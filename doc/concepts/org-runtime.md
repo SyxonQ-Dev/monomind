@@ -648,7 +648,7 @@ monomind org skills import obra/superpowers --global                 # MIT/Apach
 ### State Detector (`state-detector.ts`)
 
 Infers a role's current activity from the raw SDK message stream — wired into the session
-loop at [`session.ts → runOneSession`](packages/@monomind/cli/src/orgrt/session.ts#runOneSession) (`const detector = new StateDetector()`):
+loop at [`session-run.ts → runOneSession`](packages/@monomind/cli/src/orgrt/session-run.ts#runOneSession) (`const detector = new StateDetector()`):
 
 - `AgentState = 'idle' | 'working' | 'tool-call' | 'blocked' | 'error' | 'completed'`
 - `onMessage(type, subtype, text)` — `result`/`tool_use` message types map directly to
