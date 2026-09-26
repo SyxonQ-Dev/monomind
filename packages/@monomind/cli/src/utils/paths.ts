@@ -20,7 +20,8 @@ import { dirname, join, resolve } from 'node:path';
  * Real on-disk locations for the project config file and memory database,
  * as actually written by `monomind init` (see init/write-runtime-config.ts
  * and commands/init.ts) and verified by `doctor`'s checkConfigFile()/
- * checkMemoryDatabase() (commands/doctor-project-checks.ts). Each array is a
+ * checkMemoryDatabase() (commands/doctor-project-checks.ts and
+ * commands/doctor-memory-checks.ts). Each array is a
  * list of candidate paths relative to a project root, in priority order —
  * callers are responsible for resolving them against whatever base directory
  * is appropriate for their context (doctor checks them relative to

@@ -1,7 +1,7 @@
 /**
  * Entity-name merge key for the memory knowledge graph.
  *
- * `resolveEntity`'s exact-name index (`nameIndexKey` in memory-kg.ts) matches
+ * `resolveEntity`'s exact-name index (`nameIndexKey` in memory-kg-names.ts) matches
  * only identical strings after light normalization (`canonicalName`), so
  * "Node.js" and "nodejs" never find each other. `mergeKey` folds a name down
  * to a coarser form so common spelling variants — case, separators

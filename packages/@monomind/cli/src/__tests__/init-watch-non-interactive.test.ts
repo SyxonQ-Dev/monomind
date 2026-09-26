@@ -19,7 +19,16 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,7 +44,7 @@ const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'bin', 'cl
  * rather than execFileSync because init may legitimately exit non-zero for
  * unrelated environment reasons, and the watcher decision is still observable.
  */
-function runInit(cwd: string, args: string[] = []): string {
+function runInit(cwd: string, args: string[] = [], extraEnv: NodeJS.ProcessEnv = {}): string {
   const res = spawnSync(process.execPath, [CLI, 'init', ...args], {
     cwd,
     encoding: 'utf-8',
@@ -43,7 +52,7 @@ function runInit(cwd: string, args: string[] = []): string {
     // CI='' proves the TTY check alone is sufficient. A throwaway HOME keeps
     // each run out of the real ~/.monomind-projects.json, which had collected
     // one entry per run of this suite.
-    env: { ...process.env, CI: '', HOME: home },
+    env: { ...process.env, CI: '', HOME: home, ...extraEnv },
   });
   return `${res.stdout ?? ''}${res.stderr ?? ''}`;
 }
@@ -62,6 +71,22 @@ function isAlive(pid: number): boolean {
   } catch {
     return false;
   }
+}
+
+/** Live processes whose environment carries HOME=`dir` (Linux /proc). */
+function processesWithHome(dir: string): string[] {
+  const found: string[] = [];
+  for (const pid of readdirSync('/proc')) {
+    if (!/^\d+$/.test(pid)) continue;
+    try {
+      if (readFileSync(`/proc/${pid}/environ`, 'utf-8').includes(`HOME=${dir}\0`)) {
+        found.push(`${pid} ${readFileSync(`/proc/${pid}/cmdline`, 'utf-8').replace(/\0/g, ' ')}`);
+      }
+    } catch {
+      /* exited meanwhile, or not ours to read */
+    }
+  }
+  return found;
 }
 
 let home: string;
@@ -112,6 +137,35 @@ describe('init does not orphan a watcher in a non-interactive run', () => {
     expect(pid, '--watch should force the watcher even without a TTY').toBeDefined();
     expect(isAlive(pid as number)).toBe(true);
   }, 130_000);
+
+  // init used to shell out to `npx monomind@latest swarm init`: a registry
+  // download of the whole published package (and, via puppeteer's postinstall,
+  // two Chrome builds) into $HOME, for a command that no longer exists. Its
+  // 30s timeout could not stop npm, and when init itself was killed npm and
+  // its install scripts kept writing into $HOME — the ENOTEMPTY flake in this
+  // file's HOME cleanup. A stub npx on PATH records any call without network.
+  it.skipIf(process.platform === 'win32')(
+    'never runs npx and leaves no process behind in HOME',
+    () => {
+      const binDir = mkdtempSync(join(tmpdir(), 'init-watch-bin-'));
+      const npxLog = join(binDir, 'npx.log');
+      try {
+        writeFileSync(join(binDir, 'npx'), `#!/bin/sh\necho "$*" >> "${npxLog}"\n`);
+        chmodSync(join(binDir, 'npx'), 0o755);
+
+        runInit(cwd, [], { PATH: `${binDir}:${process.env.PATH ?? ''}` });
+
+        const npxCalls = existsSync(npxLog) ? readFileSync(npxLog, 'utf-8') : '';
+        expect(npxCalls, 'init shelled out to npx').toBe('');
+        if (process.platform === 'linux') {
+          expect(processesWithHome(home), 'a child of init outlived it').toEqual([]);
+        }
+      } finally {
+        rmSync(binDir, { recursive: true, force: true });
+      }
+    },
+    130_000,
+  );
 
   it('still honours --no-watch', () => {
     runInit(cwd, ['--no-watch']);

@@ -488,7 +488,7 @@ export const metricsCommand: Command = {
     output.writeln();
 
     try {
-      // Call MCP tool for metrics. The real handler (hooks-routing.ts) only
+      // Call MCP tool for metrics. The real handler (hooks-metrics-list.ts) only
       // returns a subset of these fields depending on whether any memory
       // entries exist yet — patterns/agents/commands/performance are all
       // Partial, not fully populated objects. Fields that aren't tracked yet

@@ -1,6 +1,6 @@
 ---
 name: board-deck-builder
-description: "Use when assembling a board or investor update deck: executive summary, metrics table, financials, per-function sections, bad-news delivery and asks. Pulls C-suite perspectives into one narrative and never invents numbers."
+description: "Use when assembling a quarterly board or investor update deck or report: executive summary, metrics table, financials, per-function sections, bad-news delivery and asks. Pulls C-suite perspectives into one narrative and never invents numbers."
 tags: ["leadership","finance","writing","fundraising","communication"]
 tools: []
 license: MIT

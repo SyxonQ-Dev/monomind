@@ -3,7 +3,7 @@
  * NEVER be committed, consumed by all three previously-independent curated
  * lists — the generated `.monomind/.gitignore` body and
  * `MONOMIND_GITIGNORE_SPECIFIC_EXCLUDES` (`write-runtime-config.ts`), and
- * `doctor-project-checks.ts`'s `REQUIRED_GITIGNORE_PATTERNS`. All three
+ * `doctor-gitignore-checks.ts`'s `REQUIRED_GITIGNORE_PATTERNS`. All three
  * independently omitted `dashboard-token` — a live monomind dashboard
  * credential that ended up committed to a public GitHub repository — and
  * the doctor check written specifically to catch gitignore gaps was one of
@@ -22,9 +22,9 @@
  * tracked.
  *
  * Deliberately its own file with NO other project imports: both
- * `write-runtime-config.ts` and `doctor-project-checks.ts` need this list,
+ * `write-runtime-config.ts` and `doctor-gitignore-checks.ts` need this list,
  * and `write-runtime-config.ts` transitively imports `doctor.ts` (via
- * `write-capabilities.ts`), which imports `doctor-project-checks.ts` — so a
+ * `write-capabilities.ts`), which reaches `doctor-gitignore-checks.ts` — so a
  * direct import from either of those two files into the other is a real
  * circular dependency (reproduced: `MONOMIND_NEVER_COMMIT` read as
  * `undefined` at module-evaluation time when doctor-project-checks.ts

@@ -1,7 +1,7 @@
 ---
 name: coder
 description: Implementation specialist that writes, refactors, and optimizes production code with tests, SOLID design, robust error handling, and monograph-first navigation
-when_to_use: Use when implementing a feature, fixing a bug, or refactoring code to a clear spec; not for architecture decisions or reviewing code
+when_to_use: Use when implementing a feature, fixing a bug, refactoring code to a clear spec, or applying review comments; not for architecture decisions or reviewing code
 tags: [code, implementation, refactoring, tdd]
 category: core
 capability:

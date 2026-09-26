@@ -48,7 +48,25 @@ const UI_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui');
  *  the exact substitution value never matters, only that it satisfies the
  *  route's own shape enough to reach the gate. */
 function enumerateNonGetRoutes(): Array<{ method: string; url: string; file: string }> {
-  const files = ['server.mjs', 'routes-org.mjs', 'routes-monograph.mjs', 'routes-monoes.mjs'];
+  const files = [
+    'server.mjs',
+    'routes-org.mjs',
+    'routes-org-config.mjs',
+    'routes-org-agents.mjs',
+    'routes-org-status.mjs',
+    'routes-org-approvals.mjs',
+    'routes-org-planning.mjs',
+    'routes-org-files.mjs',
+    'routes-org-lifecycle.mjs',
+    'routes-org-runs.mjs',
+    'routes-org-mastermind.mjs',
+    'routes-org-live.mjs',
+    'routes-org-knowledge.mjs',
+    'routes-org-workflows.mjs',
+    'routes-org-control.mjs',
+    'routes-monograph.mjs',
+    'routes-monoes.mjs',
+  ];
   const routes: Array<{ method: string; url: string; file: string }> = [];
   for (const file of files) {
     const text = readFileSyncNode(join(UI_DIR, file), 'utf8');

@@ -614,7 +614,7 @@ export class CLI {
     }
 
     // Task 04: CapabilityMetadata validation moved to `monomind doctor -c registry`
-    // (see doctor-project-checks.ts:checkAgentRegistry). Printing this from a
+    // (see doctor-routing-checks.ts:checkAgentRegistry). Printing this from a
     // fire-and-forget startup task raced process exit — short-lived commands
     // could skip the warning even when the underlying issue was present. Doctor
     // runs it synchronously within its own check pass instead, so it's always
@@ -622,7 +622,7 @@ export class CLI {
 
     // NOTE: Semantic routing (@monoes/routing) is constructed on-demand by
     // its consumers — `monomind route semantic` (commands/route.ts) and the
-    // `hooks_route_semantic` MCP tool (mcp-tools/hooks-routing.ts), both via
+    // `hooks_route_semantic` MCP tool (mcp-tools/hooks-route.ts), both via
     // routing/route-layer-factory.ts. `monomind agent` has no --task flag —
     // that routing point does not exist yet. It is intentionally NOT eagerly
     // initialized here: building all route centroids and probing for the
