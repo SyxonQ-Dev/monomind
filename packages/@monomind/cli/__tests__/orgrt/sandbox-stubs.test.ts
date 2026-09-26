@@ -36,6 +36,12 @@ function layout() {
 
 const files = (paths: string[]) => paths.filter((p) => !p.endsWith('/.claude'));
 
+
+/** Waits out the coarse clock file timestamps come from (a few ms per tick). */
+function pastClockTick(): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+}
+
 describe('sandboxStubPaths', () => {
   const roots = ['/o/wt', '/o', '/h', '/t'];
 
@@ -186,6 +192,10 @@ describe('SandboxStubs', () => {
     const { cwd, home, paths } = layout();
     const stubs = new SandboxStubs(null);
     stubs.hold('o:r', paths);
+    // File times come from a coarse clock (a few ms per tick); a replacement in
+    // the same tick that also reuses the inode is indistinguishable — CI's
+    // filesystem reuses a freed inode at once.
+    pastClockTick();
     const written = join(cwd, '.bashrc');
     chmodSync(written, 0o644);
     writeFileSync(written, 'export X=1\n');
@@ -197,6 +207,17 @@ describe('SandboxStubs', () => {
     expect(removed).not.toContain(replaced);
     expect(readFileSync(written, 'utf8')).toBe('export X=1\n');
     expect(existsSync(replaced)).toBe(true);
+  });
+
+  it('leaves a stub whose metadata someone changed (same inode, new ctime)', () => {
+    const { home, paths } = layout();
+    const stubs = new SandboxStubs(null);
+    stubs.hold('o:r', paths);
+    pastClockTick();
+    const touched = join(home, '.claude', 'local');
+    chmodSync(touched, 0o644);
+    expect(stubs.release('o:r')).not.toContain(touched);
+    expect(existsSync(touched)).toBe(true);
   });
 
   it('holds nothing in a directory it cannot write', () => {

@@ -175,6 +175,10 @@ export interface LedgerEntry {
   ino: number;
   dev: number;
   kind: 'file' | 'dir';
+  /** A file stub's ctime at creation: an inode number is reused as soon as a
+   *  file is deleted, so dev+ino alone cannot tell our stub from an empty file
+   *  someone recreated at the same path. Absent on older entries. */
+  ctimeMs?: number;
   pid: number;
   /** This pid's namespace and boot, so a later reclaim() can tell a dead pid
    *  in our own namespace apart from a live one we simply cannot see from a
@@ -198,6 +202,7 @@ function readLedger(file: string): LedgerEntry[] {
         typeof e.ino === 'number' &&
         typeof e.dev === 'number' &&
         (e.kind === 'file' || e.kind === 'dir') &&
+        (e.ctimeMs === undefined || typeof e.ctimeMs === 'number') &&
         Number.isInteger(e.pid) &&
         (e.pidNamespace === undefined || typeof e.pidNamespace === 'string') &&
         (e.bootId === undefined || typeof e.bootId === 'string'),
@@ -270,6 +275,8 @@ function isLegacy(e: LedgerEntry): boolean {
 interface Stub {
   dev: number;
   ino: number;
+  /** Files only: a directory's ctime moves whenever an entry inside it does. */
+  ctimeMs?: number;
   dir: boolean;
   owners: Set<string>;
 }
@@ -313,7 +320,13 @@ export class SandboxStubs {
         else
           closeSync(openSync(p, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o444));
         const st = lstatSync(p);
-        this.stubs.set(p, { dev: st.dev, ino: st.ino, dir, owners: new Set([owner]) });
+        this.stubs.set(p, {
+          dev: st.dev,
+          ino: st.ino,
+          ctimeMs: dir ? undefined : st.ctimeMs,
+          dir,
+          owners: new Set([owner]),
+        });
         created.push(p);
       } catch {
         /* exists, no parent, or not writable: the SDK handles it as before */
@@ -379,7 +392,7 @@ export class SandboxStubs {
       .filter((e) => STUB_NAMES.has(basename(e.path)) && !this.stubs.has(e.path))
       .map((e): [string, Stub] => [
         e.path,
-        { dev: e.dev, ino: e.ino, dir: e.kind === 'dir', owners: new Set() },
+        { dev: e.dev, ino: e.ino, ctimeMs: e.ctimeMs, dir: e.kind === 'dir', owners: new Set() },
       ]);
     const removed: string[] = [];
     const adopted: LedgerEntry[] = [];
@@ -402,6 +415,7 @@ export class SandboxStubs {
       ino: s.ino,
       dev: s.dev,
       kind: s.dir ? 'dir' : 'file',
+      ...(s.ctimeMs === undefined ? {} : { ctimeMs: s.ctimeMs }),
       pid: process.pid,
       pidNamespace: this.identity.pidNamespace(),
       bootId: this.identity.bootId(),
@@ -505,6 +519,7 @@ function unchanged(p: string, stub: Stub, filledDir = false): boolean {
   try {
     const st = lstatSync(p);
     if (st.dev !== stub.dev || st.ino !== stub.ino) return false;
+    if (stub.ctimeMs !== undefined && st.ctimeMs !== stub.ctimeMs) return false;
     if (stub.dir) return st.isDirectory() && (filledDir || readdirSync(p).length === 0);
     return st.isFile() && st.size === 0;
   } catch {
