@@ -4,6 +4,12 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+## [2.16.14] — 2026-09-27
+
+### Internal
+
+- **Split large CLI/orgrt modules into smaller files for maintainability; no behavior change.** `org.ts`/`org-observe.ts` were split into `commands/org-*.ts` modules, and `daemon.ts`/`session.ts` were split into `orgrt/session-*.ts` modules, with doc source-anchors updated to point at the new module locations. This range is entirely behaviour-preserving internal refactors plus doc-anchor updates; confirmed by this round's pre-audit with no functional or user-facing change.
+
 ## [2.16.13] — 2026-09-27
 
 ### Fixed
