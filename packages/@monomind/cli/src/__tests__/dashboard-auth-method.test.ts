@@ -52,6 +52,7 @@ function enumerateNonGetRoutes(): Array<{ method: string; url: string; file: str
     'server.mjs',
     'routes-org.mjs',
     'routes-org-config.mjs',
+    'routes-org-agents.mjs',
     'routes-monograph.mjs',
     'routes-monoes.mjs',
   ];
