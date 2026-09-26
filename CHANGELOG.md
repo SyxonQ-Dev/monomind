@@ -8,6 +8,8 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 - **The org runtime no longer removes an empty file someone else recreated where one of its sandbox stubs was.** A stub was recognised by device and inode only, and a filesystem reuses a freed inode at once, so an empty file recreated at the same path (an SDK stub, a user's placeholder) passed as the runtime's own and was deleted when the run ended. A file stub now also records its ctime at creation (ledger entries too), so a replaced or re-chmodded file is left alone. This also made the `Tests` workflow fail on every push since 2.16.10.
 
+- **`cleanup --data --force` could corrupt `~/.monomind-projects.json` if interrupted mid-write.** It rewrote the registry file in place; it now writes through the same atomic temp-file-then-rename helper `init` uses. The dry run and the forced run also now report project-data folders and pruned registry entries as separate counts instead of one combined total.
+
 ## [2.16.11] — 2026-09-26
 
 ### Fixed
