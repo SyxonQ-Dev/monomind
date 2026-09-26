@@ -622,7 +622,7 @@ export class CLI {
 
     // NOTE: Semantic routing (@monoes/routing) is constructed on-demand by
     // its consumers — `monomind route semantic` (commands/route.ts) and the
-    // `hooks_route_semantic` MCP tool (mcp-tools/hooks-routing.ts), both via
+    // `hooks_route_semantic` MCP tool (mcp-tools/hooks-route.ts), both via
     // routing/route-layer-factory.ts. `monomind agent` has no --task flag —
     // that routing point does not exist yet. It is intentionally NOT eagerly
     // initialized here: building all route centroids and probing for the
