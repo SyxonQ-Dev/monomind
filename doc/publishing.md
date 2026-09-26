@@ -106,6 +106,35 @@ it first leaves a window where `npm i monomind` cannot resolve its own dependenc
 Sub-packages (`@monoes/memory`, `@monoes/monograph`, …) version and publish independently
 from their own directories — they are not part of the umbrella's lockstep.
 
+## Several sessions, one repo
+
+Several Claude sessions can work in the same clone and release from it (the release org,
+`.monomind/orgs/release.json`, mirrored in `config/orgs/release.json`).
+
+**CHANGELOG.md merge driver.** A release turns `## [Unreleased]` into `## [X.Y.Z] — <date>`
+on origin. A session that added entries under `## [Unreleased]` in the meantime used to hit
+a CHANGELOG.md conflict on every `git merge origin/main`. `.gitattributes` routes
+CHANGELOG.md to the `monomind-changelog` merge driver, `scripts/merge-changelog.mjs`. It keeps
+the released sections verbatim and puts every entry that only your side added into one
+`## [Unreleased]` above them, deduped and grouped under their `### Added` / `### Fixed` / …
+headings. Any other kind of conflict is left to you as an ordinary one. Git only knows the
+driver once it is registered in the clone's config, once per clone (every worktree shares it):
+
+```bash
+pnpm run setup:merge-drivers
+```
+
+Without it, `.gitattributes` has no effect and git merges CHANGELOG.md as plain text. To use
+it for one merge without registering it:
+
+```bash
+git -c merge.monomind-changelog.driver="node scripts/merge-changelog.mjs %O %A %B" merge origin/main
+```
+
+If a merge already stopped on the conflict, register the driver, run
+`git checkout -m CHANGELOG.md` to redo that file's merge with it, check the file has no
+conflict markers left, and `git add CHANGELOG.md`.
+
 ## Keeping the `.claude` trees in sync
 
 The same asset tree exists five times in this repo, and `@monoes/monomindcli` ships one of
