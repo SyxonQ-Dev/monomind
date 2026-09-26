@@ -31,9 +31,10 @@ const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 // ranker improves; never lower them to make a change pass.
 const FLOOR = { agentsTop1: 49, agentsTop3: 55, skillsTop1: 53, skillsTop3: 65 };
 // Precision of what the [PICK] gate shows over keyword ranking (frozen: agents
-// 46/50, skills 36/43; before the task-head / template fixes 46/50 and 34/43,
-// before the vibe / "not for" fixes 46/50 and 34/42 on 77 tasks).
-const GATED_FLOOR = { agents: 0.92, skills: 0.83 };
+// 48/52, skills 41/47; before the "for X use Y" redirect fix 46/50 and 36/43,
+// before the task-head / template fixes 46/50 and 34/43, before the vibe /
+// "not for" fixes 46/50 and 34/42 on 77 tasks).
+const GATED_FLOOR = { agents: 0.92, skills: 0.87 };
 // The live catalogs drift with every agent/skill edit: a looser floor.
 const LIVE_FLOOR = { agentsTop1: 40, skillsTop1: 42 };
 // Catalog entries edited on purpose to fix a reviewed wrong pick whose cause
@@ -134,7 +135,9 @@ describe('the gated pick on the frozen catalog', () => {
     // "write developer documentation for the REST API" showed api-designer and
     // "create a new org that monitors competitors" Performance Monitor plus
     // competitor-comparison-pages: the head of the task, not its modifier.
-    const reviewed = new Set([129, 130, 138, 140, 141]);
+    // "Our Node service leaks memory" showed backend-dev on the "Node" of its
+    // "for Node code patterns use backend-patterns" pointer.
+    const reviewed = new Set([2, 129, 130, 138, 140, 141]);
     const wrong = [...r.agents.wrong, ...r.skills.wrong].filter((w) => reviewed.has(w.id));
     expect(wrong).toEqual([]);
   });

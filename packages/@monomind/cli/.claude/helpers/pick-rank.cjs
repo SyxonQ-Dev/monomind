@@ -41,6 +41,9 @@
  * "pull request". A task that names what a "not for" clause rules out (more
  * than half the words of one of its alternatives, at least one of them a word
  * the item does not otherwise carry) keeps EXCLUDED_FACTOR of its score.
+ * A pointer clause "for X use Y" / "For X, see Y" is read the same way: X is
+ * work that belongs to Y, and neither X nor Y's name describes this item
+ * ("for Node code patterns use backend-patterns" must not match "Node").
  */
 
 var K1 = 1.2;
@@ -252,6 +255,22 @@ function queryTerms(text) {
 var DOC_CLAUSE_SPLIT = /[.;:!?()[\]{}<>|\n\r\u2013\u2014]+|\s-+\s/;
 var DOC_NOT_FOR = /\b(?:not|never)\s+(?:intended\s+|meant\s+)?for\s+(.+)$|\b(?:do\s+not|don't|dont|never)\s+use\s+(?:it\s+|this\s+)?for\s+(.+)$/;
 var DOC_ALTERNATIVES = /,|\s(?:or|and|nor)\s/;
+// "for X use Y" / "for X, see Y": work that belongs to another entry.
+var DOC_REDIRECT = /^\s*for\s+(.+?),?\s+(?:use|see)\s+\S/;
+var DOC_REDIRECT_SPLIT = /,\s*(?:and\s+)?for\s+/;
+
+/** The X of each "for X use Y" in a clause made only of such redirects
+ *  ("for A use B, for C see D"), else null. */
+function redirects(clause) {
+  var out = [];
+  var parts = clause.split(DOC_REDIRECT_SPLIT);
+  for (var i = 0; i < parts.length; i++) {
+    var r = DOC_REDIRECT.exec(i ? 'for ' + parts[i] : parts[i]);
+    if (!r) return null;
+    out.push(r[1]);
+  }
+  return out;
+}
 
 /** A description's own exclusions (see the file header): `kept` is the text
  *  without its "not for" clauses, `ruledOut` the word lists of each
@@ -266,13 +285,24 @@ function docExclusions(description) {
     .replace(/\u2019/g, "'")
     .split(DOC_CLAUSE_SPLIT)
     .forEach(function (clause) {
-      var m = DOC_NOT_FOR.exec(clause);
-      if (m) {
-        kept.push(clause.slice(0, m.index));
-        (m[1] || m[2]).split(DOC_ALTERNATIVES).forEach(function (alt) {
+      function ruleOut(text) {
+        text.split(DOC_ALTERNATIVES).forEach(function (alt) {
           var t = tokens(alt);
           if (t.length) ruledOut.push(t);
         });
+      }
+      var alts = redirects(clause);
+      if (alts) {
+        // The pointer's target is another entry's name: unindexed, but its
+        // words stay where this entry's own text (tags) carries them.
+        alts.forEach(ruleOut);
+        dropped.push(alts.join(' '));
+        return;
+      }
+      var m = DOC_NOT_FOR.exec(clause);
+      if (m) {
+        kept.push(clause.slice(0, m.index));
+        ruleOut(m[1] || m[2]);
         dropped.push(m[1] || m[2]);
         return;
       }
