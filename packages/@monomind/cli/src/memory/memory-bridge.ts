@@ -4,7 +4,7 @@
  * Uses SQLiteBackend (better-sqlite3, sql.js WASM fallback) from @monoes/memory.
  * LanceDB was replaced by this SQLite engine 2026-07; the on-disk data
  * directory is still named `lancedb` for legacy/back-compat path resolution
- * (see getDbPath below) but no longer holds LanceDB data.
+ * (see getDbPath in memory-bridge-paths.ts) but no longer holds LanceDB data.
  * All exported function signatures are unchanged.
  *
  * @module v1/cli/memory-bridge

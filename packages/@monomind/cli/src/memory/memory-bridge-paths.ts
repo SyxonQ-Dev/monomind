@@ -99,7 +99,7 @@ function validateAnchor(
   // whose real target is '/' (e.g. MONOMIND_PROJECT_ROOT=<tmp>/link-to-root)
   // passes every check below on its lexical form — dirname(lexical) !==
   // lexical, since the link itself sits inside a normal directory — while
-  // getDbPath's traversal guard (memory-bridge.ts's realOrResolved(), i.e.
+  // getDbPath's traversal guard (memory-bridge-paths.ts's realOrResolved(), i.e.
   // fs.realpathSync) resolves the SAME anchor to '/' downstream. Two
   // notions of "the root" in one module: the store gets hashed from the
   // lexical path this function returned, the guard's boundary is computed

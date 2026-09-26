@@ -235,7 +235,7 @@ export type ClaudeMdTemplate =
 
 /**
  * The embedding model and dimensions the memory bridge embeds with
- * (BRIDGE_EMBEDDING_MODEL / BRIDGE_EMBEDDING_DIMS in memory/memory-bridge.ts —
+ * (BRIDGE_EMBEDDING_MODEL / BRIDGE_EMBEDDING_DIMS in memory/memory-bridge-core.ts —
  * a test keeps them equal). Duplicated here, not imported, because many tests
  * mock memory-bridge and these values are read at module load.
  */

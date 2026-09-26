@@ -4,11 +4,11 @@
  *
  * WIRING STATUS (#126)
  * ---------------------
- * As of this change, `memory-bridge.ts`'s `bridgeSearchEntries()` calls this
+ * As of this change, `memory-bridge-search.ts`'s `bridgeSearchEntries()` calls this
  * as its JS-fallback keyword scorer (replacing a naive token-overlap-fraction
  * scan) WHEN the FTS5 fast path is unavailable/empty AND the queried entry
  * set is small enough to build cheaply (currently capped at 1,500 entries —
- * see BM25_ENTRY_CAP in memory-bridge.ts; this module's own measured cost of
+ * see BM25_ENTRY_CAP in memory-bridge-search.ts; this module's own measured cost of
  * ~1.7s/12.5k chunks is why a cap exists at all). Above the cap, or with
  * `MONOMIND_BM25=0`, the old token-overlap scan still runs. The 0.697
  * Recall@5 cited below was measured by the EVAL HARNESS's separate scorer
