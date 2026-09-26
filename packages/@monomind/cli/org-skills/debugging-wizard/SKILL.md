@@ -1,6 +1,6 @@
 ---
 name: debugging-wizard
-description: "Use when isolating a bug from error messages, stack traces and logs with a reproduce, isolate, hypothesize, fix and prevent loop in any language. Includes per-language debugger setup, common bug patterns and git bisect strategies; for repairing a whole broken feature use focused-fix."
+description: "Use when isolating a bug or crash from error messages, stack traces, core dumps and logs with a reproduce, isolate, hypothesize, fix and prevent loop in any language. Includes per-language debugger setup, common bug patterns and git bisect strategies; for repairing a whole broken feature use focused-fix."
 tags: ["engineering","debug","testing"]
 tools: ["monograph_query","monograph_context","monograph_impact","monograph_suggest"]
 license: MIT

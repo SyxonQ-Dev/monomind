@@ -1,7 +1,7 @@
 ---
 name: devops-automator
 description: Expert DevOps engineer specializing in infrastructure automation, CI/CD pipeline development, and cloud operations
-when_to_use: Use when setting up CI/CD pipelines, infrastructure as code, containers, or cloud deployment automation; for GitHub Actions specifically use workflow-automation
+when_to_use: Use when setting up CI/CD pipelines, infrastructure as code, containers, or automated deploys of apps to the cloud; for GitHub Actions specifically use workflow-automation
 tags: [devops, ci-cd, infrastructure, cloud, automation]
 category: devops
 color: "#f97316"

@@ -1,6 +1,6 @@
 ---
 name: adversarial-reviewer
-description: "Use when you want a deliberately hostile code review of recent changes or a PR before merge, through three personas that must each find issues. Saboteur, New Hire and Security Auditor findings end in a BLOCK, CONCERNS or CLEAN verdict; built to break agreeable self-review."
+description: "Use when you want a deliberately hostile code review in which three personas must each find issues. Saboteur, New Hire and Security Auditor findings end in a BLOCK, CONCERNS or CLEAN verdict; built to break agreeable self-review."
 tags: ["engineering","testing","code-review","security"]
 tools: ["monograph_query","monograph_context","monograph_impact","monograph_suggest"]
 license: MIT
