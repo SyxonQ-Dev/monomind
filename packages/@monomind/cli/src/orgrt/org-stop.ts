@@ -1,3 +1,6 @@
+// packages/@monomind/cli/src/orgrt/org-stop.ts
+// Extracted from daemon.ts — stopping an org run: stopOrg's join/remove
+// sequence and finishStop's teardown (checkpoint, drain, history, cleanup).
 import { reapOrphanedSdkProcesses } from '../utils/resource-governor.js';
 import { captureCheckpoint } from './checkpoint.js';
 import type { OrgDaemon } from './daemon.js';
