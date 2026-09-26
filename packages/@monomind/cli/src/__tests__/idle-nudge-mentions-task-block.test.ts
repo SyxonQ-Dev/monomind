@@ -26,7 +26,10 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const daemonSrc = readFileSync(join(__dirname, '../orgrt/daemon.ts'), 'utf-8');
+// daemon.ts's startOrg code lives in modules split out of it.
+const daemonSrc = ['daemon.ts', 'idle-watchdog.ts']
+  .map((f) => readFileSync(join(__dirname, '../orgrt', f), 'utf-8'))
+  .join('\n');
 const sessionSrc = readFileSync(join(__dirname, '../orgrt/session.ts'), 'utf-8');
 
 describe('idle-nudge and org_complete guidance point at org_task_block', () => {
