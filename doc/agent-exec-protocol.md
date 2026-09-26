@@ -11,7 +11,7 @@
     machine-readable `stop_reason` (§3.2), org project resolution rule (§7.1), `org list` /
     `org events` marked as new commands (§7), golden transcript fixtures (§8).
   - rev 3 (2026-08-25): **correction** — `org list` was NOT new; it already existed
-    (`commands/org.ts:1354`, human-output only, already project-cwd-scoped per §7.1) and only
+    (`commands/org-manage.ts → listAction`, human-output only, already project-cwd-scoped per §7.1) and only
     needed `--json` added, same as the other §7.2 commands. `org events` is the only genuinely new
     org command (§7.2). Also noted: `resolveRunner` can return `undefined` for the implicit
     default-runner case — `agent exec` must classify "no runner resolved" distinctly from
@@ -388,7 +388,7 @@ Existing commands gaining `--json` output: `org status`, `org logs [--tail N]`, 
 `org memory`, plus action results for `org answer/approve/deny/gate-approve/gate-reject`
 (return the updated entity as JSON).
 
-`org list` (all orgs in the project) already exists (`commands/org.ts:1354`) — it only gains
+`org list` (all orgs in the project) already exists (`commands/org-manage.ts → listAction`) — it only gains
 `--json` output here, same as the other commands above (rev 3). **The only genuinely new
 command** added for this protocol is `org events` (§7.3).
 
