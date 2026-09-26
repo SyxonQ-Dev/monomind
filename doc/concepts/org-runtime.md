@@ -720,7 +720,7 @@ Resume state persistence:
 - `RoleCheckpoint` includes: `mailboxQueue`, `mailboxClosed`, `tokensUsed`, `costUsd`,
   `lastMessageId`, `sessionId`, `status`, `error`, `scrollback?: string[]` (last N lines of
   terminal output, [`checkpoint.ts → RoleCheckpoint`](packages/@monomind/cli/src/orgrt/checkpoint.ts#RoleCheckpoint) — backed by the bounded ring-buffer `ScrollbackBuffer`
-  class, [`daemon.ts → ScrollbackBuffer`](packages/@monomind/cli/src/orgrt/daemon.ts#ScrollbackBuffer), 500-line default cap; restored on resume at
+  class, [`daemon-types.ts → ScrollbackBuffer`](packages/@monomind/cli/src/orgrt/daemon-types.ts#ScrollbackBuffer), 500-line default cap; restored on resume at
   [`checkpoint-ops.ts → resumeOrg`](packages/@monomind/cli/src/orgrt/checkpoint-ops.ts#resumeOrg)).
 - TTL: 24 hours (`CHECKPOINT_TTL_MS`).
 - `captureCheckpoint()` — called **before** mailboxes close in `finishStop()`. In that stop
