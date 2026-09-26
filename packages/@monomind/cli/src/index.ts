@@ -614,7 +614,7 @@ export class CLI {
     }
 
     // Task 04: CapabilityMetadata validation moved to `monomind doctor -c registry`
-    // (see doctor-project-checks.ts:checkAgentRegistry). Printing this from a
+    // (see doctor-routing-checks.ts:checkAgentRegistry). Printing this from a
     // fire-and-forget startup task raced process exit — short-lived commands
     // could skip the warning even when the underlying issue was present. Doctor
     // runs it synchronously within its own check pass instead, so it's always
