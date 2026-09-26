@@ -432,21 +432,12 @@ const initAction = async (ctx: CommandContext): Promise<CommandResult> => {
       output.writeln();
       output.printInfo('Starting services...');
 
-      const { execSync } = await import('node:child_process');
-
-      if (startAll) {
-        try {
-          output.writeln(output.dim('  Initializing swarm...'));
-          execSync('npx monomind@latest swarm init --topology hierarchical', {
-            stdio: 'pipe',
-            cwd: ctx.cwd,
-            timeout: 30000,
-          });
-          output.writeln(output.success('  ✓ Swarm initialized'));
-        } catch {
-          output.writeln(output.dim('  Swarm initialization skipped'));
-        }
-      }
+      // No swarm step: it shelled out to `npx monomind@latest swarm init`,
+      // which fetched the published package (and Chrome, via puppeteer's
+      // postinstall) into $HOME only to fail — `swarm` became `monoswarm`
+      // long ago. npm defers SIGTERM, so the 30s timeout never bounded it,
+      // and a killed init left npm writing into $HOME. `monoswarm init`
+      // stays an explicit, on-demand step.
 
       if (startAll) {
         // Seed .monomind/metrics/ immediately instead of waiting for the
