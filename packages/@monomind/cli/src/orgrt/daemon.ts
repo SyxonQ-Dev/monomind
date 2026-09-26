@@ -1,13 +1,11 @@
 // packages/@monomind/cli/src/orgrt/daemon.ts
 // monolean: single-process inter-org — upgrade path = daemon-to-daemon HTTP when multi-host is real
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { resolveOrgDefBlueprints } from '../catalog/blueprints.js';
 // ── Extracted module imports ────────────────────────────────────────────
 import * as approvalOps from './approvals.js';
 import type { BrokerLease } from './broker.js';
-import { reopenBudgetClosedRoles, rolesOnDefTokenCaps } from './budget-closure.js';
 import type { OrgBus } from './bus.js';
 import type { OrgCheckpoint, RoleCheckpoint } from './checkpoint.js';
 import * as checkpointOps from './checkpoint-ops.js';
@@ -15,18 +13,17 @@ import type { TaskEvidence } from './completion-gate.js';
 import * as crossOrg from './cross-org.js';
 import type { AgentRuntime, DaemonOpts, RunningOrg } from './daemon-types.js';
 import * as decisionOps from './decisions.js';
-import { isEndpointRole } from './endpoint-roles.js';
 import type { attachForwarder } from './forwarder.js';
 import * as orgMemory from './org-memory.js';
+import * as orgReload from './org-reload.js';
 import * as orgStart from './org-start.js';
 import * as orgStateFile from './org-state-file.js';
 import * as orgStop from './org-stop.js';
-import { expandOrgPolicyPathVars, promptVarsFor } from './prompt-vars.js';
 import * as questionOps from './questions.js';
 import type { RunSummary } from './reporting.js';
 import * as roleIncarnation from './role-incarnation.js';
 import * as roleRespawn from './role-respawn.js';
-import { computeReplacementBudget, type RespawnReceipt } from './role-slot.js';
+import type { RespawnReceipt } from './role-slot.js';
 import { currentRoleTrace, type RoleTrace } from './role-trace.js';
 import { buildRuntimeOptions, type RuntimeOptionsReceipt } from './runtime-options.js';
 import * as scheduler from './scheduler-integration.js';
@@ -38,7 +35,6 @@ import {
   type DecisionKind,
   ORG_DIR,
   type OrgDef,
-  OrgDefSchema,
   type OrgRole,
 } from './types.js';
 
@@ -185,101 +181,7 @@ export class OrgDaemon {
    *  Removed roles are NOT killed — they finish their current work and won't be re-spawned.
    *  Returns a summary of what changed. */
   reloadOrgDef(name: string): { changed: string[]; newRoles: string[]; removedRoles: string[] } {
-    const running = this.orgs.get(name);
-    if (!running) throw new Error(`org ${name} is not running`);
-    const defPath = join(this.root, ORG_DIR, `${name}.json`);
-    const parsedDef = OrgDefSchema.parse(JSON.parse(readFileSync(defPath, 'utf8')));
-    const bp = resolveOrgDefBlueprints(parsedDef, this.root);
-    if (bp.errors.length) throw new Error(`org ${name}: ${bp.errors.join('; ')}`);
-    const newDef = expandOrgPolicyPathVars(bp.def, promptVarsFor(this.root));
-    const changed: string[] = [];
-    const newRoles: string[] = [];
-    const removedRoles: string[] = [];
-    const onDefTokenCaps = rolesOnDefTokenCaps(running);
-
-    if (newDef.goal !== running.def.goal) {
-      running.def.goal = newDef.goal;
-      changed.push('goal');
-    }
-
-    const oldRc = running.def.run_config as Record<string, unknown>;
-    const newRc = newDef.run_config as Record<string, unknown>;
-    for (const key of new Set([...Object.keys(oldRc), ...Object.keys(newRc)])) {
-      if (JSON.stringify(oldRc[key]) !== JSON.stringify(newRc[key])) {
-        oldRc[key] = newRc[key];
-        changed.push(`run_config.${key}`);
-      }
-    }
-
-    // M1 (C-37): apply changes to EXISTING roles' tool_providers, endpoint,
-    // kind and policy. Fields are replaced on the live role object (sessions
-    // read tool_providers at their next start, checkApproval reads policy
-    // live) and a running role's PolicyEngine gets the new policy now.
-    // #343: budget_usd / budget_tokens too — the live PolicyEngine gets the
-    // new caps with its spend kept, and a role closed for budget reopens
-    // below once it is no longer over them.
-    const RELOADABLE_ROLE_FIELDS = [
-      'tool_providers',
-      'endpoint',
-      'kind',
-      'policy',
-      'budget_usd',
-      'budget_tokens',
-    ] as const;
-    for (const next of newDef.roles) {
-      const live = running.def.roles.find((r) => r.id === next.id);
-      if (!live) continue;
-      const liveRec = live as Record<string, unknown>;
-      const nextRec = next as Record<string, unknown>;
-      for (const field of RELOADABLE_ROLE_FIELDS) {
-        if (JSON.stringify(liveRec[field]) === JSON.stringify(nextRec[field])) continue;
-        const targets = new Set<Record<string, unknown>>([liveRec]);
-        const slotRole = running.roleSlots.get(next.id)?.effectiveRole as
-          | Record<string, unknown>
-          | undefined;
-        if (slotRole) targets.add(slotRole);
-        const pending = running.pendingRoles?.get(next.id) as Record<string, unknown> | undefined;
-        if (pending) targets.add(pending);
-        for (const t of targets) {
-          if (nextRec[field] === undefined) delete t[field];
-          else t[field] = nextRec[field];
-        }
-        if (field === 'policy') running.agents.get(next.id)?.policy.updatePolicy(next.policy ?? {});
-        if (field === 'budget_usd' || field === 'budget_tokens')
-          running.agents.get(next.id)?.policy.setBudgetCaps({
-            maxTokens: live.policy?.maxTokens ?? computeReplacementBudget(running.def, next.id),
-            maxUsd: live.policy?.maxUsd ?? live.budget_usd,
-          });
-        changed.push(`role:${next.id}:${field}`);
-      }
-    }
-    const reopened = reopenBudgetClosedRoles(this, name, running, onDefTokenCaps);
-
-    const existingRoleIds = new Set(running.def.roles.map((r) => r.id));
-    const newRoleIds = new Set(newDef.roles.map((r) => r.id));
-    for (const role of newDef.roles) {
-      if (!existingRoleIds.has(role.id)) {
-        running.def.roles.push(role);
-        // M2: an endpoint role never gets a session — nothing to lazy-spawn.
-        if (!isEndpointRole(role)) {
-          if (!running.pendingRoles) running.pendingRoles = new Map();
-          running.pendingRoles.set(role.id, role);
-        }
-        newRoles.push(role.id);
-      }
-    }
-    for (const id of existingRoleIds) {
-      if (!newRoleIds.has(id)) removedRoles.push(id);
-    }
-
-    running.bus.emit({
-      type: 'audit',
-      reason: 'hot-reload',
-      msg: `org def reloaded: ${changed.length} fields changed, ${newRoles.length} new roles, ${removedRoles.length} removed roles${reopened.length ? `, reopened ${reopened.join(', ')}` : ''}`,
-      data: { changed, newRoles, removedRoles },
-    });
-
-    return { changed, newRoles, removedRoles };
+    return orgReload.reloadOrgDef(this, name);
   }
   /** Names of the orgs this daemon currently has running. Snapshot — safe to
    *  iterate while stopOrg() mutates the underlying map. */

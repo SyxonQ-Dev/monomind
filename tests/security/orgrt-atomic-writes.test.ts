@@ -25,6 +25,7 @@ const DAEMON_SRC = [
   'daemon.ts',
   'daemon-types.ts',
   'idle-watchdog.ts',
+  'org-reload.ts',
   'org-start.ts',
   'org-start-steps.ts',
   'org-state-file.ts',
