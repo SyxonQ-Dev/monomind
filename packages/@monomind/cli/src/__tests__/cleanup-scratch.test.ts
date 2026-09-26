@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   utimesSync,
@@ -18,6 +19,7 @@ import {
   findStaleRegistryEntries,
   findStaleScratch,
 } from '../commands/cleanup.js';
+import { output } from '../output.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -332,7 +334,45 @@ describe('cleanup --data: ~/.monomind-projects.json registry (#347)', () => {
       const reg = JSON.parse(readFileSync(registry, 'utf-8'));
       expect(reg.projects).toEqual([live, '/no-such-root-zz347/proj']);
       expect(reg.extra).toBe(1);
+      // written atomically: no temp sibling left behind
+      expect(readdirSync(home).filter((f) => f.includes('.monomind-projects.json.'))).toEqual([]);
     } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('prints separate counts for project data and registry entries', async () => {
+    const { home } = makeRegistryFixture();
+    const base = join(home, '.monomind', 'projects');
+    mkdirSync(join(base, 'gone-a'), { recursive: true });
+    writeFileSync(
+      join(base, 'gone-a', 'origin.json'),
+      JSON.stringify({ path: join(home, 'deleted-root', 'a') }),
+    );
+    const lines: string[] = [];
+    vi.spyOn(output, 'writeln').mockImplementation((t = '') => {
+      lines.push(String(t));
+    });
+    try {
+      await cleanupCommand.action?.({
+        args: [],
+        flags: { data: true },
+        cwd: home,
+        interactive: false,
+      } as any);
+      expect(lines.join('\n')).toContain('1 project-data item(s), 1 registry entry(ies)');
+      lines.length = 0;
+      await cleanupCommand.action?.({
+        args: [],
+        flags: { data: true, force: true },
+        cwd: home,
+        interactive: false,
+      } as any);
+      expect(lines.join('\n')).toContain(
+        'Removed 1 project-data item(s), pruned 1 registry entry(ies)',
+      );
+    } finally {
+      vi.restoreAllMocks();
       rmSync(home, { recursive: true, force: true });
     }
   });

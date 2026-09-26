@@ -14,16 +14,16 @@ import {
   lstatSync,
   readdirSync,
   readFileSync,
-  realpathSync,
   rmSync,
   statSync,
   unlinkSync,
-  writeFileSync,
 } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { atomicWriteFile } from '../init/fs-helpers.js';
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
+import { isProvablyDeleted } from './cleanup-origin.js';
 import {
   applyCleanupEntry,
   buildCleanupPlan,
@@ -46,49 +46,6 @@ interface StaleScratchItem {
 /** Orphaned per-project data (--data): ~/.monomind/projects/<slug> dirs whose
  * source project is gone, plus dead lancedb/ dirs left by the pre-2.3.1 engine. */
 const UNKNOWN_DIR_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
-
-/** Where removable volumes appear; a missing path under one may just be unplugged. */
-const MEDIA_ROOTS = ['/Volumes', '/media', '/mnt', '/run/media'];
-
-function isMountPoint(dir: string): boolean {
-  const parent = dirname(dir);
-  if (parent === dir) return true; // filesystem root
-  try {
-    return statSync(dir).dev !== statSync(parent).dev;
-  } catch {
-    return true; // cannot tell — stay cautious
-  }
-}
-
-/**
- * True when a recorded project path is gone because it was deleted, not
- * because the volume holding it is unmounted. Walks up to the nearest existing
- * ancestor: when that is the path's own parent (the old rule), a well-known
- * local root (home, /tmp, /var/tmp, the OS temp dir) or an ordinary directory,
- * the path was deleted — this covers a whole deleted test root (#347). When it
- * is a mount point (`/`, a network share's mount) or a removable-media
- * directory, the missing piece may be a volume that is not attached right now.
- */
-function isProvablyDeleted(p: string): boolean {
-  const target = resolve(p);
-  if (existsSync(target)) return false;
-  const parent = dirname(target);
-  let nearest = parent;
-  while (!existsSync(nearest) && dirname(nearest) !== nearest) nearest = dirname(nearest);
-  if (nearest === parent) return true;
-  const localRoots = new Set<string>();
-  for (const r of [homedir(), '/tmp', '/var/tmp', tmpdir()]) {
-    localRoots.add(resolve(r));
-    try {
-      localRoots.add(realpathSync(r));
-    } catch {
-      /* missing root — nothing to add */
-    }
-  }
-  if (localRoots.has(nearest)) return true;
-  if (MEDIA_ROOTS.includes(nearest) || MEDIA_ROOTS.includes(dirname(nearest))) return false;
-  return !isMountPoint(nearest);
-}
 
 /**
  * Entries of the project registry (~/.monomind-projects.json, written by
@@ -115,7 +72,7 @@ function pruneRegistryEntries(registryPath: string, stale: string[]): number {
   const removed = reg.projects.length - kept.length;
   if (removed > 0) {
     reg.projects = kept;
-    writeFileSync(registryPath, JSON.stringify(reg, null, 2), 'utf-8');
+    atomicWriteFile(registryPath, JSON.stringify(reg, null, 2), 'utf-8');
   }
   return removed;
 }
@@ -485,7 +442,9 @@ export const cleanupCommand: Command = {
       output.writeln();
       if (dryRun) {
         output.writeln(
-          output.dim(`  ${total} item(s). This was a dry run. Use --force to delete.`),
+          output.dim(
+            `  ${total} item(s): ${orphans.length} project-data item(s), ${staleRegistryEntries.length} registry entry(ies). This was a dry run. Use --force to delete.`,
+          ),
         );
         return {
           success: true,
@@ -493,6 +452,9 @@ export const cleanupCommand: Command = {
           data: { found: orphans, staleRegistryEntries, dryRun },
         };
       }
+      output.writeln(
+        `  Removed ${removed} project-data item(s), pruned ${registryRemoved} registry entry(ies)`,
+      );
       return {
         success: true,
         message: `Removed ${removed + registryRemoved} orphaned item(s)`,
