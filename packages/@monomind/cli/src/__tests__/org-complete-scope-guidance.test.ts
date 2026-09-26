@@ -30,7 +30,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const daemonSrc = ['daemon.ts', 'org-start.ts', 'idle-watchdog.ts']
   .map((f) => readFileSync(join(__dirname, '../orgrt', f), 'utf-8'))
   .join('\n');
-const sessionSrc = readFileSync(join(__dirname, '../orgrt/session.ts'), 'utf-8');
+// The org tool descriptions moved from session.ts to org-tools.ts.
+const sessionSrc = ['session.ts', 'org-tools.ts']
+  .map((f) => readFileSync(join(__dirname, '../orgrt', f), 'utf-8'))
+  .join('\n');
 
 describe('org_complete scope guidance distinguishes "this batch" from "the full goal"', () => {
   it('org_complete tool description warns against calling it for just the current batch', () => {

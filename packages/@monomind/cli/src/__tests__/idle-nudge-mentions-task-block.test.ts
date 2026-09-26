@@ -30,7 +30,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const daemonSrc = ['daemon.ts', 'org-start.ts', 'idle-watchdog.ts']
   .map((f) => readFileSync(join(__dirname, '../orgrt', f), 'utf-8'))
   .join('\n');
-const sessionSrc = readFileSync(join(__dirname, '../orgrt/session.ts'), 'utf-8');
+// The org tool descriptions moved from session.ts to org-tools.ts.
+const sessionSrc = ['session.ts', 'org-tools.ts']
+  .map((f) => readFileSync(join(__dirname, '../orgrt', f), 'utf-8'))
+  .join('\n');
 
 describe('idle-nudge and org_complete guidance point at org_task_block', () => {
   it('the idle-nudge message offers org_task_block as an explicit numbered option', () => {
