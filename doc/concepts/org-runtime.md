@@ -248,7 +248,7 @@ Routes `org_send` tool calls:
 `workspace: 'worktree-per-role'` is a real, distinct fourth mode beyond the three above: each
 non-boss role gets its own `git worktree add <path> HEAD --detach` under
 `.monomind/orgs/<name>/worktree-<role-id>/` ([`daemon.ts → spawnRoleIncarnation`](packages/@monomind/cli/src/orgrt/daemon.ts#spawnRoleIncarnation)), cleaned up on stop
-alongside the shared `'worktree'` mode ([`daemon.ts → finishStop`](packages/@monomind/cli/src/orgrt/daemon.ts#finishStop)). Falls back to the shared cwd if the
+alongside the shared `'worktree'` mode ([`org-stop.ts → finishStop`](packages/@monomind/cli/src/orgrt/org-stop.ts#finishStop)). Falls back to the shared cwd if the
 `git worktree add` call fails for a given role.
 
 ### Top-level `run_config` defaults
