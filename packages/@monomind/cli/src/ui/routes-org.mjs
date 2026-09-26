@@ -10,87 +10,16 @@ import path from 'node:path';
 import { companionEvents, translate } from '../orgrt/forwarder.js';
 import * as hil from './org-hil.mjs';
 import * as orgRuntime from './org-runtime.mjs';
+import {
+  approvalsOrEmpty,
+  decodeHilSegment,
+  hilEvent,
+  hilRespond,
+  hilRoot,
+  readHilBody,
+  validOrgName,
+} from './routes-org-helpers.mjs';
 import { getMmClientCount } from './sse-manager.mjs';
-
-/** listApprovals for read-only views, where an unreadable file shows as none. */
-function approvalsOrEmpty(orgsDir, orgName) {
-  try {
-    return hil.listApprovals(path.dirname(path.dirname(orgsDir)), orgName);
-  } catch (_) {
-    return [];
-  }
-}
-
-const validOrgName = (n) => typeof n === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(n);
-
-/** Project root for a HIL route: ?dir= or the server's project. */
-function hilRoot(req, ctx) {
-  const dir = new URL(req.url, 'http://localhost').searchParams.get('dir');
-  return path.resolve(dir || ctx.projectDir || process.cwd());
-}
-
-const HIL_BODY_MAX = 65536;
-
-/** JSON body (≤64KB); null when malformed. Call inside hilRespond: an
- *  oversized body throws 413 and an aborted upload 400, instead of an
- *  unhandled rejection that would take the dashboard process down. Bytes are
- *  decoded once at the end, so a character split across chunks survives. */
-async function readHilBody(req) {
-  const chunks = [];
-  let size = 0;
-  try {
-    // Past the cap, keep draining (without keeping) so the 413 still reaches
-    // the client — leaving the iterator early destroys the socket.
-    for await (const chunk of req) {
-      size += chunk.length;
-      if (size <= HIL_BODY_MAX) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-  } catch (err) {
-    throw Object.assign(new Error(`request body not received: ${err.message}`), { status: 400 });
-  }
-  if (size > HIL_BODY_MAX)
-    throw Object.assign(new Error('request body is over 64KB'), { status: 413 });
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
-  } catch (_) {
-    return null;
-  }
-}
-
-/** decodeURIComponent for a path segment; a malformed escape is a 400. */
-function decodeHilSegment(seg) {
-  try {
-    return decodeURIComponent(seg);
-  } catch (_) {
-    throw Object.assign(new Error(`malformed path segment: ${seg}`), { status: 400 });
-  }
-}
-
-/** Run `fn` and answer with its JSON result, or the HIL error's status. */
-async function hilRespond(res, corsOrigin, fn) {
-  const cors = corsOrigin ? { 'Access-Control-Allow-Origin': corsOrigin } : {};
-  try {
-    const data = await fn();
-    res.writeHead(200, { 'Content-Type': 'application/json', ...cors });
-    res.end(JSON.stringify(data));
-  } catch (err) {
-    const { status, error } = err.status
-      ? { status: err.status, error: err.message }
-      : hil.hilErrorStatus(err);
-    res.writeHead(status, { 'Content-Type': 'application/json', ...cors });
-    res.end(JSON.stringify({ ok: false, error }));
-  }
-  return true;
-}
-
-/** Record a human decision in the dashboard's event log and push it to live views. */
-function hilEvent(ctx, root, ev) {
-  const event = { ...ev, resolvedBy: hil.DASHBOARD_RESOLVER, ts: Date.now() };
-  ctx
-    .appendToFile(path.join(root, 'data', 'mastermind-events.jsonl'), `${JSON.stringify(event)}\n`)
-    .catch(() => {});
-  ctx.broadcastMm(event);
-}
 
 export async function handleOrgRoutes(req, res, url, corsOrigin, ctx) {
   // ------------------------------------------------- Org management
