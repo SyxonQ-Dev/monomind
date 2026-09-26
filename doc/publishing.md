@@ -135,6 +135,24 @@ If a merge already stopped on the conflict, register the driver, run
 `git checkout -m CHANGELOG.md` to redo that file's merge with it, check the file has no
 conflict markers left, and `git add CHANGELOG.md`.
 
+**Release lock.** Only one release org run per clone at a time. Before PREFLIGHT,
+release-captain runs `node scripts/release-lock.mjs acquire --runtime
+.monomind/orgs/release/runtime.json`. That is an atomic `mkdir` under
+`~/.monomind/release-locks/`, keyed by the clone's git common dir, so the main checkout
+and every worktree share one lock. A second run finds the lock held, reports "release
+already in progress by run X (pid, host, since)" and ends without doing anything. The
+captain releases the lock at the end of every run, GO or NO-GO. The lock is not kept in
+`.git` itself because the captain runs with `policy.git: read`, where `.git` is read-only.
+A lock whose holder is gone is taken over by the next acquire: its run ended in
+`runtime.json`, its run's `bus.jsonl` was quiet for 30 minutes, its pid is dead (checked
+only from the pid namespace that recorded it), the machine rebooted, or it is older than 12
+hours. To check or clear it by hand:
+
+```bash
+node scripts/release-lock.mjs status
+node scripts/release-lock.mjs release --force   # only when no release is running
+```
+
 ## Keeping the `.claude` trees in sync
 
 The same asset tree exists five times in this repo, and `@monoes/monomindcli` ships one of
