@@ -137,7 +137,7 @@ split for live roles without their own `budget_tokens`. See
 monomind org reload <name>
 ```
 
-**Source:** [`commands/org.ts → reloadAction`](packages/@monomind/cli/src/commands/org.ts#reloadAction) (subcommand entry), [`orgrt/daemon.ts → reloadOrgDef`](packages/@monomind/cli/src/orgrt/daemon.ts#reloadOrgDef) (`reloadOrgDef()`)
+**Source:** [`commands/org.ts → reloadAction`](packages/@monomind/cli/src/commands/org.ts#reloadAction) (subcommand entry), [`orgrt/org-reload.ts → reloadOrgDef`](packages/@monomind/cli/src/orgrt/org-reload.ts#reloadOrgDef) (`reloadOrgDef()`)
 
 ---
 
