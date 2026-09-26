@@ -1,21 +1,15 @@
 // packages/@monomind/cli/src/orgrt/daemon.ts
 // monolean: single-process inter-org — upgrade path = daemon-to-daemon HTTP when multi-host is real
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { resolveOrgDefBlueprints } from '../catalog/blueprints.js';
-import { writeJsonFileAtomic } from '../utils/json-file.js';
 // ── Extracted module imports ────────────────────────────────────────────
 import * as approvalOps from './approvals.js';
 import type { BrokerLease } from './broker.js';
 import { reopenBudgetClosedRoles, rolesOnDefTokenCaps } from './budget-closure.js';
 import type { OrgBus } from './bus.js';
-import {
-  captureCheckpoint,
-  generateChecksum,
-  type OrgCheckpoint,
-  type RoleCheckpoint,
-} from './checkpoint.js';
+import type { OrgCheckpoint, RoleCheckpoint } from './checkpoint.js';
 import * as checkpointOps from './checkpoint-ops.js';
 import type { TaskEvidence } from './completion-gate.js';
 import * as crossOrg from './cross-org.js';
@@ -25,6 +19,7 @@ import { isEndpointRole } from './endpoint-roles.js';
 import type { attachForwarder } from './forwarder.js';
 import * as orgMemory from './org-memory.js';
 import * as orgStart from './org-start.js';
+import * as orgStateFile from './org-state-file.js';
 import * as orgStop from './org-stop.js';
 import { expandOrgPolicyPathVars, promptVarsFor } from './prompt-vars.js';
 import * as questionOps from './questions.js';
@@ -414,53 +409,7 @@ export class OrgDaemon {
     checkpointOverride?: OrgCheckpoint | null,
     closedBy?: string,
   ): void {
-    const p = join(this.root, ORG_DIR, name, 'runtime.json');
-    const missing = [...(this.abandoned.get(name) ?? [])];
-    const memoryError = this.memoryErrors.get(name);
-    const running = org ?? this.orgs.get(name);
-    const validStatus = status === 'stopped' || status === 'crashed' ? status : 'running';
-    // Pattern 3: Capture full checkpoint state for resume. On stop, finishStop
-    // passes a snapshot captured BEFORE mailboxes close and sessions drain —
-    // otherwise the queue is always empty by persist time.
-    let checkpoint: OrgCheckpoint | null = checkpointOverride ?? null;
-    if (!checkpoint && running) {
-      // Best-effort, like the snapshot in finishStop: persisting the run's
-      // state matters more than the resume checkpoint inside it, and a stop
-      // must not fail because a checkpoint could not be built.
-      try {
-        checkpoint = captureCheckpoint(running, validStatus as 'running' | 'stopped' | 'crashed');
-      } catch (err) {
-        console.error(
-          `org ${name}: could not capture the ${validStatus} checkpoint:`,
-          err instanceof Error ? err.message : err,
-        );
-        checkpoint = null;
-      }
-    } else if (checkpoint && checkpoint.status !== validStatus) {
-      const { checksum: _, ...state } = checkpoint;
-      checkpoint = {
-        ...state,
-        status: validStatus as 'running' | 'stopped' | 'crashed',
-        checksum: generateChecksum({
-          ...state,
-          status: validStatus as 'running' | 'stopped' | 'crashed',
-        }),
-      };
-    }
-    // C4: writeJsonFileAtomic (tmp + rename) — a direct writeFileSync here
-    // could leave runtime.json truncated on Ctrl-C during `org stop`, which
-    // would brick every subsequent `org status` / isOrgRunning / scheduler
-    // call. The state files in 6 other daemon paths already use this helper.
-    writeJsonFileAtomic(p, {
-      status,
-      run,
-      pid: process.pid,
-      updated: new Date().toISOString(),
-      ...(missing.length ? { abandonedRoles: missing } : {}),
-      ...(memoryError ? { memoryError } : {}),
-      ...(checkpoint ? { checkpoint } : {}),
-      ...(closedBy ? { closedBy } : {}),
-    });
+    orgStateFile.persistState(this, name, status, run, org, checkpointOverride, closedBy);
   }
 
   /** Mark every currently-running org as crashed in runtime.json.
@@ -469,64 +418,17 @@ export class OrgDaemon {
    *  this, `runOutcomeResult` (org.ts)'s "crashed: <error>" message always
    *  read "crashed: unknown error" regardless of what actually happened. */
   persistCrashStateAll(error?: string): void {
-    for (const [name, org] of this.orgs) {
-      try {
-        const p = join(this.root, ORG_DIR, name, 'runtime.json');
-        // Capture separately from the write below: a throw here (e.g. a
-        // cyclic structure in roleState reaching generateChecksum) must not
-        // suppress the base crash record, which is the actually-important
-        // best-effort write this method exists for.
-        let checkpoint: ReturnType<typeof captureCheckpoint> | undefined;
-        try {
-          checkpoint = captureCheckpoint(org, 'crashed');
-        } catch {
-          /* best effort — proceed without a checkpoint */
-        }
-        // C4: atomic write — crash handler is the most likely place to hit
-        // a partial write since the process is mid-teardown.
-        writeJsonFileAtomic(p, {
-          status: 'crashed',
-          run: org.run,
-          pid: process.pid,
-          updated: new Date().toISOString(),
-          closedBy: 'crash-handler',
-          ...(checkpoint ? { checkpoint } : {}),
-          ...(error ? { error } : {}),
-        });
-      } catch {
-        /* best effort — filesystem may be unavailable */
-      }
-    }
-  }
-
-  private heartbeatPath(): string {
-    return join(this.root, '.monomind', 'serve-heartbeat.json');
+    orgStateFile.persistCrashStateAll(this, error);
   }
 
   /** Write a heartbeat file so `org status` can distinguish "daemon alive" from
    *  "daemon gone" even when runtime.json still says running. */
   writeHeartbeat(): void {
-    try {
-      const p = this.heartbeatPath();
-      mkdirSync(join(this.root, '.monomind'), { recursive: true });
-      // C4: atomic write — heartbeat corruption is how `org status` reports
-      // a phantom daemon after a crash.
-      writeJsonFileAtomic(p, {
-        pid: process.pid,
-        updatedAt: new Date().toISOString(),
-        running: this.listRunning(),
-      });
-    } catch {
-      /* best effort */
-    }
+    orgStateFile.writeHeartbeat(this);
   }
 
   clearHeartbeat(): void {
-    try {
-      unlinkSync(this.heartbeatPath());
-    } catch {
-      /* already gone or never written */
-    }
+    orgStateFile.clearHeartbeat(this);
   }
 
   // ── Delegated methods — extracted to focused modules ──────────────────

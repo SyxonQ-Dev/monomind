@@ -27,6 +27,7 @@ const DAEMON_SRC = [
   'idle-watchdog.ts',
   'org-start.ts',
   'org-start-steps.ts',
+  'org-state-file.ts',
   'org-stop.ts',
   'role-incarnation.ts',
   'role-respawn.ts',
