@@ -205,7 +205,7 @@ The adherence hook only observes; it never blocks a spawn. Only a real spawn set
 
 ## 8. Dynamic Complexity Scoring
 
-`hooks_route` and `hooks_pre-task` attach a complexity estimate ([`hooks-routing.ts`](packages/@monomind/cli/src/mcp-tools/hooks-routing.ts#hooksRoute)):
+`hooks_route` and `hooks_pre-task` attach a complexity estimate ([`hooks-route.ts`](packages/@monomind/cli/src/mcp-tools/hooks-route.ts#hooksRoute)):
 
 - **`high`**: more than 200 characters, or contains `complex` / `architecture`. Duration: 2-4 hours.
 - **`low`**: fewer than 50 characters, or contains `simple` / `fix`. Duration: 10-30 min.

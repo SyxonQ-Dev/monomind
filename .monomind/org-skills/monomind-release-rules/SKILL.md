@@ -140,6 +140,27 @@ those, never values remembered from an earlier run.
   placeholder files in the working directory. Stage the exact paths you changed
   and check `git status --porcelain` before every commit.
 
+## GitHub CI
+- The release org's own checks run on this machine; GitHub's `Tests` workflow
+  runs on a different filesystem and OS matrix and has caught what they missed:
+  it was red on every push from 2.16.9 to 2.16.11 (a stub test that only fails
+  where freed inodes are reused at once) while three releases went out GO.
+- Read it for TARGET (the SHA this run started from; it is already on origin)
+  with the public API — no credentials needed:
+  `curl -s "https://api.github.com/repos/monoes/monomind/actions/runs?head_sha=<TARGET full sha>&per_page=20" | jq -r '.workflow_runs[] | "\(.name) \(.status) \(.conclusion) \(.id)"'`
+  and for a failed run its failed jobs:
+  `curl -s https://api.github.com/repos/monoes/monomind/actions/runs/<id>/jobs | jq -r '.jobs[] | select(.conclusion == "failure") | .name, (.steps[] | select(.conclusion == "failure") | "  " + .name)'`
+  (the job log itself needs `gh run view <id> --log-failed`, which only
+  publisher can run).
+- `Tests` still queued or in progress: re-check in the foreground (Bash
+  `timeout: 600000`, a `sleep 60` loop of at most 20 minutes); it is never a
+  reason to skip the check.
+- `Tests` failed: triage it like any FAIL — reproduce the failing test on SRC.
+  It blocks GO unless it is proven a pre-existing flake: the same test passes
+  3/3 run in isolation on SRC AND failed or flaked before this release's changes,
+  with an issue filed for it. No `Tests` run for TARGET at all (never pushed):
+  say so in REPORT.md; it does not block.
+
 ## Processes
 - No process outlives the Bash call that started it — not one started with
   `&`, nohup or setsid, and not the Bash tool's own `run_in_background` (in a
@@ -201,6 +222,61 @@ those, never values remembered from an earlier run.
   hunks you need from `git show <sha> -- <path>`, and context with `grep -n` or
   Read offset/limit (the 2.16.7 pre-audit read 20 dumped diffs and 20 logs
   whole and cost $12.83).
+
+## Parallel sessions (release lock, VERSION, local main sync)
+Several sessions work in and release from this clone (ORG_ROOT and its
+worktrees), and each may start this org. Commands below run from ORG_ROOT
+with the Environment prefix.
+- RELEASE LOCK (release-captain; your FIRST command, before PREFLIGHT):
+  `node scripts/release-lock.mjs acquire --runtime .monomind/orgs/release/runtime.json`.
+  It is one lock per clone, shared by every worktree (`~/.monomind/release-locks/`).
+  - exit 0: this run holds it (also after a restart). Put its output line in
+    PREFLIGHT.md and go on.
+  - exit 3: another run is releasing ("release already in progress by run X
+    (pid P on H, since T)"). Do NOTHING else: no PREFLIGHT, no report, no
+    hygiene, no CLEAN UP, no task or message to any role (the other run owns
+    the shared scratch). Call `org_complete` with outcome `partial`, blocker
+    `external` and that line as the summary, and end.
+  - any other exit, or no such script (an older checkout): record a WARNING
+    with the error and rely on PREFLIGHT (5)'s process check.
+  - Release it as the LAST step of CLEAN UP on EVERY outcome that got past
+    the acquire (GO, NO-GO, failed PREFLIGHT), right before `org_complete`:
+    `node scripts/release-lock.mjs release --runtime .monomind/orgs/release/runtime.json`.
+    If the run dies first, the next acquire takes the lock over once the run
+    shows as ended. Never `release --force` a lock you do not hold.
+- VERSION (release-captain, at PREFLIGHT): resolve VERSION with SETUP's rule
+  and write it in PREFLIGHT.md. A version named in the task is the operator's
+  expectation, not an order: other sessions may have released since it was
+  written. Use it only when it is above both `npm view @monoes/monomindcli
+  version` and ORG_ROOT's package.json version (a deliberate minor or major);
+  otherwise release the next free version. When the two differ, say so on the
+  FIRST line of PREFLIGHT.md, in REPORT.md's warnings and in the
+  `org_complete` summary: `VERSION: task named X, npm already has Y, releasing
+  Z`. It is not an error and not a question for the human.
+- LOCAL MAIN SYNC (publisher, after the push to origin; `<sha>` = the release
+  SHA, S = `ORG_ROOT-sync-VERSION`). Only when ORG_ROOT is on `main` with no
+  tracked changes (`git -C ORG_ROOT symbolic-ref --short HEAD` prints main,
+  `git -C ORG_ROOT status --porcelain --untracked-files=no` prints nothing);
+  otherwise change nothing and report why.
+  - `<sha>` already in main (`git -C ORG_ROOT merge-base --is-ancestor <sha> main`): nothing to do.
+  - main is an ancestor of `<sha>`: `git -C ORG_ROOT merge --ff-only <sha>`.
+  - Otherwise local main has commits the release lacks: merge the release
+    into it in a temporary worktree, with the CHANGELOG.md merge driver
+    registered for that one command (it resolves "the release renamed
+    [Unreleased] while local main added entries under it"):
+    `printf 'CHANGELOG.md merge=monomind-changelog\n' > $GATE/sync.gitattributes`;
+    `git -C ORG_ROOT worktree add -b sync/main-VERSION S main`;
+    `GIT_AUTHOR_NAME=nokhodian GIT_AUTHOR_EMAIL=nokhodian@gmail.com GIT_COMMITTER_NAME=nokhodian GIT_COMMITTER_EMAIL=nokhodian@gmail.com git -C S -c core.attributesFile=$GATE/sync.gitattributes -c merge.monomind-changelog.driver="node SRC/scripts/merge-changelog.mjs %O %A %B" merge --no-ff --no-edit <sha>`.
+    Clean (exit 0, `git -C S diff --name-only --diff-filter=U` empty): re-check
+    ORG_ROOT is still on main with no tracked changes (other sessions switch
+    it), then `git -C ORG_ROOT merge --ff-only sync/main-VERSION`. Conflict:
+    record the files `git -C S diff --name-only --diff-filter=U` lists, then
+    `git -C S merge --abort`; ORG_ROOT stays untouched. Either way finish with
+    `git -C ORG_ROOT worktree remove --force S` and
+    `git -C ORG_ROOT branch -D sync/main-VERSION`.
+  - Never rebase, reset, amend or cherry-pick local main's commits, and never
+    push local main. Report the outcome (fast-forwarded, merged as <new sha>,
+    or the conflicting files) to release-captain.
 
 ## Unattended
 - No web access. Never ask the human anything: org_gate is denied for every role,

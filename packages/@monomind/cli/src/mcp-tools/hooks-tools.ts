@@ -1,7 +1,8 @@
 /**
  * Hooks MCP Tools — Registration Layer
  * Thin registration module that aggregates all hooks MCP tools into a single array.
- * Business logic lives in hooks-embedding.ts, hooks-routing.ts, and hooks-intelligence.ts.
+ * Business logic lives in hooks-embedding.ts, hooks-routing.ts (re-exporting the
+ * hooks-*.ts tool modules), and hooks-intelligence.ts.
  */
 
 import {
