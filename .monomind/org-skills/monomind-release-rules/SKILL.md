@@ -140,6 +140,27 @@ those, never values remembered from an earlier run.
   placeholder files in the working directory. Stage the exact paths you changed
   and check `git status --porcelain` before every commit.
 
+## GitHub CI
+- The release org's own checks run on this machine; GitHub's `Tests` workflow
+  runs on a different filesystem and OS matrix and has caught what they missed:
+  it was red on every push from 2.16.9 to 2.16.11 (a stub test that only fails
+  where freed inodes are reused at once) while three releases went out GO.
+- Read it for TARGET (the SHA this run started from; it is already on origin)
+  with the public API — no credentials needed:
+  `curl -s "https://api.github.com/repos/monoes/monomind/actions/runs?head_sha=<TARGET full sha>&per_page=20" | jq -r '.workflow_runs[] | "\(.name) \(.status) \(.conclusion) \(.id)"'`
+  and for a failed run its failed jobs:
+  `curl -s https://api.github.com/repos/monoes/monomind/actions/runs/<id>/jobs | jq -r '.jobs[] | select(.conclusion == "failure") | .name, (.steps[] | select(.conclusion == "failure") | "  " + .name)'`
+  (the job log itself needs `gh run view <id> --log-failed`, which only
+  publisher can run).
+- `Tests` still queued or in progress: re-check in the foreground (Bash
+  `timeout: 600000`, a `sleep 60` loop of at most 20 minutes); it is never a
+  reason to skip the check.
+- `Tests` failed: triage it like any FAIL — reproduce the failing test on SRC.
+  It blocks GO unless it is proven a pre-existing flake: the same test passes
+  3/3 run in isolation on SRC AND failed or flaked before this release's changes,
+  with an issue filed for it. No `Tests` run for TARGET at all (never pushed):
+  say so in REPORT.md; it does not block.
+
 ## Processes
 - No process outlives the Bash call that started it — not one started with
   `&`, nohup or setsid, and not the Bash tool's own `run_in_background` (in a
