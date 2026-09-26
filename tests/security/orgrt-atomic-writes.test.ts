@@ -20,10 +20,22 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const DAEMON_SRC = readFileSync(
-  new URL('../../packages/@monomind/cli/src/orgrt/daemon.ts', import.meta.url),
-  'utf-8',
-);
+// daemon.ts plus the modules split out of it — the same code, now in several files.
+const DAEMON_SRC = [
+  'daemon.ts',
+  'daemon-types.ts',
+  'idle-watchdog.ts',
+  'org-start.ts',
+  'org-start-steps.ts',
+  'role-incarnation.ts',
+  'role-respawn.ts',
+  'role-session-opts.ts',
+  'runner-resolve.ts',
+]
+  .map((f) =>
+    readFileSync(new URL(`../../packages/@monomind/cli/src/orgrt/${f}`, import.meta.url), 'utf-8'),
+  )
+  .join('\n');
 
 describe('C4 — atomic state writes in orgrt/daemon.ts', () => {
   // Match `writeFileSync(<final-path>, ...)` where <final-path> is NOT a

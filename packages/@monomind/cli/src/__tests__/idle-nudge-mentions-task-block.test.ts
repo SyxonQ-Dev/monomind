@@ -27,7 +27,7 @@ import { describe, expect, it } from 'vitest';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // daemon.ts's startOrg code lives in modules split out of it.
-const daemonSrc = ['daemon.ts', 'idle-watchdog.ts']
+const daemonSrc = ['daemon.ts', 'org-start.ts', 'idle-watchdog.ts']
   .map((f) => readFileSync(join(__dirname, '../orgrt', f), 'utf-8'))
   .join('\n');
 const sessionSrc = readFileSync(join(__dirname, '../orgrt/session.ts'), 'utf-8');
