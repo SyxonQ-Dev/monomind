@@ -183,10 +183,12 @@ function subcommandsBlock(relFile, exportName) {
   return src.slice(open, close);
 }
 
-/** `org` subcommands: inline objects, multi-line (`      name:`) or one-line (`    { name:`). */
+/** `org` subcommands: inline objects, multi-line (`      name:`) or one-line
+ *  (`    { name:`), or `xxxSubcommand` identifiers defined in sibling modules. */
 function countOrgSubcommands() {
   const block = subcommandsBlock('packages/@monomind/cli/src/commands/org.ts', 'orgCommand');
-  return [...block.matchAll(/^( {6}name: '| {4}\{ name: ')/gm)].length;
+  return [...block.matchAll(/^( {6}name: '| {4}\{ name: '| {4}[a-z][A-Za-z]*Subcommand,$)/gm)]
+    .length;
 }
 
 /** `hooks` subcommands: identifiers listed one per line (deprecated/aliases included). */

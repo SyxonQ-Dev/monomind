@@ -102,7 +102,7 @@ export function classifyNativeModuleError(text: string): string | null {
  * was compiled against...") and the "could not locate the bindings file"
  * shape name the offending package this way. Used to look up that module's
  * own on-disk freshness (see checkMonographFreshness in
- * doctor-project-checks.ts) so a since-rebuilt module doesn't keep getting
+ * doctor-monograph-checks.ts) so a since-rebuilt module doesn't keep getting
  * reported as a current failure just because an old build.log entry still
  * mentions it. Handles scoped (@scope/name) and unscoped package dirs.
  */

@@ -4,6 +4,11 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`browse open` no longer rejects the Chrome it just started on a busy machine.** Once Chrome's CDP endpoint answered, the launcher checked `/json/version` with a 1 s timeout and treated a timeout as "not Chrome". A Chrome that had only just started, on a loaded CI runner, answered `/json/list` but missed that timeout, and `open` failed with "Port N is occupied by a CDP-speaking process that does not identify as Chrome/Chromium" for its own browser. This made the `#318 concurrent browse sessions` test flaky on CI. A timeout or a failed request now means "try again" until the launch deadline. Only an endpoint that answers as another browser is refused, and a port-0 launch now also kills the Chrome it refused instead of leaving it running.
+- **`init` no longer downloads the published monomind package, and Chrome with it, into `$HOME`, and it no longer leaves npm running after it exits.** Its "Starting services" step ran `npx monomind@latest swarm init`. That step could never succeed: `swarm` was renamed to `monoswarm`, so it always ended with "Unknown command" and printed "Swarm initialization skipped". Before failing, it installed the whole published package from the registry (about 30,000 files) and ran that package's install scripts, which include puppeteer downloading two Chrome builds into `~/.cache/puppeteer`. On a cold npm cache this cost tens of seconds on every `init`. The 30-second timeout did not limit it, because npm postpones SIGTERM until the current install step finishes (one run took 105 s). When `init` itself was killed partway through, for example by a caller's timeout, npm and puppeteer's installer kept running and writing into `$HOME`. They even recreated a home directory that had already been deleted, with 261 MB of Chrome in it. This caused the intermittent `ENOTEMPTY` failures in `init-watch-non-interactive.test.ts`'s cleanup. `init` no longer runs this step. Run `monomind monoswarm init` when you need a swarm.
+
 ## [2.16.12] — 2026-09-26
 
 ### Fixed

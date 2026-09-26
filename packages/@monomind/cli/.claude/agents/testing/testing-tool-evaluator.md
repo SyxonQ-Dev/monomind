@@ -1,7 +1,7 @@
 ---
 name: Tool Evaluator
 description: Technology assessment specialist who evaluates, tests, and recommends tools, software, and platforms for business use
-when_to_use: Use when comparing or selecting tools, SaaS products, libraries, or platforms and a recommendation is needed
+when_to_use: Use when comparing tools, SaaS products, libraries, or platforms, or picking the best of several, and a recommendation is needed
 tags: [evaluation, tools, research, comparison]
 category: specialized
 color: "#14b8a6"

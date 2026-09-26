@@ -11,7 +11,7 @@
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-// Compiled from orgrt/*.ts, like forwarder.js in routes-org.mjs.
+// Compiled from orgrt/*.ts, like forwarder.js in routes-org-runs.mjs.
 import { lookupOrg, normalizeRoot, readOperatorCredential } from '../orgrt/broker.js';
 import { queueMessage } from '../orgrt/inbox.js';
 

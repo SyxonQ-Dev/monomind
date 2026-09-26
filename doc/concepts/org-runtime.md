@@ -665,7 +665,7 @@ loop at [`session-run.ts → runOneSession`](packages/@monomind/cli/src/orgrt/se
 
 `runPrechecks(checks, cwd)` runs a `run_config.prechecks` array (`{ name, command }` shell
 commands) sequentially, stopping at the first failure — wired into a scheduled run's start
-path at [`commands/org.ts → serveAction`](packages/@monomind/cli/src/commands/org.ts#serveAction). If any check fails, the run is skipped rather
+path at [`commands/org-serve.ts → serveAction`](packages/@monomind/cli/src/commands/org-serve.ts#serveAction). If any check fails, the run is skipped rather
 than started, and the failure is logged.
 
 ### Remote Hosts — SSH Cross-Org Dispatch (`remote.ts`)

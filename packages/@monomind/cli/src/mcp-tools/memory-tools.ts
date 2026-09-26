@@ -351,7 +351,7 @@ export const memoryCausalEdge: MCPTool = {
 
 /** Per-call ceilings enforced by kgIngest/kgIngestRules. Mirrored here so an
  *  over-cap payload is reported as truncated instead of silently sliced.
- *  Keep in sync with the `.slice()` bounds in memory-kg.ts. */
+ *  Keep in sync with the `.slice()` bounds in memory-kg-ingest.ts. */
 const KG_MAX_NODES = 500;
 const KG_MAX_EDGES = 1000;
 const KG_MAX_RULES = 50;

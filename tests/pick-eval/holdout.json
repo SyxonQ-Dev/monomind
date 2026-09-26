@@ -165,7 +165,13 @@
     "domain": "review",
     "task": "review pull request 482 for correctness",
     "agents": ["reviewer", "monoswarm-code-review", "pr-manager"],
-    "skills": ["code-reviewer", "mastermind:code-review", "mastermind:review", "code-review-swarm"]
+    "skills": [
+      "code-reviewer",
+      "mastermind:code-review",
+      "mastermind:review",
+      "code-review-swarm",
+      "github:pr-manager"
+    ]
   },
   {
     "id": 128,
@@ -217,7 +223,13 @@
     "domain": "non-english",
     "task": "revisa el pull request 482 y busca errores",
     "agents": ["reviewer", "monoswarm-code-review", "pr-manager"],
-    "skills": ["code-reviewer", "mastermind:code-review", "mastermind:review", "code-review-swarm"]
+    "skills": [
+      "code-reviewer",
+      "mastermind:code-review",
+      "mastermind:review",
+      "code-review-swarm",
+      "github:pr-manager"
+    ]
   },
   {
     "id": 135,

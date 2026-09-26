@@ -292,6 +292,45 @@ describe('pick-rank exclusion clauses in descriptions', () => {
     expect(ex.kept).not.toContain('code');
     expect(ex.kept).toContain('covers x');
   });
+
+  it('reads a "for X use Y" redirect as work the item is not for', () => {
+    const ex = pr.docExclusions(
+      'Builds services; for Node code patterns use backend-patterns, for UI work see web-ui. For claim appraisal, use critic. For teams of five.',
+    );
+    expect(ex.ruledOut).toEqual([
+      pr.tokens('Node code patterns'),
+      pr.tokens('UI work'),
+      pr.tokens('claim appraisal'),
+    ]);
+    // Neither the redirected work nor the other entry's id describe this one.
+    for (const word of ['node', 'patterns', 'web', 'critic']) expect(ex.kept).not.toContain(word);
+    // A clause that only starts with "for" is not a redirect.
+    expect(ex.kept).toContain('for teams of five');
+  });
+
+  it('ranks an item by its own work, not by the work it redirects', () => {
+    // Verbatim from the frozen eval catalog: the redirect's "Node" and the
+    // pointer's "build process" outranked the debugging skills.
+    const mcp = {
+      id: 'mcp-server-patterns',
+      description:
+        'Use when writing or debugging an MCP server with the Node or TypeScript SDK: registering tools, resources and prompts, Zod validation and transport choice. Quick SDK patterns; for an end-to-end build process see mcp-server-builder.',
+      text: 'ai-ml backend mcp typescript',
+    };
+    const backend = {
+      id: 'backend-dev',
+      description:
+        'Use when an org role acts as backend developer and must build server-side services, APIs and database logic that are correct, secure and performant under load. Covers boundary validation, parameterized queries, idempotent writes and N+1 avoidance; for Node code patterns use backend-patterns.',
+      text: 'engineering backend api database',
+    };
+    const score = (q: string, id: string, items: Item[]) =>
+      pr.shortlist(q, items, items.length).find((i: Item) => i.id === id).score;
+    const filler = { id: 'filler', description: 'Unrelated filler entry' };
+    expect(score('run the build process', 'mcp-server-patterns', [mcp, filler])).toBe(0);
+    expect(score('Node code patterns', 'backend-dev', [backend, filler])).toBe(0);
+    // Its own words still rank it.
+    expect(top('debug an MCP server', [filler, mcp], 1)).toEqual(['mcp-server-patterns']);
+  });
 });
 
 describe('pick-rank task head and modifiers', () => {

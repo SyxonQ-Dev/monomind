@@ -12,17 +12,20 @@
  * before returning null. Behavior contract unchanged; observability added.
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as bridge from '../../packages/@monomind/cli/src/memory/memory-bridge.js';
 
 const ORIGINAL_DEBUG = process.env.DEBUG;
 const ORIGINAL_MDEBUG = process.env.MONOMIND_DEBUG;
 
-const SRC = readFileSync(
-  new URL('../../packages/@monomind/cli/src/memory/memory-bridge.ts', import.meta.url),
-  'utf-8',
-);
+// memory-bridge.ts is split across memory-bridge*.ts modules — scan them all.
+const MEMORY_DIR = new URL('../../packages/@monomind/cli/src/memory/', import.meta.url);
+const SRC = readdirSync(MEMORY_DIR)
+  .filter((f) => f.startsWith('memory-bridge') && f.endsWith('.ts'))
+  .sort()
+  .map((f) => readFileSync(new URL(f, MEMORY_DIR), 'utf-8'))
+  .join('\n');
 
 describe('R1 — memory-bridge surfaces errors instead of swallowing', () => {
   let errSpy: ReturnType<typeof vi.spyOn>;

@@ -21,7 +21,7 @@ import { getProjectRoot } from '../memory/memory-bridge.js';
 import { profileStoreDir } from './profile-store.js';
 
 export const KNOWLEDGE_NS_PREFIX = 'knowledge:';
-// Global brain constants — canonical definitions live in memory-bridge.ts
+// Global brain constants — canonical definitions live in memory-bridge-paths.ts
 // (GLOBAL_BRAIN / GLOBAL_BRAIN_DIR); duplicated here because the bridge is
 // imported lazily and these are needed synchronously.
 export const GLOBAL_BRAIN_SENTINEL = '@global';

@@ -1,7 +1,7 @@
 ---
 name: production-validator
 description: Production validation specialist ensuring applications are fully implemented and deployment-ready
-when_to_use: Use when verifying an app is fully implemented (no mocks or stubs) and works against real databases, APIs, and infrastructure before deploy
+when_to_use: Use when verifying, before a release, that an app is fully implemented (no mocks or stubs) and works against real databases, APIs, and infrastructure; not for deploying it
 tags: [production-readiness, validation, e2e, deployment]
 category: testing
 ---
