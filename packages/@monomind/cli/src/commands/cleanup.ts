@@ -17,10 +17,10 @@ import {
   rmSync,
   statSync,
   unlinkSync,
-  writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { atomicWriteFile } from '../init/fs-helpers.js';
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { isProvablyDeleted } from './cleanup-origin.js';
@@ -72,7 +72,7 @@ function pruneRegistryEntries(registryPath: string, stale: string[]): number {
   const removed = reg.projects.length - kept.length;
   if (removed > 0) {
     reg.projects = kept;
-    writeFileSync(registryPath, JSON.stringify(reg, null, 2), 'utf-8');
+    atomicWriteFile(registryPath, JSON.stringify(reg, null, 2), 'utf-8');
   }
   return removed;
 }
@@ -442,7 +442,9 @@ export const cleanupCommand: Command = {
       output.writeln();
       if (dryRun) {
         output.writeln(
-          output.dim(`  ${total} item(s). This was a dry run. Use --force to delete.`),
+          output.dim(
+            `  ${total} item(s): ${orphans.length} project-data item(s), ${staleRegistryEntries.length} registry entry(ies). This was a dry run. Use --force to delete.`,
+          ),
         );
         return {
           success: true,
@@ -450,6 +452,9 @@ export const cleanupCommand: Command = {
           data: { found: orphans, staleRegistryEntries, dryRun },
         };
       }
+      output.writeln(
+        `  Removed ${removed} project-data item(s), pruned ${registryRemoved} registry entry(ies)`,
+      );
       return {
         success: true,
         message: `Removed ${removed + registryRemoved} orphaned item(s)`,
