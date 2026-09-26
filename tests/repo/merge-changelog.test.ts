@@ -94,6 +94,17 @@ describe('merge-changelog driver', () => {
     );
   });
 
+  it("keeps theirs' subsection order as written, even when it is not Keep a Changelog order", () => {
+    const base = `${HEAD}## [Unreleased]\n\n### Fixed\n\n- **F.** f\n\n### Removed\n\n- **R.** r\n\n${V1}`;
+    const ours = `${HEAD}## [Unreleased]\n\n### Fixed\n\n- **F.** f\n- **Ours.** o\n\n### Removed\n\n- **R.** r\n\n${V1}`;
+    const theirs = `${HEAD}## [Unreleased]\n\n### Fixed\n\n- **F.** f\n- **Theirs.** t\n\n### Removed\n\n- **R.** r\n\n${V1}`;
+    const r = drive(base, ours, theirs);
+    expect(r.status).toBe(0);
+    expect(r.result).toBe(
+      `${HEAD}## [Unreleased]\n\n### Fixed\n\n- **F.** f\n- **Theirs.** t\n- **Ours.** o\n\n### Removed\n\n- **R.** r\n\n${V1}`,
+    );
+  });
+
   it('keeps multi-line entries whole', () => {
     const base = `${HEAD}## [Unreleased]\n\n${V1}`;
     const entry = '- **Long.** first line\n  continued here\n  and here';

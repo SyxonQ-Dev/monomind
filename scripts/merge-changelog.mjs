@@ -11,13 +11,15 @@
  *   - theirs' version sections, verbatim;
  *   - one `## [Unreleased]` above them holding theirs' own Unreleased entries
  *     plus every entry our side added (not in base, not anywhere in theirs),
- *     deduped, in their `### Added` / `### Fixed` / … subsections.
+ *     deduped, under their `### Added` / `### Fixed` / … headings (theirs'
+ *     subsection order, with ours' new ones placed where they sit in ours).
  *
  * It only does that when the merge has exactly this shape: our side changed
  * no version section and only added Unreleased entries (every base Unreleased
  * entry is still there, unchanged), and the preamble merges trivially.
- * Anything else is left to git as an ordinary conflict: the file named by %A
- * gets `git merge-file`'s conflict markers and the driver exits 1.
+ * Anything else gets exactly what git's own text merge would give: the file
+ * named by %A gets `git merge-file`'s result, and the driver exits 1 when that
+ * has conflict markers (0 when the text merge was clean).
  *
  * Register it (pnpm run setup:merge-drivers does this):
  *   .gitattributes:  CHANGELOG.md merge=monomind-changelog
@@ -36,8 +38,6 @@ const SECTION = /^## \[/;
 const UNRELEASED = /^## \[Unreleased\]/i;
 const SUBSECTION = /^### /;
 const BULLET = /^\s{0,3}[-*+] /;
-/** Keep a Changelog order; unknown headings follow in order of appearance. */
-const ORDER = ['breaking', 'added', 'changed', 'deprecated', 'removed', 'fixed', 'security'];
 
 /** Splits a changelog into its preamble and `## [` sections (header + body lines). */
 function parse(text) {
@@ -87,20 +87,24 @@ function entries(body) {
   return out.map((e) => ({ sub: e.sub, gap: e.gap, text: e.lines.join('\n') }));
 }
 
-const rank = (sub) => {
-  const i = ORDER.indexOf(
-    sub
-      .replace(/^###\s*/, '')
-      .trim()
-      .toLowerCase(),
-  );
-  return sub === '' ? -1 : i === -1 ? ORDER.length : i;
-};
+const subsOf = (list) => [...new Set(list.map((e) => e.sub))];
 
-function renderUnreleased(header, list, looseList) {
-  const subs = [];
-  for (const e of list) if (!subs.includes(e.sub)) subs.push(e.sub);
-  subs.sort((a, b) => rank(a) - rank(b));
+/**
+ * Theirs' subsection order; each one only ours has goes right before the one
+ * it precedes in ours (at the end if none), and entries with no heading first.
+ */
+function subsectionOrder(theirsSubs, oursSubs) {
+  const order = [...theirsSubs];
+  let next = order.length;
+  for (const s of [...oursSubs].reverse()) {
+    const i = order.indexOf(s);
+    if (i === -1) order.splice(next, 0, s);
+    else next = i;
+  }
+  return order.sort((a, b) => (a === '' ? -1 : b === '' ? 1 : 0));
+}
+
+function renderUnreleased(header, list, subs, looseList) {
   const out = [header, ''];
   for (const sub of subs) {
     if (sub) out.push(sub, '');
@@ -153,11 +157,16 @@ function mergeChangelog(baseText, oursText, theirsText) {
 
   if (!added.length) return theirsText;
   const theirsUnreleased = unreleased(theirs)[0];
-  const list = [...(theirsUnreleased ? entries(theirsUnreleased.body) : []), ...added];
+  const theirsEntries = theirsUnreleased ? entries(theirsUnreleased.body) : [];
+  const list = [...theirsEntries, ...added];
   const header = theirsUnreleased?.header ?? unreleased(ours)[0]?.header ?? '## [Unreleased]';
+  const subs = subsectionOrder(subsOf(theirsEntries), subsOf(oursEntries)).filter((sub) =>
+    list.some((e) => e.sub === sub),
+  );
   const rendered = renderUnreleased(
     header,
     list,
+    subs,
     oursEntries.some((e) => e.gap),
   ).join('\n');
 
