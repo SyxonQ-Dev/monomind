@@ -9,6 +9,9 @@ import { ORG_DIR } from '../../src/orgrt/types.js';
 // Costs real subscription quota. Run explicitly:
 //   MONOMIND_ORG_E2E=1 npx vitest run __tests__/orgrt/real-smoke.test.ts
 const enabled = process.env.MONOMIND_ORG_E2E === '1';
+// The shared test setup moves HOME to a temp dir (#347); the real engine
+// needs the subscription credentials under the developer's real home.
+if (enabled && process.env.MONOMIND_TEST_REAL_HOME) process.env.HOME = process.env.MONOMIND_TEST_REAL_HOME;
 
 describe.skipIf(!enabled)('real SDK smoke (subscription auth)', () => {
   it('a 1-agent org answers via the real engine and events hit the bus', async () => {

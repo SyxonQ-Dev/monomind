@@ -1,11 +1,20 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
+
+// Moves every worker off the developer's real HOME (#347).
+const home = (f: string) => fileURLToPath(new URL(`../../../tests/setup/${f}`, import.meta.url));
 
 export default defineConfig({
   test: {
     environment: 'node',
     include: ['__tests__/**/*.test.ts', 'src/__tests__/**/*.test.ts'],
     exclude: ['node_modules', 'dist', '**/._*'],
-    setupFiles: ['__tests__/setup/resource-governor.setup.ts', '__tests__/setup/no-jev-env.setup.ts'],
+    globalSetup: [home('isolated-home.global.ts')],
+    setupFiles: [
+      home('isolated-home.setup.ts'),
+      '__tests__/setup/resource-governor.setup.ts',
+      '__tests__/setup/no-jev-env.setup.ts',
+    ],
     globals: true,
     // Cap worker count: this box-class (10 cores / 16 GB) cannot sustain the
     // default ~10 workers when several test files each load a 100MB+ ONNX

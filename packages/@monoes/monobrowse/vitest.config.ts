@@ -1,4 +1,8 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
+
+// Moves every worker off the developer's real HOME (#347).
+const home = (f: string) => fileURLToPath(new URL(`../../../tests/setup/${f}`, import.meta.url));
 
 export default defineConfig({
   test: {
@@ -10,6 +14,8 @@ export default defineConfig({
     // They are binary resource forks, not tests, and vitest would otherwise
     // try to transform them.
     exclude: ['**/node_modules/**', '**/dist/**', '**/.git/**', '**/._*'],
+    globalSetup: [home('isolated-home.global.ts')],
+    setupFiles: [home('isolated-home.setup.ts')],
     globals: false,
     testTimeout: 10000,
     mockReset: true,
