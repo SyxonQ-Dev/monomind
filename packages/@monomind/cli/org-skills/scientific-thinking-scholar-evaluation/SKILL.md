@@ -1,6 +1,6 @@
 ---
 name: scientific-thinking-scholar-evaluation
-description: "Use when evaluating a paper, proposal, thesis chapter or literature review with a repeatable 1-5 rubric on methods, evidence and citations. Supports comprehensive, targeted or comparative scope and revision feedback. For general claim appraisal, use scientific-critical-thinking."
+description: "Use when evaluating a paper, proposal, thesis chapter or review article with a repeatable 1-5 rubric on methods, evidence and citations. Supports comprehensive, targeted or comparative scope and revision feedback. For general claim appraisal, use scientific-critical-thinking."
 tags: ["research","science","writing","evaluation"]
 tools: []
 license: MIT

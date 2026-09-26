@@ -76,4 +76,49 @@ describe('release org config', () => {
     expect(all).toMatch(new RegExp(`never .{0,120}${SHARED_TMPDIR}`, 'i'));
     expect(all).toMatch(/short-sha/i);
   });
+
+  /** Parallel sessions (2026-09-26, 2.16.7 … 2.16.12 released back to back). */
+  describe('parallel sessions', () => {
+    const rules = readFileSync(
+      join(
+        configPath,
+        '..',
+        '..',
+        '..',
+        '.monomind',
+        'org-skills',
+        'monomind-release-rules',
+        'SKILL.md',
+      ),
+      'utf8',
+    );
+    const role = (id: string) =>
+      (def.roles.find((r) => r.id === id)?.responsibilities ?? []).join('\n');
+
+    it('captain takes the release lock before PREFLIGHT and releases it in CLEAN UP', () => {
+      const captain = role('release-captain');
+      expect(captain.indexOf('RELEASE LOCK')).toBeGreaterThan(-1);
+      expect(captain.indexOf('RELEASE LOCK')).toBeLessThan(captain.indexOf('PREFLIGHT —'));
+      expect(captain).toMatch(/release the release lock[^.]*and org_complete/);
+      expect(rules).toMatch(/node scripts\/release-lock\.mjs acquire --runtime /);
+      expect(rules).toMatch(/node scripts\/release-lock\.mjs release --runtime /);
+      expect(rules).toMatch(
+        /exit 3:[\s\S]{0,400}org_complete` with outcome `partial`, blocker\s+`external`/,
+      );
+    });
+
+    it('a version named in the task is reported when it differs, never treated as an error', () => {
+      expect(rules).toMatch(/VERSION: task named X, npm already has Y, releasing\s+Z/);
+      expect(role('release-captain')).not.toMatch(/if the task states one, use it\. /);
+    });
+
+    it('local main sync merges with the CHANGELOG.md driver and never rewrites the owner commits', () => {
+      expect(rules).toMatch(
+        /-c merge\.monomind-changelog\.driver="node SRC\/scripts\/merge-changelog\.mjs %O %A %B"/,
+      );
+      expect(rules).toMatch(/Never rebase, reset, amend or cherry-pick local main's commits/);
+      expect(role('publisher')).not.toMatch(/git merge --no-ff origin\/main/);
+      expect(role('publisher')).toMatch(/LOCAL MAIN SYNC[^.]*'Parallel sessions'/);
+    });
+  });
 });

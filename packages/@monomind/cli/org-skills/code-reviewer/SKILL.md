@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-description: "Org role guidance for a code reviewer: review PRs for bugs, security holes, N+1 queries and design issues, then write a structured, prioritized report. Workflow with checklist, feedback and spec-compliance references."
+description: "Org role guidance for a code reviewer: review pull requests (PRs) for bugs, security holes, N+1 queries and design issues, then write a structured, prioritized report. Workflow with checklist, feedback and spec-compliance references."
 tags: ["engineering","testing","code-review"]
 tools: ["monograph_query","monograph_context","monograph_impact","monograph_suggest"]
 license: MIT

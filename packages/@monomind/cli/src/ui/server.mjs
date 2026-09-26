@@ -2122,7 +2122,7 @@ export async function startServer({
 
     // ------------------------------------------------ GET /markdown.js
     // Markdown renderer, split out of dashboard.html (#124) — same pattern
-    // as GET /orgs-files.js in routes-org.mjs (a sibling asset served via
+    // as GET /orgs-files.js in routes-org-mastermind.mjs (a sibling asset served via
     // its own hardcoded route, not a generic static-file handler). Must be
     // in _OPEN_ROUTES above: dashboard.html's own <script src="markdown.js">
     // request happens before the page has the auth token to attach.

@@ -1,6 +1,6 @@
 ---
 name: scientific-thinking-literature-review
-description: "Use when finding, screening, synthesizing and citing a body of academic or technical literature as a narrative, scoping or systematic review or meta-analysis. Covers question framing with PICO, search planning, screening, citation checks and evidence logs."
+description: "Use when finding, screening, synthesizing and citing a body of academic papers or technical literature as a narrative, scoping or systematic review or meta-analysis. Covers question framing with PICO, search planning, screening, citation checks and evidence logs."
 tags: ["research","science","writing"]
 tools: []
 license: MIT

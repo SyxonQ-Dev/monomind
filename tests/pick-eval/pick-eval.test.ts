@@ -31,9 +31,12 @@ const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 // ranker improves; never lower them to make a change pass.
 const FLOOR = { agentsTop1: 49, agentsTop3: 55, skillsTop1: 53, skillsTop3: 65 };
 // Precision of what the [PICK] gate shows over keyword ranking (frozen: agents
-// 46/50, skills 36/43; before the task-head / template fixes 46/50 and 34/43,
-// before the vibe / "not for" fixes 46/50 and 34/42 on 77 tasks).
-const GATED_FLOOR = { agents: 0.92, skills: 0.83 };
+// 48/52, skills 41/47; before the "for X use Y" redirect fix 46/50 and 36/43,
+// before the task-head / template fixes 46/50 and 34/43, before the vibe /
+// "not for" fixes 46/50 and 34/42 on 77 tasks).
+const GATED_FLOOR = { agents: 0.92, skills: 0.87 };
+// The same with the REVISED entries swapped in (agents 48/48, skills 49/49).
+const REVISED_GATED_FLOOR = { agents: 0.97, skills: 0.96 };
 // The live catalogs drift with every agent/skill edit: a looser floor.
 const LIVE_FLOOR = { agentsTop1: 40, skillsTop1: 42 };
 // Catalog entries edited on purpose to fix a reviewed wrong pick whose cause
@@ -43,13 +46,48 @@ const LIVE_FLOOR = { agentsTop1: 40, skillsTop1: 42 };
 // said "org" for a GitHub organization, api-designer carried a
 // `documentation` tag, code-documenter's description left out API reference
 // docs and tutorials.
+// Second round: repo-architect said "organizing" (an org is an agent
+// organization here); production-validator said "before deploy" but does not
+// deploy; adversarial-reviewer and monolean-audit claimed any review of
+// changes before merge / any codebase audit; scholar-evaluation named the
+// literature review it grades like one it writes; the PR-manager command
+// claimed "automated reviews". The right entries lacked their plain words:
+// coder (review comments), Tool Evaluator (picking the best), DevOps
+// Automator (deploys), literature-review (papers), debugging-wizard (crash),
+// board-deck-builder (quarterly report), code-reviewer (pull requests), the
+// PR-manager command (open).
 const REVISED = {
-  agents: ['monoswarm-multi-repo', 'sync-coordinator'],
-  skills: ['api-designer', 'code-documenter'],
+  agents: [
+    'monoswarm-multi-repo',
+    'sync-coordinator',
+    'coder',
+    'repo-architect',
+    'production-validator',
+    'testing-tool-evaluator',
+    'engineering-devops-automator',
+  ],
+  skills: [
+    'api-designer',
+    'code-documenter',
+    'adversarial-reviewer',
+    'monolean-audit',
+    'scientific-thinking-scholar-evaluation',
+    'scientific-thinking-literature-review',
+    'debugging-wizard',
+    'board-deck-builder',
+    'code-reviewer',
+    'github:pr-manager',
+  ],
 };
 // Reviewed prompts where a wrong [PICK] was seen: the SDK docs task (15), the
-// short docs and org-creation prompts and their variants (129, 130, 138-142).
-const REVIEWED = [15, 129, 130, 138, 139, 140, 141, 142];
+// short docs and org-creation prompts and their variants (129, 130, 138-142);
+// second round: review comments (8), the agent-org task (34), deploying (122),
+// picking a CI tool (115), a heap leak (2), a literature review (23), a
+// report deck (105), reviewing changes or a PR (114, 127, 134), opening a PR
+// (37), a vulnerability audit (126) and a segfault (128).
+const REVIEWED = [
+  2, 8, 15, 23, 34, 37, 105, 114, 115, 122, 126, 127, 128, 129, 130, 134, 138, 139, 140, 141, 142,
+];
 
 /** The frozen snapshot with the REVISED entries as the repo has them now. */
 function frozenWithRevisions(snapshot: EvalCatalogs, repo: EvalCatalogs): EvalCatalogs {
@@ -134,7 +172,9 @@ describe('the gated pick on the frozen catalog', () => {
     // "write developer documentation for the REST API" showed api-designer and
     // "create a new org that monitors competitors" Performance Monitor plus
     // competitor-comparison-pages: the head of the task, not its modifier.
-    const reviewed = new Set([129, 130, 138, 140, 141]);
+    // "Our Node service leaks memory" showed backend-dev on the "Node" of its
+    // "for Node code patterns use backend-patterns" pointer.
+    const reviewed = new Set([2, 129, 130, 138, 140, 141]);
     const wrong = [...r.agents.wrong, ...r.skills.wrong].filter((w) => reviewed.has(w.id));
     expect(wrong).toEqual([]);
   });
@@ -163,13 +203,13 @@ describe('the gated pick with the revised catalog entries', () => {
     expect([...r.agents.wrong, ...r.skills.wrong]).toEqual([]);
   });
 
-  it('keeps the frozen floors', () => {
+  it('keeps the frozen floors and the revised precision', () => {
     const r = keywordEval(tasks, catalogs);
     expect(r.agents.top1).toBeGreaterThanOrEqual(FLOOR.agentsTop1);
     expect(r.skills.top1).toBeGreaterThanOrEqual(FLOOR.skillsTop1);
     const g = gatedEval(tasks, catalogs);
-    expect(g.agents.precision).toBeGreaterThanOrEqual(GATED_FLOOR.agents);
-    expect(g.skills.precision).toBeGreaterThanOrEqual(GATED_FLOOR.skills);
+    expect(g.agents.precision).toBeGreaterThanOrEqual(REVISED_GATED_FLOOR.agents);
+    expect(g.skills.precision).toBeGreaterThanOrEqual(REVISED_GATED_FLOOR.skills);
   });
 });
 

@@ -1,6 +1,6 @@
 ---
 name: github:pr-manager
-description: Comprehensive pull request management with monomind swarm coordination for automated reviews, testing, and merge workflows.
+description: Open, update and merge GitHub pull requests with monomind swarm coordination - multi-reviewer runs, testing, conflict resolution and merge strategies.
 ---
 
 # GitHub PR Manager
