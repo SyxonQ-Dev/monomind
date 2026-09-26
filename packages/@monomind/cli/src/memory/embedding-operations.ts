@@ -84,7 +84,7 @@ export async function loadEmbeddingModel(options?: {
 
   try {
     // MONOMIND_NO_LOCAL_EMBEDDINGS: see the matching guard in
-    // memory-bridge.ts's loadEmbedder() — same native-crash rationale,
+    // memory-bridge-backend.ts's loadEmbedder() — same native-crash rationale,
     // same switch (env var, or disableLocalModels() for org runs).
     const transformers = localEmbeddingsDisabled()
       ? null
@@ -107,7 +107,7 @@ export async function loadEmbeddingModel(options?: {
       // "Cannot read properties of null (reading 'model')".
       try {
         const { pipeline } = transformers;
-        // dtype pinned to q8, matching memory-bridge.ts's loadEmbedder(). Since
+        // dtype pinned to q8, matching memory-bridge-backend.ts's loadEmbedder(). Since
         // transformers v4 the default is fp32 (`onnx/model.onnx`), which the
         // provisioning step never fetches — leaving it unset made every load
         // here fail with local_files_only and silently drop to hash-fallback.

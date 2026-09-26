@@ -249,7 +249,7 @@ describe('getProjectRoot', () => {
       expect(getProjectRoot(a)).toBe(a); // re-query the first: still itself, not stuck on b
     });
 
-    // AC-5: `getDbPath`'s path-traversal guard (memory-bridge.ts, ~line 282)
+    // AC-5: `getDbPath`'s path-traversal guard (memory-bridge-paths.ts)
     // allows a custom MCP-supplied path only if it sits inside `getProjectRoot()`,
     // the per-project data dir, or the global brain. A wrong (too-wide) root
     // widens that allow-list for free — before this fix, adopting the bare
@@ -342,7 +342,7 @@ describe('getProjectRoot', () => {
     // between validateAnchor's ONE-TIME resolution of the anchor to a REAL
     // path (cached as that real-path STRING) and getDbPath's guard, which
     // re-resolves that SAME cached real-path string fresh on EVERY call —
-    // see the comment at getDbPath's `relCwd` line in memory-bridge.ts.
+    // see the comment at getDbPath's `relCwd` line in memory-bridge-paths.ts.
     // Swapping the filesystem entry AT THE ANCHOR PATH after validation
     // does nothing (the anchor is never consulted again once cached).
     // Swapping the filesystem entry AT THE RESOLVED REAL TARGET — the path

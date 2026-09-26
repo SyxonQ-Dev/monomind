@@ -5,7 +5,7 @@
  * The HNSW ANN index itself now lives inside @monoes/memory's
  * SqlBackend.search() (size-gated, built from the real memory_embeddings
  * table, persisted to disk next to the SQLite file) — see
- * memory-bridge.ts's bridgeGetHNSWStatus()/bridgeForceBuildHNSW(). This file
+ * memory-bridge-entries.ts's bridgeGetHNSWStatus()/bridgeForceBuildHNSW(). This file
  * used to also maintain a second, separate pure-JS HNSW index reaching
  * directly into a `.swarm/memory.db` that nothing writes to post-rename;
  * that layer queried the wrong database with the wrong schema and was
