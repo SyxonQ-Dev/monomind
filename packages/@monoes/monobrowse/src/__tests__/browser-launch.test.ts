@@ -9,12 +9,13 @@
  * services; each test binds/tears down its own listeners.
  */
 
+import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
 import { createServer as createTcpServer, type Socket, type Server as TcpServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { getLaunchedPid, getLaunchedUserDataDir, launchBrowser } from '../browser/browser.js';
 
 const BASE = 23470;
@@ -31,6 +32,72 @@ afterEach(async () => {
   await Promise.all(servers.map((s) => new Promise<void>((resolve) => s.close(() => resolve()))));
   servers = [];
 }, 5000);
+
+// Every fake-chrome.cjs below is spawned by launchBrowser (detached, so a
+// test cannot reach it through a ChildProcess). Its temp dir is on its
+// command line, so each dir is recorded here and afterAll kills whatever is
+// still running out of one — a fixture must never outlive this file (one
+// that did kept 127.0.0.1:23480 bound and failed later runs with
+// EADDRINUSE).
+const fixtureDirs: string[] = [];
+
+function fixtureDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  fixtureDirs.push(dir);
+  return dir;
+}
+
+/** Pids of processes whose command line mentions `dir`. */
+function processesIn(dir: string): string[] {
+  try {
+    return execFileSync('pgrep', ['-f', dir], { encoding: 'utf8' })
+      .trim()
+      .split('\n')
+      .filter(Boolean);
+  } catch {
+    return []; // pgrep exits 1 when nothing matches
+  }
+}
+
+afterAll(async () => {
+  const leaked: string[] = [];
+  for (const dir of fixtureDirs.splice(0)) {
+    // A fixture a test just SIGKILLed can take a moment to disappear.
+    let pids = processesIn(dir);
+    for (let i = 0; i < 20 && pids.length > 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      pids = processesIn(dir);
+    }
+    leaked.push(...pids);
+    for (const pid of pids) {
+      try {
+        process.kill(Number(pid), 'SIGKILL');
+      } catch {
+        /* already gone */
+      }
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+  // Swept above either way; failing here names a test whose own cleanup
+  // missed a fixture.
+  expect(leaked, 'fake-chrome fixtures outlived their test').toEqual([]);
+});
+
+// Prepended to every fake-chrome script: exit once the process that launched
+// it is gone (launchBrowser spawns detached, so a vitest worker that dies or
+// is killed mid-test would otherwise leave the fixture — and its port —
+// behind, reparented to init), and never live longer than a minute anyway.
+const FIXTURE_WATCHDOG = `const parent = process.ppid;
+setInterval(() => {
+  try {
+    if (process.ppid !== parent) process.exit(0);
+    process.kill(parent, 0);
+  } catch {
+    process.exit(0);
+  }
+}, 1000).unref();
+setTimeout(() => process.exit(0), 60000).unref();
+`;
 
 /** Bind a bare TCP listener — accepts connections but speaks no HTTP/CDP. */
 function occupyNonChrome(port: number): Promise<void> {
@@ -119,7 +186,7 @@ describe('launchBrowser — port scan/attach decisions', () => {
 // --remote-debugging-port=0, it binds a kernel-assigned port and only then
 // writes that port to <user-data-dir>/DevToolsActivePort.
 const FAKE_CHROME = `#!/usr/bin/env node
-const { createServer } = require('node:http');
+${FIXTURE_WATCHDOG}const { createServer } = require('node:http');
 const { writeFileSync } = require('node:fs');
 const { join } = require('node:path');
 const dir = process.argv.find((a) => a.startsWith('--user-data-dir=')).slice('--user-data-dir='.length);
@@ -133,11 +200,32 @@ setTimeout(() => server.listen(0, '127.0.0.1', () => {
 }), 600);
 `;
 
+// Like FAKE_CHROME, but its first /json/version answer takes longer than
+// launchBrowser's 1 s identity timeout, while /json/list answers at once.
+const FAKE_CHROME_SLOW_IDENTITY = `#!/usr/bin/env node
+${FIXTURE_WATCHDOG}const { createServer } = require('node:http');
+const { writeFileSync } = require('node:fs');
+const { join } = require('node:path');
+const dir = process.argv.find((a) => a.startsWith('--user-data-dir=')).slice('--user-data-dir='.length);
+let versionCalls = 0;
+const server = createServer((req, res) => {
+  const send = () => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(req.url === '/json/version' ? JSON.stringify({ Browser: 'Chrome/999.0.0.0' }) : '[]');
+  };
+  if (req.url === '/json/version' && versionCalls++ === 0) setTimeout(send, 1500);
+  else send();
+});
+server.listen(0, '127.0.0.1', () => {
+  writeFileSync(join(dir, 'DevToolsActivePort'), server.address().port + '\\n/devtools/browser/fake');
+});
+`;
+
 describe.skipIf(process.platform === 'win32')(
   'launchBrowser — port 0 (Chrome picks the port)',
   () => {
     it('returns the port its own Chrome reported, never another CDP endpoint', async () => {
-      const dir = mkdtempSync(join(tmpdir(), 'monobrowse-port0-'));
+      const dir = fixtureDir('monobrowse-port0-');
       const exe = join(dir, 'fake-chrome.cjs');
       writeFileSync(exe, FAKE_CHROME);
       chmodSync(exe, 0o755);
@@ -168,6 +256,48 @@ describe.skipIf(process.platform === 'win32')(
       }
     });
 
+    it('does not reject its own Chrome when /json/version answers slowly (loaded machine)', async () => {
+      // On a busy CI runner Chrome's DevTools server can take longer than the
+      // identity check's timeout to answer /json/version right after it
+      // starts listening, while /json/list (no timeout) got through. That
+      // timeout used to be read as "not Chrome" and failed the launch with
+      // "occupied by a CDP-speaking process that does not identify as
+      // Chrome/Chromium" — for the very Chrome it had just started.
+      const dir = fixtureDir('monobrowse-slowid-');
+      const exe = join(dir, 'fake-chrome.cjs');
+      writeFileSync(exe, FAKE_CHROME_SLOW_IDENTITY);
+      chmodSync(exe, 0o755);
+      const profile = join(dir, 'profile');
+      mkdirSync(profile);
+
+      let port: number | undefined;
+      try {
+        port = await launchBrowser({ port: 0, userDataDir: profile, executablePath: exe });
+        expect(port).toBeGreaterThan(0);
+        expect(getLaunchedPid(port)).toBeTypeOf('number');
+      } finally {
+        const pid = port === undefined ? undefined : getLaunchedPid(port);
+        if (pid) process.kill(pid, 'SIGKILL');
+      }
+    }, 15000);
+
+    it('still refuses a CDP endpoint that answers as a non-Chrome browser', async () => {
+      const dir = fixtureDir('monobrowse-notchrome-');
+      const exe = join(dir, 'fake-chrome.cjs');
+      writeFileSync(exe, FAKE_CHROME.replace('Chrome/999.0.0.0', 'Firefox/1.0'));
+      chmodSync(exe, 0o755);
+      const profile = join(dir, 'profile');
+      mkdirSync(profile);
+      await expect(
+        launchBrowser({ port: 0, userDataDir: profile, executablePath: exe }),
+      ).rejects.toThrow(/does not identify as Chrome/);
+      // Refused, so never tracked — launchBrowser must stop it itself.
+      for (let i = 0; i < 20 && processesIn(dir).length > 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(processesIn(dir)).toEqual([]);
+    }, 15000);
+
     it('refuses port 0 without a dedicated userDataDir', async () => {
       await expect(launchBrowser({ port: 0 })).rejects.toThrow(/requires a dedicated userDataDir/);
     });
@@ -182,7 +312,7 @@ describe.skipIf(process.platform === 'win32')(
 // when a concurrent launch wins the same "free-looking" port: before its
 // CDP endpoint ever opens.
 const FAKE_CHROME_FIXED_PORT = `#!/usr/bin/env node
-const { createServer } = require('node:http');
+${FIXTURE_WATCHDOG}const { createServer } = require('node:http');
 const { writeFileSync, mkdirSync } = require('node:fs');
 const { join } = require('node:path');
 const port = Number(
@@ -206,7 +336,7 @@ describe.skipIf(process.platform === 'win32')(
   'launchBrowser — concurrent launches with no explicit --port (TOCTOU race)',
   () => {
     it('two concurrent launches racing for the same default port both succeed, on different ports and profiles', async () => {
-      const dir = mkdtempSync(join(tmpdir(), 'monobrowse-concurrent-'));
+      const dir = fixtureDir('monobrowse-concurrent-');
       const exe = join(dir, 'fake-chrome.cjs');
       writeFileSync(exe, FAKE_CHROME_FIXED_PORT);
       chmodSync(exe, 0o755);
@@ -216,12 +346,17 @@ describe.skipIf(process.platform === 'win32')(
       // whether or not the user passed it (cli/commands.ts:288).
       const port = BASE + 10;
 
+      // allSettled, not all: when one launch rejects, the other's fixture is
+      // still running and must be killed too — Promise.all dropped its port
+      // and leaked it.
+      let results: PromiseSettledResult<number>[] = [];
       let ports: number[] = [];
       try {
-        ports = await Promise.all([
+        results = await Promise.allSettled([
           launchBrowser({ port, executablePath: exe, launchTimeoutMs: 5000 }),
           launchBrowser({ port, executablePath: exe, launchTimeoutMs: 5000 }),
         ]);
+        ports = results.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
       } finally {
         for (const p of ports) {
           const pid = getLaunchedPid(p);
@@ -233,9 +368,9 @@ describe.skipIf(process.platform === 'win32')(
             }
           }
         }
-        rmSync(dir, { recursive: true, force: true });
       }
 
+      for (const r of results) if (r.status === 'rejected') throw r.reason;
       expect(ports).toHaveLength(2);
       // The old probe-then-launch race let both calls observe the same
       // candidate as free and spawn Chrome on it — one bind wins, the

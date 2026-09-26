@@ -92,18 +92,27 @@ export async function isPortOpen(port: number): Promise<boolean> {
  * attaching to an unrelated real browser that happens to be listening there.
  */
 async function isChromeIdentity(port: number): Promise<boolean> {
+  return (await chromeIdentity(port)) === 'chrome';
+}
+
+/** isChromeIdentity, telling "answered as something else" apart from "did
+ *  not answer in time" ('unknown': a timeout, a refused or reset connection,
+ *  a non-OK status or an unparseable body). */
+async function chromeIdentity(port: number): Promise<'chrome' | 'other' | 'unknown'> {
   try {
     const res = await fetch(`http://127.0.0.1:${port}/json/version`, {
       signal: AbortSignal.timeout(1000),
     });
-    if (!res.ok) return false;
+    if (!res.ok) return 'unknown';
     const info = (await res.json()) as { Browser?: string };
     // Edge's Browser field is "Edg/<version>" with no "chrome"/"chromium"
     // substring, even though it's Chromium-based and CDP-compatible —
     // accept it alongside Chrome/Chromium rather than rejecting a valid target.
-    return typeof info.Browser === 'string' && /chrom(e|ium)|edg/i.test(info.Browser);
+    return typeof info.Browser === 'string' && /chrom(e|ium)|edg/i.test(info.Browser)
+      ? 'chrome'
+      : 'other';
   } catch {
-    return false;
+    return 'unknown';
   }
 }
 
@@ -353,6 +362,17 @@ async function launchOnFreePort(config: BrowserConfig, port: number): Promise<nu
   // process's pid overwriting the real winner's, corrupting the very map
   // closeBrowser()'s kill fallback depends on.
 
+  // With port 0 a refused or timed-out launch is not tracked under any port,
+  // so no closeBrowser() could ever reach it — stop it rather than leave it
+  // running.
+  const killUntracked = () => {
+    try {
+      if (child.pid) process.kill(child.pid, 'SIGKILL');
+    } catch {
+      /* already gone */
+    }
+  };
+
   const launchTimeout = config.launchTimeoutMs ?? LAUNCH_TIMEOUT;
   const deadline = Date.now() + launchTimeout;
   while (Date.now() < deadline) {
@@ -361,10 +381,17 @@ async function launchOnFreePort(config: BrowserConfig, port: number): Promise<nu
     if (earlyFailure) throw earlyFailure;
     const boundPort = port === 0 ? readDevToolsActivePort(activePortFile) : port;
     if (boundPort !== null && (await isPortOpen(boundPort))) {
-      if (await isChromeIdentity(boundPort)) {
+      const identity = await chromeIdentity(boundPort);
+      if (identity === 'chrome') {
         track(boundPort);
         return boundPort;
       }
+      // A Chrome that has only just opened its endpoint, on a loaded
+      // machine, can answer /json/list (no timeout) yet miss the identity
+      // check's 1 s timeout on /json/version. That says nothing about who is
+      // listening — keep polling rather than refuse our own Chrome.
+      if (identity === 'unknown') continue;
+      if (port === 0) killUntracked();
       throw new Error(
         `Port ${boundPort} is occupied by a CDP-speaking process that does not identify as Chrome/Chromium. ` +
           `Refusing to attach — pass a different port or free port ${boundPort}.`,
@@ -375,13 +402,7 @@ async function launchOnFreePort(config: BrowserConfig, port: number): Promise<nu
   if (earlyFailure) throw earlyFailure;
 
   if (port === 0) {
-    // Not tracked under any port yet, so no closeBrowser() could ever reach
-    // it — stop it here rather than leave it running.
-    try {
-      if (child.pid) process.kill(child.pid, 'SIGKILL');
-    } catch {
-      /* already gone */
-    }
+    killUntracked();
     throw new Error(
       `Chrome did not report a CDP port in ${activePortFile} within ${launchTimeout}ms`,
     );
