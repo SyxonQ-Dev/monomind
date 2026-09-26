@@ -4,6 +4,8 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+## [2.16.12] — 2026-09-26
+
 ### Fixed
 
 - **The org runtime no longer removes an empty file someone else recreated where one of its sandbox stubs was.** A stub was recognised by device and inode only, and a filesystem reuses a freed inode at once, so an empty file recreated at the same path (an SDK stub, a user's placeholder) passed as the runtime's own and was deleted when the run ended. A file stub now also records its ctime at creation (ledger entries too), so a replaced or re-chmodded file is left alone. This also made the `Tests` workflow fail on every push since 2.16.10.
