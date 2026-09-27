@@ -4,6 +4,8 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+## [2.16.19] — 2026-09-27
+
 ### Fixed
 
 - **The `monodesign_detect` MCP tool now reports what `monodesign detect` does for HTML** ([#353](https://github.com/monoes/monomind/issues/353)). It ran the regex text engine on every file and on inline content, so HTML lost every cascade-dependent finding (low contrast, computed sizes) and could return 0 findings where the CLI reported some. HTML files and inline HTML now go through the static-HTML engine like the CLI; inline findings keep the caller's virtual path.
