@@ -27,11 +27,18 @@
  *      manual repro. vi.useFakeTimers() (used throughout close-browser.test.ts)
  *      cannot catch this class of bug, because fake timers do not model real
  *      event-loop-drain semantics — hence a dedicated, real-timer test here.
+ *
+ * Ports come from the OS (listen on 0), never a fixed number (#351): these
+ * tests used 23495-23497, inside reap-idle-browser.test.ts's 23490-23499
+ * range, whose fake Chrome endpoints run in a parallel worker. A spawn that
+ * failed on 23495 while that file had 23495 bound looked like a lost launch
+ * race to launchBrowser, which moved on and reported port 23496 instead.
  */
 
 import { spawn } from 'node:child_process';
 import { chmodSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -88,6 +95,19 @@ afterEach(async () => {
   await rm(tempDir, { recursive: true, force: true });
 });
 
+/** A port nothing is listening on, picked by the kernel from its ephemeral
+ *  range — which the fixed-port fixtures of other test files stay below. */
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address() as { port: number };
+      server.close(() => resolve(port));
+    });
+  });
+}
+
 async function writePersistedPort(port: number, pid: number, savedAt: number): Promise<void> {
   const dir = join(tempDir, '.monomind', 'monobrowse');
   await mkdir(dir, { recursive: true });
@@ -118,21 +138,22 @@ describe('#314: launchBrowser settles instead of hanging when Chrome fails to st
     // "file not found" that launchBrowser would reject before ever exec'ing.
     writeFileSync(fake, 'not an executable\n');
     chmodSync(fake, 0o644);
+    const port = await freePort();
 
     const start = Date.now();
     await expect(
-      launchBrowser({ executablePath: fake, port: 23495, launchTimeoutMs: 3000 }),
-    ).rejects.toThrow(/Chrome failed to start on port 23495/);
+      launchBrowser({ executablePath: fake, port, launchTimeoutMs: 10_000 }),
+    ).rejects.toThrow(`Chrome failed to start on port ${port}: `);
     // Without a child 'error' listener, this used to depend entirely on
     // whether something outside this function happened to intercept the
     // resulting uncaught exception (a bare node:test process has nothing
     // that does — see the module doc comment); where it happened not to
     // crash the process outright, the promise still only ever settled by
     // burning the full launchTimeoutMs. The fix rejects as soon as the
-    // spawn error fires, so this must land in well under a second, not
-    // ride the 3000ms timeout out.
-    expect(Date.now() - start).toBeLessThan(1000);
-  }, 8000);
+    // spawn error fires, so this must land well inside the 10s timeout
+    // rather than ride it out — with room for a loaded machine.
+    expect(Date.now() - start).toBeLessThan(5000);
+  }, 20_000);
 
   it('rejects with a clear message when Chrome exits immediately instead of opening its CDP port', async () => {
     vi.resetModules();
@@ -140,18 +161,19 @@ describe('#314: launchBrowser settles instead of hanging when Chrome fails to st
     const fake = join(tempDir, 'chrome.sh');
     writeFileSync(fake, '#!/bin/sh\nexit 1\n');
     chmodSync(fake, 0o755);
+    const port = await freePort();
 
     await expect(
-      launchBrowser({ executablePath: fake, port: 23496, launchTimeoutMs: 3000 }),
-    ).rejects.toThrow(/Chrome exited before the CDP endpoint opened on port 23496/);
-  }, 8000);
+      launchBrowser({ executablePath: fake, port, launchTimeoutMs: 10_000 }),
+    ).rejects.toThrow(`Chrome exited before the CDP endpoint opened on port ${port} `);
+  }, 20_000);
 });
 
 describe('#314: closeBrowser settles under the real event loop, not fake timers', () => {
   it('resolves promptly when nothing else is pinning the event loop', async () => {
     vi.resetModules();
     const { closeBrowser } = await import('../browser/browser.js');
-    const port = 23497;
+    const port = await freePort();
 
     // A real, short-lived child — not Chrome, just something with a genuine,
     // observable exit so process.kill(pid, 0) behaves for real and there is
