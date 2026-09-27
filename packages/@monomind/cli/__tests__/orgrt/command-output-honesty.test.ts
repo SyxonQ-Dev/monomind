@@ -19,7 +19,7 @@ function readSrc(rel: string): string {
 
 describe('P1-19: Command-output-honesty regression (prevents P0-1 to P0-6 recurrence)', () => {
   describe('P0-1: hooks pretrain — no theatrical pipeline', () => {
-    const src = readSrc('commands/hooks-routing-commands.ts');
+    const src = readSrc('commands/hooks-routing-pretrain.ts');
 
     it('does NOT contain the fake 4-step pipeline labels', () => {
       expect(src).not.toContain('RETRIEVE');

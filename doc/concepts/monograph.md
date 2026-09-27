@@ -161,6 +161,6 @@ MCP tool suite above:
 
 - **Package export:** `@monoes/monograph` exposes a dedicated `./lsp` subpath
   ([`package.json`](packages/@monomind/monograph/package.json): `import "@monoes/monograph/lsp"` resolves to `dist/src/lsp/server.js`).
-- **CLI subcommand:** `monomind monograph lsp` ([`commands/monograph.ts → lspCommand`](packages/@monomind/cli/src/commands/monograph.ts#lspCommand)) starts it.
+- **CLI subcommand:** `monomind monograph lsp` ([`commands/monograph-lsp.ts → lspCommand`](packages/@monomind/cli/src/commands/monograph-lsp.ts#lspCommand)) starts it.
 - **Source:** [`packages/@monomind/monograph/src/lsp/`](packages/@monomind/monograph/src/lsp/).
 - **Test coverage:** 6 dedicated suites under [`tests/monograph/lsp/`](tests/monograph/lsp/) — `server`, `hover`, `code-lens`, `code-actions`, `diagnostics`, `diagnostics-ext`.
