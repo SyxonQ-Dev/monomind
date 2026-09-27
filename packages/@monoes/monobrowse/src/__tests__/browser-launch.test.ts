@@ -5,12 +5,13 @@
  * launchBrowser would ever exec a browser binary, so these run fast and
  * don't depend on Chrome being installed in CI.
  *
- * Fixed port range (23470-23479) chosen to avoid colliding with real
- * services; each test binds/tears down its own listeners.
+ * Fixed port range (23460-23489) chosen to avoid colliding with real
+ * services and with reap-idle-browser.test.ts's 23490-23499, which runs in a
+ * parallel worker; each test binds/tears down its own listeners.
  */
 
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
 import { createServer as createTcpServer, type Socket, type Server as TcpServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -310,25 +311,33 @@ describe.skipIf(process.platform === 'win32')(
 // port too — see cli/commands.ts's `port` option default). If the bind
 // fails (another process already has it), it exits the way real Chrome does
 // when a concurrent launch wins the same "free-looking" port: before its
-// CDP endpoint ever opens.
+// CDP endpoint ever opens. Like real Chrome on a fixed port, it writes no
+// DevToolsActivePort; it announces its browser websocket on stderr, with an
+// id unique to this process that /json/version reports too.
 const FAKE_CHROME_FIXED_PORT = `#!/usr/bin/env node
 ${FIXTURE_WATCHDOG}const { createServer } = require('node:http');
+const { randomUUID } = require('node:crypto');
 const { writeFileSync, mkdirSync } = require('node:fs');
 const { join } = require('node:path');
 const port = Number(
   process.argv.find((a) => a.startsWith('--remote-debugging-port=')).slice('--remote-debugging-port='.length),
 );
 const dir = process.argv.find((a) => a.startsWith('--user-data-dir=')).slice('--user-data-dir='.length);
+const ws = 'ws://127.0.0.1:' + port + '/devtools/browser/' + randomUUID();
 const server = createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(req.url === '/json/version' ? JSON.stringify({ Browser: 'Chrome/999.0.0.0' }) : '[]');
+  res.end(
+    req.url === '/json/version'
+      ? JSON.stringify({ Browser: 'Chrome/999.0.0.0', webSocketDebuggerUrl: ws })
+      : '[]',
+  );
 });
 server.on('error', () => {
   process.exit(21);
 });
 server.listen(port, '127.0.0.1', () => {
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'DevToolsActivePort'), port + '\\n/devtools/browser/fake');
+  process.stderr.write('\\nDevTools listening on ' + ws + '\\n');
 });
 `;
 
@@ -385,5 +394,68 @@ describe.skipIf(process.platform === 'win32')(
       expect(dirs[0]).toBeTruthy();
       expect(dirs[1]).toBeTruthy();
     }, 15000);
+
+    it('a launch whose Chrome is still booting does not adopt a concurrent launch that took the port', async () => {
+      // The loaded-machine shape of the race above, made deterministic: both
+      // launches probe the port as free, the "fast" Chrome binds it first,
+      // and the "slow" one is still starting when its poll finds a Chrome
+      // answering there. That Chrome is not the slow launch's own, so it
+      // must not be returned — nor may the slow launch record its own pid
+      // (about to exit on the lost bind) under the fast launch's port.
+      const dir = fixtureDir('monobrowse-adopt-');
+      const fast = join(dir, 'fast-chrome.cjs');
+      const slow = join(dir, 'slow-chrome.cjs');
+      writeFileSync(fast, fixedPortChrome(500));
+      writeFileSync(slow, fixedPortChrome(2500));
+      chmodSync(fast, 0o755);
+      chmodSync(slow, 0o755);
+      // Below BASE: this file's fixed ports, clear of the kernel's
+      // ephemeral range, where another test's listen(0) server can land on
+      // the candidate the slow launch scans on to.
+      const port = BASE - 10;
+
+      let results: PromiseSettledResult<number>[] = [];
+      try {
+        results = await Promise.allSettled([
+          launchBrowser({ port, executablePath: fast, launchTimeoutMs: 10_000 }),
+          launchBrowser({ port, executablePath: slow, launchTimeoutMs: 10_000 }),
+        ]);
+      } finally {
+        for (const r of results) {
+          const pid = r.status === 'fulfilled' ? getLaunchedPid(r.value) : undefined;
+          if (pid) {
+            try {
+              process.kill(pid, 'SIGKILL');
+            } catch {
+              /* already gone */
+            }
+          }
+        }
+      }
+
+      const [fastResult, slowResult] = results;
+      expect(fastResult).toEqual({ status: 'fulfilled', value: port });
+      if (slowResult.status === 'rejected') throw slowResult.reason;
+      expect(slowResult.value).not.toBe(port);
+      // The pid tracked for the port is the Chrome that actually serves it.
+      const fastDir = getLaunchedUserDataDir(port)!;
+      expect(fastDir).toBeTruthy();
+      expect(getLaunchedPid(port)).toBe(Number(readFileSync(join(fastDir, 'pid'), 'utf8')));
+    }, 20_000);
   },
 );
+
+/** FAKE_CHROME_FIXED_PORT that waits `delayMs` before binding, and records
+ *  its own pid in its profile dir. */
+function fixedPortChrome(delayMs: number): string {
+  return FAKE_CHROME_FIXED_PORT.replace(
+    'mkdirSync(dir, { recursive: true });',
+    `mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'pid'), String(process.pid));`,
+  )
+    .replace(
+      "server.listen(port, '127.0.0.1', () => {",
+      "setTimeout(() => server.listen(port, '127.0.0.1', () => {",
+    )
+    .replace(/\}\);\n$/, `}), ${delayMs});\n`);
+}
