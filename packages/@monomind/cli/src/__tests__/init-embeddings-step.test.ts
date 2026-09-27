@@ -72,7 +72,7 @@ describe('init --with-embeddings step', () => {
 
   it('init no longer shells out to the missing `embeddings init` command', async () => {
     const fs = await import('node:fs');
-    const src = fs.readFileSync(new URL('../commands/init.ts', import.meta.url), 'utf-8');
+    const src = fs.readFileSync(new URL('../commands/init-action.ts', import.meta.url), 'utf-8');
     expect(src).not.toMatch(/'embeddings',\s*'init'/);
     expect(src).toContain('runEmbeddingsStep(');
   });

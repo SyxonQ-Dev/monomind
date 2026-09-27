@@ -112,7 +112,7 @@ Source: [`cli/engine/registry/antipatterns.mjs`](packages/@monoes/monodesign/cli
 
 ## OKLCH Palette Seed Library
 
-Source: [`packages/@monomind/cli/src/commands/design-palette.ts:29–417`](packages/@monomind/cli/src/commands/design-palette.ts#L29-L417)
+Source: [`packages/@monomind/cli/src/commands/design-palette.ts#SEEDS`](packages/@monomind/cli/src/commands/design-palette.ts#SEEDS), with the seed data in [`design-palette-seeds-1.ts`](packages/@monomind/cli/src/commands/design-palette-seeds-1.ts) and [`design-palette-seeds-2.ts`](packages/@monomind/cli/src/commands/design-palette-seeds-2.ts)
 
 - **129 hand-curated seeds** spanning the full hue wheel (0°–360°)
 - Each seed: `{ id, oklch: [L, C, H], mood: string, strategy: string }`
