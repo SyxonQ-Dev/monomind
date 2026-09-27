@@ -21,7 +21,15 @@
  * purpose — so this also fails when an SDK upgrade adds a path.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -217,6 +225,10 @@ describe.skipIf(
       const before = new Set(paths.filter((p) => existsSync(p)));
       const created = stubs.hold('org:run', paths);
       expect(created.sort()).toEqual(paths.filter((p) => !before.has(p)).sort());
+      // The legacy .config.json (layout()) puts the SDK's .claude*.json binds
+      // in ~/.claude/, where the CLI never reads them: held too (2.16.15).
+      const innerJson = join(l.home, '.claude', '.claude.json');
+      expect(created).toContain(innerJson);
       const inode = new Map(created.map((p) => [p, lstatSync(p).ino]));
       const a = role(l, 'sleep 6');
       // A's sandbox is up once the one stub the runtime leaves to it appears.
@@ -224,6 +236,15 @@ describe.skipIf(
       const b = await role(l, MOUNTS(l.base));
       await a;
       for (const p of created) expect(lstatSync(p).ino, p).toBe(inode.get(p));
+      // B started on the held file and ran its command; the bind source is
+      // the held file itself, not a /dev/null stub.
+      expect(b).not.toMatch(/corrupted|Can't find source path|bwrap:/);
+      const innerBind = b.split('\n').find((line) => line.endsWith(` ${innerJson}`));
+      expect(innerBind).toBeDefined();
+      expect(innerBind?.startsWith('/null ')).toBe(false);
+      // The CLI used the legacy file as its config, and left the held one empty.
+      expect(readFileSync(join(l.home, '.claude', '.config.json'), 'utf8')).not.toBe('{}');
+      expect(lstatSync(innerJson).size).toBe(0);
       const nullBinds = b
         .split('\n')
         .filter((line) => line.startsWith('/null '))
@@ -243,6 +264,31 @@ describe.skipIf(
       const dotClaude = join(l.cwd, '.claude');
       expect(stubs.release('org:run').sort()).toEqual(created.filter((p) => p !== dotClaude).sort());
       for (const p of created) expect(existsSync(p), p).toBe(p === dotClaude);
+    }, 60_000);
+
+    it('with runtime stubs and no legacy .config.json: the held ~/.claude/.claude.json is never read', async () => {
+      const l = layout();
+      rmSync(join(l.home, '.claude', '.config.json'));
+      const stubs = new SandboxStubs(null);
+      const innerJson = join(l.home, '.claude', '.claude.json');
+      try {
+        const created = stubs.hold(
+          'org:run',
+          sandboxStubPaths({ cwd: l.cwd, home: l.home, writableRoots: l.writableRoots, env: {} }),
+        );
+        expect(created).toContain(innerJson);
+        const ino = lstatSync(innerJson).ino;
+        const out = await role(l, `${MOUNTS(l.base)}; echo RAN-OK`);
+        expect(out).not.toMatch(/corrupted|Can't find source path|bwrap:/);
+        expect(out).toContain('RAN-OK');
+        // Its config is $HOME/.claude.json, written at startup.
+        expect(lstatSync(join(l.home, '.claude.json')).size).toBeGreaterThan(0);
+        expect(lstatSync(innerJson).ino).toBe(ino);
+        expect(lstatSync(innerJson).size).toBe(0);
+      } finally {
+        stubs.releaseAll();
+      }
+      expect(existsSync(innerJson)).toBe(false);
     }, 60_000);
 
     it('denyWrite ["."] without held stubs: the #323 fallback, a new file lands in the cwd', async () => {

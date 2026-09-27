@@ -4,6 +4,10 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Sandboxed org roles no longer fail a Bash call on `~/.claude/.claude.json`.** The SDK binds `.claude.json` and its three OAuth-profile siblings next to whichever global config the Claude CLI picked — with a legacy `~/.claude/.config.json` that is `~/.claude/` — and created and deleted empty mount-point stubs there per command, so one role's cleanup could remove the file while another role's bwrap was binding it (`bwrap: Can't find source path ~/.claude/.claude.json`, 2.16.15 release run). Without `CLAUDE_CONFIG_DIR` the CLI never reads those four files in `~/.claude/` (its config is `~/.claude/.config.json` or `$HOME/.claude.json`), so the runtime now holds them for the whole run like its other stubs; with `CLAUDE_CONFIG_DIR` set they can be the live config and stay with the SDK.
+
 ## [2.16.15] — 2026-09-27
 
 ### Added

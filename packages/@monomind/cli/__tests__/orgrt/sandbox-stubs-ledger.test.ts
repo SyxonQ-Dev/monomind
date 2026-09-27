@@ -78,6 +78,7 @@ describe('the sandbox stub ledger', () => {
   it("reclaims a dead runtime's stubs before creating its own", () => {
     const l = layout();
     const left = crashedRun(l);
+    expect(left).toContain(join(l.home, '.claude', '.claude.json'));
     const next = new SandboxStubs(l.ledger);
     expect(next.reclaim().sort()).toEqual([...left].sort());
     for (const p of left) expect(existsSync(p)).toBe(false);

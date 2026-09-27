@@ -87,6 +87,36 @@ describe('sandboxStubPaths', () => {
     expect(paths.some((p) => p.startsWith('/h/.claude'))).toBe(false);
   });
 
+  // The SDK binds these next to the global config the CLI picked; with a
+  // legacy ~/.claude/.config.json that is ~/.claude/. Without
+  // CLAUDE_CONFIG_DIR the CLI never reads them (sandbox-stubs-sdk.test.ts).
+  const homeConfigDirStubs = [
+    '/h/.claude/.claude.json',
+    '/h/.claude/.claude-staging-oauth.json',
+    '/h/.claude/.claude-local-oauth.json',
+    '/h/.claude/.claude-custom-oauth.json',
+  ];
+
+  it('holds ~/.claude/.claude*.json when CLAUDE_CONFIG_DIR is unset', () => {
+    const paths = sandboxStubPaths({ cwd: '/w', home: '/h', writableRoots: ['/w'], env: {} });
+    for (const p of homeConfigDirStubs) expect(paths).toContain(p);
+  });
+
+  it('never holds a .claude.json that can be the live config under CLAUDE_CONFIG_DIR', () => {
+    for (const dir of ['/c', '/h/.claude']) {
+      const paths = sandboxStubPaths({
+        cwd: '/w',
+        home: '/h',
+        writableRoots: ['/w'],
+        env: { CLAUDE_CONFIG_DIR: dir },
+      });
+      if (dir === '/c') for (const p of homeConfigDirStubs) expect(paths).not.toContain(p);
+      expect(paths).not.toContain(join(dir, '.claude.json'));
+      expect(paths).not.toContain(join(dir, '.config.json'));
+      expect(paths).not.toContain(join(dir, '.credentials.json'));
+    }
+  });
+
   it('leaves out the git config lock and the state the CLI writes itself', () => {
     const paths = sandboxStubPaths({ cwd: '/w', home: '/h', writableRoots: ['/w'], env: {} });
     for (const p of [

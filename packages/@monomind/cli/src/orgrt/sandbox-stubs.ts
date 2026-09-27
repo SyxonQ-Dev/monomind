@@ -33,10 +33,20 @@
  * upgrade adds one). Left out on purpose: `.git/config.lock` (held, it makes
  * every `git config` write fail), the dirs the CLI writes into itself
  * (projects, shell-snapshots, session-env, plugins, backups), which a file
- * would break, and the state files it writes itself (.claude.json,
- * .config.json, .credentials.json): a CLI starting on an empty .config.json
- * exits with "configuration file … is corrupted". A path whose parent does not
- * exist is skipped.
+ * would break, and the state files it reads and writes itself: the live
+ * global config ($CLAUDE_CONFIG_DIR/.claude.json, else $HOME/.claude.json),
+ * the legacy <config dir>/.config.json it prefers when that exists (a CLI
+ * starting on an empty one exits with "configuration file … is corrupted")
+ * and .credentials.json. A path whose parent does not exist is skipped.
+ *
+ * The SDK binds `.claude{,-staging-oauth,-local-oauth,-custom-oauth}.json`
+ * next to whichever global config the CLI picked: with a legacy
+ * ~/.claude/.config.json that is ~/.claude/, so ~/.claude/.claude.json became
+ * a raced stub ("Can't find source path ~/.claude/.claude.json", 2.16.15).
+ * Without CLAUDE_CONFIG_DIR the CLI never reads those four in ~/.claude/ —
+ * its config is ~/.claude/.config.json or $HOME/.claude*.json — so they are
+ * held too (HOME_CONFIG_DIR_STUBS). With CLAUDE_CONFIG_DIR set,
+ * $CLAUDE_CONFIG_DIR/.claude.json can be the live config and is left alone.
  */
 
 import {
@@ -119,6 +129,11 @@ export const GLOBAL_CONFIG_STUBS = [
   '.claude-staging-oauth.json',
 ];
 
+/** Relative to ~/.claude, only without CLAUDE_CONFIG_DIR: never the CLI's
+ *  config there (sandbox-stubs-sdk.test.ts shows it reading and writing only
+ *  ~/.claude/.config.json or $HOME/.claude.json). */
+const HOME_CONFIG_DIR_STUBS = ['.claude.json', ...GLOBAL_CONFIG_STUBS];
+
 const within = (root: string, p: string): boolean =>
   p === root || p.startsWith(root.endsWith(sep) ? root : root + sep);
 
@@ -148,6 +163,9 @@ export function sandboxStubPaths(ctx: {
     ...above.flatMap(project),
     ...CONFIG_DIR_STUBS.map((p) => join(configDir ?? join(ctx.home, '.claude'), p)),
     ...GLOBAL_CONFIG_STUBS.map((p) => join(configDir ?? ctx.home, p)),
+    ...(configDir === undefined
+      ? HOME_CONFIG_DIR_STUBS.map((p) => join(ctx.home, '.claude', p))
+      : []),
     join(ctx.home, '.mcp.json'),
   ];
 }
@@ -156,9 +174,14 @@ export function sandboxStubPaths(ctx: {
  *  reclaimed, whatever it says (the ledger lives in a directory the roles'
  *  sandboxed shells can write). */
 const STUB_NAMES = new Set(
-  ['.claude', 'config.worktree', ...CWD_STUBS, ...CONFIG_DIR_STUBS, ...GLOBAL_CONFIG_STUBS].map(
-    (p) => basename(p),
-  ),
+  [
+    '.claude',
+    'config.worktree',
+    ...CWD_STUBS,
+    ...CONFIG_DIR_STUBS,
+    ...GLOBAL_CONFIG_STUBS,
+    ...HOME_CONFIG_DIR_STUBS,
+  ].map((p) => basename(p)),
 );
 
 /** The per-machine crash ledger: `MONOMIND_ORGRT_STUBS_DIR`, else
