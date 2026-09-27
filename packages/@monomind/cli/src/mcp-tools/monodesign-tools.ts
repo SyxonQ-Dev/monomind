@@ -16,8 +16,9 @@
  */
 
 import { spawn } from 'node:child_process';
-import { readFileSync, statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { extname, join, resolve } from 'node:path';
 import { resolveMonodesignCli } from '../commands/design-detect.js';
 import { hashUnit, hueWord, SEEDS, toOklchCss, weightedPick } from '../commands/design-palette.js';
 import type { MCPTool } from './types.js';
@@ -34,6 +35,38 @@ async function getEngine(): Promise<Record<string, any>> {
   const enginePath = resolve(cliPath, '..', '..', 'engine', 'detect-antipatterns.mjs');
   _engine = await import(enginePath);
   return _engine!;
+}
+
+/** The CLI's split (cli/engine/cli/main.mjs): HTML files get the static-HTML
+ *  engine, which resolves the CSS cascade (contrast, computed sizes), and
+ *  everything else the regex text engine. detectText alone misses every
+ *  cascade-dependent finding in HTML (#353). */
+const HTML_EXTENSIONS = new Set(['.html', '.htm']);
+
+async function detectFile(engine: Record<string, any>, file: string): Promise<any[]> {
+  return HTML_EXTENSIONS.has(extname(file).toLowerCase())
+    ? await engine.detectHtml(file)
+    : engine.detectText(readFileSync(file, 'utf8'), file);
+}
+
+/** Inline content: detectHtml reads a path, so HTML goes through a temp file
+ *  and its findings are labelled with the caller's virtual path. */
+async function detectInline(
+  engine: Record<string, any>,
+  content: string,
+  virtualPath: string,
+): Promise<any[]> {
+  const ext = extname(virtualPath).toLowerCase();
+  if (!HTML_EXTENSIONS.has(ext)) return engine.detectText(content, virtualPath);
+  const dir = mkdtempSync(join(tmpdir(), 'monodesign-inline-'));
+  try {
+    const file = join(dir, `inline${ext}`);
+    writeFileSync(file, content);
+    const found: any[] = await engine.detectHtml(file);
+    return found.map((f) => (f.file === file ? { ...f, file: virtualPath } : f));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 const MAX_FINDINGS = 100;
@@ -156,7 +189,7 @@ const monodesignDetect: MCPTool = {
 
       if (typeof params.content === 'string' && params.content.length > 0) {
         const vp = typeof params.filePath === 'string' ? params.filePath : 'inline.html';
-        findings = engine.detectText(params.content, vp);
+        findings = await detectInline(engine, params.content, vp);
       } else {
         const abs = validateTarget(params.target ?? '.');
         if (!abs) return { success: false, error: 'invalid target path' };
@@ -176,13 +209,13 @@ const monodesignDetect: MCPTool = {
             };
           for (const file of files) {
             try {
-              findings.push(...engine.detectText(readFileSync(file, 'utf8'), file));
+              findings.push(...(await detectFile(engine, file)));
             } catch {
               /* skip unreadable */
             }
           }
         } else {
-          findings = engine.detectText(readFileSync(abs, 'utf8'), abs);
+          findings = await detectFile(engine, abs);
         }
       }
 

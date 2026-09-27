@@ -136,6 +136,7 @@ function shippedChangesSince(dir, since) {
     `:(exclude)${dir}/**/*.test.ts`,
     `:(exclude)${dir}/**/*.test.mjs`,
     `:(exclude)${dir}/**/*.md`,
+    `:(exclude)${dir}/*.md`,
     `:(exclude)${dir}/__tests__/**`,
     `:(exclude)${dir}/vitest.config.*`,
   ).trim();
