@@ -772,7 +772,7 @@ A ready task is handed to its assignee by [`decisions.ts → dispatchReadyTasks`
 as one mailbox line, `[task:<id>] <title>` (plus `[loadout:<name>]` when one was selected).
 `org_task` and each `org_plan_graph` node take an optional `brief` (at most 4000 characters) — the
 creator's instructions: scope, acceptance criteria, paths, what failed last time. It is stored on
-the task ([`task-dag.ts → OrgTask`](packages/@monomind/cli/src/orgrt/task-dag.ts#OrgTask)), so it
+the task ([`task-dag-types.ts → OrgTask`](packages/@monomind/cli/src/orgrt/task-dag-types.ts#OrgTask)), so it
 rides the checkpoint and split children inherit it, and [`task-provenance.ts → dispatchLine`](packages/@monomind/cli/src/orgrt/task-provenance.ts#dispatchLine)
 appends it below the title in every dispatch of the task — the first one, one made later when its
 deps complete, and a re-dispatch after a refused close or a resume. A briefing sent as a separate
