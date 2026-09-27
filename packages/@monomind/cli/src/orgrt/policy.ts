@@ -1,12 +1,26 @@
 // packages/@monomind/cli/src/orgrt/policy.ts
-import { realpathSync } from 'node:fs';
+// File-size sweep: secret redaction/summarization lives in policy-secrets.ts,
+// and glob/path/domain matching lives in policy-paths.ts — both re-exported
+// below where other modules import them from here.
 import { homedir } from 'node:os';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { isDecisionFile } from './authority-mask.js';
 import type { OrgBus } from './bus.js';
 import { fileToolDenied, isDashboardCredential } from './file-roots.js';
 import { checkGitPolicy } from './policy-git.js';
-import { type RolePolicy, TOOL_RESULT_OUTPUT_MAX_CHARS } from './types.js';
+import {
+  globToRegExp,
+  isWithin,
+  realPath,
+  safeHost,
+  uniq,
+  webDomainMatches,
+} from './policy-paths.js';
+import { redactSecrets, summarize } from './policy-secrets.js';
+import type { RolePolicy } from './types.js';
+
+export { globToRegExp, webDomainMatches } from './policy-paths.js';
+export { redactSecrets, summarizeToolInput, summarizeToolOutput } from './policy-secrets.js';
 
 export type Decision =
   | { behavior: 'allow'; updatedInput: Record<string, unknown> }
@@ -42,98 +56,6 @@ const SNAPSHOT_MAX_CHARS = 20_000;
  *  SSH keys, and anything named like a secret/credential store. */
 const SENSITIVE_FILE =
   /(^|[/\\])(\.[^/\\]*|id_(rsa|dsa|ecdsa|ed25519)[^/\\]*|[^/\\]*(secret|credential)[^/\\]*|[^/\\]*\.(pem|key|p12|pfx|jks|keystore|crt|cer|der|asc|gpg|kdbx))$/i;
-/** SEC: secret shapes scrubbed from every bus payload — the argument summary on
- *  'tool' events and the content snapshot on 'asset' events. Prefix-keeping
- *  patterns ($1) leave the surrounding context readable; the rest are replaced
- *  whole. Deliberately loose: a false positive costs a readable value in an
- *  audit log, a false negative persists a live credential to disk. */
-const SECRET_PATTERNS: Array<[RegExp, string]> = [
-  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[REDACTED]'],
-  [/\b(bearer\s+)[A-Za-z0-9._~+/=-]{16,}/gi, '$1[REDACTED]'],
-  [/\b(basic\s+)[A-Za-z0-9+/=]{16,}/gi, '$1[REDACTED]'],
-  [/\b(sk|rk)-[A-Za-z0-9_-]{16,}/g, '[REDACTED]'],
-  [/\bgh[pousr]_[A-Za-z0-9]{20,}/g, '[REDACTED]'],
-  [/\bgithub_pat_[A-Za-z0-9_]{20,}/g, '[REDACTED]'],
-  [/\bAKIA[0-9A-Z]{16}\b/g, '[REDACTED]'],
-  [/\bxox[abprs]-[A-Za-z0-9-]{10,}/g, '[REDACTED]'],
-  [/\bAIza[0-9A-Za-z_-]{30,}/g, '[REDACTED]'],
-  [/\bey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, '[REDACTED]'],
-  // .env / shell: SOME_API_KEY=value, DB_PASSWORD="value"
-  [
-    /(\b[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?)[A-Z0-9_]*\s*=\s*)(["']?)[^\s"']+\2/g,
-    '$1[REDACTED]',
-  ],
-  // json / yaml / cli: "apiKey": "value", password: value, api_key=value
-  [
-    /((?:api[_-]?key|access[_-]?token|auth[_-]?token|secret[_-]?key|client[_-]?secret|secret|password|passwd|token)["']?\s*[:=]\s*)(["']?)[^\s"',&]{6,}\2/gi,
-    '$1[REDACTED]',
-  ],
-  // url credentials: scheme://user:password@host
-  [/(\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:)[^\s/@]+@/gi, '$1[REDACTED]@'],
-];
-
-export function redactSecrets(text: string): string {
-  let out = text;
-  for (const [re, replacement] of SECRET_PATTERNS) out = out.replace(re, replacement);
-  return out;
-}
-
-/** #289: the bounded, redacted slice of a tool's result body that goes on the
- *  bus. Redacts BEFORE truncating, so a cut-off credential can't leak the way
- *  a half-matched token would; keeps the head and states the truncation in
- *  structured fields rather than leaving a reader to infer it from an ellipsis. */
-export function summarizeToolOutput(text: string): {
-  output: string;
-  truncated?: boolean;
-  output_chars: number;
-} {
-  const clean = redactSecrets(text);
-  if (clean.length <= TOOL_RESULT_OUTPUT_MAX_CHARS)
-    return { output: clean, output_chars: text.length };
-  return {
-    output: `${clean.slice(0, TOOL_RESULT_OUTPUT_MAX_CHARS)}…[truncated]`,
-    truncated: true,
-    output_chars: text.length,
-  };
-}
-
-const REGEX_METACHARS = new Set('.+^${}()|[]\\'.split(''));
-
-/**
- * tiny glob→RegExp: `**\/` matches zero-or-more leading directories (so
- * `**\/*.md` matches both `README.md` and `docs/README.md`, standard glob
- * semantics), bare `**` matches any depth, `*` matches one path segment.
- */
-export function globToRegExp(glob: string): RegExp {
-  let out = '';
-  let i = 0;
-  while (i < glob.length) {
-    if (glob.startsWith('**/', i)) {
-      out += '(?:.*/)?';
-      i += 3;
-      continue;
-    }
-    if (glob.startsWith('**', i)) {
-      out += '.*';
-      i += 2;
-      continue;
-    }
-    const c = glob[i];
-    if (c === '*') {
-      out += '[^/]*';
-      i++;
-      continue;
-    }
-    if (REGEX_METACHARS.has(c)) {
-      out += `\\${c}`;
-      i++;
-      continue;
-    }
-    out += c;
-    i++;
-  }
-  return new RegExp(`^${out}$`);
-}
 
 /** Extra per-role context the daemon wires into a PolicyEngine (M1). */
 export interface PolicyToolContext {
@@ -483,72 +405,4 @@ export class PolicyEngine {
 
     return allow();
   }
-}
-
-/** webAllow entry matcher. `*` allows any host (the intuitive "no
- *  restriction" value); `*.example.com` matches the bare domain and every
- *  subdomain; anything else is an exact host or subdomain suffix match. */
-export function webDomainMatches(pattern: string, host: string): boolean {
-  if (pattern === '*') return true;
-  if (pattern.startsWith('*.')) {
-    const base = pattern.slice(2);
-    return host === base || host.endsWith(`.${base}`);
-  }
-  return host === pattern || host.endsWith(`.${pattern}`);
-}
-
-const uniq = (xs: string[]): string[] => [...new Set(xs)];
-
-/** #303: is `target` equal to, or nested under, `container`? Both must
- *  already be `realPath()`-resolved — this is a plain string comparison, not
- *  a filesystem check, so a symlink escape must be resolved before this
- *  runs, never lexically. */
-function isWithin(container: string, target: string): boolean {
-  if (container === target) return true;
-  const withSep = container.endsWith(sep) ? container : container + sep;
-  return target.startsWith(withSep);
-}
-
-/** realpath of `p`, resolving through the nearest EXISTING ancestor when the
- *  target itself doesn't exist yet (a Write into a symlinked directory), and
- *  falling back to the lexical path when nothing on it exists. */
-function realPath(p: string): string {
-  const rest: string[] = [];
-  let cur = p;
-  for (;;) {
-    try {
-      return join(realpathSync(cur), ...rest);
-    } catch {
-      /* not there — try the parent */
-    }
-    const parent = dirname(cur);
-    if (parent === cur) return p;
-    rest.unshift(basename(cur));
-    cur = parent;
-  }
-}
-
-function safeHost(url: string): string | null {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return null;
-  }
-}
-/** Redacted, truncated argument summary — the form `tool` events log (and,
- *  since M5, approval requests carry). */
-export function summarizeToolInput(input: Record<string, unknown>): Record<string, unknown> {
-  return summarize(input);
-}
-function summarize(input: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(input)) {
-    if (typeof v !== 'string') {
-      out[k] = v;
-      continue;
-    }
-    const clean = redactSecrets(v); // redact BEFORE truncating so a cut-off token can't leak
-    out[k] = clean.length > 200 ? `${clean.slice(0, 200)}…` : clean;
-  }
-  return out;
 }
