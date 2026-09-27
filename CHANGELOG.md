@@ -2,6 +2,16 @@
 
 All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
+## [2.16.18] — 2026-09-27
+
+### Fixed
+
+- `scripts/sync-claude-trees.mjs` now creates files missing inside a skill directory when the `.agents`/`.gemini` mirrors already hold that skill (previously silently left dangling imports to files that were never copied over).
+
+### Internal
+
+- File-size sweep wave 2: split ~95 oversized source files across the CLI, mcp-tools, orgrt, memory, init packages and the @monoes/monodesign, @monoes/memory, @monoes/monobrowse, @monoes/monograph, monofence-ai siblings into smaller modules. Pure code reorganization — original paths re-export everything, no behavior change.
+
 ## [2.16.17] — 2026-09-27
 
 ### Fixed
