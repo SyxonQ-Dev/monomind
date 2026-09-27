@@ -7,21 +7,13 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { VERSION } from '../index.js';
 import { formatKeptFiles } from '../init/file-guard.js';
-import {
-  DEFAULT_INIT_OPTIONS,
-  executeInit,
-  FULL_INIT_OPTIONS,
-  type InitOptions,
-  MINIMAL_INIT_OPTIONS,
-} from '../init/index.js';
+import { DEFAULT_INIT_OPTIONS, executeInit } from '../init/index.js';
 import { reportProjectMemory } from '../init/init-memory.js';
 import { formatIndexSummary } from '../init/project-indexes.js';
+import { resolveInitOptions } from '../init/resolve-options.js';
 import { ingestDirectory } from '../knowledge/document-pipeline.js';
 import { output } from '../output.js';
-import { resolvePlatformId } from '../platform-adapters/registry.js';
-import type { PlatformId } from '../platform-adapters/types.js';
 import { confirm } from '../prompt.js';
 import {
   downloadEmbeddingModel,
@@ -31,7 +23,7 @@ import {
 } from '../routing/model-download.js';
 import type { CommandContext, CommandResult } from '../types.js';
 
-function isInitialized(cwd: string): { claude: boolean; monomind: boolean } {
+export function isInitialized(cwd: string): { claude: boolean; monomind: boolean } {
   const claudePath = path.join(cwd, '.claude', 'settings.json');
   const monomindPath = path.join(cwd, '.monomind', 'config.yaml');
   return {
@@ -41,21 +33,33 @@ function isInitialized(cwd: string): { claude: boolean; monomind: boolean } {
 }
 
 export const initAction = async (ctx: CommandContext): Promise<CommandResult> => {
-  const force = ctx.flags.force as boolean;
-  const minimal = ctx.flags.minimal as boolean;
-  const full = ctx.flags.full as boolean;
-  const skipClaude = ctx.flags['skip-claude'] as boolean;
-  const onlyClaude = ctx.flags['only-claude'] as boolean;
-  const requestedTarget = ctx.flags.target as string | undefined;
-  const requestedPlatforms = ctx.flags.platform as string | undefined;
-  const enablePlatformHooks = ctx.flags['enable-hooks'] === true;
-  const noInstall = (ctx.flags['no-install'] || ctx.flags.noInstall) as boolean;
-  // `--pin` with no value pins to the running CLI; `--pin <version>` pins to
-  // that exact version. Absent (the default) keeps the floating command.
-  const pinFlag = ctx.flags.pin;
-  const pin = pinFlag === true ? VERSION : typeof pinFlag === 'string' ? pinFlag : undefined;
-  const cwd = ctx.cwd;
+  // `--project <dir>` (#358): initialize <dir> instead of the process cwd,
+  // equivalent to `cd <dir> && monomind init`. Validated up front so both the
+  // human and `--json` paths below fail the same way on a bad path.
+  const projectFlag = ctx.flags.project as string | undefined;
+  const json = ctx.flags.json === true || ctx.flags.format === 'json';
+  let cwd = ctx.cwd;
+  if (projectFlag) {
+    const resolvedProject = path.resolve(ctx.cwd, projectFlag);
+    if (!fs.existsSync(resolvedProject) || !fs.statSync(resolvedProject).isDirectory()) {
+      const message = `Directory does not exist: ${resolvedProject}`;
+      if (json) {
+        process.stdout.write(`${JSON.stringify({ success: false, error: message })}\n`);
+        return { success: false, exitCode: 1 };
+      }
+      return { success: false, exitCode: 1, message };
+    }
+    cwd = resolvedProject;
+  }
 
+  // `--json` (#358): a machine-readable, headless workspace-init path —
+  // no spinner/box ceremony, stdout reserved for exactly one JSON document.
+  if (json) {
+    const { runInitWorkspace } = await import('./init-workspace.js');
+    return runInitWorkspace(ctx, cwd);
+  }
+
+  const force = ctx.flags.force as boolean;
   const initialized = isInitialized(cwd);
   const hasExisting = initialized.claude || initialized.monomind;
 
@@ -88,131 +92,11 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
   output.writeln(output.bold('Initializing Monomind'));
   output.writeln();
 
-  let options: InitOptions;
-
-  if (minimal) {
-    options = {
-      ...MINIMAL_INIT_OPTIONS,
-      targetDir: cwd,
-      force,
-      components: { ...MINIMAL_INIT_OPTIONS.components },
-    };
-  } else if (full) {
-    options = {
-      ...FULL_INIT_OPTIONS,
-      targetDir: cwd,
-      force,
-      components: { ...FULL_INIT_OPTIONS.components },
-    };
-  } else {
-    options = {
-      ...DEFAULT_INIT_OPTIONS,
-      targetDir: cwd,
-      force,
-      components: { ...DEFAULT_INIT_OPTIONS.components },
-    };
+  const resolved = resolveInitOptions(ctx, cwd);
+  if (!resolved.ok) {
+    return { success: false, exitCode: 1, message: resolved.message };
   }
-
-  const legacyTargets = ['opencode', 'kimicode', 'codex'].filter(
-    (name) => ctx.flags[name] === true,
-  );
-  const target =
-    requestedTarget ||
-    (onlyClaude ? 'claude' : legacyTargets.length === 1 ? legacyTargets[0] : 'all');
-  const validTargets = new Set(['all', 'claude', 'antigravity', 'opencode', 'kimicode', 'codex']);
-  if (!validTargets.has(target)) {
-    return { success: false, exitCode: 1, message: `Unknown init target: ${target}` };
-  }
-
-  const selectedTargets = new Set(
-    target === 'all' ? [...validTargets].filter((name) => name !== 'all') : [target],
-  );
-  let selectedPlatforms: PlatformId[];
-  if (requestedPlatforms) {
-    const requested = requestedPlatforms.split(',');
-    const parsed = requested
-      .map((value) => resolvePlatformId(value))
-      .filter((value): value is PlatformId => value !== undefined);
-    if (parsed.length === 0 || parsed.length !== requested.length) {
-      return {
-        success: false,
-        exitCode: 1,
-        message: `Unknown init platform: ${requestedPlatforms}`,
-      };
-    }
-    selectedPlatforms = [...new Set(parsed)];
-    selectedTargets.clear();
-    if (selectedPlatforms.includes('claude')) selectedTargets.add('claude');
-    if (selectedPlatforms.includes('antigravity')) selectedTargets.add('antigravity');
-    if (selectedPlatforms.includes('opencode')) selectedTargets.add('opencode');
-    if (selectedPlatforms.includes('kimi')) selectedTargets.add('kimicode');
-    if (selectedPlatforms.includes('codex')) selectedTargets.add('codex');
-  } else {
-    const legacyToPlatform: Record<string, PlatformId> = {
-      claude: 'claude',
-      antigravity: 'antigravity',
-      opencode: 'opencode',
-      kimicode: 'kimi',
-      codex: 'codex',
-    };
-    selectedPlatforms = [...selectedTargets]
-      .map((legacy) => legacyToPlatform[legacy])
-      .filter((value): value is PlatformId => value !== undefined);
-  }
-
-  // `--skip-claude` has always meant "leave Claude project artifacts out".
-  // It must not erase an explicitly selected non-Claude adapter (the previous
-  // component-only implementation silently did exactly that). Keep the
-  // legacy target set and adapter selection in lockstep.
-  if (skipClaude) {
-    selectedTargets.delete('claude');
-    selectedPlatforms = selectedPlatforms.filter((platform) => platform !== 'claude');
-  }
-  if (pin) options.mcp = { ...options.mcp, pin };
-  options.selectedPlatforms = selectedPlatforms;
-  options.enablePlatformHooks = enablePlatformHooks;
-  options.components.antigravity = selectedTargets.has('antigravity');
-  options.components.opencode = selectedTargets.has('opencode');
-  options.components.kimicode = selectedTargets.has('kimicode');
-  options.components.codex = selectedTargets.has('codex');
-  options.components.mcp = selectedTargets.has('claude') || selectedTargets.has('antigravity');
-  if (!selectedTargets.has('claude')) {
-    options.components.settings = false;
-    options.components.commands = false;
-    options.components.agents = false;
-    options.components.helpers = false;
-    options.components.statusline = false;
-    options.components.claudeMd = false;
-  }
-
-  if (skipClaude) {
-    options.components.settings = false;
-    options.components.skills = false;
-    options.components.commands = false;
-    options.components.agents = false;
-    options.components.helpers = false;
-    options.components.statusline = false;
-    options.components.mcp = false;
-    options.components.claudeMd = false;
-  }
-
-  if (onlyClaude) {
-    options.components.runtime = false;
-  }
-
-  if (noInstall) {
-    options.installClaudeCode = false;
-  }
-
-  // Memory is on by default and not tied to --start-all: every init except
-  // --only-claude (runtime is off) and --no-memory creates the database.
-  if (
-    ctx.flags.memory === false ||
-    ctx.flags['no-memory'] === true ||
-    ctx.flags.noMemory === true
-  ) {
-    options.initMemory = false;
-  }
+  const options = resolved.options;
 
   const spinner = output.createSpinner({ text: 'Initializing...' });
   spinner.start();
@@ -641,10 +525,6 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
       ].join('\n'),
       'Support Monomind',
     );
-
-    if (ctx.flags.format === 'json') {
-      output.printJson(result);
-    }
 
     return { success: true, data: result };
   } catch (error) {

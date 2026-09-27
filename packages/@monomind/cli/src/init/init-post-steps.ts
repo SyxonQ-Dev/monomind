@@ -203,7 +203,10 @@ export async function runDoctorFix(
     if (res && (res as { success?: boolean }).success === false) {
       result.skipped.push('doctor: reported issues (run: monomind doctor for details)');
     } else {
-      result.created.files.push(
+      // A health check that found nothing to fix never "created" a file —
+      // report it as an update note, not a created one, so a run that
+      // changes nothing else can honestly report an empty `created` list.
+      result.updated.push(
         install
           ? 'doctor --install (health check + auto-fix)'
           : 'doctor --fix (health check, no network install)',

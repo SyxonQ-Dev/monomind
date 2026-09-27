@@ -59,6 +59,7 @@ describe('version handshake (§2)', () => {
         'doctor-json',
         'doctor-read-only',
         'doctor-offline',
+        'init-json',
       ],
     });
     expect(p.capabilities).toContain('agent-exec');

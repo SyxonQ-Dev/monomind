@@ -48,6 +48,11 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    startup watchdog (§3.1, §3.2)
  *  - `agent-exec-tool-activity` — `tool_activity` start/end events for
  *    NATIVE tool calls on `agent exec` stdout, in every access mode (§3.2)
+ *  - `init-json` — `monomind init --json` prints `{root, created, skipped,
+ *    claude_project_registered, duration_ms}` on stdout, human output
+ *    suppressed; `--project <dir>`, `--if-missing` (idempotent, never
+ *    touches an existing file), `--no-graph`, and `--register-claude-project`
+ *    (doc/agent-exec-protocol.md §11)
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
@@ -65,6 +70,7 @@ export const AGENT_PROTOCOL_CAPABILITIES = [
   'doctor-json',
   'doctor-read-only',
   'doctor-offline',
+  'init-json',
 ] as const;
 
 /** The exact handshake object emitted by `monomind --version --json`. */

@@ -38,7 +38,7 @@ export async function writeMCPConfig(
   // for the ordering rationale (still ahead of this and every other
   // .mcp.json write, satisfying finding U5).
 
-  if (fs.existsSync(mcpPath) && !options.force) {
+  if (fs.existsSync(mcpPath) && (!options.force || options.ifMissing)) {
     result.skipped.push('.mcp.json');
     return;
   }
@@ -234,7 +234,7 @@ export async function writeClaudeMd(
   const claudeMdPath = path.join(targetDir, 'CLAUDE.md');
   const exists = fs.existsSync(claudeMdPath);
 
-  if (exists && !options.force) {
+  if (exists && (!options.force || options.ifMissing)) {
     result.skipped.push('CLAUDE.md');
     return;
   }
