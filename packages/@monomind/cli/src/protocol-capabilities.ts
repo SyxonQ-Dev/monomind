@@ -53,12 +53,18 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    suppressed; `--project <dir>`, `--if-missing` (idempotent, never
  *    touches an existing file), `--no-graph`, and `--register-claude-project`
  *    (doc/agent-exec-protocol.md §11)
+ *  - `agent-exec-background-pids` — `--access full` spawns the `claude` CLI
+ *    as the leader of its own process group; `cancel`/`--timeout`/
+ *    `--budget-usd` kill the whole group (Bash-tool grandchildren and `&`
+ *    background jobs included), and `done` gains `background_pids` listing
+ *    survivors still alive after a NORMAL end_turn (§3.2)
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
   'agent-exec-full-access',
   'agent-exec-settings',
   'agent-exec-tool-activity',
+  'agent-exec-background-pids',
   'agent-scan',
   'agent-scan-read-only',
   'org-json-v1',

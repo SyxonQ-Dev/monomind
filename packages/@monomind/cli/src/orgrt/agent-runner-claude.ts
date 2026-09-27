@@ -1,11 +1,13 @@
 // packages/@monomind/cli/src/orgrt/agent-runner-claude.ts
 import { spawn } from 'node:child_process';
 import { createSdkMcpServer, query, tool } from '@anthropic-ai/claude-agent-sdk';
+import { fullAccessClaudeSpawn } from './agent-runner-claude-fullaccess.js';
 import { resolveClaudeSettingsOverrides } from './agent-runner-claude-settings.js';
 import type { AgentMessage, AgentRunArgs, AgentRunner } from './agent-runner-types.js';
 import { killOnAbort } from './agent-runner-types.js';
 import { maskedCommand } from './authority-mask.js';
 import { coverEveryToolCall, POLICY_HOOK_TIMEOUT_S } from './policy-hook.js';
+import { signalGroup } from './process-tree.js';
 import { omitAnthropicManagedKeys } from './provider.js';
 import { toolInputSchema } from './tool-fence.js';
 import { toolResultSpillHook } from './tool-spill.js';
@@ -69,6 +71,24 @@ export class ClaudeAgentRunner implements AgentRunner {
     const unsubscribe = killOnAbort(args.signal, {
       kill: () => abortController.abort(),
     });
+    // #359: the ladder above only stops the SDK's in-process loop from
+    // issuing further turns — it never touches an already-running child
+    // process. Full access additionally needs the whole process GROUP
+    // killed on cancel/timeout/budget (agent-exec.ts's terminate(), or
+    // session.ts's silent-stream abort for a future full-access org role,
+    // #365): reuses killOnAbort's own SIGTERM-then-SIGKILL-after-5s ladder,
+    // targeted at the group (`fullAccessPid`, set once `fullAccessClaudeSpawn`
+    // spawns the child below) instead of a single process. No-op for scoped
+    // mode: `fullAccessPid` is never set there.
+    let fullAccessPid: number | undefined;
+    const unsubscribeGroup =
+      args.access === 'full'
+        ? killOnAbort(args.signal, {
+            kill: (signal) => {
+              if (fullAccessPid !== undefined) signalGroup(fullAccessPid, signal ?? 'SIGTERM');
+            },
+          })
+        : () => {};
 
     // Incremental text streaming is opt-in via extras, not unconditional:
     // this runner has two independent consumers. agent-exec.ts (the Agent
@@ -202,9 +222,20 @@ export class ClaudeAgentRunner implements AgentRunner {
         ...(args.claudeRestrictions?.disallowedTools?.length
           ? { disallowedTools: args.claudeRestrictions.disallowedTools }
           : {}),
-        ...(args.authorityMask?.length
-          ? { spawnClaudeCodeProcess: maskedClaudeSpawn(args.authorityMask) }
-          : {}),
+        // #359: full access always installs the group-leader spawn (with or
+        // without an authorityMask — `fullAccessClaudeSpawn` treats an empty
+        // mask as a no-op, see maskedCommand); scoped mode keeps today's
+        // plain masked spawn, untouched.
+        ...(args.access === 'full'
+          ? {
+              spawnClaudeCodeProcess: fullAccessClaudeSpawn(args.authorityMask ?? [], (pid) => {
+                fullAccessPid = pid;
+                args.onProcessSpawned?.({ pid });
+              }),
+            }
+          : args.authorityMask?.length
+            ? { spawnClaudeCodeProcess: maskedClaudeSpawn(args.authorityMask) }
+            : {}),
         // ADR-O001 D2. A PROGRAMMATIC hook, not a filesystem one: these are
         // registered over the SDK's control protocol at initialize() time and
         // so are unaffected by `settingSources: []` above (which only stops
@@ -378,6 +409,7 @@ export class ClaudeAgentRunner implements AgentRunner {
       }
     } finally {
       unsubscribe();
+      unsubscribeGroup();
     }
   }
 }

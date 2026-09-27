@@ -39,6 +39,7 @@ import { mapStopReason } from './agent-exec-stop-reason.js';
 import type { AgentMessage, OrgToolDef } from './agent-runner.js';
 import { classifyStderr } from './kimicode-runner.js';
 import { loadCreateOrgSkillGuidance } from './org-design-skill.js';
+import { listGroupMembers } from './process-tree.js';
 import { resolveExecRunner, runnerSpec } from './runner-registry.js';
 import { ToolActivityTracker } from './tool-activity.js';
 
@@ -98,6 +99,10 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
   let lastSession: string | undefined;
   let totals = { in: 0, out: 0, usd: 0 };
   let lastResult: AgentMessage | undefined;
+  // #359: pid of the runner's spawned agent-CLI process, when it reports
+  // one (full access only — see AgentRunArgs.onProcessSpawned). Used on a
+  // normal end_turn to list background survivors for `done.background_pids`.
+  let spawnedPid: number | undefined;
   // Holder object: `terminal` is assigned inside the terminate() closure and
   // read after the loop — TS flow analysis would otherwise keep the `null`
   // narrowing across closure calls and type the post-loop reads as `never`.
@@ -285,6 +290,9 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
         canUseTool: effectiveCanUseTool,
         access,
         signal: abort.signal,
+        onProcessSpawned: (info) => {
+          spawnedPid = info.pid;
+        }, // #359
         // Opts every runner that supports it (each subprocess runner's own
         // `streamPartials`/equivalent gate — claude, antigravity, qwen-rpc,
         // opencode, pi-rpc) into per-token/per-chunk incremental `assistant`
@@ -385,10 +393,22 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
     process.removeListener('SIGTERM', onSignal);
   }
 
-  const finish = (exitCode: number): number => {
-    safeEmit({ v: 1, type: 'done', exit_code: exitCode });
+  const finish = (exitCode: number, extra?: Record<string, unknown>): number => {
+    safeEmit({ v: 1, type: 'done', exit_code: exitCode, ...extra });
     finished = true;
     return exitCode;
+  };
+
+  // #359: only for a turn that ends NORMALLY (not killed via terminate()) —
+  // cancel/timeout/budget already kill the whole process group above, so
+  // there's nothing left to report there. `listGroupMembers` returns
+  // `supported:false` on win32 (no POSIX process groups, v1 gap — see
+  // process-tree.ts), in which case the field is omitted entirely rather
+  // than falsely reporting "none".
+  const backgroundPids = (): number[] | undefined => {
+    if (access !== 'full' || spawnedPid === undefined) return undefined;
+    const { pids, supported } = listGroupMembers(spawnedPid);
+    return supported ? pids : undefined;
   };
 
   if (state.terminal) {
@@ -450,5 +470,6 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
     output_tokens: totals.out,
     cost_usd: totals.usd,
   });
-  return finish(isError ? 1 : 0);
+  const bg = backgroundPids();
+  return finish(isError ? 1 : 0, bg ? { background_pids: bg } : undefined);
 }

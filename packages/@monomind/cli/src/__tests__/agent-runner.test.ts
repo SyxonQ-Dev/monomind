@@ -431,12 +431,82 @@ describe('ClaudeAgentRunner: --access full SDK options', () => {
     expect(full.allowDangerouslySkipPermissions).toBe(true);
   });
 
-  it('full differs from scoped ONLY in permissionMode and allowDangerouslySkipPermissions', async () => {
+  it('full differs from scoped ONLY in permissionMode, allowDangerouslySkipPermissions, and spawnClaudeCodeProcess (#359)', async () => {
     const scoped = await captureOptions({ access: 'scoped' });
     const full = await captureOptions({ access: 'full' });
-    const { allowDangerouslySkipPermissions, ...fullRest } = full;
+    // #359: full access installs a group-leader spawn hook (see the next
+    // describe block) that scoped mode never gets — irrelevant to this
+    // permissionMode/allowDangerouslySkipPermissions snapshot, same reason
+    // abortController/mcpServers are excluded above.
+    const { allowDangerouslySkipPermissions, spawnClaudeCodeProcess, ...fullRest } = full;
     expect(allowDangerouslySkipPermissions).toBe(true);
+    expect(typeof spawnClaudeCodeProcess).toBe('function');
     expect(fullRest.permissionMode).toBe('bypassPermissions');
     expect({ ...fullRest, permissionMode: scoped.permissionMode }).toEqual(scoped);
+  });
+
+  it('scoped mode never gets spawnClaudeCodeProcess when no authorityMask is set', async () => {
+    const scoped = await captureOptions({ access: 'scoped' });
+    expect('spawnClaudeCodeProcess' in scoped).toBe(false);
+  });
+});
+
+// ─── full access: group-leader spawn (#359) ─────────────────────────────────
+
+describe('ClaudeAgentRunner: --access full spawns the Claude CLI as its own process-group leader (#359)', () => {
+  /** Captures the `spawnClaudeCodeProcess` hook the runner installed, without
+   *  invoking it (invoking it would need a real `claude` binary — the
+   *  detached/pid-callback wiring is exercised here; process-tree.test.ts
+   *  covers the real-process group-kill mechanics end to end). */
+  async function captureSpawnHook(
+    overrides: Record<string, unknown>,
+  ): Promise<((o: unknown) => unknown) | undefined> {
+    let capturedOptions: any;
+    const mockQueryFn = (args: any) => {
+      capturedOptions = args.options;
+      return (async function* () {
+        yield { type: 'result', session_id: 's1', subtype: 'success', is_error: false };
+      })();
+    };
+    const runner = new ClaudeAgentRunner(mockQueryFn as any);
+    for await (const _m of runner.run(baseArgs(overrides))) {
+      // drain
+    }
+    return capturedOptions.spawnClaudeCodeProcess;
+  }
+
+  it('installs a spawnClaudeCodeProcess hook for access:"full" even with no authorityMask', async () => {
+    const hook = await captureSpawnHook({ access: 'full' });
+    expect(typeof hook).toBe('function');
+  });
+
+  it('the hook spawns the child detached (own process group) and reports its pid via onProcessSpawned', async () => {
+    let reportedPid: number | undefined;
+    let capturedOptions: any;
+    const mockQueryFn = (args: any) => {
+      capturedOptions = args.options;
+      return (async function* () {
+        yield { type: 'result', session_id: 's1', subtype: 'success', is_error: false };
+      })();
+    };
+    const runner = new ClaudeAgentRunner(mockQueryFn as any);
+    for await (const _m of runner.run(
+      baseArgs({
+        access: 'full',
+        onProcessSpawned: (info: { pid: number }) => (reportedPid = info.pid),
+      }),
+    )) {
+      // drain
+    }
+    // Real spawn, real short-lived process (`true`) — exercises the actual
+    // node:child_process wiring, not a mock of it.
+    const child = capturedOptions.spawnClaudeCodeProcess({
+      command: 'true',
+      args: [],
+      env: process.env,
+    });
+    expect(child.pid).toBeGreaterThan(0);
+    expect(reportedPid).toBe(child.pid);
+    await new Promise<void>((resolve) => child.once('exit', () => resolve()));
   });
 });

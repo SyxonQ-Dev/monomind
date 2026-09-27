@@ -1,4 +1,4 @@
-# Agent Exec Protocol — v1 (rev 12)
+# Agent Exec Protocol — v1 (rev 13)
 
 - **Status**: Implemented (Phase 0 of the mono-agent delegation plan — see
   `mono-agent:docs/plans/local-agent-monomind-delegation.md`)
@@ -177,6 +177,42 @@
     unnecessary once a coder session's first real turn runs; it never writes
     `~/.claude.json`'s `hasTrustDialogAccepted`, which is interactive-CLI-only and out of reach
     headlessly. Additive only.
+  - rev 13 (2026-09-28): **`--access full` kills the whole process tree, and reports
+    background survivors** (issue #359, part of the Coder mode epic #364) — new capability
+    `agent-exec-background-pids`. A full-access turn can start long-running or background
+    processes via its Bash tool (a dev server, `sleep 600 &`, a watcher); `agent exec` now
+    spawns the `claude` CLI as the leader of its OWN process group instead of joining
+    monomind's, so `cancel`, `--timeout`, and `--budget-usd` SIGTERM the WHOLE tree (not just
+    the CLI process) and SIGKILL it after a 5s grace if anything survives. A plain group
+    signal alone was live-verified INSUFFICIENT against the real, installed Claude Code CLI: it
+    spawns each Bash-tool shell invocation as the leader of its OWN, separate process group
+    (not a member of the top `claude` process's group), so `orgrt/process-tree.ts` computes a
+    fixed-point closure over PPID **and** PGID edges instead — this reaches a nested group
+    (the Bash tool's own shell and everything it starts) while it's still live, and a plain
+    reparented orphan (immediate parent already exited; a group, unlike a PPID chain, survives
+    that) via a single algorithm (`groupClosure`, see its module doc for the live-verified
+    process tree that motivated it). The closure is computed BEFORE any signal is sent — kill-
+    then-read would sever the very PPID edge needed to find a nested group once the leader
+    dies. On a NORMAL `end_turn`, survivors are left running (the common "start the dev
+    server, test it next turn" flow) but now reported: `done` gains
+    `background_pids: number[]`, the closure's live members at that moment. **Known v1
+    limitation** (live-verified, not merely theoretical): if the Bash tool's own shell for a
+    given call has ALREADY exited by the time a normal end_turn is checked — the common case
+    for "background it and return immediately" — the PPID edge to its nested group is gone and
+    that group's id was never recorded, so a survivor can go unreported; a fully robust fix
+    needs polling the tree throughout the turn (deferred, not attempted here). The KILL path is
+    not affected by this gap: cancel/timeout/budget react promptly, while the CLI's own shell
+    for the in-flight call is still alive and its PPID edge intact. Implemented in the RUNNER
+    layer (`ClaudeAgentRunner`/`agent-runner-claude-fullaccess.ts`), so a future full-access org
+    role (#365) inherits the same protection automatically — nothing org-runtime-specific was
+    added. Scoped mode's SDK options are unaffected (proven by an updated SDK-options
+    snapshot test in `agent-runner.test.ts`). Windows: process-GROUP semantics don't exist
+    there; the kill side falls back to `taskkill /T` (best-effort, tree- not group-based) and
+    `background_pids` discovery is unsupported for v1 (the field is omitted, never fabricated
+    as an empty list) — a documented gap, not a crash. §3's caller guidance is extended: a
+    caller SHOULD also run monomind in its own process group and kill the group on Stop, and
+    background jobs (§3.2's `background_pids`) are explicitly in scope of that guidance, not
+    just the agent-CLI grandchild.
 - **Stability**: Versioned. Frames and events carry `"v": 1`. Breaking changes bump `v` and are
   announced via the capability handshake (§2).
 - **Purpose**: Expose monomind's `AgentRunner` engine (14 local agent CLI runners) and org
@@ -204,7 +240,7 @@ by swarm management and is NOT reused by this protocol — the installed-only vi
 
 ```
 $ monomind --version --json
-{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-scan","agent-scan-read-only","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","doctor-json","doctor-read-only","doctor-offline","init-json"]}
+{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-exec-background-pids","agent-scan","agent-scan-read-only","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","doctor-json","doctor-read-only","doctor-offline","init-json"]}
 ```
 
 Callers MUST handshake before use and fail with an actionable message (install/upgrade hint)
@@ -216,7 +252,13 @@ removals or semantic changes bump the capability string (e.g. `org-json-v2`) or 
 Runs one agent turn through the resolved runner. Process model: monomind spawns the agent CLI as
 its child (directly, or via the runner's SDK); the caller spawns monomind. Callers SHOULD place
 monomind in its own process group so a group-kill reaps monomind **and** the agent-CLI
-grandchild.
+grandchild. **rev 13, coder mode (`--access full`)**: monomind itself now spawns the agent CLI
+as the leader of a SEPARATE process group and kills that whole group on `cancel`/`--timeout`/
+`--budget-usd` (§3.4) — this reaches the Bash tool's own grandchildren and `&` background jobs,
+not just the CLI process, so callers should NOT assume a group-kill of monomind alone is
+sufficient for those; background jobs are explicitly in scope of this guidance, and a survivor
+left running after a normal `end_turn` is reported via `done.background_pids` (§3.2), not
+silently leaked.
 
 stdout is reserved **exclusively** for NDJSON events (§3.2). All diagnostics, warnings, and
 progress go to stderr. A caller must be able to `JSON.parse` every stdout line.
@@ -270,7 +312,7 @@ done`. On failure: `start → … → error → done`.
 | `usage` | `v, input_tokens, output_tokens, cost_usd` | Per-round delta (cumulative→delta conversion handled inside monomind) |
 | `result` | `v, subtype ("success"\|"error"), is_error, text, stop_reason, input_tokens, output_tokens, cost_usd` | Aggregate final result; **rev 7**: `text` is the complete final assistant text — the joined `assistant` texts for a `streams_incrementally` runtime, the last `assistant` message otherwise (omitted only if the turn produced none); `stop_reason`: `end_turn` \| `max_turns` \| `tool_round_cap` \| `cancelled` \| `timeout`. **rev 4**: `tool_round_cap` is detected best-effort — it matches the runner's tool-round-cap assistant note; a fence runner that stops without the note yields `end_turn` |
 | `error` | `v, code, message, fatal (bool)` | Codes in §3.4. `fatal:true` = auth/quota class — callers must not retry |
-| `done` | `v, exit_code` | Terminal event. Always emitted exactly once, even on error |
+| `done` | `v, exit_code, background_pids?` | Terminal event. Always emitted exactly once, even on error. **rev 13**, capability `agent-exec-background-pids`: `background_pids` (only for `--access full`, only after a NORMAL `end_turn` — never on `cancel`/`--timeout`/`--budget-usd`, which already kill the whole tree, §3) lists pids still alive in the agent-CLI's extended process tree (PPID descendants and nested process groups, see `orgrt/process-tree.ts`) at that moment — e.g. a `sleep 600 &` the turn started and left running on purpose. A survivor whose launching shell has ALREADY exited by check time can go unreported (known v1 limitation, §3's rev 13 note — the kill path is unaffected). Omitted (not an empty array) when access is `scoped`, or on a platform where discovery isn't supported (win32, v1) |
 
 Exit codes: `0` success (result.subtype=success) · `1` agent/runner error · `2` usage/protocol
 error (bad flags, unknown runtime, missing binary) · `124` `--timeout` expired · `130` cancelled
@@ -499,8 +541,9 @@ Callers may read `<projectRoot>/.monomind/orgs/<name>/runtime.json` and run `bus
 2. `--json` snapshot tests for §7.2 commands, including the new `org list` and `org events`.
 3. Handshake test (`--version --json` shape + capability gating).
 4. Golden NDJSON transcripts published at `doc/agent-exec-protocol/fixtures/*.ndjson` (success,
-   tool-loop, fatal auth, timeout, cancel, bad-frame, tool-activity) so callers can build contract
-   tests without running monomind; mono-agent's Phase 1 gate consumes these.
+   tool-loop, fatal auth, timeout, cancel, bad-frame, tool-activity, full-access,
+   full-access-background) so callers can build contract tests without running monomind;
+   mono-agent's Phase 1 gate consumes these.
 5. Two real runners smoke-tested (whatever is installed in CI/dev).
 
 ### 8.4 Status (rev 4)
@@ -510,7 +553,7 @@ tool modes plus §3.2's `tool_activity` events, #357), `src/__tests__/runner-reg
 (scan + handshake + `tool_activity_fidelity`), `src/__tests__/agent-runner.test.ts`
 (`ClaudeAgentRunner`'s own `tool_use`/`tool_result` shapes), `src/__tests__/tool-activity.test.ts`
 (the event builder's size caps, denial, and cancel-close logic in isolation),
-`src/__tests__/org-json-contracts.test.ts` (§7.2/§7.3 snapshots), and the seven fixtures above
+`src/__tests__/org-json-contracts.test.ts` (§7.2/§7.3 snapshots), and the fixtures above
 (validated by `src/__tests__/agent-exec-fixtures.test.ts`). Item 5 is a manual/CI gate —
 run `monomind agent test <id>` for two installed runtimes before release.
 

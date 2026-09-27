@@ -48,6 +48,7 @@ describe('version handshake (§2)', () => {
         'agent-exec-full-access',
         'agent-exec-settings',
         'agent-exec-tool-activity',
+        'agent-exec-background-pids',
         'agent-scan',
         'agent-scan-read-only',
         'org-json-v1',

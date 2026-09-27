@@ -1,0 +1,6 @@
+{"v":1,"type":"start","runtime":"claude","cwd":"/home/user/scratch/coder-smoke","pid":4212,"access":"full","streams_incrementally":true}
+{"v":1,"type":"session","session_id":"th_c0de2"}
+{"v":1,"type":"assistant","text":"Starting the dev server in the background, then I'll check it next turn."}
+{"v":1,"type":"usage","input_tokens":1840,"output_tokens":97,"cost_usd":0.0043}
+{"v":1,"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","text":"Starting the dev server in the background, then I'll check it next turn.","input_tokens":1840,"output_tokens":97,"cost_usd":0.0043}
+{"v":1,"type":"done","exit_code":0,"background_pids":[4231]}

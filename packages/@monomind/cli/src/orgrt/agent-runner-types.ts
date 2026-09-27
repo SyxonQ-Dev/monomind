@@ -96,6 +96,14 @@ export interface AgentRunArgs {
    *  strictMcpConfig: true, plain-string system prompt) — see
    *  agent-runner-claude-settings.ts. */
   settingSources?: Array<'user' | 'project' | 'local'>;
+  /** #359: full-access only. Called synchronously once ClaudeAgentRunner
+   *  spawns the underlying `claude` CLI process, with its pid — lets a
+   *  caller (agent-exec.ts) discover background survivors on a normal
+   *  end_turn (walk the process GROUP rooted at this pid, see
+   *  process-tree.ts) without a new AgentMessage frame every runner would
+   *  need to implement. Runners that don't spawn a real OS process, or that
+   *  don't support `access: 'full'`, never call it. */
+  onProcessSpawned?: (info: { pid: number }) => void;
   /** ADR-O001 D2: directory for spilled tool-result bodies. When set,
    *  ClaudeAgentRunner installs a PostToolUse hook that writes an oversized
    *  result here in full and replaces it in the transcript with a bounded
