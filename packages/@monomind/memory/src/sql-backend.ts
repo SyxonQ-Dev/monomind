@@ -13,20 +13,31 @@
  * sql-driver.ts; the canonical schema and the legacy-data migration live in
  * sql-schema.ts. This file contains only behaviour.
  *
+ * File-size sweep: the class's method BODIES are grouped into sibling
+ * modules — ANN/HNSW index management in sql-backend-ann.ts, the
+ * store/update/delete family in sql-backend-writes.ts, the get/query/search
+ * family in sql-backend-reads.ts, and stats/health/persist in
+ * sql-backend-introspect.ts. Each stays a real method here (same signature,
+ * same visibility) so callers and TypeScript see no difference; the method
+ * body is just `return theSiblingImpl.call(this, ...args)`. Fields those
+ * bodies read/write moved from `private` to `protected` (compile-time only;
+ * no runtime change) — TypeScript allows a standalone function typed
+ * `this: SqlBackend` to reach `protected` members but not `private` ones, so
+ * `protected` is the minimum visibility the split needs.
+ *
  * @module v1/memory/sql-backend
  */
 
 import { EventEmitter } from 'node:events';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { writeFileAtomicSync } from './atomic-file.js';
-import { HNSWIndex, type HNSWSerialized } from './hnsw-index.js';
-import { cosineSimilarity } from './math-utils.js';
-import type { SqlDriver, SqlParam } from './sql-driver.js';
+import type { HNSWIndex } from './hnsw-index.js';
+import { sqlBackendAnnMethods } from './sql-backend-ann.js';
+import { sqlBackendIntrospectMethods } from './sql-backend-introspect.js';
+import { sqlBackendReadMethods } from './sql-backend-reads.js';
+import { sqlBackendWriteMethods } from './sql-backend-writes.js';
+import type { SqlDriver } from './sql-driver.js';
 import { hasFTS5Table, initializeSchema, type MigrationReport } from './sql-schema.js';
 import type {
   BackendStats,
-  ComponentHealth,
   EmbeddingGenerator,
   HealthCheckResult,
   IMemoryBackend,
@@ -54,9 +65,6 @@ const DEFAULT_CONFIG: SqlBackendConfig = {
   verbose: false,
 };
 
-/** Cap on votes/rows pulled in one go, guarding against unbounded memory use. */
-const MAX_QUERY_LIMIT = 10_000;
-
 export class SqlBackend extends EventEmitter implements IMemoryBackend {
   protected config: SqlBackendConfig;
   protected driver: SqlDriver | null = null;
@@ -64,11 +72,11 @@ export class SqlBackend extends EventEmitter implements IMemoryBackend {
   /** Populated during initialize(); surfaced for diagnostics. */
   migrationReport: MigrationReport | null = null;
   /** Whether the FTS5 full-text index is available (Issue #66). */
-  private _fts5Available = false;
+  protected _fts5Available = false;
 
-  private stats = { queryCount: 0, totalQueryTime: 0, writeCount: 0, totalWriteTime: 0 };
+  protected stats = { queryCount: 0, totalQueryTime: 0, writeCount: 0, totalWriteTime: 0 };
   /** Debounce counter: the agent_reads purge is expensive, so it is amortised. */
-  private _readCount = 0;
+  protected _readCount = 0;
 
   // ===== ANN (HNSW) fast path for search() ==================================
   // Below MONOMIND_HNSW_THRESHOLD active embedded entries, brute-force cosine
@@ -78,13 +86,13 @@ export class SqlBackend extends EventEmitter implements IMemoryBackend {
   // change to any of those is the invalidation signal (store/delete change
   // the count; an in-place re-embed of an existing id changes max-updated-at
   // without changing the count).
-  private _annIndex: HNSWIndex | null = null;
-  private _annEntries: Map<string, MemoryEntry> = new Map();
-  private _annDimensions = 0;
-  private _annBuiltForCount = -1;
-  private _annBuiltForMaxUpdatedAt = -1;
+  protected _annIndex: HNSWIndex | null = null;
+  protected _annEntries: Map<string, MemoryEntry> = new Map();
+  protected _annDimensions = 0;
+  protected _annBuiltForCount = -1;
+  protected _annBuiltForMaxUpdatedAt = -1;
 
-  private static readonly ANN_THRESHOLD = (() => {
+  static readonly ANN_THRESHOLD = (() => {
     const raw = process.env.MONOMIND_HNSW_THRESHOLD;
     const n = raw !== undefined ? parseInt(raw, 10) : NaN;
     return Number.isFinite(n) && n > 0 ? n : 5000;
@@ -98,130 +106,21 @@ export class SqlBackend extends EventEmitter implements IMemoryBackend {
     return null;
   }
 
-  private annCachePath(): string | null {
-    const dir = this.getAnnCacheDir();
-    return dir ? join(dir, 'hnsw-index.json') : null;
+  // Bodies live in sql-backend-ann.ts (file-size sweep) — thin wrappers here
+  // keep the same call signatures and visibility other methods rely on.
+  protected annCachePath(): string | null {
+    return sqlBackendAnnMethods.annCachePath.call(this);
   }
 
-  /**
-   * Staleness fingerprint for the ANN cache: row count alone misses an
-   * in-place embedding update (same id, re-embedded content — the count
-   * doesn't change), which would otherwise leave the cached graph serving a
-   * stale vector for that entry indefinitely. `updated_at` is bumped on
-   * every store() call (including updates to an existing id), so pairing
-   * count with MAX(updated_at) catches that case too.
-   */
-  private countEmbeddedActiveEntries(): { count: number; maxUpdatedAt: number } {
-    const row = this.driver?.get(
-      `SELECT COUNT(*) as c, COALESCE(MAX(e.updated_at), 0) as m FROM memory_entries e
-        JOIN memory_embeddings emb ON emb.entry_id = e.id
-       WHERE (e.expires_at IS NULL OR e.expires_at = 0 OR e.expires_at > ?)`,
-      [Date.now()],
-    ) as { c: number; m: number } | undefined;
-    return { count: row?.c ?? 0, maxUpdatedAt: row?.m ?? 0 };
+  protected countEmbeddedActiveEntries(): { count: number; maxUpdatedAt: number } {
+    return sqlBackendAnnMethods.countEmbeddedActiveEntries.call(this);
   }
 
-  /**
-   * Returns a ready-to-search ANN index for the given embedding dimensions,
-   * or null when the corpus is below ANN_THRESHOLD (brute force stays the
-   * search path). Tries, in order: the process-lifetime cache, a valid
-   * on-disk cache (skips the DB read + graph build entirely), then a full
-   * rebuild from memory_embeddings (writing a fresh on-disk cache for next
-   * time).
-   */
-  private async getAnnIndex(
+  protected async getAnnIndex(
     dimensions: number,
     force = false,
   ): Promise<{ index: HNSWIndex; entries: Map<string, MemoryEntry> } | null> {
-    const { count, maxUpdatedAt } = this.countEmbeddedActiveEntries();
-    if (!force && count < SqlBackend.ANN_THRESHOLD) return null;
-
-    if (
-      !force &&
-      this._annIndex &&
-      this._annDimensions === dimensions &&
-      this._annBuiltForCount === count &&
-      this._annBuiltForMaxUpdatedAt === maxUpdatedAt
-    ) {
-      return { index: this._annIndex, entries: this._annEntries };
-    }
-
-    const cachePath = this.annCachePath();
-    if (!force && cachePath && existsSync(cachePath)) {
-      try {
-        const parsed = JSON.parse(readFileSync(cachePath, 'utf8')) as {
-          entryCount: number;
-          maxUpdatedAt: number;
-          dimensions: number;
-          index: HNSWSerialized;
-          entries: Array<[string, MemoryEntry]>;
-        };
-        if (
-          parsed.entryCount === count &&
-          parsed.maxUpdatedAt === maxUpdatedAt &&
-          parsed.dimensions === dimensions
-        ) {
-          const index = HNSWIndex.deserialize(parsed.index);
-          const entries = new Map(parsed.entries);
-          this._annIndex = index;
-          this._annDimensions = dimensions;
-          this._annBuiltForCount = count;
-          this._annBuiltForMaxUpdatedAt = maxUpdatedAt;
-          this._annEntries = entries;
-          return { index, entries };
-        }
-      } catch {
-        // Corrupt or incompatible cache — fall through to a full rebuild.
-      }
-    }
-
-    const rows =
-      this.driver?.iterate(
-        `SELECT e.*, emb.embedding AS _emb
-         FROM memory_entries e
-         JOIN memory_embeddings emb ON emb.entry_id = e.id
-        WHERE (e.expires_at IS NULL OR e.expires_at = 0 OR e.expires_at > ?)`,
-        [Date.now()],
-      ) ?? [];
-
-    const index = new HNSWIndex({ dimensions, metric: 'cosine' });
-    const entries = new Map<string, MemoryEntry>();
-    const points: Array<{ id: string; vector: Float32Array }> = [];
-    for (const row of rows) {
-      const buf = row._emb as Buffer | Uint8Array | undefined;
-      if (!buf || buf.byteLength % 4 !== 0) continue;
-      const vec = new Float32Array(buf.buffer as ArrayBuffer, buf.byteOffset, buf.byteLength / 4);
-      if (vec.length !== dimensions) continue;
-      const entry = this.rowToEntry(row);
-      points.push({ id: entry.id, vector: vec });
-      entries.set(entry.id, entry);
-    }
-    await index.rebuild(points);
-
-    this._annIndex = index;
-    this._annDimensions = dimensions;
-    this._annBuiltForCount = count;
-    this._annBuiltForMaxUpdatedAt = maxUpdatedAt;
-    this._annEntries = entries;
-
-    if (cachePath) {
-      try {
-        writeFileAtomicSync(
-          cachePath,
-          JSON.stringify({
-            entryCount: count,
-            maxUpdatedAt,
-            dimensions,
-            index: index.serialize(),
-            entries: Array.from(entries.entries()),
-          }),
-        );
-      } catch {
-        // Best-effort — a failed cache write just means the next cold start rebuilds.
-      }
-    }
-
-    return { index, entries };
+    return sqlBackendAnnMethods.getAnnIndex.call(this, dimensions, force);
   }
 
   /**
@@ -313,613 +212,75 @@ export class SqlBackend extends EventEmitter implements IMemoryBackend {
     this.emit('shutdown');
   }
 
-  // ===== Writes ============================================================
+  // ===== Writes =============================================================
+  // Bodies live in sql-backend-writes.ts (file-size sweep).
 
   async store(entry: MemoryEntry): Promise<void> {
-    this.ensureInitialized();
-    const startTime = performance.now();
-    this.validateTags(entry.tags);
-
-    this.driver?.transaction(() => this.storeSync(entry));
-
-    const duration = performance.now() - startTime;
-    this.stats.writeCount++;
-    this.stats.totalWriteTime += duration;
-    this.emit('entry:stored', { id: entry.id, duration });
+    return sqlBackendWriteMethods.store.call(this, entry);
   }
 
-  /**
-   * Compare-and-swap update: writes ONLY if the row's stored `version` still
-   * equals `expectedVersion`. The check and the write are one SQL statement
-   * (`UPDATE ... WHERE id = ? AND version = ?`), so SQLite's own single-
-   * statement atomicity — the same guarantee `store()`'s INSERT OR REPLACE
-   * already relies on — makes this a real compare-and-swap against every
-   * other writer, in this process or another, with no bridge-level lock.
-   *
-   * Exists for memory-KG review finding K5: a getByKey() + store() read-
-   * merge-write (what every caller did before this) leaves a window in which
-   * two concurrent callers each merge onto the same row and the second
-   * store() silently overwrites the first's contribution. A caller that reads
-   * a row's version, merges onto it, and writes back through here instead
-   * gets `false` when its merge has gone stale, rather than winning a race it
-   * did not know it was running.
-   *
-   * Only the columns a claim-ledger merge (memory-kg.ts) actually changes are
-   * updated; embeddings are left untouched, matching storeSync's own rule that
-   * a revision without a new vector keeps the one it had.
-   *
-   * @returns true when the write landed, false when the row's version had
-   * already moved (or the row no longer exists) — the caller must re-read and
-   * re-merge, never assume the write happened.
-   */
   async storeIfVersion(entry: MemoryEntry, expectedVersion: number): Promise<boolean> {
-    this.ensureInitialized();
-    this.validateTags(entry.tags);
-    const d = this.driver!;
-    return d.transaction(() => {
-      const changes = d.run(
-        `UPDATE memory_entries
-           SET content = ?, tags = ?, metadata = ?, updated_at = ?, version = ?, "references" = ?
-         WHERE id = ? AND version = ?`,
-        [
-          entry.content,
-          JSON.stringify(entry.tags),
-          JSON.stringify(entry.metadata),
-          entry.updatedAt,
-          entry.version,
-          JSON.stringify(entry.references),
-          entry.id,
-          expectedVersion,
-        ] as SqlParam[],
-      );
-      if (changes === 0) return false;
-      d.run('DELETE FROM memory_entry_tags WHERE entry_id = ?', [entry.id]);
-      for (const tag of entry.tags) {
-        d.run('INSERT OR IGNORE INTO memory_entry_tags (entry_id, tag) VALUES (?, ?)', [
-          entry.id,
-          tag,
-        ]);
-      }
-      return true;
-    });
+    return sqlBackendWriteMethods.storeIfVersion.call(this, entry, expectedVersion);
   }
 
-  /**
-   * Compare-and-swap create: the create-side counterpart to `storeIfVersion`.
-   * Inserts ONLY if no row already occupies this id or this namespace/key pair
-   * (the schema's `UNIQUE(namespace, key)` index — see sql-schema.ts).
-   *
-   * Exists for the same K5 race on the CREATE side: two concurrent callers
-   * asserting the same new KG entity mint the same deterministic `key` but a
-   * different random row `id` (see memory-bridge.ts's upsert). Plain `store()`
-   * (INSERT OR REPLACE) resolves that collision by silently deleting whichever
-   * row landed first — exactly the lost update K5 describes, just on first
-   * write instead of a merge. `INSERT OR IGNORE` instead leaves the first row
-   * untouched and reports that it did, so the loser re-reads and merges onto
-   * it instead of clobbering it.
-   *
-   * @returns true when this call created the row, false when one already
-   * existed — the caller must re-read and merge rather than assume it won.
-   */
   async storeIfAbsent(entry: MemoryEntry): Promise<boolean> {
-    this.ensureInitialized();
-    this.validateTags(entry.tags);
-    const d = this.driver!;
-    return d.transaction(() => {
-      const changes = d.run(
-        `INSERT OR IGNORE INTO memory_entries (
-           id, key, content, type, namespace, tags, metadata, owner_id, access_level,
-           created_at, updated_at, expires_at, event_at, version, "references",
-           access_count, last_accessed_at
-         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [
-          entry.id,
-          entry.key,
-          entry.content,
-          entry.type,
-          entry.namespace,
-          JSON.stringify(entry.tags),
-          JSON.stringify(entry.metadata),
-          entry.ownerId || null,
-          entry.accessLevel,
-          entry.createdAt,
-          entry.updatedAt,
-          entry.expiresAt || null,
-          entry.eventAt ?? null,
-          entry.version,
-          JSON.stringify(entry.references),
-          entry.accessCount,
-          entry.lastAccessedAt,
-        ] as SqlParam[],
-      );
-      if (changes === 0) return false;
-      for (const tag of entry.tags) {
-        d.run('INSERT OR IGNORE INTO memory_entry_tags (entry_id, tag) VALUES (?, ?)', [
-          entry.id,
-          tag,
-        ]);
-      }
-      if (entry.embedding && entry.embedding.byteLength > 0) {
-        const bytes = Buffer.from(
-          entry.embedding.buffer as ArrayBuffer,
-          entry.embedding.byteOffset,
-          entry.embedding.byteLength,
-        );
-        d.run('INSERT OR REPLACE INTO memory_embeddings (entry_id, embedding) VALUES (?, ?)', [
-          entry.id,
-          bytes,
-        ]);
-      }
-      return true;
-    });
+    return sqlBackendWriteMethods.storeIfAbsent.call(this, entry);
   }
 
-  /** Synchronous store body, shared by store() and bulkInsert(). */
-  private storeSync(entry: MemoryEntry): void {
-    const d = this.driver!;
-
-    // Read any existing embedding BEFORE INSERT OR REPLACE fires the CASCADE
-    // that would delete it — an entry updated without a vector must keep the
-    // one it already had.
-    let embeddingToStore = entry.embedding;
-    if (!embeddingToStore) {
-      const existing = d.get('SELECT embedding FROM memory_embeddings WHERE entry_id = ?', [
-        entry.id,
-      ]);
-      const buf = existing?.embedding as Buffer | Uint8Array | undefined;
-      if (buf && buf.byteLength > 0) {
-        embeddingToStore = new Float32Array(
-          buf.buffer as ArrayBuffer,
-          buf.byteOffset,
-          buf.byteLength / 4,
-        );
-      }
-    }
-
-    d.run(
-      `INSERT OR REPLACE INTO memory_entries (
-         id, key, content, type, namespace, tags, metadata, owner_id, access_level,
-         created_at, updated_at, expires_at, event_at, version, "references",
-         access_count, last_accessed_at
-       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [
-        entry.id,
-        entry.key,
-        entry.content,
-        entry.type,
-        entry.namespace,
-        JSON.stringify(entry.tags),
-        JSON.stringify(entry.metadata),
-        entry.ownerId || null,
-        entry.accessLevel,
-        entry.createdAt,
-        entry.updatedAt,
-        entry.expiresAt || null,
-        entry.eventAt ?? null,
-        entry.version,
-        JSON.stringify(entry.references),
-        entry.accessCount,
-        entry.lastAccessedAt,
-      ] as SqlParam[],
-    );
-
-    d.run('DELETE FROM memory_entry_tags WHERE entry_id = ?', [entry.id]);
-    for (const tag of entry.tags) {
-      d.run('INSERT OR IGNORE INTO memory_entry_tags (entry_id, tag) VALUES (?, ?)', [
-        entry.id,
-        tag,
-      ]);
-    }
-
-    if (embeddingToStore) {
-      // Slice by byteOffset/byteLength: for copies under Node's 4KB pooling
-      // threshold, `.buffer` refers to the entire shared pool, so writing it
-      // whole silently stores unrelated memory.
-      const bytes = Buffer.from(
-        embeddingToStore.buffer as ArrayBuffer,
-        embeddingToStore.byteOffset,
-        embeddingToStore.byteLength,
-      );
-      d.run('INSERT OR REPLACE INTO memory_embeddings (entry_id, embedding) VALUES (?, ?)', [
-        entry.id,
-        bytes,
-      ]);
-    }
+  protected storeSync(entry: MemoryEntry): void {
+    sqlBackendWriteMethods.storeSync.call(this, entry);
   }
 
   async bulkInsert(entries: MemoryEntry[]): Promise<void> {
-    this.ensureInitialized();
-    for (const e of entries) this.validateTags(e.tags);
-    this.driver?.transaction(() => {
-      for (const entry of entries) this.storeSync(entry);
-    });
-    this.emit('bulk:inserted', { count: entries.length });
+    return sqlBackendWriteMethods.bulkInsert.call(this, entries);
   }
 
   async update(id: string, update: MemoryEntryUpdate): Promise<MemoryEntry | null> {
-    this.ensureInitialized();
-    const entry = await this.get(id);
-    if (!entry) return null;
-
-    if (update.content !== undefined) entry.content = update.content;
-    if (update.tags !== undefined) entry.tags = update.tags;
-    if (update.metadata !== undefined) entry.metadata = { ...entry.metadata, ...update.metadata };
-    if (update.accessLevel !== undefined) entry.accessLevel = update.accessLevel;
-    if (update.expiresAt !== undefined) entry.expiresAt = update.expiresAt;
-    if (update.references !== undefined) entry.references = update.references;
-
-    entry.updatedAt = Date.now();
-    entry.version++;
-
-    await this.store(entry);
-    this.emit('entry:updated', { id });
-    return entry;
+    return sqlBackendWriteMethods.update.call(this, id, update);
   }
 
   async delete(id: string): Promise<boolean> {
-    this.ensureInitialized();
-    const d = this.driver!;
-    // Explicit tag cleanup as well as the CASCADE — belt and braces, since FK
-    // enforcement is a pragma that not every driver honours.
-    d.run('DELETE FROM memory_entry_tags WHERE entry_id = ?', [id]);
-    d.run('DELETE FROM memory_embeddings WHERE entry_id = ?', [id]);
-    const changes = d.run('DELETE FROM memory_entries WHERE id = ?', [id]);
-    if (changes > 0) {
-      this.emit('entry:deleted', { id });
-      return true;
-    }
-    return false;
+    return sqlBackendWriteMethods.delete.call(this, id);
   }
 
   async bulkDelete(ids: string[]): Promise<number> {
-    this.ensureInitialized();
-    const d = this.driver!;
-    const count = d.transaction(() => {
-      let deleted = 0;
-      for (const id of ids) {
-        d.run('DELETE FROM memory_entry_tags WHERE entry_id = ?', [id]);
-        d.run('DELETE FROM memory_embeddings WHERE entry_id = ?', [id]);
-        if (d.run('DELETE FROM memory_entries WHERE id = ?', [id]) > 0) deleted++;
-      }
-      return deleted;
-    });
-    this.emit('bulk:deleted', { count });
-    return count;
+    return sqlBackendWriteMethods.bulkDelete.call(this, ids);
   }
 
   async clearNamespace(namespace: string): Promise<number> {
-    this.ensureInitialized();
-    const d = this.driver!;
-    const count = d.transaction(() => {
-      d.run(
-        `DELETE FROM memory_entry_tags
-          WHERE entry_id IN (SELECT id FROM memory_entries WHERE namespace = ?)`,
-        [namespace],
-      );
-      const changes = d.run('DELETE FROM memory_entries WHERE namespace = ?', [namespace]);
-      d.run('DELETE FROM memory_embeddings WHERE entry_id NOT IN (SELECT id FROM memory_entries)');
-      return changes;
-    });
-    this.emit('namespace:cleared', { namespace, count });
-    return count;
+    return sqlBackendWriteMethods.clearNamespace.call(this, namespace);
   }
 
-  // ===== Reads =============================================================
+  // ===== Reads ==============================================================
+  // Bodies live in sql-backend-reads.ts (file-size sweep).
 
   async get(id: string, agentId?: string): Promise<MemoryEntry | null> {
-    this.ensureInitialized();
-    const startTime = performance.now();
-    const row = this.driver?.get(
-      'SELECT memory_entries.*, emb.embedding AS _emb FROM memory_entries LEFT JOIN memory_embeddings emb ON emb.entry_id = memory_entries.id WHERE memory_entries.id = ?',
-      [id],
-    );
-    if (!row) return null;
-
-    // Collaborative memory promotion — https://arxiv.org/abs/2505.18279
-    const AGENT_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
-    if (agentId && AGENT_ID_RE.test(agentId)) {
-      try {
-        this.driver?.run(
-          'INSERT OR IGNORE INTO agent_reads (entry_id, agent_id, read_at) VALUES (?, ?, ?)',
-          [id, agentId, Date.now()],
-        );
-        this._readCount++;
-        if (this._readCount % 1000 === 0) this.checkAndPromoteEntry(id);
-      } catch {
-        /* non-critical */
-      }
-    }
-
-    const entry = this.rowToEntry(row);
-    this.emit('entry:retrieved', { id, duration: performance.now() - startTime });
-    return entry;
+    return sqlBackendReadMethods.get.call(this, id, agentId);
   }
 
-  /**
-   * Promote an entry to 'team' once 3+ distinct agents have read it within 24h.
-   * https://arxiv.org/abs/2505.18279
-   */
-  private checkAndPromoteEntry(entryId: string): void {
-    const d = this.driver;
-    if (!d) return;
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    d.run('DELETE FROM agent_reads WHERE read_at <= ?', [cutoff]);
-    const row = d.get(
-      'SELECT COUNT(DISTINCT agent_id) as cnt FROM agent_reads WHERE entry_id = ? AND read_at > ?',
-      [entryId, cutoff],
-    );
-    if (Number(row?.cnt ?? 0) >= 3) {
-      d.run(
-        "UPDATE memory_entries SET access_level = 'team' WHERE id = ? AND access_level = 'private'",
-        [entryId],
-      );
-    }
+  protected checkAndPromoteEntry(entryId: string): void {
+    sqlBackendReadMethods.checkAndPromoteEntry.call(this, entryId);
   }
 
   async getByKey(namespace: string, key: string): Promise<MemoryEntry | null> {
-    this.ensureInitialized();
-    const startTime = performance.now();
-    const row = this.driver?.get(
-      'SELECT memory_entries.*, emb.embedding AS _emb FROM memory_entries LEFT JOIN memory_embeddings emb ON emb.entry_id = memory_entries.id WHERE memory_entries.namespace = ? AND memory_entries.key = ?',
-      [namespace, key],
-    );
-    if (!row) return null;
-    const entry = this.rowToEntry(row);
-    this.emit('entry:retrieved', { namespace, key, duration: performance.now() - startTime });
-    return entry;
+    return sqlBackendReadMethods.getByKey.call(this, namespace, key);
   }
 
   async query(query: MemoryQuery): Promise<MemoryEntry[]> {
-    this.ensureInitialized();
-    const startTime = performance.now();
-
-    // PKG-3: LEFT JOIN memory_embeddings once so rowToEntry can read the
-    // embedding column without an N+1 round-trip per result row.
-    let sql =
-      'SELECT memory_entries.*, emb.embedding AS _emb FROM memory_entries LEFT JOIN memory_embeddings emb ON emb.entry_id = memory_entries.id WHERE 1=1';
-    const params: SqlParam[] = [];
-
-    if (query.namespace) {
-      sql += ' AND namespace = ?';
-      params.push(query.namespace);
-    }
-    if (query.key) {
-      sql += ' AND key = ?';
-      params.push(query.key);
-    }
-    if (query.keyPrefix) {
-      sql += ' AND key LIKE ?';
-      params.push(`${query.keyPrefix}%`);
-    }
-    if (query.memoryType) {
-      sql += ' AND type = ?';
-      params.push(query.memoryType);
-    }
-    if (query.accessLevel) {
-      sql += ' AND access_level = ?';
-      params.push(query.accessLevel);
-    }
-    if (query.ownerId) {
-      sql += ' AND owner_id = ?';
-      params.push(query.ownerId);
-    }
-    if (query.createdAfter) {
-      sql += ' AND created_at >= ?';
-      params.push(query.createdAfter);
-    }
-    if (query.createdBefore) {
-      sql += ' AND created_at <= ?';
-      params.push(query.createdBefore);
-    }
-    if (query.updatedAfter) {
-      sql += ' AND updated_at >= ?';
-      params.push(query.updatedAfter);
-    }
-    if (query.updatedBefore) {
-      sql += ' AND updated_at <= ?';
-      params.push(query.updatedBefore);
-    }
-    // Bi-temporal event-time filters (arXiv:2501.13956 — Zep/Graphiti)
-    if (query.eventAfter) {
-      sql += ' AND event_at >= ?';
-      params.push(query.eventAfter);
-    }
-    if (query.eventBefore) {
-      sql += ' AND event_at <= ?';
-      params.push(query.eventBefore);
-    }
-
-    if (!query.includeExpired) {
-      sql += ' AND (expires_at IS NULL OR expires_at > ?)';
-      params.push(Date.now());
-    }
-
-    // MemoryQuery.tags is documented as "entries must have all specified tags"
-    // (types.ts). Counting distinct matches enforces that; an EXISTS(... IN ...)
-    // would be ANY-match, which is exactly the divergence that made the two old
-    // backends return different result sets for the same call.
-    if (query.tags && query.tags.length > 0) {
-      this.validateTags(query.tags);
-      const placeholders = query.tags.map(() => '?').join(', ');
-      sql += ` AND (
-        SELECT COUNT(DISTINCT t.tag) FROM memory_entry_tags t
-        WHERE t.entry_id = memory_entries.id AND t.tag IN (${placeholders})
-      ) = ?`;
-      params.push(...query.tags, query.tags.length);
-    }
-
-    const colMap: Record<string, string> = {
-      createdAt: 'created_at',
-      updatedAt: 'updated_at',
-      lastAccessedAt: 'last_accessed_at',
-      accessCount: 'access_count',
-      key: 'key',
-    };
-    const orderCol =
-      query.sortField && query.sortField !== 'score' && colMap[query.sortField]
-        ? colMap[query.sortField]
-        : 'created_at';
-    const orderDir = query.sortDirection === 'asc' ? 'ASC' : 'DESC';
-    sql += ` ORDER BY ${orderCol} ${orderDir} LIMIT ?`;
-
-    const effectiveLimit = Math.min(Math.max(1, query.limit ?? MAX_QUERY_LIMIT), MAX_QUERY_LIMIT);
-    params.push(effectiveLimit);
-    if (query.offset) {
-      sql += ' OFFSET ?';
-      params.push(query.offset);
-    }
-
-    const rows = this.driver?.all(sql, params) ?? [];
-    const results = rows.map((r) => this.rowToEntry(r));
-
-    const duration = performance.now() - startTime;
-    this.stats.queryCount++;
-    this.stats.totalQueryTime += duration;
-    this.emit('query:executed', { query, resultCount: results.length, duration });
-    return results;
+    return sqlBackendReadMethods.query.call(this, query);
   }
 
-  /**
-   * Semantic search. Below MONOMIND_HNSW_THRESHOLD active embedded entries
-   * (default 5000), brute-force cosine over stored embeddings — namespace-
-   * and TTL-filtered in SQL — stays cheaper (a few tens of ms at second-brain
-   * scale). Above it, getAnnIndex() builds (or loads a persisted) HNSW graph
-   * and this searches that instead; results are still namespace/threshold
-   * filtered post-search to match the brute-force semantics exactly.
-   */
   async search(embedding: Float32Array, options: SearchOptions): Promise<SearchResult[]> {
-    this.ensureInitialized();
-    const ns = options.filters?.namespace;
-
-    const ann = await this.getAnnIndex(embedding.length).catch(() => null);
-    if (ann) {
-      const applyFilters = (raw: Array<{ id: string; distance: number }>): SearchResult[] => {
-        const out: SearchResult[] = [];
-        for (const r of raw) {
-          const entry = ann.entries.get(r.id);
-          if (!entry) continue;
-          if (ns && entry.namespace !== ns) continue;
-          const score = 1 - r.distance;
-          if (options.threshold !== undefined && score < options.threshold) continue;
-          out.push({ entry, score, distance: r.distance });
-          if (out.length >= options.k) break;
-        }
-        return out;
-      };
-
-      const overFetch = Math.max(options.k * 4, options.k + 20);
-      let results = applyFilters(
-        await ann.index.search(embedding, Math.min(overFetch, ann.entries.size)),
-      );
-
-      // A fixed over-fetch multiple assumes matches are spread roughly evenly
-      // through the globally-nearest candidates. A namespace filter can
-      // violate that — a namespace's true nearest neighbors may simply not be
-      // among the top `overFetch` globally, understating recall (or
-      // returning nothing) even though matches exist elsewhere in the graph.
-      // There's no way to know how deep those matches rank without searching
-      // further, so the only correct fallback is to widen all the way to the
-      // full index rather than guessing a bigger-but-still-arbitrary number.
-      if (ns && results.length < options.k && ann.entries.size > overFetch) {
-        results = applyFilters(await ann.index.search(embedding, ann.entries.size));
-      }
-
-      results.sort((a, b) => b.score - a.score);
-      return results;
-    }
-
-    const rows =
-      this.driver?.iterate(
-        `SELECT e.*, emb.embedding AS _emb
-         FROM memory_entries e
-         JOIN memory_embeddings emb ON emb.entry_id = e.id
-        WHERE (e.expires_at IS NULL OR e.expires_at = 0 OR e.expires_at > ?)
-        ${ns ? 'AND e.namespace = ?' : ''}`,
-        ns ? [Date.now(), ns] : [Date.now()],
-      ) ?? [];
-
-    const results: SearchResult[] = [];
-    for (const row of rows) {
-      const buf = row._emb as Buffer | Uint8Array | undefined;
-      if (!buf || buf.byteLength % 4 !== 0) continue;
-      const vec = new Float32Array(buf.buffer as ArrayBuffer, buf.byteOffset, buf.byteLength / 4);
-      if (vec.length !== embedding.length) continue;
-      const similarity = cosineSimilarity(embedding, vec);
-      if (options.threshold !== undefined && similarity < options.threshold) continue;
-      // PKG-3: row already carries _emb from the JOIN; rowToEntry reads it
-      // directly instead of re-querying memory_embeddings per row.
-      results.push({ entry: this.rowToEntry(row), score: similarity, distance: 1 - similarity });
-    }
-    results.sort((a, b) => b.score - a.score);
-    return results.slice(0, options.k);
+    return sqlBackendReadMethods.search.call(this, embedding, options);
   }
 
-  /**
-   * FTS5-accelerated keyword search (Issue #66).
-   *
-   * When the FTS5 index is available, text matching runs inside SQLite via
-   * `MATCH` — orders of magnitude faster than loading 50k rows into JS. When
-   * FTS5 is unavailable (e.g. sql.js WASM compiled without the extension) the
-   * method returns `null` so the caller can fall back to JS-side matching.
-   *
-   * `queryText` is the raw user query; it is FTS5-tokenized automatically.
-   * Special characters are escaped to prevent FTS5 syntax errors.
-   */
   async keywordSearch(
     queryText: string,
-    options: {
-      namespace?: string;
-      limit?: number;
-    } = {},
+    options: { namespace?: string; limit?: number } = {},
   ): Promise<
     { id: string; key: string; content: string; namespace: string; rank: number }[] | null
   > {
-    this.ensureInitialized();
-    if (!this._fts5Available) return null;
-
-    const limit = Math.min(Math.max(1, options.limit ?? 50), MAX_QUERY_LIMIT);
-
-    // Escape FTS5 special characters and build a query where every token must
-    // appear (implicit AND). Tokens shorter than 2 chars are dropped — they
-    // produce noise and FTS5 may reject single-char tokens depending on the
-    // tokenizer configuration.
-    const tokens = queryText
-      .replace(/[":*^~(){}[\]\\]/g, ' ')
-      .split(/\s+/)
-      .filter((t) => t.length > 1)
-      .map((t) => `"${t}"`);
-    if (!tokens.length) return null;
-
-    const d = this.driver!;
-    const ns = options.namespace;
-
-    const search = (match: string) =>
-      d.all(
-        `SELECT f.entry_id, f.key, f.content, e.namespace, rank
-           FROM memory_entries_fts f
-           JOIN memory_entries e ON e.id = f.entry_id
-          WHERE memory_entries_fts MATCH ?
-            AND (e.expires_at IS NULL OR e.expires_at = 0 OR e.expires_at > ?)
-            ${ns ? 'AND e.namespace = ?' : ''}
-          ORDER BY rank
-          LIMIT ?`,
-        ns ? [match, Date.now(), ns, limit] : [match, Date.now(), limit],
-      );
-
-    // Preserve the precise all-terms query first. Natural-language queries
-    // often contain context words absent from the target document, though; a
-    // zero-result strict search should still surface the best lexical leads.
-    let rows = search(tokens.join(' '));
-    if (rows.length === 0 && tokens.length > 1) rows = search(tokens.join(' OR '));
-
-    return rows.map((r) => ({
-      id: String(r.entry_id),
-      key: String(r.key),
-      content: String(r.content),
-      namespace: String(r.namespace),
-      // FTS5 rank is negative (lower = better match); invert to a 0–1 score.
-      rank: Number(r.rank),
-    }));
+    return sqlBackendReadMethods.keywordSearch.call(this, queryText, options);
   }
 
   /** Whether FTS5 full-text search is available on this backend instance. */
@@ -928,137 +289,27 @@ export class SqlBackend extends EventEmitter implements IMemoryBackend {
   }
 
   async count(namespace?: string): Promise<number> {
-    this.ensureInitialized();
-    const row = namespace
-      ? this.driver?.get('SELECT COUNT(*) as count FROM memory_entries WHERE namespace = ?', [
-          namespace,
-        ])
-      : this.driver?.get('SELECT COUNT(*) as count FROM memory_entries');
-    return Number(row?.count ?? 0);
+    return sqlBackendReadMethods.count.call(this, namespace);
   }
 
   async listNamespaces(): Promise<string[]> {
-    this.ensureInitialized();
-    return (this.driver?.all('SELECT DISTINCT namespace FROM memory_entries') ?? []).map((r) =>
-      String(r.namespace),
-    );
+    return sqlBackendReadMethods.listNamespaces.call(this);
   }
 
-  // ===== Introspection =====================================================
+  // ===== Introspection ======================================================
+  // Bodies live in sql-backend-introspect.ts (file-size sweep).
 
   async getStats(): Promise<BackendStats> {
-    this.ensureInitialized();
-    const d = this.driver!;
-
-    const entriesByNamespace: Record<string, number> = {};
-    for (const row of d.all(
-      'SELECT namespace, COUNT(*) as count FROM memory_entries GROUP BY namespace',
-    )) {
-      entriesByNamespace[String(row.namespace)] = Number(row.count);
-    }
-
-    const entriesByType: Record<MemoryType, number> = {
-      episodic: 0,
-      semantic: 0,
-      working: 0,
-      cache: 0,
-    };
-    for (const row of d.all('SELECT type, COUNT(*) as count FROM memory_entries GROUP BY type')) {
-      entriesByType[String(row.type) as MemoryType] = Number(row.count);
-    }
-
-    // page_count/page_size are native-only; sql.js reports 0 rather than a
-    // fabricated figure.
-    let memoryUsage = 0;
-    const pageCount = d.pragma('page_count');
-    const pageSize = d.pragma('page_size');
-    if (typeof pageCount === 'number' && typeof pageSize === 'number') {
-      memoryUsage = pageCount * pageSize;
-    }
-
-    return {
-      totalEntries: await this.count(),
-      entriesByNamespace,
-      entriesByType,
-      memoryUsage,
-      avgQueryTime:
-        this.stats.queryCount > 0 ? this.stats.totalQueryTime / this.stats.queryCount : 0,
-      avgSearchTime: 0,
-    };
+    return sqlBackendIntrospectMethods.getStats.call(this);
   }
 
   async healthCheck(): Promise<HealthCheckResult> {
-    const issues: string[] = [];
-    const recommendations: string[] = [];
-
-    if (!this.initialized || !this.driver) {
-      return {
-        status: 'unhealthy',
-        components: {
-          storage: { status: 'unhealthy', latency: 0, message: 'Not initialized' },
-          index: { status: 'healthy', latency: 0 },
-          cache: { status: 'healthy', latency: 0 },
-        },
-        timestamp: Date.now(),
-        issues: ['Backend not initialized'],
-        recommendations: ['Call initialize() before using'],
-      };
-    }
-
-    let storageHealth: ComponentHealth;
-    try {
-      const integrity = this.driver.pragma('integrity_check');
-      if (integrity === undefined || integrity === 'ok') {
-        // undefined means the driver cannot run the check, not that it failed.
-        storageHealth = { status: 'healthy', latency: 0 };
-      } else {
-        issues.push('Database integrity check failed');
-        recommendations.push('Run VACUUM to repair database');
-        storageHealth = { status: 'unhealthy', latency: 0, message: 'Integrity check failed' };
-      }
-    } catch (error) {
-      issues.push('Failed to check database integrity');
-      storageHealth = { status: 'unhealthy', latency: 0, message: String(error) };
-    }
-
-    const totalEntries = await this.count();
-    const utilizationPercent = (totalEntries / this.config.maxEntries) * 100;
-    if (utilizationPercent > 95) {
-      issues.push('Storage utilization critical (>95%)');
-      recommendations.push('Cleanup old data or increase maxEntries');
-      storageHealth = { status: 'unhealthy', latency: 0, message: 'Near capacity' };
-    } else if (utilizationPercent > 80) {
-      issues.push('Storage utilization high (>80%)');
-      recommendations.push('Consider cleanup');
-      if (storageHealth.status === 'healthy') {
-        storageHealth = { status: 'degraded', latency: 0, message: 'High utilization' };
-      }
-    }
-
-    const status =
-      storageHealth.status === 'unhealthy'
-        ? 'unhealthy'
-        : storageHealth.status === 'degraded'
-          ? 'degraded'
-          : 'healthy';
-
-    return {
-      status,
-      components: {
-        storage: storageHealth,
-        index: { status: 'healthy', latency: 0 },
-        cache: { status: 'healthy', latency: 0 },
-      },
-      timestamp: Date.now(),
-      issues,
-      recommendations,
-    };
+    return sqlBackendIntrospectMethods.healthCheck.call(this);
   }
 
   /** Flush to durable storage. No-op on write-through drivers. */
   async persist(): Promise<void> {
-    if (!this.driver) return;
-    await this.driver.persist();
+    return sqlBackendIntrospectMethods.persist.call(this);
   }
 
   // ===== Internals =========================================================
@@ -1087,7 +338,7 @@ export class SqlBackend extends EventEmitter implements IMemoryBackend {
     }
   }
 
-  private rowToEntry(row: Record<string, unknown>): MemoryEntry {
+  protected rowToEntry(row: Record<string, unknown>): MemoryEntry {
     // PKG-3: callers LEFT JOIN memory_embeddings AS _emb so the embedding is
     // already on the row — no extra SELECT per entry. The buffer slice
     // pattern matches storeSync(): Node pools small Buffers in a shared 4KB

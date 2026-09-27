@@ -1,8 +1,26 @@
 /**
  * CLI Command Parser
  * Advanced argument parsing with validation and type coercion
+ *
+ * File-size sweep: the class's method BODIES are grouped into sibling
+ * modules — flag tokenizing/merging/coercion in parser-flags.ts, short-flag
+ * alias and boolean/array flag-scope building in parser-aliases.ts, and
+ * default application + flag validation in parser-validate.ts — mixed onto
+ * CommandParser.prototype below. Each stays a real method here (same
+ * signature, same visibility) so callers and TypeScript see no difference;
+ * the body is just `return theSiblingImpl.call(this, ...args)`. Fields those
+ * bodies read/write moved from `private` to `protected` (compile-time only;
+ * no runtime change) — TypeScript allows a standalone function typed
+ * `this: CommandParser` to reach `protected` members but not `private` ones,
+ * so `protected` is the minimum visibility the split needs. The two
+ * `private static` members with no external references (RESERVED_FLAG_KEYS,
+ * asChain) don't have that this-typed escape hatch for static access, so
+ * they moved wholesale into the sibling file that uses them instead.
  */
 
+import { parserAliasMethods } from './parser-aliases.js';
+import { parserFlagMethods } from './parser-flags.js';
+import { parserValidateMethods } from './parser-validate.js';
 import type { Command, CommandOption, ParsedFlags } from './types.js';
 
 export interface ParseResult {
@@ -23,9 +41,9 @@ export interface ParserOptions {
 }
 
 export class CommandParser {
-  private options: ParserOptions;
-  private commands: Map<string, Command> = new Map();
-  private globalOptions: CommandOption[] = [];
+  protected options: ParserOptions;
+  protected commands: Map<string, Command> = new Map();
+  protected globalOptions: CommandOption[] = [];
 
   constructor(options: ParserOptions = {}) {
     this.options = {
@@ -128,70 +146,18 @@ export class CommandParser {
     });
   }
 
-  /**
-   * Reserved keys that would either pollute the prototype chain (`__proto__`,
-   * `constructor`, `prototype`) or shadow `Object.prototype` methods that
-   * downstream consumers commonly call (`hasOwnProperty`, `toString`,
-   * `valueOf`, `isPrototypeOf`, `propertyIsEnumerable`). All are rejected.
-   */
-  private static readonly RESERVED_FLAG_KEYS = new Set([
-    '__proto__',
-    'constructor',
-    'prototype',
-    'hasOwnProperty',
-    'toString',
-    'valueOf',
-    'isPrototypeOf',
-    'propertyIsEnumerable',
-  ]);
-
-  private setFlagSafe(flags: ParsedFlags, key: string, value: string | number | boolean): void {
-    if (CommandParser.RESERVED_FLAG_KEYS.has(key)) return;
-    flags[key] = value;
+  // Bodies live in parser-flags.ts (file-size sweep).
+  protected setFlagSafe(flags: ParsedFlags, key: string, value: string | number | boolean): void {
+    parserFlagMethods.setFlagSafe.call(this, flags, key, value);
   }
 
-  /**
-   * Merge a single parsed flag (or set of `_` positionals) into the
-   * accumulated result flags, collecting repeats into an array instead of
-   * overwriting. Declared `type: 'array'` options always end up as an array
-   * (even a single occurrence); any other repeated flag also becomes an
-   * array on its second occurrence rather than silently dropping the first
-   * value.
-   */
   private mergeParsedFlags(
     into: ParsedFlags,
     from: ParsedFlags,
     arrayFlags: Set<string>,
     booleanFlags?: Set<string>,
   ): void {
-    for (const key of Object.keys(from)) {
-      if (key === '_') {
-        into._.push(...from._);
-        continue;
-      }
-      if (CommandParser.RESERVED_FLAG_KEYS.has(key)) continue;
-      const incoming = from[key];
-
-      if (Array.isArray(into[key])) {
-        (into[key] as string[]).push(...([] as unknown[]).concat(incoming).map(String));
-      } else if (into[key] !== undefined && booleanFlags?.has(key)) {
-        // Declared boolean flag repeated (e.g. `--dry-run --dry-run`) — last
-        // value wins instead of promoting to an array. Callers throughout the
-        // codebase check booleans with `flags['x'] === true`; an array value
-        // would silently fail that check (e.g. guidance.ts's --dry-run,
-        // which guards a destructive write).
-        into[key] = incoming;
-      } else if (into[key] !== undefined) {
-        // Repeated flag not previously an array — promote to array so the
-        // earlier value isn't lost.
-        into[key] = [String(into[key]), String(incoming)];
-      } else if (arrayFlags.has(key)) {
-        // First occurrence of a declared array flag — still wrap in an array.
-        into[key] = [String(incoming)];
-      } else {
-        into[key] = incoming;
-      }
-    }
+    parserFlagMethods.mergeParsedFlags.call(this, into, from, arrayFlags, booleanFlags);
   }
 
   parse(args: string[]): ParseResult {
@@ -353,52 +319,16 @@ export class CommandParser {
     return result;
   }
 
-  /**
-   * Convert a camelCase key to kebab-case (inverse of normalizeKey).
-   */
-  private camelToKebab(key: string): string {
-    return key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+  protected camelToKebab(key: string): string {
+    return parserFlagMethods.camelToKebab.call(this, key);
   }
 
-  /**
-   * Ensure every flag is reachable under both its camelCase and
-   * kebab-case spelling. Runs once, after all flags (including
-   * defaults) have been merged into the result.
-   */
   private mirrorFlagKeys(flags: ParsedFlags): void {
-    for (const key of Object.keys(flags)) {
-      if (key === '_' || CommandParser.RESERVED_FLAG_KEYS.has(key)) continue;
-
-      const camelKey = this.normalizeKey(key);
-      if (
-        camelKey !== key &&
-        flags[camelKey] === undefined &&
-        !CommandParser.RESERVED_FLAG_KEYS.has(camelKey)
-      ) {
-        flags[camelKey] = flags[key];
-      }
-
-      const kebabKey = this.camelToKebab(key);
-      if (
-        kebabKey !== key &&
-        flags[kebabKey] === undefined &&
-        !CommandParser.RESERVED_FLAG_KEYS.has(kebabKey)
-      ) {
-        flags[kebabKey] = flags[key];
-      }
-    }
+    parserFlagMethods.mirrorFlagKeys.call(this, flags);
   }
 
-  /**
-   * True when `value` looks like a space-separated negative number
-   * (`-0.5`, `-42`) rather than a new flag. Scoped narrowly to "leading `-`
-   * immediately followed by a digit" — a legitimate flag name never starts
-   * with a digit, so this can't misfire on a genuine following flag while
-   * still letting `--threshold -0.5` consume `-0.5` as the value instead of
-   * being misparsed as a new (bogus) flag.
-   */
-  private looksLikeNegativeNumber(value: string): boolean {
-    return /^-\d/.test(value);
+  protected looksLikeNegativeNumber(value: string): boolean {
+    return parserFlagMethods.looksLikeNegativeNumber.call(this, value);
   }
 
   private parseFlag(
@@ -407,370 +337,54 @@ export class CommandParser {
     aliases: Record<string, string>,
     booleanFlags: Set<string>,
   ): { flags: ParsedFlags; nextIndex: number } {
-    const flags: ParsedFlags = { _: [] };
-    const arg = args[index];
-    let nextIndex = index + 1;
-
-    if (arg.startsWith('--')) {
-      // Long flag
-      const equalIndex = arg.indexOf('=');
-
-      if (equalIndex !== -1) {
-        // --flag=value
-        const key = arg.slice(2, equalIndex);
-        const value = arg.slice(equalIndex + 1);
-        this.setFlagSafe(flags, this.normalizeKey(key), this.parseValue(value));
-      } else if (arg.startsWith('--no-')) {
-        // --no-flag (boolean negation) — only accept for declared boolean flags
-        // so attackers can't covertly toggle off arbitrary security controls
-        // (--no-verify-signature, --no-confirm, etc.) when the underlying flag
-        // doesn't exist as a boolean option. Unknown --no-X is treated as a
-        // string flag passed verbatim, which validation can then reject.
-        const key = arg.slice(5);
-        const normalizedKey = this.normalizeKey(key);
-        if (booleanFlags.has(normalizedKey)) {
-          this.setFlagSafe(flags, normalizedKey, false);
-        } else {
-          // Record under the prefixed name so it surfaces as unknown rather
-          // than silently downgrading any flag the user happens to spell.
-          this.setFlagSafe(flags, this.normalizeKey(`no-${key}`), true);
-        }
-      } else {
-        const key = arg.slice(2);
-        const normalizedKey = this.normalizeKey(key);
-
-        if (booleanFlags.has(normalizedKey)) {
-          nextIndex = this.setBooleanFlag(flags, normalizedKey, args, nextIndex);
-        } else if (
-          nextIndex < args.length &&
-          (!args[nextIndex].startsWith('-') || this.looksLikeNegativeNumber(args[nextIndex]))
-        ) {
-          this.setFlagSafe(flags, normalizedKey, this.parseValue(args[nextIndex]));
-          nextIndex++;
-        } else {
-          this.setFlagSafe(flags, normalizedKey, true);
-        }
-      }
-    } else if (arg.startsWith('-')) {
-      // Short flag(s)
-      const chars = arg.slice(1);
-
-      if (chars.length === 1) {
-        // Single short flag
-        const key = aliases[chars] || chars;
-        const normalizedKey = this.normalizeKey(key);
-
-        if (booleanFlags.has(normalizedKey)) {
-          nextIndex = this.setBooleanFlag(flags, normalizedKey, args, nextIndex);
-        } else if (
-          nextIndex < args.length &&
-          (!args[nextIndex].startsWith('-') || this.looksLikeNegativeNumber(args[nextIndex]))
-        ) {
-          this.setFlagSafe(flags, normalizedKey, this.parseValue(args[nextIndex]));
-          nextIndex++;
-        } else {
-          this.setFlagSafe(flags, normalizedKey, true);
-        }
-      } else {
-        // Multiple short flags combined (e.g., -abc)
-        for (const char of chars) {
-          const key = aliases[char] || char;
-          this.setFlagSafe(flags, this.normalizeKey(key), true);
-        }
-      }
-    }
-
-    return { flags, nextIndex };
+    return parserFlagMethods.parseFlag.call(this, args, index, aliases, booleanFlags);
   }
 
-  /**
-   * Set a declared boolean flag, consuming an immediately following literal
-   * `true`/`false` as its value and returning the new cursor.
-   *
-   * Without this, `--success false` both set success=`true` AND left the token
-   * "false" in the positional list — where any command that also accepts a
-   * positional read it as that argument. `hooks post-task --task-id abc
-   * --success false` therefore recorded task "false" as *successful* (issue
-   * #269). `--flag=false` always worked; this makes the spaced form agree.
-   */
-  private setBooleanFlag(
+  protected setBooleanFlag(
     flags: ParsedFlags,
     key: string,
     args: string[],
     nextIndex: number,
   ): number {
-    const next = args[nextIndex];
-    if (next === 'true' || next === 'false') {
-      this.setFlagSafe(flags, key, next === 'true');
-      return nextIndex + 1;
-    }
-    this.setFlagSafe(flags, key, true);
-    return nextIndex;
+    return parserFlagMethods.setBooleanFlag.call(this, flags, key, args, nextIndex);
   }
 
-  private parseValue(value: string): string | number | boolean {
-    // Boolean
-    if (value.toLowerCase() === 'true') return true;
-    if (value.toLowerCase() === 'false') return false;
-
-    // Number — only coerce if the string is unambiguously a canonical number.
-    // The previous code coerced any numeric-looking string, which silently
-    // dropped leading zeros ("00042" → 42), mangled IDs/tokens above
-    // Number.MAX_SAFE_INTEGER, and could cause tenant/identity mix-ups when
-    // downstream consumers strict-equal-compared against stored strings.
-    if (value.trim() !== '' && /^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$/.test(value)) {
-      const num = Number(value);
-      if (
-        (Number.isFinite(num) && Number.isSafeInteger(num)) ||
-        (!Number.isInteger(num) && Number.isFinite(num))
-      ) {
-        return num;
-      }
-    }
-
-    // String
-    return value;
+  protected parseValue(value: string): string | number | boolean {
+    return parserFlagMethods.parseValue.call(this, value);
   }
 
-  private normalizeKey(key: string): string {
-    // Convert kebab-case to camelCase
-    return key.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+  protected normalizeKey(key: string): string {
+    return parserFlagMethods.normalizeKey.call(this, key);
   }
 
-  private buildAliases(): Record<string, string> {
-    const aliases: Record<string, string> = {};
-
-    // Add aliases from all commands and subcommands first (lowest priority) —
-    // any command's own options may still be re-applied by buildScopedAliases()
-    // once the resolved command is known.
-    for (const cmd of this.commands.values()) {
-      if (cmd.options) {
-        for (const opt of cmd.options) {
-          if (opt.short) {
-            aliases[opt.short] = opt.name;
-          }
-        }
-      }
-      // Also include subcommands' options
-      if (cmd.subcommands) {
-        for (const sub of cmd.subcommands) {
-          if (sub.options) {
-            for (const opt of sub.options) {
-              if (opt.short) {
-                aliases[opt.short] = opt.name;
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // Global options are applied last so an unrelated command's short flag
-    // (e.g. "security scan --quick, -Q") can't silently shadow a global flag
-    // of the same letter (e.g. global "-Q, --quiet") for every other command.
-    for (const opt of this.globalOptions) {
-      if (opt.short) {
-        aliases[opt.short] = opt.name;
-      }
-    }
-
-    return { ...aliases, ...this.options.aliases };
+  // Bodies live in parser-aliases.ts (file-size sweep).
+  protected buildAliases(): Record<string, string> {
+    return parserAliasMethods.buildAliases.call(this);
   }
 
-  /**
-   * Build aliases scoped to a specific command/subcommand.
-   * The resolved command's short flags take priority over global ones,
-   * fixing collisions where multiple subcommands use the same short flag (e.g. -t).
-   */
   private buildScopedAliases(scope?: Command | Command[]): Record<string, string> {
-    // Start with global aliases as base
-    const aliases = this.buildAliases();
-
-    // Override with the resolved chain's own options (these take priority);
-    // deepest subcommand last, so it wins over its ancestors.
-    for (const cmd of CommandParser.asChain(scope)) {
-      for (const opt of cmd.options ?? []) {
-        if (opt.short) {
-          aliases[opt.short] = opt.name;
-        }
-      }
-    }
-
-    return aliases;
+    return parserAliasMethods.buildScopedAliases.call(this, scope);
   }
 
-  /** Normalize a single command or a resolved chain into an array. */
-  private static asChain(scope?: Command | Command[]): Command[] {
-    if (!scope) return [];
-    return Array.isArray(scope) ? scope : [scope];
-  }
-
-  /**
-   * Get boolean flags scoped to a specific command/subcommand chain.
-   */
   private getScopedBooleanFlags(scope?: Command | Command[]): Set<string> {
-    const flags = this.getBooleanFlags();
-
-    for (const cmd of CommandParser.asChain(scope)) {
-      for (const opt of cmd.options ?? []) {
-        if (opt.type === 'boolean') {
-          flags.add(this.normalizeKey(opt.name));
-        }
-      }
-    }
-
-    return flags;
+    return parserAliasMethods.getScopedBooleanFlags.call(this, scope);
   }
 
-  /**
-   * Get flags declared `type: 'array'`, scoped to a specific command/subcommand chain.
-   */
   private getScopedArrayFlags(scope?: Command | Command[]): Set<string> {
-    const flags = new Set<string>();
-    for (const cmd of CommandParser.asChain(scope)) {
-      for (const opt of cmd.options ?? []) {
-        if (opt.type === 'array') {
-          flags.add(this.normalizeKey(opt.name));
-        }
-      }
-    }
-    return flags;
+    return parserAliasMethods.getScopedArrayFlags.call(this, scope);
   }
 
-  private getBooleanFlags(): Set<string> {
-    const flags = new Set<string>();
-
-    for (const opt of this.globalOptions) {
-      if (opt.type === 'boolean') {
-        flags.add(this.normalizeKey(opt.name));
-      }
-    }
-
-    // Add boolean flags from all commands and subcommands
-    for (const cmd of this.commands.values()) {
-      if (cmd.options) {
-        for (const opt of cmd.options) {
-          if (opt.type === 'boolean') {
-            flags.add(this.normalizeKey(opt.name));
-          }
-        }
-      }
-      // Also include subcommands' boolean flags
-      if (cmd.subcommands) {
-        for (const sub of cmd.subcommands) {
-          if (sub.options) {
-            for (const opt of sub.options) {
-              if (opt.type === 'boolean') {
-                flags.add(this.normalizeKey(opt.name));
-              }
-            }
-          }
-        }
-      }
-    }
-
-    if (this.options.booleanFlags) {
-      for (const flag of this.options.booleanFlags) {
-        flags.add(this.normalizeKey(flag));
-      }
-    }
-
-    return flags;
+  protected getBooleanFlags(): Set<string> {
+    return parserAliasMethods.getBooleanFlags.call(this);
   }
 
+  // Bodies live in parser-validate.ts (file-size sweep).
   private applyDefaults(flags: ParsedFlags, resolvedCmd?: Command): void {
-    // The resolved command's own options shadow same-name globals: apply the
-    // command's defaults and suppress the global default for those names.
-    const shadowed = new Set<string>();
-    if (resolvedCmd?.options) {
-      for (const opt of resolvedCmd.options) {
-        const key = this.normalizeKey(opt.name);
-        shadowed.add(key);
-        if (flags[key] === undefined && opt.default !== undefined) {
-          flags[key] = opt.default as string | boolean | number | string[];
-        }
-      }
-    }
-
-    // Apply global option defaults
-    for (const opt of this.globalOptions) {
-      const key = this.normalizeKey(opt.name);
-      if (shadowed.has(key)) continue;
-      if (flags[key] === undefined && opt.default !== undefined) {
-        flags[key] = opt.default as string | boolean | number | string[];
-      }
-    }
-
-    // Apply custom defaults
-    if (this.options.defaults) {
-      for (const [key, value] of Object.entries(this.options.defaults)) {
-        const normalizedKey = this.normalizeKey(key);
-        if (flags[normalizedKey] === undefined) {
-          flags[normalizedKey] = value as string | boolean | number | string[];
-        }
-      }
-    }
+    parserValidateMethods.applyDefaults.call(this, flags, resolvedCmd);
   }
 
   validateFlags(flags: ParsedFlags, command?: Command): string[] {
-    const errors: string[] = [];
-    // Command options shadow same-name globals — validate against the
-    // command's definition (its choices/validators), not the global's.
-    const byName = new Map<string, CommandOption>();
-    for (const opt of this.globalOptions) byName.set(opt.name, opt);
-    if (command?.options) {
-      for (const opt of command.options) byName.set(opt.name, opt);
-    }
-    const allOptions = [...byName.values()];
-
-    // Check required flags
-    for (const opt of allOptions) {
-      const key = this.normalizeKey(opt.name);
-
-      if (opt.required && (flags[key] === undefined || flags[key] === '')) {
-        errors.push(`Required option missing: --${opt.name}`);
-      }
-
-      // Check choices
-      if (opt.choices && flags[key] !== undefined) {
-        const value = String(flags[key]);
-        if (!opt.choices.includes(value)) {
-          errors.push(
-            `Invalid value for --${opt.name}: ${value}. Must be one of: ${opt.choices.join(', ')}`,
-          );
-        }
-      }
-
-      // Run custom validator
-      if (opt.validate && flags[key] !== undefined) {
-        const result = opt.validate(flags[key]);
-        if (result !== true) {
-          errors.push(typeof result === 'string' ? result : `Invalid value for --${opt.name}`);
-        }
-      }
-    }
-
-    // Check for unknown flags if not allowed
-    if (!this.options.allowUnknownFlags) {
-      // Include both the camelCase and original (kebab-case) spelling of
-      // each option name — parse() now mirrors flags under both forms, so
-      // validation must recognize both or the mirrored key would be
-      // flagged as an unknown option.
-      const knownFlags = new Set<string>();
-      for (const opt of allOptions) {
-        knownFlags.add(this.normalizeKey(opt.name));
-        knownFlags.add(opt.name);
-      }
-      knownFlags.add('_'); // Positional args
-
-      for (const key of Object.keys(flags)) {
-        if (!knownFlags.has(key) && key !== '_') {
-          errors.push(`Unknown option: --${key}`);
-        }
-      }
-    }
-
-    return errors;
+    return parserValidateMethods.validateFlags.call(this, flags, command);
   }
 
   getGlobalOptions(): CommandOption[] {

@@ -5,25 +5,36 @@
  * to the unified memory system (any IMemoryBackend — SQLite via
  * better-sqlite3/sql.js as of 2026-07).
  *
+ * File-size sweep: the class's method BODIES are grouped into sibling
+ * modules — legacy source loaders (SQLite/Markdown/JSON/swarm/distributed) in
+ * migration-loaders.ts, and batch processing + legacy-entry transformation in
+ * migration-transform.ts — mixed onto MemoryMigrator.prototype below. Each
+ * stays a real method here (same signature, same visibility) so callers and
+ * TypeScript see no difference; the body is just
+ * `return theSiblingImpl.call(this, ...args)`. Fields those bodies read/write
+ * moved from `private` to `protected` (compile-time only; no runtime change)
+ * — TypeScript allows a standalone function typed `this: MemoryMigrator` to
+ * reach `protected` members but not `private` ones, so `protected` is the
+ * minimum visibility the split needs.
+ *
  * @module v1/memory/migration
  */
 
 import { EventEmitter } from 'node:events';
-import { promises as fs } from 'node:fs';
-import * as path from 'node:path';
-import type { IMemoryBackend } from './types.js';
-import {
-  createDefaultEntry,
-  type EmbeddingGenerator,
-  type MemoryEntry,
-  type MemoryEntryInput,
-  type MemoryType,
-  type MigrationConfig,
-  type MigrationError,
-  type MigrationProgress,
-  type MigrationResult,
-  type MigrationSource,
+import { type LegacyEntry, migrationLoaderMethods } from './migration-loaders.js';
+import { migrationTransformMethods } from './migration-transform.js';
+import type {
+  EmbeddingGenerator,
+  IMemoryBackend,
+  MemoryEntry,
+  MigrationConfig,
+  MigrationError,
+  MigrationProgress,
+  MigrationResult,
+  MigrationSource,
 } from './types.js';
+
+export type { LegacyEntry };
 
 /**
  * Default migration configuration
@@ -34,23 +45,6 @@ const DEFAULT_MIGRATION_CONFIG: Partial<MigrationConfig> = {
   validateData: true,
   continueOnError: true,
 };
-
-/**
- * Legacy entry format (common structure)
- */
-interface LegacyEntry {
-  id?: string;
-  key: string;
-  value: unknown;
-  namespace?: string;
-  tags?: string[];
-  metadata?: Record<string, unknown>;
-  timestamp?: number;
-  createdAt?: string | number;
-  updatedAt?: string | number;
-  created_at?: string | number;
-  updated_at?: string | number;
-}
 
 /**
  * Memory Migration Manager
@@ -64,10 +58,10 @@ interface LegacyEntry {
  * - DistributedMemory instances
  */
 export class MemoryMigrator extends EventEmitter {
-  private config: MigrationConfig;
-  private target: IMemoryBackend;
-  private embeddingGenerator?: EmbeddingGenerator;
-  private progress: MigrationProgress;
+  protected config: MigrationConfig;
+  protected target: IMemoryBackend;
+  protected embeddingGenerator?: EmbeddingGenerator;
+  protected progress: MigrationProgress;
 
   constructor(
     target: IMemoryBackend,
@@ -148,323 +142,60 @@ export class MemoryMigrator extends EventEmitter {
     return { ...this.progress };
   }
 
-  // ===== Source Loaders =====
+  // ===== Source Loaders (bodies live in migration-loaders.ts) =====
 
-  private async loadFromSource(): Promise<LegacyEntry[]> {
-    switch (this.config.source) {
-      case 'sqlite':
-        return this.loadFromSQLite();
-      case 'markdown':
-        return this.loadFromMarkdown();
-      case 'json':
-        return this.loadFromJSON();
-      case 'memory-manager':
-        return this.loadFromMemoryManager();
-      case 'monoswarm-memory':
-        return this.loadFromSwarmMemory();
-      case 'distributed-memory':
-        return this.loadFromDistributedMemory();
-      default:
-        throw new Error(`Unknown migration source: ${this.config.source}`);
-    }
+  protected async loadFromSource(): Promise<LegacyEntry[]> {
+    return migrationLoaderMethods.loadFromSource.call(this);
   }
 
-  private async loadFromSQLite(): Promise<LegacyEntry[]> {
-    const dbPath = this.config.sourcePath;
-
-    // A .json-suffixed "sqlite" source is actually an exported JSON dump —
-    // route it through the real JSON loader instead of opening it as a DB.
-    if (dbPath.endsWith('.json')) {
-      return this.loadFromJSON();
-    }
-
-    let Database: new (
-      path: string,
-      opts?: Record<string, unknown>,
-    ) => {
-      prepare: (sql: string) => { all: (...params: unknown[]) => unknown[] };
-      close: () => void;
-    };
-    try {
-      const mod = await import('better-sqlite3');
-      Database = (mod as { default: typeof Database }).default;
-    } catch (error) {
-      throw new Error(
-        `Cannot read SQLite source "${dbPath}": better-sqlite3 is not available (${(error as Error).message})`,
-      );
-    }
-
-    let db: InstanceType<typeof Database> | undefined;
-    try {
-      db = new Database(dbPath, { readonly: true, fileMustExist: true });
-    } catch (error) {
-      throw new Error(`Failed to open SQLite database "${dbPath}": ${(error as Error).message}`);
-    }
-
-    try {
-      const tables = db
-        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_entries'")
-        .all() as Array<{ name: string }>;
-      if (tables.length === 0) {
-        throw new Error(
-          `SQLite source "${dbPath}" has no "memory_entries" table — not a recognized memory backend database`,
-        );
-      }
-
-      const rows = db.prepare('SELECT * FROM memory_entries').all() as Array<
-        Record<string, unknown>
-      >;
-      return rows.map(
-        (row): LegacyEntry => ({
-          id: row.id as string,
-          key: row.key as string,
-          value: row.content,
-          namespace: row.namespace as string | undefined,
-          tags: this.safeJsonParse(row.tags as string, []),
-          metadata: this.safeJsonParse(row.metadata as string, {}),
-          createdAt: row.created_at as number,
-          updatedAt: row.updated_at as number,
-        }),
-      );
-    } finally {
-      db.close();
-    }
+  protected async loadFromSQLite(): Promise<LegacyEntry[]> {
+    return migrationLoaderMethods.loadFromSQLite.call(this);
   }
 
-  private safeJsonParse<T>(value: string | undefined, fallback: T): T {
-    if (!value) return fallback;
-    try {
-      return JSON.parse(value) as T;
-    } catch {
-      return fallback;
-    }
+  protected safeJsonParse<T>(value: string | undefined, fallback: T): T {
+    return migrationLoaderMethods.safeJsonParse.call(this, value, fallback) as T;
   }
 
-  private async loadFromMarkdown(): Promise<LegacyEntry[]> {
-    const entries: LegacyEntry[] = [];
-    const basePath = this.config.sourcePath;
-
-    try {
-      const files = await this.walkDirectory(basePath, '.md');
-
-      for (const filePath of files) {
-        try {
-          const content = await fs.readFile(filePath, 'utf-8');
-          const entry = this.parseMarkdownEntry(filePath, content, basePath);
-          if (entry) {
-            entries.push(entry);
-          }
-        } catch (error) {
-          this.addError(filePath, (error as Error).message, 'PARSE_ERROR', true);
-        }
-      }
-
-      return entries;
-    } catch (error) {
-      throw new Error(`Failed to load Markdown: ${(error as Error).message}`);
-    }
+  protected async loadFromMarkdown(): Promise<LegacyEntry[]> {
+    return migrationLoaderMethods.loadFromMarkdown.call(this);
   }
 
-  private async loadFromJSON(filePathOverride?: string): Promise<LegacyEntry[]> {
-    const filePath = filePathOverride ?? this.config.sourcePath;
-
-    try {
-      const content = await fs.readFile(filePath, 'utf-8');
-      const data = JSON.parse(content);
-
-      // Handle different JSON formats
-      if (Array.isArray(data)) {
-        return data;
-      } else if (data.entries) {
-        return data.entries;
-      } else if (typeof data === 'object') {
-        // Assume it's a namespace -> entries map
-        const entries: LegacyEntry[] = [];
-        for (const [namespace, namespaceEntries] of Object.entries(data)) {
-          if (Array.isArray(namespaceEntries)) {
-            for (const entry of namespaceEntries) {
-              entries.push({ ...entry, namespace });
-            }
-          }
-        }
-        return entries;
-      }
-
-      return [];
-    } catch (error) {
-      throw new Error(`Failed to load JSON: ${(error as Error).message}`);
-    }
+  protected async loadFromJSON(filePathOverride?: string): Promise<LegacyEntry[]> {
+    return migrationLoaderMethods.loadFromJSON.call(this, filePathOverride);
   }
 
-  private async loadFromMemoryManager(): Promise<LegacyEntry[]> {
-    // Would integrate with existing MemoryManager instance
-    // For now, try to load from common paths
-    const possiblePaths = ['./memory/memory-store.json', './.swarm/memory.db', './memory.json'];
-
-    for (const p of possiblePaths) {
-      try {
-        const fullPath = path.resolve(this.config.sourcePath, p);
-        await fs.access(fullPath);
-        // #85: read the verified fullPath, not this.config.sourcePath — the
-        // latter is the search directory, so readFile() on it throws EISDIR,
-        // the catch swallowed it, and the migration silently returned [].
-        // `await` is required: a bare `return promise` inside try/catch does
-        // not route rejections through the catch below.
-        const stat = await fs.stat(fullPath);
-        if (!stat.isFile()) continue;
-        return await this.loadFromJSON(fullPath);
-      } catch {}
-    }
-
-    return [];
+  protected async loadFromMemoryManager(): Promise<LegacyEntry[]> {
+    return migrationLoaderMethods.loadFromMemoryManager.call(this);
   }
 
-  private async loadFromSwarmMemory(): Promise<LegacyEntry[]> {
-    // Would integrate with SwarmMemory partitions
-    const entries: LegacyEntry[] = [];
-    const basePath = this.config.sourcePath;
-
-    try {
-      // Check for swarm memory directory structure
-      const partitionsPath = path.join(basePath, '.swarm', 'memory');
-      const files = await this.walkDirectory(partitionsPath, '.json');
-
-      for (const filePath of files) {
-        try {
-          const content = await fs.readFile(filePath, 'utf-8');
-          const data = JSON.parse(content);
-
-          // Extract namespace from file path
-          const relativePath = path.relative(partitionsPath, filePath);
-          const namespace = path.dirname(relativePath).replace(/\\/g, '/');
-
-          if (Array.isArray(data)) {
-            entries.push(...data.map((e: LegacyEntry) => ({ ...e, namespace })));
-          } else if (data.entries) {
-            entries.push(...data.entries.map((e: LegacyEntry) => ({ ...e, namespace })));
-          }
-        } catch (error) {
-          this.addError(filePath, (error as Error).message, 'PARSE_ERROR', true);
-        }
-      }
-
-      return entries;
-    } catch (_error) {
-      return [];
-    }
+  protected async loadFromSwarmMemory(): Promise<LegacyEntry[]> {
+    return migrationLoaderMethods.loadFromSwarmMemory.call(this);
   }
 
-  private async loadFromDistributedMemory(): Promise<LegacyEntry[]> {
-    // Would integrate with DistributedMemorySystem nodes
-    return this.loadFromSwarmMemory(); // Similar structure
+  protected async loadFromDistributedMemory(): Promise<LegacyEntry[]> {
+    return migrationLoaderMethods.loadFromDistributedMemory.call(this);
   }
 
-  // ===== Batch Processing =====
-
-  private async processBatch(batch: LegacyEntry[]): Promise<void> {
-    for (const legacyEntry of batch) {
-      try {
-        // Validate if enabled
-        if (this.config.validateData) {
-          const validation = this.validateEntry(legacyEntry);
-          if (!validation.valid) {
-            if (this.config.continueOnError) {
-              this.addError(
-                legacyEntry.key || 'unknown',
-                validation.reason || 'Validation failed',
-                'VALIDATION_ERROR',
-                false,
-              );
-              this.progress.skipped++;
-              continue;
-            } else {
-              throw new Error(validation.reason);
-            }
-          }
-        }
-
-        // Transform to new format
-        const newEntry = await this.transformEntry(legacyEntry);
-
-        // Store in target
-        await this.target.store(newEntry);
-        this.progress.migrated++;
-      } catch (error) {
-        if (this.config.continueOnError) {
-          this.addError(
-            legacyEntry.key || 'unknown',
-            (error as Error).message,
-            'STORE_ERROR',
-            true,
-          );
-          this.progress.failed++;
-        } else {
-          throw error;
-        }
-      }
-    }
+  protected async walkDirectory(dir: string, extension: string): Promise<string[]> {
+    return migrationLoaderMethods.walkDirectory.call(this, dir, extension);
   }
 
-  private async transformEntry(legacy: LegacyEntry): Promise<MemoryEntry> {
-    // Map namespace if configured
-    let namespace = legacy.namespace || 'default';
-    if (this.config.namespaceMapping?.[namespace]) {
-      namespace = this.config.namespaceMapping[namespace];
-    }
+  protected parseMarkdownEntry(
+    filePath: string,
+    content: string,
+    basePath: string,
+  ): LegacyEntry | null {
+    return migrationLoaderMethods.parseMarkdownEntry.call(this, filePath, content, basePath);
+  }
 
-    // Determine content
-    const content = typeof legacy.value === 'string' ? legacy.value : JSON.stringify(legacy.value);
+  // ===== Batch Processing (bodies live in migration-transform.ts) =====
 
-    // Map type if configured
-    let type: MemoryType = 'semantic';
-    if (legacy.metadata?.type && typeof legacy.metadata.type === 'string') {
-      if (this.config.typeMapping?.[legacy.metadata.type]) {
-        type = this.config.typeMapping[legacy.metadata.type];
-      } else if (this.isValidMemoryType(legacy.metadata.type)) {
-        type = legacy.metadata.type as MemoryType;
-      }
-    }
+  protected async processBatch(batch: LegacyEntry[]): Promise<void> {
+    return migrationTransformMethods.processBatch.call(this, batch);
+  }
 
-    // Parse timestamps
-    const createdAt = this.parseTimestamp(
-      legacy.createdAt || legacy.created_at || legacy.timestamp,
-    );
-    const updatedAt = this.parseTimestamp(
-      legacy.updatedAt || legacy.updated_at || legacy.timestamp,
-    );
-
-    const input: MemoryEntryInput = {
-      key: legacy.key,
-      content,
-      type,
-      namespace,
-      tags: legacy.tags || [],
-      metadata: {
-        ...legacy.metadata,
-        migrated: true,
-        migrationSource: this.config.source,
-        migrationTimestamp: Date.now(),
-        originalValue: legacy.value,
-      },
-    };
-
-    const entry = createDefaultEntry(input);
-    entry.createdAt = createdAt;
-    entry.updatedAt = updatedAt;
-
-    // Generate embedding if configured
-    if (this.config.generateEmbeddings && this.embeddingGenerator) {
-      try {
-        entry.embedding = await this.embeddingGenerator(content);
-      } catch (error) {
-        // Log but don't fail
-        this.emit('migration:warning', {
-          message: `Failed to generate embedding for ${legacy.key}: ${(error as Error).message}`,
-        });
-      }
-    }
-
-    return entry;
+  protected async transformEntry(legacy: LegacyEntry): Promise<MemoryEntry> {
+    return migrationTransformMethods.transformEntry.call(this, legacy);
   }
 
   // ===== Helper Methods =====
@@ -483,23 +214,11 @@ export class MemoryMigrator extends EventEmitter {
     };
   }
 
-  private validateEntry(entry: LegacyEntry): { valid: boolean; reason?: string } {
-    if (!entry.key || typeof entry.key !== 'string') {
-      return { valid: false, reason: 'Missing or invalid key' };
-    }
-
-    if (entry.value === undefined) {
-      return { valid: false, reason: 'Missing value' };
-    }
-
-    if (entry.key.length > 500) {
-      return { valid: false, reason: 'Key too long (max 500 chars)' };
-    }
-
-    return { valid: true };
+  protected validateEntry(entry: LegacyEntry): { valid: boolean; reason?: string } {
+    return migrationTransformMethods.validateEntry.call(this, entry);
   }
 
-  private addError(entryId: string, message: string, code: string, recoverable: boolean): void {
+  protected addError(entryId: string, message: string, code: string, recoverable: boolean): void {
     const error: MigrationError = {
       entryId,
       message,
@@ -510,22 +229,12 @@ export class MemoryMigrator extends EventEmitter {
     this.emit('migration:error', error);
   }
 
-  private parseTimestamp(value: string | number | undefined): number {
-    if (!value) return Date.now();
-
-    if (typeof value === 'number') {
-      // Handle both milliseconds and seconds
-      return value > 1e12 ? value : value * 1000;
-    }
-
-    const parsed = Date.parse(value);
-    return Number.isNaN(parsed) ? Date.now() : parsed;
+  protected parseTimestamp(value: string | number | undefined): number {
+    return migrationTransformMethods.parseTimestamp.call(this, value);
   }
 
-  private isValidMemoryType(type: string): boolean {
-    // 'procedural' kept here for legacy migration compatibility only —
-    // it is no longer a valid MemoryType (procedural memory removed).
-    return ['episodic', 'semantic', 'procedural', 'working', 'cache'].includes(type);
+  protected isValidMemoryType(type: string): boolean {
+    return migrationTransformMethods.isValidMemoryType.call(this, type);
   }
 
   private estimateTimeRemaining(startTime: number, completed: number, total: number): number {
@@ -565,88 +274,6 @@ export class MemoryMigrator extends EventEmitter {
     }
 
     return summary;
-  }
-
-  private async walkDirectory(dir: string, extension: string): Promise<string[]> {
-    const files: string[] = [];
-
-    try {
-      const entries = await fs.readdir(dir, { withFileTypes: true });
-
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name);
-
-        if (entry.isDirectory()) {
-          const subFiles = await this.walkDirectory(fullPath, extension);
-          files.push(...subFiles);
-        } else if (entry.isFile() && entry.name.endsWith(extension)) {
-          files.push(fullPath);
-        }
-      }
-    } catch (_error) {
-      // Directory doesn't exist or isn't readable
-    }
-
-    return files;
-  }
-
-  private parseMarkdownEntry(
-    filePath: string,
-    content: string,
-    basePath: string,
-  ): LegacyEntry | null {
-    // Extract frontmatter if present
-    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-
-    const metadata: Record<string, unknown> = {};
-    let body = content;
-
-    if (frontmatterMatch) {
-      try {
-        // Simple YAML-like parsing
-        const frontmatter = frontmatterMatch[1];
-        for (const line of frontmatter.split('\n')) {
-          const colonIndex = line.indexOf(':');
-          if (colonIndex > 0) {
-            const key = line.substring(0, colonIndex).trim();
-            let value: unknown = line.substring(colonIndex + 1).trim();
-
-            // Parse common types
-            if (value === 'true') value = true;
-            else if (value === 'false') value = false;
-            else if (typeof value === 'string' && /^\d+$/.test(value)) value = parseInt(value, 10);
-            else if (typeof value === 'string' && value.startsWith('[') && value.endsWith(']')) {
-              try {
-                value = JSON.parse(value.replace(/'/g, '"'));
-              } catch {
-                // Keep as string
-              }
-            }
-
-            metadata[key] = value;
-          }
-        }
-        body = frontmatterMatch[2];
-      } catch {
-        // Failed to parse frontmatter, use whole content
-      }
-    }
-
-    // Derive key from file path
-    const relativePath = path.relative(basePath, filePath);
-    const key = relativePath.replace(/\\/g, '/').replace(/\.md$/, '').replace(/\//g, ':');
-
-    // Derive namespace from directory structure
-    const namespace = path.dirname(relativePath).replace(/\\/g, '/') || 'default';
-
-    return {
-      key,
-      value: body.trim(),
-      namespace,
-      tags: Array.isArray(metadata.tags) ? metadata.tags : [],
-      metadata,
-      timestamp: Date.now(),
-    };
   }
 }
 

@@ -17,6 +17,11 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const SCRIPT = resolve(__dirname, '..', 'scripts', 'understand-analyze.mjs');
+// File-size sweep split understand-analyze.mjs into sibling modules; source
+// checks below read whichever file the checked content actually lives in.
+const DETECT_MODULE = resolve(__dirname, '..', 'scripts', 'understand-analyze-detect.mjs');
+const IGNORE_MODULE = resolve(__dirname, '..', 'scripts', 'understand-analyze-ignore.mjs');
+const ONBOARD_MODULE = resolve(__dirname, '..', 'scripts', 'understand-analyze-onboard.mjs');
 
 describe('understand-analyze.mjs — smoke tests', () => {
   let tmpDir: string;
@@ -103,21 +108,21 @@ describe('understand-analyze.mjs — smoke tests', () => {
   });
 
   it('script source defines language detection table', () => {
-    const src = readFileSync(SCRIPT, 'utf-8');
+    const src = readFileSync(DETECT_MODULE, 'utf-8');
     expect(src).toContain('LANGUAGE_BY_EXT');
     expect(src).toContain("'.ts': 'TypeScript'");
     expect(src).toContain("'.rs': 'Rust'");
   });
 
   it('script source defines framework signatures', () => {
-    const src = readFileSync(SCRIPT, 'utf-8');
+    const src = readFileSync(DETECT_MODULE, 'utf-8');
     expect(src).toContain('FRAMEWORK_SIGNATURES');
     expect(src).toContain("['React'");
     expect(src).toContain("['Django'");
   });
 
   it('script source defines default ignore patterns including node_modules', () => {
-    const src = readFileSync(SCRIPT, 'utf-8');
+    const src = readFileSync(IGNORE_MODULE, 'utf-8');
     expect(src).toContain('DEFAULT_IGNORE_PATTERNS');
     expect(src).toContain("'node_modules/'");
     expect(src).toContain("'.git/'");
@@ -130,10 +135,11 @@ describe('understand-analyze.mjs — smoke tests', () => {
   });
 
   it('script source has onboarding guide builder', () => {
-    const src = readFileSync(SCRIPT, 'utf-8');
-    expect(src).toContain('buildOnboardingGuide');
-    expect(src).toContain('## Architecture');
-    expect(src).toContain('## File Map');
-    expect(src).toContain('## Complexity Hotspots');
+    const mainSrc = readFileSync(SCRIPT, 'utf-8');
+    expect(mainSrc).toContain('buildOnboardingGuide');
+    const onboardSrc = readFileSync(ONBOARD_MODULE, 'utf-8');
+    expect(onboardSrc).toContain('## Architecture');
+    expect(onboardSrc).toContain('## File Map');
+    expect(onboardSrc).toContain('## Complexity Hotspots');
   });
 });
