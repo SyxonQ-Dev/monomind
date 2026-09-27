@@ -47,8 +47,8 @@ Two read-only routes back the view (verified at HEAD):
 
 | Route | Source | Behavior |
 |---|---|---|
-| `GET /api/global-docs` | [`server.mjs → startServer`](packages/@monomind/cli/src/ui/server.mjs#startServer) | Lists document **metadata** (path, project, category, title, preview, mtime, sizeBytes) across every known project root plus the global brain. Returns metadata only — no file content. |
-| `GET /api/global-doc/read?path=...` | [`server.mjs → startServer`](packages/@monomind/cli/src/ui/server.mjs#startServer) | Returns the raw markdown body of one document, fetched on demand when a user opens it in the viewer. |
+| `GET /api/global-docs` | [`server-routes-docs.mjs → handleRoutesDocs`](packages/@monomind/cli/src/ui/server-routes-docs.mjs#handleRoutesDocs) | Lists document **metadata** (path, project, category, title, preview, mtime, sizeBytes) across every known project root plus the global brain. Returns metadata only — no file content. |
+| `GET /api/global-doc/read?path=...` | [`server-routes-docs.mjs → handleRoutesDocs`](packages/@monomind/cli/src/ui/server-routes-docs.mjs#handleRoutesDocs) | Returns the raw markdown body of one document, fetched on demand when a user opens it in the viewer. |
 
 ---
 
@@ -70,7 +70,7 @@ This dashboard has a documented history of security fixes in this project, so th
    `fs.realpathSync` (so a symlink that lexically sits inside an allowed root but physically
    points outside it can't be used to escape), then checked for containment against the
    allowed project roots — `403` if outside, `400` if the resolved file doesn't end in `.md`
-   ([`server.mjs → startServer`](packages/@monomind/cli/src/ui/server.mjs#startServer)). The symlink-resolution step was added in a follow-up fix after the initial ship (a
+   ([`server-routes-docs.mjs → handleRoutesDocs`](packages/@monomind/cli/src/ui/server-routes-docs.mjs#handleRoutesDocs)). The symlink-resolution step was added in a follow-up fix after the initial ship (a
    symlink-escape report) — this section describes only the current, already-patched behavior.
 
 ---
