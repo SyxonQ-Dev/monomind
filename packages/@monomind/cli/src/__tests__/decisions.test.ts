@@ -703,6 +703,41 @@ describe('dagCompleteTask: evidence gate (run_config.completion_evidence)', () =
       daemon.orgs.delete('alpha');
     });
 
+    // 2.16.14 release run, task-10: a docs role with nothing to change sent
+    // honest evidence three times, but each call wrote it INSIDE `result`
+    // (a stray `</result>` then `<parameter name="evidence">{…}`), so the
+    // runtime saw no evidence. The generic refusal did not say so, and the
+    // tool result did not say the attempt was free, so the role thought it
+    // had spent its three attempts and escalated. Then a no-op close on the
+    // unchanged worktree HEAD, sent properly, is accepted.
+    it('evidence written into `result` is named as such, costs no attempt, and the no-op close then succeeds', () => {
+      const { daemon, repo, sha, taskDag, task } = setup(true);
+      const docs = join(tmp, 'docs');
+      execFileSync('git', ['worktree', 'add', '-q', '-b', 'docs', docs], { cwd: repo });
+      const evidence = {
+        headSha: sha,
+        worktree: docs,
+        checks: [
+          { command: 'node scripts/check-doc-refs.mjs', exitCode: 0, output: 'all resolve' },
+        ],
+      };
+      const swallowed = `no doc commit needed.</result>\n<parameter name="evidence">${JSON.stringify(evidence)}`;
+      for (let i = 0; i < 3; i++) {
+        const out = JSON.parse(dagCompleteTask(daemon, 'alpha', 'dev', task.id, swallowed));
+        expect(out.error).toMatch(/inside `result`/);
+        expect(out.error).toMatch(/did not count/);
+        expect(out.requeued).toBe(task.id);
+      }
+      expect(taskDag.get(task.id)?.evidenceFailures).toBeFalsy();
+
+      const out = JSON.parse(
+        dagCompleteTask(daemon, 'alpha', 'dev', task.id, 'no doc commit needed', evidence),
+      );
+      expect(out.done).toBe(task.id);
+      expect(taskDag.get(task.id)?.status).toBe('done');
+      daemon.orgs.delete('alpha');
+    });
+
     // A boss poking org_task_done on someone else's task is refused, but it
     // is not the assignee failing to produce evidence — it must not burn the
     // assignee's budget of attempts.

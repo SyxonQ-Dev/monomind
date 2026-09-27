@@ -281,6 +281,9 @@ export interface TaskEvidenceFacts {
   caller: string;
   /** The task's recorded assignee. */
   assignee: string;
+  /** The `result` text of the same org_task_done call. Only read when no
+   *  evidence arrived, to tell a missing proof from one written into it. */
+  result?: string;
 }
 
 /** Shortest sha prefix accepted — the git default short length. Below that a
@@ -289,6 +292,16 @@ const MIN_SHA_LEN = 7;
 
 const EVIDENCE_SHAPE =
   'Attach evidence: { headSha: "<the current commit sha>", worktree: "<the worktree you ran in, if not the org workspace>", checks: [{ command, exitCode, expectExit?, expectReason?, output }] } — one entry per acceptance criterion, each a command you actually ran, with its real exit code and its output. Set expectExit only when a SINGLE-PURPOSE command is met by a non-zero exit (e.g. 1 for a lookup that must find nothing, 124 for a timeout that must fire), and always say why in expectReason; never on a test suite or any other aggregate command.';
+
+/** Evidence written INTO the `result` string instead of passed as its own
+ *  argument: a `<parameter name="evidence">` left inside it by a mis-closed
+ *  tool call, or the evidence object pasted in as JSON. 2.16.14 release run,
+ *  task-10: three honest proofs refused this way, each answered with the
+ *  generic "not a summary" refusal the role believed it had already met. */
+const EVIDENCE_IN_RESULT = /<parameter\b[^>]*\bname=["']?evidence\b|"headSha"\s*:/i;
+
+const EVIDENCE_IN_RESULT_REFUSAL =
+  'org_task_done refused (run_config.completion_evidence): no `evidence` argument arrived — your evidence is inside `result`, as text. The call reached the runtime as { taskId, result } only (a `<parameter name="evidence">` written inside the result string, e.g. after a stray `</result>`, is part of that string), so nothing was checked. Call org_task_done again with `evidence` as its own argument — an object { headSha, worktree, checks: [...] } next to `taskId` and `result`, not text inside `result` — and keep `result` to the prose summary.';
 
 /** How a task whose job is to REPORT closes. Its failures are findings, not
  *  acceptance checks; its acceptance commands prove the report exists. */
@@ -345,6 +358,7 @@ export function checkTaskEvidence(f: TaskEvidenceFacts): string | null {
   }
   const ev = f.evidence;
   if (!ev) {
+    if (f.result && EVIDENCE_IN_RESULT.test(f.result)) return EVIDENCE_IN_RESULT_REFUSAL;
     return `org_task_done refused (run_config.completion_evidence): closing a task needs verifiable evidence, not a summary. ${EVIDENCE_SHAPE}`;
   }
   if (ev.checks.length === 0) {
