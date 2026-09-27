@@ -1249,6 +1249,37 @@ describe('agent exec: tool_activity', () => {
   });
 });
 
+// ─── #365: MONOMIND_AGENT_EXEC marker ──────────────────────────────────────
+
+describe('agent exec: MONOMIND_AGENT_EXEC env marker (#365)', () => {
+  it('sets MONOMIND_AGENT_EXEC=1 in the runner child env, in every access mode', async () => {
+    const h = makeHarness();
+    let capturedEnv: Record<string, string> | undefined;
+    const runner: AgentRunner = {
+      async *run(args) {
+        capturedEnv = args.env;
+        yield { type: 'result', subtype: 'success' };
+      },
+    };
+    await run(h, runner, { env: { MY_VAR: 'x' } });
+    expect(capturedEnv?.MONOMIND_AGENT_EXEC).toBe('1');
+    expect(capturedEnv?.MY_VAR).toBe('x');
+  });
+
+  it('a caller-supplied MONOMIND_AGENT_EXEC is overridden — it always marks this as an agent-exec child', async () => {
+    const h = makeHarness();
+    let capturedEnv: Record<string, string> | undefined;
+    const runner: AgentRunner = {
+      async *run(args) {
+        capturedEnv = args.env;
+        yield { type: 'result', subtype: 'success' };
+      },
+    };
+    await run(h, runner, { env: { MONOMIND_AGENT_EXEC: '0' } });
+    expect(capturedEnv?.MONOMIND_AGENT_EXEC).toBe('1');
+  });
+});
+
 // ─── JSON Schema → zod ──────────────────────────────────────────────────────
 
 describe('agent exec: jsonSchemaToZodShape', () => {

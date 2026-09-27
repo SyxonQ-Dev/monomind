@@ -53,6 +53,13 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    suppressed; `--project <dir>`, `--if-missing` (idempotent, never
  *    touches an existing file), `--no-graph`, and `--register-claude-project`
  *    (doc/agent-exec-protocol.md §11)
+ *  - `org-role-full-access` — per-role `policy.access: "full"` (Coder mode
+ *    epic #364, issue #365): human-only grant via
+ *    `monomind org role set-access <org> <role> full|scoped`, an
+ *    `access_ack` hash covering the role's security-relevant config, an
+ *    unattended-run gate (`run_config.allow_unattended_full_access`) and
+ *    taint checks in `org validate`. `org status --json` gains
+ *    `roles_access` (§7.2) for any role that declares it.
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
@@ -67,6 +74,7 @@ export const AGENT_PROTOCOL_CAPABILITIES = [
   'org-endpoint-roles',
   'org-federation',
   'org-idle-deadline',
+  'org-role-full-access',
   'doctor-json',
   'doctor-read-only',
   'doctor-offline',

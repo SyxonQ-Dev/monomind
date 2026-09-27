@@ -1,6 +1,6 @@
 # `monomind org` — Command Reference
 
-> **<!-- doc-count:org-subcommands -->36<!-- /doc-count:org-subcommands --> subcommands** for starting, stopping, monitoring, and managing autonomous agent
+> **<!-- doc-count:org-subcommands -->37<!-- /doc-count:org-subcommands --> subcommands** for starting, stopping, monitoring, and managing autonomous agent
 > organizations. All commands target a named org config in `.monomind/orgs/<name>.json`.
 
 ---
@@ -45,6 +45,7 @@
 | [`list`](#list) | List all org configs |
 | [`delete`](#delete) | Delete org and all artifacts |
 | [`mark-complete`](#mark-complete) | Clear stale running/crashed runtime record |
+| [`role set-access`](#role-set-access) | Human-only grant/revoke of `policy.access: "full"` for one role |
 
 ---
 
@@ -681,6 +682,49 @@ monomind org mark-complete <name>
 Writes `{status:'stopped', closedBy:'mark-complete'}` to `runtime.json`.
 
 **Source:** [`commands/org-manage.ts → markCompleteAction`](packages/@monomind/cli/src/commands/org-manage.ts#markCompleteAction)
+
+---
+
+## `role set-access`
+
+Grant or revoke `policy.access: "full"` for one role (#365, Coder mode epic #364) — the **only**
+place this repo writes that field together with a matching, SIGNED `access_ack`. See
+`doc/concepts/org-runtime.md`'s "Full access" section for the full guardrail model (the signed
+ack, the agent-context refusal, the unattended gate, and `org validate`'s taint checks).
+
+```bash
+monomind org role set-access <org> <role> full [--yes-i-understand]
+monomind org role set-access <org> <role> scoped
+```
+
+| Flag | Purpose |
+|---|---|
+| `--yes-i-understand` | Skip the interactive confirmation for a `full` grant (required outside a TTY) |
+
+**`full` refuses outright if it detects an agent context** — env `CLAUDECODE`,
+`CLAUDE_CODE_ENTRYPOINT`, `MONOMIND_ORG_ROLE`, `MONOMIND_SDK_AGENT`, or `MONOMIND_AGENT_EXEC` (set
+on `agent exec`'s runner child env) — with a "run this yourself in a terminal" message, exit
+non-zero, checked BEFORE anything else and not overridable by `--yes-i-understand` or a TTY. This
+is what stops a scoped chat/org from reaching a grant through an allowed `monomind org …` Bash
+prefix. Outside an agent context, `full` refuses a role whose resolved runtime doesn't support full
+access (`agent scan --json`'s `full_access` field — `claude` only today), then requires either an
+interactive confirmation or `--yes-i-understand`.
+
+Once confirmed, it creates (idempotently, mode `0600`) a machine-local signing key in the
+operator-credential directory if one doesn't exist yet, then writes `policy.access: "full"` and
+`policy.access_ack: {by:"human", at, hash, sig}` — `hash` covers the role's prompt/
+responsibilities, runtime, model, provider, tool providers, `reports_to`, `review_input`,
+`policy.settings`, and the org's `run_config.allow_unattended_full_access`/
+`accept_full_access_taint`; `sig` is an HMAC of `hash` (plus org/role/at/by) under that key, so a
+config-writing path that can merely recompute the public `hash` still cannot produce a grant the
+runtime will honor. Editing any hash-covered field afterward suspends the grant
+(`access_state: "suspended"`, visible in `org status`) until this command is run again. `scoped`
+removes `policy.access`/`policy.access_ack`, needs no confirmation, and is exempt from the
+agent-context check (a downgrade is always safe). Neither writes a live running org's session state
+directly — run `monomind org validate <org>` to check for taint/scoped-field warnings, then
+`monomind org reload <org>` (or restart it) to apply.
+
+**Source:** [`commands/org-subcommands-role.ts`](packages/@monomind/cli/src/commands/org-subcommands-role.ts)
 
 ---
 

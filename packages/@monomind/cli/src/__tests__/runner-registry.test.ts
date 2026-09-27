@@ -56,6 +56,7 @@ describe('version handshake (§2)', () => {
         'org-endpoint-roles',
         'org-federation',
         'org-idle-deadline',
+        'org-role-full-access',
         'doctor-json',
         'doctor-read-only',
         'doctor-offline',

@@ -15,6 +15,7 @@ import { resolveRoleProvider } from './provider.js';
 import { resolveRoleGitEnforcement, roleAuthorityMask } from './role-sandbox.js';
 import { type FaultRestarts, ProcessFaultError } from './sandbox-fault.js';
 import { sandboxStubPaths, sandboxStubs } from './sandbox-stubs.js';
+import { beginFullAccessSession, endFullAccessSession } from './session-full-access.js';
 import { resolveModel } from './session-prompt.js';
 import { openSessionStream, sessionRunArgs } from './session-stream.js';
 import type { SessionOpts } from './session-types.js';
@@ -88,6 +89,15 @@ export async function runOneSession(
 
   bus.emit({ type: 'status', from: role.id, msg: 'session starting' });
 
+  // #365: the ONLY place that decides whether this session actually runs
+  // with full access — role.policy.access alone is never trusted below this
+  // point. Absent opts.def (a handful of low-level tests construct
+  // SessionOpts directly with no org def), a role can only ever be scoped.
+  const runtimeKey = role.runtime ?? opts.def?.runtime ?? 'claude';
+  const fullAccessSession = beginFullAccessSession(bus, role, opts.def, runtimeKey);
+  const { resolvedAccess } = fullAccessSession;
+  let fullAccessToolCalls = 0;
+
   let sessionId: string | undefined = resume;
   let hitTurnLimit = false;
   let contextLimitFired = false;
@@ -117,6 +127,10 @@ export async function runOneSession(
   // org_task_cancel for this process's task: end it the same way (task-cancel.ts).
   // Already aborted when it landed during the setup awaits above.
   const unlinkCancelled = linkAbort(cancelled, abort);
+  // #365: `~/.monomind/logs/agent-exec-full-access.log` gets one line per
+  // full-access session run regardless of how it ends — set from every exit
+  // path (the try block's return, or a caught error rethrown after).
+  let sessionExitCode = 1;
   try {
     // #258: policy.git enforced where git runs, not only by Bash text
     // classification — guard env for every runtime, OS sandbox + file-tool
@@ -124,36 +138,52 @@ export async function runOneSession(
     // the sandbox and it can't start.
     // Before the sandbox is built: it can only mask directories that exist.
     ensureAuthorityDirs(homedir(), process.env);
-    const gitEnforcement = resolveRoleGitEnforcement({
-      org,
-      role,
-      cwd,
-      orgRoot: opts.orgRoot,
-      orgDir: opts.orgDir,
-      bus,
-      claudeRuntime: runner instanceof ClaudeAgentRunner,
-      runtime: role.runtime ?? opts.def?.runtime,
-      // The sandbox's mount-point stubs, created once and kept until the run
-      // ends, so no other role's process deletes one mid-bind (sandbox-stubs.ts).
-      // Held before the deny list is built, which keeps a denied cwd read-only
-      // when all of them are in place (sandbox-deny-write.ts).
-      holdStubs: (writableRoots) => {
-        const paths = sandboxStubPaths({ cwd, home: homedir(), writableRoots, env: process.env });
-        sandboxStubs.hold(`${org}:${opts.run ?? ''}`, paths);
-        return sandboxStubs.missing(paths);
-      },
-    });
+    // #365: an ACTIVE full-access role gets none of policy.git's layers —
+    // "removes the remaining PolicyEngine checks too" — so it never calls
+    // resolveRoleGitEnforcement/roleAuthorityMask at all, regardless of its
+    // own (irrelevant) policy.git value. Every other role's enforcement is
+    // built exactly as before this issue.
+    const gitEnforcement =
+      resolvedAccess.access === 'full'
+        ? { env: {} as Record<string, string> }
+        : resolveRoleGitEnforcement({
+            org,
+            role,
+            cwd,
+            orgRoot: opts.orgRoot,
+            orgDir: opts.orgDir,
+            bus,
+            claudeRuntime: runner instanceof ClaudeAgentRunner,
+            runtime: role.runtime ?? opts.def?.runtime,
+            // The sandbox's mount-point stubs, created once and kept until the run
+            // ends, so no other role's process deletes one mid-bind (sandbox-stubs.ts).
+            // Held before the deny list is built, which keeps a denied cwd read-only
+            // when all of them are in place (sandbox-deny-write.ts).
+            holdStubs: (writableRoots) => {
+              const paths = sandboxStubPaths({
+                cwd,
+                home: homedir(),
+                writableRoots,
+                env: process.env,
+              });
+              sandboxStubs.hold(`${org}:${opts.run ?? ''}`, paths);
+              return sandboxStubs.missing(paths);
+            },
+          });
     // What this session really got, not what the config asked for (policy-git.ts).
     policy.setOsSandboxed(!!gitEnforcement.claudeRestrictions?.sandbox);
-    const authorityMask = roleAuthorityMask({
-      bus,
-      roleId: role.id,
-      inSdkSandbox: !!gitEnforcement.claudeRestrictions?.sandbox,
-      // vercel runs in-process with no shell; its file tools go through the policy engine.
-      inProcess: (role.runtime ?? opts.def?.runtime) === 'vercel',
-      cwd,
-      orgRoot: opts.orgRoot,
-    });
+    const authorityMask =
+      resolvedAccess.access === 'full'
+        ? undefined
+        : roleAuthorityMask({
+            bus,
+            roleId: role.id,
+            inSdkSandbox: !!gitEnforcement.claudeRestrictions?.sandbox,
+            // vercel runs in-process with no shell; its file tools go through the policy engine.
+            inProcess: (role.runtime ?? opts.def?.runtime) === 'vercel',
+            cwd,
+            orgRoot: opts.orgRoot,
+          });
     const stream = runner.run(
       sessionRunArgs(opts, {
         runner,
@@ -166,6 +196,7 @@ export async function runOneSession(
         resume,
         authorityMask,
         abort,
+        resolvedAccess,
       }),
     );
 
@@ -180,6 +211,11 @@ export async function runOneSession(
       }
       if (cancelled?.aborted) throw cancelled.reason;
       mailbox.observeTurn(m.type); // the prompt stream outlives a live turn (#331)
+      // #365: feeds ONLY 'tool_use'/'tool_result' — a no-op for every other
+      // message type and, when this session isn't running with active full
+      // access, a no-op entirely (fullAccessSession.tracker is unset).
+      fullAccessSession.tracker?.onMessage(m);
+      if (fullAccessSession.tracker && m.type === 'tool_result') fullAccessToolCalls++;
       if (m.session_id) {
         sessionId = m.session_id;
         // P2-13: propagate the session ID back to the daemon so checkpoints
@@ -392,8 +428,10 @@ export async function runOneSession(
     }
     if (cancelled?.aborted) throw cancelled.reason;
     bus.emit({ type: 'status', from: role.id, msg: 'session ended' });
+    sessionExitCode = 0;
     return { sessionId, hitTurnLimit };
   } catch (err) {
+    sessionExitCode = 1;
     // The turn in flight never got its 'result', so its metered turns (already
     // in policy) have no usage event yet. Cost is only on 'result': unknown.
     if (totalTokens(messageTurnTokens) > 0)
@@ -442,5 +480,14 @@ export async function runOneSession(
     unlinkCancelled();
     abort.abort();
     providerSet?.close();
+    endFullAccessSession(fullAccessSession, {
+      org,
+      role: role.id,
+      cwd,
+      runtime: runtimeKey,
+      sessionId,
+      exitCode: sessionExitCode,
+      toolCalls: fullAccessToolCalls,
+    });
   }
 }

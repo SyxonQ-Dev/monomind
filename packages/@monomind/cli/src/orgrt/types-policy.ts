@@ -170,6 +170,50 @@ export const RolePolicySchema = z
      *  Bare form — `org_send`, `monoagent__automation_publish` — never the
      *  `mcp__org__` namespaced form. `autoApproveTools` still wins. */
     approvalTools: z.array(z.string()).optional(),
+    /** #365 (Coder mode for org roles): 'scoped' (default) is every field
+     *  above, unchanged. 'full' removes the remaining PolicyEngine checks —
+     *  no allowTools/denyTools/fileWrite/fileRead/webAllow/sandbox, no OS
+     *  sandbox, no authority mask, `git` behaves as 'push' regardless of its
+     *  own value. Only takes effect when `access_ack` (below) is present AND
+     *  its hash matches the role's current security-relevant config — see
+     *  access-grant.ts's `resolveRoleAccess`, the runtime's ONLY source of
+     *  truth for whether a role actually runs with full access this session.
+     *  Setting this field alone, from any config-writing path, grants
+     *  nothing. */
+    access: z.enum(['scoped', 'full']).default('scoped'),
+    /** Coder mode (#356) settings sources this role's sessions load, when
+     *  `access: 'full'` is active: any of 'user'/'project'/'local'. Ignored
+     *  for a scoped role. Unset/`[]` = today's isolated behavior even when
+     *  full access is active. */
+    settings: z.array(z.enum(['user', 'project', 'local'])).optional(),
+    /** Human-only grant record for `access: 'full'`, written ONLY by
+     *  `monomind org role set-access <org> <role> full` after an interactive
+     *  confirmation or `--yes-i-understand`. `hash` covers the role's
+     *  security-relevant config (see access-ack.ts); `sig` is an
+     *  HMAC-SHA256 of `{org, role, hash, at, by}` under a machine-local
+     *  secret key that lives in the operator-credential directory
+     *  (authority-mask.ts's `authorityDirs`) — a directory every
+     *  scoped/sandboxed role is denied Read/Edit on. `hash` alone is a
+     *  PUBLIC drift check, not an authenticator: anything that can write the
+     *  org JSON could recompute it, so `resolveRoleAccess`
+     *  (access-grant.ts) — the runtime's ONLY source of truth for whether a
+     *  role actually runs with full access this session — verifies `sig`
+     *  against that key before it ever trusts `hash`. The runtime
+     *  recomputes `hash` every session start and drops the role to scoped
+     *  (`access_state: 'suspended'`) the instant `sig` doesn't verify or
+     *  `hash` no longer matches — so a config-writing path that merely
+     *  copies this object forward without going through the human CLI (and
+     *  without the key, which it cannot read) grants nothing. Never set
+     *  this by hand or from a program other than that command. */
+    access_ack: z
+      .object({
+        by: z.literal('human'),
+        at: z.string(),
+        hash: z.string(),
+        sig: z.string().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .partial()
   .passthrough();

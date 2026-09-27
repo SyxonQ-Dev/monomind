@@ -34,6 +34,7 @@ import {
   resumeFromSubcommand,
   watchSubcommand,
 } from './org-subcommands-observe.js';
+import { roleSubcommand } from './org-subcommands-role.js';
 import {
   pauseSubcommand,
   reloadSubcommand,
@@ -112,6 +113,7 @@ export const orgCommand: Command = {
     listSubcommand,
     deleteSubcommand,
     markCompleteSubcommand,
+    roleSubcommand,
   ],
   examples: [
     { command: 'monomind org run my-org', description: 'Run an org under full daemon control' },
@@ -121,7 +123,7 @@ export const orgCommand: Command = {
     // it only exits with result.exitCode — so this must log itself or bare
     // `monomind org` exits silently with code 1 and zero output.
     const message =
-      'usage: monomind org <run|stop|status|serve|test-loop|logs|report|costs|inbox|questions|answer|approve|deny|replay|resume-from|branch|decisions|create|validate|migrate|list|delete|mark-complete>';
+      'usage: monomind org <run|stop|status|serve|test-loop|logs|report|costs|inbox|questions|answer|approve|deny|replay|resume-from|branch|decisions|create|validate|migrate|list|delete|mark-complete|role>';
     log(output.error(message));
     return { success: false, message };
   },

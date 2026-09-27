@@ -86,6 +86,12 @@ export class ClaudeAgentRunner implements AgentRunner {
     // so leaving this opt-in, rather than always-on, keeps the org runtime
     // byte-for-byte unchanged.
     const streamPartials = args.extras?.includePartialMessages === true;
+    // #365: org full-access roles want the rich 'tool_use' start event (for
+    // tool_activity bus events) without opting into incremental assistant-
+    // text streaming — a second, independent flag so a caller can ask for
+    // just the tool_use signal. session.ts sets this only for a role whose
+    // resolved access is 'full'; every other caller is unaffected.
+    const emitToolUse = streamPartials || args.extras?.includeToolUseEvents === true;
     // canUseTool alone misses every call the CLI allows itself (policy-hook.ts).
     const gate = args.canUseTool ? coverEveryToolCall(args.canUseTool) : undefined;
 
@@ -294,7 +300,7 @@ export class ClaudeAgentRunner implements AgentRunner {
               // every other agent-exec-only enrichment (session.ts never
               // sets it, so the org runtime never sees this message type
               // from this runner and is unaffected).
-              if (streamPartials) {
+              if (emitToolUse) {
                 yield {
                   type: 'tool_use',
                   session_id,
