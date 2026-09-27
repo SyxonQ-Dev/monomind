@@ -129,6 +129,7 @@ export async function executeInit(options: InitOptions): Promise<InitResult> {
           '../knowledge/document-pipeline.js'
         );
         const fs = await import('node:fs');
+        let indexedAnything = false;
 
         if (activeNames.includes('documents')) {
           console.log('\nIndexing documents for Second Brain...');
@@ -137,6 +138,7 @@ export async function executeInit(options: InitOptions): Promise<InitResult> {
             console.log(
               `  ✓ ${docResult.totalChunks} chunks from ${docResult.filesProcessed} documents`,
             );
+            indexedAnything = true;
           } else {
             console.log('  ✓ Knowledge base initialized (no new documents to index)');
           }
@@ -171,11 +173,15 @@ export async function executeInit(options: InitOptions): Promise<InitResult> {
 
           if (seeded > 0) {
             console.log(`  ✓ ${seededChunks} chunks from ${seeded} documents`);
+            indexedAnything = true;
           } else {
             console.log('  ✓ Knowledge base initialized (no project docs found)');
           }
         }
-        result.created.files.push('.monomind/knowledge/');
+        // Idempotency: a re-run over unchanged docs indexes nothing new
+        // (ingestDirectory/ingestDocument skip already-ingested content by
+        // hash), so only report "created" when something was actually added.
+        if (indexedAnything) result.created.files.push('.monomind/knowledge/');
       } catch (docErr) {
         result.skipped.push(
           `knowledge indexing: ${docErr instanceof Error ? docErr.message : String(docErr)}`,
@@ -318,9 +324,28 @@ export async function executeInit(options: InitOptions): Promise<InitResult> {
 
     // Every agent and skill is on disk now: index them (project + user-level)
     // so the prompt hook and `monomind pick` route to them from the start.
+    // Both indexes are unconditionally rebuilt every run — read their bytes
+    // first so a re-run over an unchanged project reports nothing "created"
+    // (idempotency: --if-missing's "second run creates nothing" contract).
+    const registryFile = path.join(targetDir, '.monomind', 'registry.json');
+    const skillRegistryFile = path.join(targetDir, '.claude', 'helpers', 'skill-registry.json');
+    const readIfExists = (file: string): Buffer | null =>
+      fs.existsSync(file) ? fs.readFileSync(file) : null;
+    const beforeRegistry = readIfExists(registryFile);
+    const beforeSkillRegistry = readIfExists(skillRegistryFile);
     result.indexes = buildProjectIndexes(targetDir, findSourceHelpersDir(options.sourceBaseDir));
-    if (result.indexes.skills) result.created.files.push('.claude/helpers/skill-registry.json');
-    if (result.indexes.agents) result.created.files.push('.monomind/registry.json');
+    if (result.indexes.skills) {
+      const after = readIfExists(skillRegistryFile);
+      if (!beforeSkillRegistry || !after?.equals(beforeSkillRegistry)) {
+        result.created.files.push('.claude/helpers/skill-registry.json');
+      }
+    }
+    if (result.indexes.agents) {
+      const after = readIfExists(registryFile);
+      if (!beforeRegistry || !after?.equals(beforeRegistry)) {
+        result.created.files.push('.monomind/registry.json');
+      }
+    }
 
     // Count enabled hooks
     result.summary.hooksEnabled = countEnabledHooks(options);

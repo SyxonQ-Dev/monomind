@@ -48,6 +48,22 @@ monomind init --target claude
 
 The legacy `--codex`, `--opencode`, and `--kimicode` flags remain aliases for their corresponding single targets.
 
+**Headless / scripted init (coder workspaces, mono-agent, CI):**
+
+```bash
+monomind init --project ./some/other/dir --if-missing --json --yes --no-watch --no-install --no-graph
+```
+
+- `--project <dir>` initializes `<dir>` instead of the cwd.
+- `--if-missing` creates only files that don't exist yet — safe to run against a repo you already
+  hand-configured; it never touches an existing `CLAUDE.md`, `AGENTS.md`, `.claude/settings.json`,
+  or `.mcp.json`, and a second run creates nothing.
+- `--json` prints one machine-readable result on stdout
+  (`{root, created, skipped, claude_project_registered, duration_ms}`) with no prompts or spinner.
+- `--no-graph` skips the Monograph code-graph build for a faster, few-second init.
+
+Full contract: `doc/agent-exec-protocol.md` §11 (capability `init-json`).
+
 **Optional — power-user setup:**
 
 ```bash

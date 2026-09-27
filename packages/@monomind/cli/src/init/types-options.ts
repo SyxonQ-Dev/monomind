@@ -33,6 +33,11 @@ export interface InitOptions {
    *  `init upgrade` refreshes blocks with `force` but is not the user's
    *  explicit --force (see file-guard.ts). */
   preserveEdits?: boolean;
+  /** `--if-missing`: create only files that don't exist yet; never touch an
+   *  existing file (CLAUDE.md, .claude/settings.json, skills/commands/agents
+   *  copies, …), even one `force` would otherwise refresh. Idempotent: a
+   *  second run against the same directory creates nothing new. */
+  ifMissing?: boolean;
   /** Run in interactive mode */
   interactive: boolean;
   /** Components to initialize */

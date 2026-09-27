@@ -70,6 +70,43 @@ export const initCommand: Command = {
       default: false,
     },
     {
+      name: 'project',
+      description: 'Initialize <dir> instead of the current directory (validated to exist)',
+      type: 'string',
+    },
+    {
+      name: 'if-missing',
+      description:
+        'Create only files that do not already exist; never modify an existing CLAUDE.md, ' +
+        'AGENTS.md, .claude/settings.json, .mcp.json, or any other existing file. Safe to run ' +
+        'again on an already-initialized directory (idempotent — a second run creates nothing)',
+      type: 'boolean',
+      default: false,
+    },
+    {
+      name: 'json',
+      description:
+        'Print a machine-readable result on stdout — ' +
+        '{root, created, skipped, claude_project_registered, duration_ms} — and suppress ' +
+        'human-readable output',
+      type: 'boolean',
+      default: false,
+    },
+    {
+      name: 'no-graph',
+      description: 'Skip building the Monograph code graph (the slowest step of init)',
+      type: 'boolean',
+      default: false,
+    },
+    {
+      name: 'register-claude-project',
+      description:
+        'Create ~/.claude/projects/<slug>/ for this directory without a model call, so Claude ' +
+        'Code / mono-agent lists it immediately (see doc/agent-exec-protocol.md §11)',
+      type: 'boolean',
+      default: false,
+    },
+    {
       name: 'target',
       short: 't',
       description: 'Coding system to initialize (default: all)',
@@ -204,6 +241,11 @@ export const initCommand: Command = {
       description: 'Update helpers and merge new settings (Agent Teams)',
     },
     { command: 'monomind init upgrade --verbose', description: 'Show detailed upgrade info' },
+    {
+      command: 'monomind init --project ./workspace --if-missing --json --yes --no-graph',
+      description:
+        'Headless, idempotent workspace init for a coder session (see doc/agent-exec-protocol.md §11)',
+    },
   ],
   action: initAction,
 };

@@ -32,6 +32,14 @@ export async function writeSettings(
   result: InitResult,
 ): Promise<void> {
   const settingsPath = path.join(targetDir, '.claude', 'settings.json');
+
+  // `--if-missing`: never merge into an existing settings.json — not even the
+  // hook/env/permission backfill below, which normally runs without --force.
+  if (options.ifMissing && fs.existsSync(settingsPath)) {
+    result.skipped.push('.claude/settings.json');
+    return;
+  }
+
   const generated = JSON.parse(generateSettingsJson(options));
 
   if (fs.existsSync(settingsPath) && fs.statSync(settingsPath).size <= MAX_EXEC_FILE_BYTES) {

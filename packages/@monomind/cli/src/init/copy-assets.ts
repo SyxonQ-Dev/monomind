@@ -127,9 +127,9 @@ export async function copySkills(
       // extra command in a shipped folder. `init --force` did exactly that.
       // The cost of not wiping is that a file removed from a newer version
       // lingers; the cost of wiping is silent data loss, which is worse.
-      guard.copyDir(sourcePath, targetPath);
+      const changed = guard.copyDir(sourcePath, targetPath);
       writtenSkills.push(skillName);
-      result.created.files.push(`.claude/skills/${skillName}`);
+      if (changed) result.created.files.push(`.claude/skills/${skillName}`);
       result.summary.skillsCount++;
     } else {
       // A skill referenced in SKILLS_MAP has no matching source directory —
@@ -240,13 +240,11 @@ export async function copyCommands(
       // No pre-copy rmSync — see the note in copySkills. Both branches below
       // overwrite what they ship, so wiping first only destroys files the user
       // added inside a shipped command directory.
-      if (fs.statSync(sourcePath).isDirectory()) {
-        guard.copyDir(sourcePath, targetPath);
-      } else {
-        guard.copyFile(sourcePath, targetPath);
-      }
+      const changed = fs.statSync(sourcePath).isDirectory()
+        ? guard.copyDir(sourcePath, targetPath)
+        : guard.copyFile(sourcePath, targetPath) === 'written';
       writtenCommands.push(cmdName);
-      result.created.files.push(`.claude/commands/${cmdName}`);
+      if (changed) result.created.files.push(`.claude/commands/${cmdName}`);
       result.summary.commandsCount++;
     }
   }
@@ -320,12 +318,12 @@ export async function copyAgents(
       // extra command in a shipped folder. `init --force` did exactly that.
       // The cost of not wiping is that a file removed from a newer version
       // lingers; the cost of wiping is silent data loss, which is worse.
-      guard.copyDir(sourcePath, targetPath);
+      const changed = guard.copyDir(sourcePath, targetPath);
       // Count agent files (.md only — .yaml agents were migrated to .md)
       const mdFiles = countFiles(sourcePath, '.md');
       result.summary.agentsCount += mdFiles;
       writtenAgents.push(agentCategory);
-      result.created.files.push(`.claude/agents/${agentCategory}`);
+      if (changed) result.created.files.push(`.claude/agents/${agentCategory}`);
     }
   }
 

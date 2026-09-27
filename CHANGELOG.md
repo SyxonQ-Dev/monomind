@@ -4,6 +4,10 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Added
+
+- **`monomind init --project <dir> --if-missing --json`** ([#358](https://github.com/monoes/monomind/issues/358)) — headless, idempotent workspace init for coder sessions. `--project <dir>` targets a directory other than the cwd; `--if-missing` creates only files that don't exist yet and never touches an existing `CLAUDE.md`/`AGENTS.md`/`.claude/settings.json`/`.mcp.json` (idempotent — a second run creates nothing); `--json` prints `{root, created, skipped, claude_project_registered, duration_ms}` on stdout with human output suppressed; `--no-graph` skips the Monograph build for a faster init; `--register-claude-project` best-effort registers `~/.claude/projects/<slug>/` without a model call. New capability `init-json` — see `doc/agent-exec-protocol.md` §11.
+
 ### Fixed
 
 - **A second dashboard server no longer takes over the first one's pairing token when the first is too busy to answer.** A secondary decided whether the primary recorded in `.monomind/control.json` was alive only by probing its `/api/status` (3 tries, 1.5 s each); a primary whose event loop was blocked longer than that looked dead, so the secondary overwrote `dashboard-token` — logging out the primary's clients — and never wrote its own `dashboard-token-<port>`. A live recorded pid now also keeps it a secondary.

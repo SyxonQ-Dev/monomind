@@ -60,6 +60,10 @@ export interface FileGuardOptions {
   replaceUnrecorded: boolean;
   /** `--force`: replace an edited managed block (after backing it up). */
   force?: boolean;
+  /** `--if-missing`: never write over a file that already exists, no matter
+   *  its content — no `.monomind-new`, no adoption, no merge. Every such
+   *  path is recorded in `skippedExisting` instead of `kept`. */
+  ifMissing?: boolean;
 }
 
 export type GuardOutcome = 'written' | 'unchanged' | 'kept';
@@ -67,6 +71,14 @@ export type GuardOutcome = 'written' | 'unchanged' | 'kept';
 export class FileGuard {
   /** Project-relative paths kept because the user edited them. */
   readonly kept: string[] = [];
+  /** Project-relative paths left alone under `--if-missing` because they
+   *  already existed — reported in the run's `skipped`, not `kept`. */
+  readonly skippedExisting: string[] = [];
+  /** Files `guardBlock` has already merged a block into THIS run — lets a
+   *  second block writer (e.g. a platform adapter, after `writeClaudeMd`
+   *  just created CLAUDE.md fresh) keep adding to a file this same run
+   *  created, while `--if-missing` still blocks one that predates the run. */
+  private readonly blockWrittenFiles = new Set<string>();
   /** Messages the run must show the user. */
   readonly warnings: string[] = [];
   readonly backupDir: string;
@@ -101,6 +113,10 @@ export class FileGuard {
   /** Write `content` to `dest` unless that would overwrite a user edit. */
   write(dest: string, content: string | Buffer, mode?: number): GuardOutcome {
     const rel = this.rel(dest);
+    if (this.options.ifMissing && fs.existsSync(dest)) {
+      if (!this.skippedExisting.includes(rel)) this.skippedExisting.push(rel);
+      return 'kept';
+    }
     const next = Buffer.isBuffer(content) ? content : Buffer.from(content);
     const newVersion = `${dest}${NEW_VERSION_SUFFIX}`;
     let outcome: GuardOutcome = 'written';
@@ -141,16 +157,23 @@ export class FileGuard {
     return this.write(dest, fs.readFileSync(src), fs.statSync(src).mode & 0o777);
   }
 
-  /** copyDirRecursive through the guard. */
-  copyDir(src: string, dest: string): void {
+  /** copyDirRecursive through the guard. Returns whether any file inside was
+   *  actually written (new or changed) — false when every file already
+   *  existed and matched (or, under `--if-missing`, simply already existed). */
+  copyDir(src: string, dest: string): boolean {
+    let changed = false;
     for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
       // Skip exFAT/macOS AppleDouble junk files (e.g. "._foo.js").
       if (entry.name.startsWith('._')) continue;
       const from = path.join(src, entry.name);
       const to = path.join(dest, entry.name);
-      if (entry.isDirectory()) this.copyDir(from, to);
-      else this.copyFile(from, to);
+      if (entry.isDirectory()) {
+        if (this.copyDir(from, to)) changed = true;
+      } else if (this.copyFile(from, to) === 'written') {
+        changed = true;
+      }
     }
+    return changed;
   }
 
   /**
@@ -176,7 +199,12 @@ export class FileGuard {
     generated: string,
     form: ManagedBlockForm,
   ): string | null {
-    const key = `${this.rel(file)}#${marker}`;
+    const rel = this.rel(file);
+    if (this.options.ifMissing && fs.existsSync(file) && !this.blockWrittenFiles.has(rel)) {
+      if (!this.skippedExisting.includes(rel)) this.skippedExisting.push(rel);
+      return null;
+    }
+    const key = `${rel}#${marker}`;
     const body = form.read(existing);
     const recorded = this.blocks[key];
     if (body !== null && recorded && sha256(body) !== recorded) {
@@ -199,6 +227,7 @@ export class FileGuard {
     const merged = form.merge(existing);
     this.blocks[key] = sha256(form.read(merged) ?? '');
     recordManifestHashes(this.targetDir, 'blocks', this.blocks);
+    this.blockWrittenFiles.add(rel);
     return merged;
   }
 
@@ -222,7 +251,7 @@ const guards = new WeakMap<InitResult, FileGuard>();
 /** The run's guard, created on first use. */
 export function guardFor(
   targetDir: string,
-  options: { force?: boolean; preserveEdits?: boolean },
+  options: { force?: boolean; preserveEdits?: boolean; ifMissing?: boolean },
   result: InitResult,
 ): FileGuard {
   let guard = guards.get(result);
@@ -230,6 +259,7 @@ export function guardFor(
     guard = new FileGuard(targetDir, {
       replaceUnrecorded: options.force === true,
       force: options.force === true && options.preserveEdits !== true,
+      ifMissing: options.ifMissing === true,
     });
     guards.set(result, guard);
   }
@@ -243,6 +273,9 @@ export function finalizeGuard(result: InitResult): void {
   guard.finalize();
   result.kept = [...guard.kept];
   result.warnings = [...(result.warnings ?? []), ...guard.warnings];
+  if (guard.skippedExisting.length) {
+    result.skipped = [...result.skipped, ...guard.skippedExisting];
+  }
 }
 
 /**

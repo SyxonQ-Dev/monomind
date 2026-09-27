@@ -39,6 +39,11 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    `doctor --read-only` change no file; the payload carries `read_only` (§10)
  *  - `doctor-offline` — `doctor --offline` skips the checks that use the
  *    network and reports them as `skipped` with `skipped_reason` (§10)
+ *  - `init-json` — `monomind init --json` prints `{root, created, skipped,
+ *    claude_project_registered, duration_ms}` on stdout, human output
+ *    suppressed; `--project <dir>`, `--if-missing` (idempotent, never
+ *    touches an existing file), `--no-graph`, and `--register-claude-project`
+ *    (doc/agent-exec-protocol.md §11)
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
@@ -53,6 +58,7 @@ export const AGENT_PROTOCOL_CAPABILITIES = [
   'doctor-json',
   'doctor-read-only',
   'doctor-offline',
+  'init-json',
 ] as const;
 
 /** The exact handshake object emitted by `monomind --version --json`. */

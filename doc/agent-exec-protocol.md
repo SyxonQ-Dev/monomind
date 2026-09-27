@@ -1,4 +1,4 @@
-# Agent Exec Protocol — v1 (rev 11)
+# Agent Exec Protocol — v1 (rev 12)
 
 - **Status**: Implemented (Phase 0 of the mono-agent delegation plan — see
   `mono-agent:docs/plans/local-agent-monomind-delegation.md`)
@@ -116,6 +116,15 @@
     `~/.grok`; hermes writes `~/.hermes/logs` and `.update_check`). Scan now reads the version from
     install files and runs a binary only when it is known to be side-effect free or the caller
     passes `--probe`, always in a scratch HOME. Entries gain `version_source` (§6). Additive only.
+  - rev 12 (2026-09-28): **headless, idempotent workspace init** (issue #358) — new capability
+    `init-json`: `monomind init --json` (§11), plus `--project <dir>`, `--if-missing`,
+    `--no-graph`, and `--register-claude-project`, all usable with or without `--json`. Answers
+    the "does a headless Claude turn already trust the folder" question empirically (§11.3):
+    the Agent SDK's `query()` creates `~/.claude/projects/<slug>/` on its first real turn
+    regardless of `settingSources`, so mono-agent's throwaway `claude -p` registration call is
+    unnecessary once a coder session's first real turn runs; it never writes
+    `~/.claude.json`'s `hasTrustDialogAccepted`, which is interactive-CLI-only and out of reach
+    headlessly. Additive only.
 - **Stability**: Versioned. Frames and events carry `"v": 1`. Breaking changes bump `v` and are
   announced via the capability handshake (§2).
 - **Purpose**: Expose monomind's `AgentRunner` engine (14 local agent CLI runners) and org
@@ -132,6 +141,7 @@
 | Capability handshake | `monomind --version --json` (§2) |
 | Org observe | `monomind org <cmd> --json` (§7) |
 | Org live tail | `monomind org events --ndjson` (§7.3) |
+| Workspace init | `monomind init --json` (§11) |
 
 `agent exec`, `agent scan`, and `agent test` join the **existing** `monomind agent` namespace
 (swarm lifecycle: `spawn/list/status/stop/metrics/pool/health`). The name `agent list` is taken
@@ -142,7 +152,7 @@ by swarm management and is NOT reused by this protocol — the installed-only vi
 
 ```
 $ monomind --version --json
-{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-scan","agent-scan-read-only","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","doctor-json","doctor-read-only","doctor-offline"]}
+{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-scan","agent-scan-read-only","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","doctor-json","doctor-read-only","doctor-offline","init-json"]}
 ```
 
 Callers MUST handshake before use and fail with an actionable message (install/upgrade hint)
@@ -550,3 +560,99 @@ $ monomind doctor -c helpers --fix --json
   local fixes.
 - Callers that need these guarantees check for the capability first: an older monomind rejects or
   ignores the flags, and writes under `--json`.
+
+## 11. `monomind init --json` (capability `init-json`, rev 12)
+
+Headless, idempotent workspace init for a coder session (mono-agent's "Coder mode" epic,
+monoes/monomind#364, sub-issue #358). Turns an arbitrary folder — a fresh scratch directory or an
+existing, user-owned repo — into a ready-to-use monomind/Claude Code workspace with no terminal
+prompts and, under `--if-missing`, a guarantee that nothing the user already has gets touched.
+
+```
+$ monomind init --project /path/to/workspace --if-missing --json --yes --no-watch --no-install
+{"root":"/path/to/workspace","created":["CLAUDE.md",".claude/settings.json",".mcp.json"],
+ "skipped":[],"claude_project_registered":false,"duration_ms":842}
+```
+
+### 11.1 Flags (all usable with or without `--json`)
+
+- `--project <dir>` — initialize `<dir>` instead of the process cwd, equivalent to
+  `cd <dir> && monomind init`. The directory must already exist; a missing one is an error
+  (`exitCode 1`, and under `--json` an `{"success":false,"error":"Directory does not exist: …"}`
+  document on stdout instead of the success shape above).
+- `--if-missing` — create only files that do not already exist. Never modifies an existing
+  `CLAUDE.md`, `AGENTS.md`, `.claude/settings.json`, `.mcp.json`, or any other file init would
+  otherwise merge into (settings.json's hook/env/permission backfill, CLAUDE.md's managed block,
+  skills/commands/agents copies, …) — every one of those is reported in `skipped` instead.
+  Idempotent: running it again against the same directory produces `"created":[]`. Also acts as
+  consent to run against an already-initialized directory — normally `init` without `--force`
+  refuses that (`"Already initialized. Use --force or --yes to reinitialize."`) unless `--yes` is
+  also given; `--if-missing` alone is enough.
+- `--json` — print exactly one JSON document on stdout (schema below) and suppress all
+  human-readable output (no spinner, no boxes, no prompts — a caller with `--json` is always
+  treated as non-interactive). Every other init flag (`--minimal`/`--full`/`--target`/`--platform`/
+  `--skip-claude`/`--only-claude`/`--pin`/`--no-memory`/…) behaves identically whether or not
+  `--json` is also passed — they share one option-resolution path
+  (`src/init/resolve-options.ts`).
+- `--no-graph` — skip the Monograph code-graph build, the slowest step of a full init. A coder
+  workspace wants to be ready in a few seconds; build the graph lazily on first real use instead
+  (`monograph_build`, or a plain `monomind monograph build` later).
+- `--register-claude-project` — best-effort, model-free registration; see §11.3.
+
+### 11.2 JSON result
+
+Success: `{root, created, skipped, claude_project_registered, duration_ms}`.
+
+- `root` — the resolved absolute target directory (`--project`, or the cwd).
+- `created` — every directory and file this run actually wrote (init's `created.directories` and
+  `created.files`, flattened). Every file `--if-missing` guards (CLAUDE.md, AGENTS.md,
+  `.claude/settings.json`, `.mcp.json`, the skills/commands/agents/helpers it copies) is
+  guaranteed absent from `created` on a re-run that finds them already present — that is the
+  literal safety contract. A handful of purely informational bookkeeping entries this init system
+  reports on every successful run regardless of `--if-missing` (re-indexing the agent/skill
+  registries, a "second brain" doc re-scan) can still appear even when nothing on disk actually
+  changed; they are not files a caller should treat as newly written.
+- `skipped` — every path left alone because it already existed (via `--if-missing`, or init's
+  ordinary non-`--force` skip-if-present behavior for CLAUDE.md/.mcp.json/AGENTS.md/etc.).
+- `claude_project_registered` — `true` when `~/.claude/projects/<slug>/` exists for `root` at the
+  end of this run (see §11.3 for exactly what that means and doesn't mean). **Always computed by
+  checking the filesystem after the run**, never assumed — a plain `init` (no
+  `--register-claude-project`, no Claude turn ever run in this directory) truthfully reports
+  `false`.
+- `duration_ms` — wall time for this invocation, measured start to finish of the command's own
+  action (not the whole process).
+
+Failure: `{"success":false,"error":"<message>","duration_ms":<n>}` on stdout (same stream, same
+"exactly one document" rule), `exitCode 1`.
+
+### 11.3 Headless trust: does a Claude turn need a throwaway call first?
+
+mono-agent's current profile init (`internal/monomind/profile_init.go`) runs
+`monomind init --yes --no-watch --no-install` and then a throwaway `claude -p "monomind
+initialized"` in the same directory, solely so `~/.claude/projects/<slug>/` exists (mono-agent's
+dashboard lists sessions from that directory).
+
+Investigated empirically (live `@anthropic-ai/claude-agent-sdk` `query()` calls, real
+credentials, scratch `HOME`s — no test doubles, since the question is about a closed-source CLI
+binary's filesystem side effects): a single `query({ cwd, ... })` call — under **both** agent-exec's
+current locked-down options (`settingSources: []`) and coder mode's planned "normal setup"
+options (`settingSources: ['user','project','local']`, issue #356) — creates
+`~/.claude/projects/<slug>/<sessionId>.jsonl` as a side effect of completing one real turn, with
+`<slug>` = the absolute cwd with every path separator replaced by `-`. **The throwaway
+registration call is therefore unnecessary**: a coder session's first real turn (which runs
+through `monomind agent exec` regardless) registers the directory on its own — mono-agent's own
+dashboard-listing need is met with zero extra model calls once #355/#356 land.
+
+The same calls, in both option shapes, left `~/.claude.json`'s `projects[<path>]` map completely
+empty (`hasTrustDialogAccepted` and friends). That bookkeeping belongs exclusively to the
+interactive CLI's onboarding/trust-dialog flow; it is not reachable through the SDK, headlessly,
+under any options tried. If a caller's idea of "trust" specifically means that flag, it cannot be
+set without a model call and this issue does not attempt to fake it.
+
+`--register-claude-project` implements the one piece that **is** model-free and honest: it
+`mkdir -p`s `~/.claude/projects/<slug>/` (empty, no session file) when it does not already exist,
+so a listing that only checks directory existence sees the workspace immediately, without waiting
+for or forcing a real turn. It never writes to `~/.claude.json`. `claude_project_registered` in
+the JSON result reflects the filesystem truthfully either way — it is `true` exactly when that
+directory exists, regardless of how it got there (a prior real session, a prior
+`--register-claude-project` call, or this run's own).
