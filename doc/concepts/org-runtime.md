@@ -564,7 +564,7 @@ Orgs under different project roots can send messages to each other if explicitly
 - `allow_from`: Org names this org accepts messages from; `"*"` = any; absent = unrestricted
 - `allow_to`: Org names this org may send to; `"*"` = any; absent = unrestricted
 
-**Trust domain:** Orgs under the **same project root** are one trust domain and never restricted — federation rules only apply to cross-root delivery ([`cross-org.ts → deliver`](packages/@monomind/cli/src/orgrt/cross-org.ts#deliver)).
+**Trust domain:** Orgs under the **same project root** are one trust domain and never restricted — federation rules only apply to cross-root delivery ([`cross-org-deliver.ts → deliver`](packages/@monomind/cli/src/orgrt/cross-org-deliver.ts#deliver)).
 
 **Enforcement:**
 - Sender's `allow_to` checked by `deliver()` — rejects with `ERROR: federation: <from> may not send to <to>` plus `federation-denied` audit event
@@ -676,7 +676,7 @@ registered in `.monomind/orgs/remote-hosts.json` (`RemoteRegistry`); `lookupRemo
 projectRoot)` resolves a target org name to a `RemoteHost` ([`remote.ts → lookupRemoteOrg`](packages/@monomind/cli/src/orgrt/remote.ts#lookupRemoteOrg)), and
 `deliverRemote()` ([`remote.ts → deliverRemote`](packages/@monomind/cli/src/orgrt/remote.ts#deliverRemote)) shells out over SSH to deliver a message. It's the last
 fallback in `deliver()`'s cross-org path, tried after local-org and broker lookups both come up
-empty ([`cross-org.ts → deliverRemote`](packages/@monomind/cli/src/orgrt/cross-org.ts#deliverRemote)).
+empty ([`cross-org-remote.ts → deliverRemote`](packages/@monomind/cli/src/orgrt/cross-org-remote.ts#deliverRemote)).
 
 > **Known issue — SSH dispatch currently fails.** `deliverRemote()` shells out to
 > `npx monomind org inbox <name> --json ...` on the remote host ([`remote.ts → deliverRemote`](packages/@monomind/cli/src/orgrt/remote.ts#deliverRemote)), but
