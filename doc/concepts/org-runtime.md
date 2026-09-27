@@ -593,7 +593,7 @@ Every human decision (approvals, question answers, gate resolutions) now records
 - Stored in `approvals.json`, `questions.json`, `gates.json`
 
 **Audit trail:**
-Every daemon-side resolution emits an audit event with reason `decision-resolved`, carrying `{kind, ref, resolver, verdict}` ([`server.ts`, `decisions.ts → resolveGate`](packages/@monomind/cli/src/orgrt/decisions.ts#resolveGate)).
+Every daemon-side resolution emits an audit event with reason `decision-resolved`, carrying `{kind, ref, resolver, verdict}` ([`server.ts`, `decision-gates.ts → resolveGate`](packages/@monomind/cli/src/orgrt/decision-gates.ts#resolveGate)).
 
 **API changes:**
 - Approval requests now carry `requestId` and summarized `input` on the question event
@@ -827,7 +827,7 @@ nothing else open, which is a retry of a close that succeeded, the refusal says 
 was accepted and nothing else is needed.
 
 When a role's turn ends (the runner's `result` message, i.e. its session is about to park),
-[`decisions.ts → nudgeOpenTasksAtTurnEnd`](packages/@monomind/cli/src/orgrt/decisions.ts#nudgeOpenTasksAtTurnEnd)
+[`dag-dispatch.ts → nudgeOpenTasksAtTurnEnd`](packages/@monomind/cli/src/orgrt/dag-dispatch.ts#nudgeOpenTasksAtTurnEnd)
 checks what it left open: for each of its own `running` tasks it delivers one short
 `[task:<id>] STILL OPEN — …` message naming the task and what closing it takes (`evidence` too when
 `run_config.completion_evidence` is on) and emits a `task-open-at-turn-end` audit event. It is
