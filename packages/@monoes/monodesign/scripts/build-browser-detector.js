@@ -27,7 +27,18 @@ const MODULES = [
   { rel: 'registry/antipatterns.mjs', transform: extractAntipatternsArray },
   { rel: 'shared/color.mjs', transform: stripImportsExports },
   { rel: 'shared/fonts.mjs', transform: stripImportsExports },
-  { rel: 'rules/checks.mjs', transform: stripImportsExports },
+  // rules/checks.mjs is only a barrel over these; inline them in source order.
+  { rel: 'rules/checks-pure.mjs', transform: stripImportsExports },
+  { rel: 'rules/checks-html.mjs', transform: stripImportsExports },
+  { rel: 'rules/checks-background.mjs', transform: stripImportsExports },
+  { rel: 'rules/checks-dom.mjs', transform: stripImportsExports },
+  { rel: 'rules/checks-css-values.mjs', transform: stripImportsExports },
+  { rel: 'rules/checks-dom-effects.mjs', transform: stripImportsExports },
+  { rel: 'rules/checks-quality.mjs', transform: stripImportsExports },
+  { rel: 'rules/checks-element.mjs', transform: stripImportsExports },
+  { rel: 'rules/checks-page.mjs', transform: stripImportsExports },
+  { rel: 'rules/checks-overflow.mjs', transform: stripImportsExports },
+  { rel: 'rules/checks-stylesheet.mjs', transform: stripImportsExports },
   { rel: 'browser/injected/index.mjs', transform: stripImportsExports },
 ];
 
