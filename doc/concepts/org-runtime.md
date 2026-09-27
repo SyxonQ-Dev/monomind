@@ -564,7 +564,7 @@ Orgs under different project roots can send messages to each other if explicitly
 - `allow_from`: Org names this org accepts messages from; `"*"` = any; absent = unrestricted
 - `allow_to`: Org names this org may send to; `"*"` = any; absent = unrestricted
 
-**Trust domain:** Orgs under the **same project root** are one trust domain and never restricted — federation rules only apply to cross-root delivery ([`cross-org.ts → deliver`](packages/@monomind/cli/src/orgrt/cross-org.ts#deliver)).
+**Trust domain:** Orgs under the **same project root** are one trust domain and never restricted — federation rules only apply to cross-root delivery ([`cross-org-deliver.ts → deliver`](packages/@monomind/cli/src/orgrt/cross-org-deliver.ts#deliver)).
 
 **Enforcement:**
 - Sender's `allow_to` checked by `deliver()` — rejects with `ERROR: federation: <from> may not send to <to>` plus `federation-denied` audit event
@@ -676,7 +676,7 @@ registered in `.monomind/orgs/remote-hosts.json` (`RemoteRegistry`); `lookupRemo
 projectRoot)` resolves a target org name to a `RemoteHost` ([`remote.ts → lookupRemoteOrg`](packages/@monomind/cli/src/orgrt/remote.ts#lookupRemoteOrg)), and
 `deliverRemote()` ([`remote.ts → deliverRemote`](packages/@monomind/cli/src/orgrt/remote.ts#deliverRemote)) shells out over SSH to deliver a message. It's the last
 fallback in `deliver()`'s cross-org path, tried after local-org and broker lookups both come up
-empty ([`cross-org.ts → deliverRemote`](packages/@monomind/cli/src/orgrt/cross-org.ts#deliverRemote)).
+empty ([`cross-org-remote.ts → deliverRemote`](packages/@monomind/cli/src/orgrt/cross-org-remote.ts#deliverRemote)).
 
 > **Known issue — SSH dispatch currently fails.** `deliverRemote()` shells out to
 > `npx monomind org inbox <name> --json ...` on the remote host ([`remote.ts → deliverRemote`](packages/@monomind/cli/src/orgrt/remote.ts#deliverRemote)), but
@@ -772,7 +772,7 @@ A ready task is handed to its assignee by [`decisions.ts → dispatchReadyTasks`
 as one mailbox line, `[task:<id>] <title>` (plus `[loadout:<name>]` when one was selected).
 `org_task` and each `org_plan_graph` node take an optional `brief` (at most 4000 characters) — the
 creator's instructions: scope, acceptance criteria, paths, what failed last time. It is stored on
-the task ([`task-dag.ts → OrgTask`](packages/@monomind/cli/src/orgrt/task-dag.ts#OrgTask)), so it
+the task ([`task-dag-types.ts → OrgTask`](packages/@monomind/cli/src/orgrt/task-dag-types.ts#OrgTask)), so it
 rides the checkpoint and split children inherit it, and [`task-provenance.ts → dispatchLine`](packages/@monomind/cli/src/orgrt/task-provenance.ts#dispatchLine)
 appends it below the title in every dispatch of the task — the first one, one made later when its
 deps complete, and a re-dispatch after a refused close or a resume. A briefing sent as a separate
