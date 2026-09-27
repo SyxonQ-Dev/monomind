@@ -109,7 +109,17 @@ describe('P1-19: Command-output-honesty regression (prevents P0-1 to P0-6 recurr
   });
 
   describe('P0-6: monoswarm vote strategies — no leftover unimplemented options', () => {
-    const src = readSrc('mcp-tools/monoswarm-tools.ts');
+    // monoswarm-tools.ts composes the monoswarm-*.ts siblings; check them all.
+    const src = [
+      'mcp-tools/monoswarm-tools.ts',
+      'mcp-tools/monoswarm-state.ts',
+      'mcp-tools/monoswarm-lifecycle-tools.ts',
+      'mcp-tools/monoswarm-membership-tools.ts',
+      'mcp-tools/monoswarm-vote-tools.ts',
+      'mcp-tools/monoswarm-coordination-tools.ts',
+    ]
+      .map(readSrc)
+      .join('\n');
 
     it('gossip and crdt are gone entirely, not silently substituted for something else', () => {
       // These were previously declared-but-rejected strategies; the rename
