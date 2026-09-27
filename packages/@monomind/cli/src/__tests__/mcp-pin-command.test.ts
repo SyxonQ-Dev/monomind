@@ -143,14 +143,15 @@ describe('the `claude mcp add` hints all come from one builder', () => {
     );
   });
 
-  it.each(['commands/doctor-project-checks.ts', 'commands/mcp-diagnostics.ts', 'init/claudemd-generator.ts'])(
-    '%s hardcodes no `claude mcp add monomind --` string of its own',
-    (relative) => {
-      const source = readFileSync(join(SRC, relative), 'utf8');
-      expect(source).not.toMatch(/claude mcp add monomind -- npx/);
-      expect(source).toContain('mcpAddHint');
-    },
-  );
+  it.each([
+    'commands/doctor-project-checks.ts',
+    'commands/mcp-diagnostics.ts',
+    'init/claudemd-generator.ts',
+  ])('%s hardcodes no `claude mcp add monomind --` string of its own', (relative) => {
+    const source = readFileSync(join(SRC, relative), 'utf8');
+    expect(source).not.toMatch(/claude mcp add monomind -- npx/);
+    expect(source).toContain('mcpAddHint');
+  });
 
   it('CLAUDE.md quick-setup shows the same command the hints do', () => {
     const md = generateClaudeMd({ ...DEFAULT_INIT_OPTIONS, targetDir: SRC });
