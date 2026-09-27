@@ -9,266 +9,38 @@
  * - Extracts keywords from tasks for pattern matching
  * - Maintains learned routing patterns with confidence scoring
  * - Persists patterns to .swarm/sona-patterns.json
+ *
+ * File-size sweep: split into sibling modules (sona-optimizer-types.ts,
+ * sona-optimizer-keywords.ts, sona-optimizer-singleton.ts). This file remains
+ * the entry point and re-exports everything that used to live here so every
+ * existing import keeps working.
  * @module v1/cli/memory/sona-optimizer
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-
-// ============================================================================
-// Types
-// ============================================================================
-
-/**
- * Trajectory outcome from hooks/intelligence/trajectory-end
- */
-export interface TrajectoryOutcome {
-  trajectoryId: string;
-  task: string;
-  agent: string;
-  success: boolean;
-  steps?: Array<{
-    action: string;
-    result: string;
-    quality: number;
-    timestamp: string;
-  }>;
-  feedback?: string;
-  duration?: number;
-}
-
-/**
- * Learned routing pattern
- */
-export interface LearnedPattern {
-  /** Keywords extracted from task descriptions */
-  keywords: string[];
-  /** Agent that handled the task */
-  agent: string;
-  /** Confidence score (0-1) */
-  confidence: number;
-  /** Number of successful uses */
-  successCount: number;
-  /** Number of failed uses */
-  failureCount: number;
-  /** Last time pattern was used */
-  lastUsed: number;
-  /** Pattern creation time */
-  createdAt: number;
-}
-
-/**
- * Routing suggestion result
- */
-export interface RoutingSuggestion {
-  /** Recommended agent */
-  agent: string;
-  /** Confidence in recommendation (0-1) */
-  confidence: number;
-  /** Source of recommendation */
-  source: 'sona-pattern' | 'keyword-match' | 'default';
-  /** Alternative agents with scores */
-  alternatives: Array<{ agent: string; score: number }>;
-  /** Matched keywords */
-  matchedKeywords?: string[];
-}
-
-/**
- * SONA optimizer statistics
- */
-export interface SONAStats {
-  /** Total patterns learned */
-  totalPatterns: number;
-  /** Successful routing decisions */
-  successfulRoutings: number;
-  /** Failed routing decisions */
-  failedRoutings: number;
-  /** Total trajectories processed */
-  trajectoriesProcessed: number;
-  /** Average confidence of patterns */
-  avgConfidence: number;
-  /** Time of last learning update */
-  lastUpdate: number | null;
-}
-
-/**
- * Persisted state structure
- */
-interface PersistedState {
-  version: string;
-  patterns: Record<string, LearnedPattern>;
-  stats: {
-    trajectoriesProcessed: number;
-    successfulRoutings: number;
-    failedRoutings: number;
-    lastUpdate: number | null;
-  };
-  metadata: {
-    createdAt: string;
-    savedAt: string;
-  };
-}
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-const DEFAULT_PERSISTENCE_PATH = '.swarm/sona-patterns.json';
-const PATTERN_VERSION = '1.0.0';
-const MIN_CONFIDENCE = 0.1;
-const MAX_CONFIDENCE = 0.99;
-const CONFIDENCE_INCREMENT = 0.1;
-const CONFIDENCE_DECREMENT = 0.15;
-const DECAY_RATE = 0.01; // Per day
-const MAX_PATTERNS = 1000;
-
-/**
- * Common agent types for routing
- */
-const _AGENT_TYPES = [
-  'coder',
-  'tester',
-  'reviewer',
-  'architect',
-  'researcher',
-  'optimizer',
-  'debugger',
-  'documenter',
-  'security-architect',
-  'performance-engineer',
-];
-
-/**
- * Task keywords for pattern extraction
- */
-const KEYWORD_CATEGORIES: Record<string, string[]> = {
-  coder: [
-    'implement',
-    'code',
-    'write',
-    'create',
-    'build',
-    'develop',
-    'add',
-    'feature',
-    'function',
-    'class',
-    'module',
-    'api',
-    'endpoint',
-  ],
-  tester: [
-    'test',
-    'spec',
-    'coverage',
-    'unit',
-    'integration',
-    'e2e',
-    'mock',
-    'assert',
-    'expect',
-    'verify',
-    'validate',
-    'scenario',
-  ],
-  reviewer: [
-    'review',
-    'check',
-    'audit',
-    'analyze',
-    'inspect',
-    'evaluate',
-    'quality',
-    'standards',
-    'best-practices',
-    'lint',
-  ],
-  architect: [
-    'architect',
-    'design',
-    'structure',
-    'pattern',
-    'system',
-    'schema',
-    'database',
-    'infrastructure',
-    'scalability',
-    'architecture',
-  ],
-  researcher: [
-    'research',
-    'investigate',
-    'explore',
-    'find',
-    'search',
-    'discover',
-    'analyze',
-    'understand',
-    'learn',
-    'study',
-  ],
-  optimizer: [
-    'optimize',
-    'performance',
-    'speed',
-    'memory',
-    'improve',
-    'enhance',
-    'faster',
-    'efficient',
-    'reduce',
-    'benchmark',
-  ],
-  debugger: [
-    'debug',
-    'fix',
-    'bug',
-    'error',
-    'issue',
-    'problem',
-    'crash',
-    'exception',
-    'trace',
-    'diagnose',
-    'resolve',
-  ],
-  documenter: [
-    'document',
-    'docs',
-    'readme',
-    'comment',
-    'explain',
-    'guide',
-    'tutorial',
-    'api-docs',
-    'specification',
-    'jsdoc',
-  ],
-  'security-architect': [
-    'security',
-    'auth',
-    'authentication',
-    'authorization',
-    'encrypt',
-    'vulnerability',
-    'cve',
-    'secure',
-    'permission',
-    'role',
-  ],
-  'performance-engineer': [
-    'profiling',
-    'bottleneck',
-    'latency',
-    'throughput',
-    'cache',
-    'scale',
-    'load',
-    'stress',
-    'concurrent',
-    'parallel',
-  ],
-};
+import {
+  CONFIDENCE_DECREMENT,
+  CONFIDENCE_INCREMENT,
+  createPatternKey,
+  DECAY_RATE,
+  DEFAULT_PERSISTENCE_PATH,
+  extractKeywords,
+  getAlternatives,
+  MAX_CONFIDENCE,
+  MAX_PATTERNS,
+  MIN_CONFIDENCE,
+  matchKeywordsToAgent,
+  PATTERN_VERSION,
+  validatePattern,
+} from './sona-optimizer-keywords.js';
+import type {
+  LearnedPattern,
+  PersistedState,
+  RoutingSuggestion,
+  SONAStats,
+  TrajectoryOutcome,
+} from './sona-optimizer-types.js';
 
 // ============================================================================
 // SONAOptimizer Class
@@ -323,7 +95,7 @@ export class SONAOptimizer {
     const { task, agent, success } = outcome;
 
     // Extract keywords from task
-    const keywords = this.extractKeywords(task);
+    const keywords = extractKeywords(task);
     if (keywords.length === 0) {
       return {
         learned: false,
@@ -334,7 +106,7 @@ export class SONAOptimizer {
     }
 
     // Create pattern key from sorted keywords
-    const patternKey = this.createPatternKey(keywords, agent);
+    const patternKey = createPatternKey(keywords, agent);
 
     // Get or create pattern
     let pattern = this.patterns.get(patternKey);
@@ -392,7 +164,7 @@ export class SONAOptimizer {
    * Get routing suggestion based on learned patterns
    */
   getRoutingSuggestion(task: string): RoutingSuggestion {
-    const keywords = this.extractKeywords(task);
+    const keywords = extractKeywords(task);
 
     // Try SONA pattern matching first
     const sonaResult = this.findBestPatternMatch(keywords);
@@ -401,19 +173,19 @@ export class SONAOptimizer {
         agent: sonaResult.agent,
         confidence: sonaResult.confidence,
         source: 'sona-pattern',
-        alternatives: this.getAlternatives(keywords, sonaResult.agent),
+        alternatives: getAlternatives(keywords, sonaResult.agent),
         matchedKeywords: sonaResult.matchedKeywords,
       };
     }
 
     // Fallback to keyword-based heuristic
-    const keywordMatch = this.matchKeywordsToAgent(keywords);
+    const keywordMatch = matchKeywordsToAgent(keywords);
     if (keywordMatch) {
       return {
         agent: keywordMatch.agent,
         confidence: keywordMatch.confidence,
         source: 'keyword-match',
-        alternatives: this.getAlternatives(keywords, keywordMatch.agent),
+        alternatives: getAlternatives(keywords, keywordMatch.agent),
         matchedKeywords: keywordMatch.matchedKeywords,
       };
     }
@@ -516,7 +288,7 @@ export class SONAOptimizer {
   importPatterns(patterns: Record<string, LearnedPattern>): number {
     let imported = 0;
     for (const [key, pattern] of Object.entries(patterns)) {
-      if (this.validatePattern(pattern)) {
+      if (validatePattern(pattern)) {
         this.patterns.set(key, pattern);
         imported++;
       }
@@ -528,88 +300,6 @@ export class SONAOptimizer {
   // ============================================================================
   // Private Methods
   // ============================================================================
-
-  /**
-   * Extract meaningful keywords from task description
-   */
-  private extractKeywords(task: string): string[] {
-    if (!task || typeof task !== 'string') {
-      return [];
-    }
-
-    const lower = task.toLowerCase();
-    const words = lower.split(/[\s\-_.,;:!?'"()[\]{}]+/).filter((w) => w.length > 2);
-
-    // Extract keywords that match our categories
-    const keywords = new Set<string>();
-
-    for (const categoryKeywords of Object.values(KEYWORD_CATEGORIES)) {
-      for (const keyword of categoryKeywords) {
-        if (lower.includes(keyword)) {
-          keywords.add(keyword);
-        }
-      }
-    }
-
-    // Add any significant words not in categories
-    for (const word of words) {
-      if (word.length >= 4 && !this.isStopWord(word)) {
-        keywords.add(word);
-      }
-    }
-
-    return Array.from(keywords).slice(0, 10); // Limit to 10 keywords
-  }
-
-  /**
-   * Check if word is a stop word
-   */
-  private isStopWord(word: string): boolean {
-    const stopWords = new Set([
-      'the',
-      'and',
-      'for',
-      'that',
-      'this',
-      'with',
-      'from',
-      'have',
-      'been',
-      'will',
-      'would',
-      'could',
-      'should',
-      'into',
-      'then',
-      'than',
-      'when',
-      'where',
-      'which',
-      'there',
-      'their',
-      'what',
-      'about',
-      'more',
-      'some',
-      'also',
-      'just',
-      'only',
-      'other',
-      'very',
-      'after',
-      'most',
-      'such',
-    ]);
-    return stopWords.has(word);
-  }
-
-  /**
-   * Create a unique pattern key from keywords and agent
-   */
-  private createPatternKey(keywords: string[], agent: string): string {
-    const sortedKeywords = [...keywords].sort();
-    return `${agent}:${sortedKeywords.join('+')}`;
-  }
 
   /**
    * Find the best matching pattern for given keywords
@@ -648,74 +338,6 @@ export class SONAOptimizer {
   }
 
   /**
-   * Match keywords to agent using category heuristics
-   */
-  private matchKeywordsToAgent(keywords: string[]): {
-    agent: string;
-    confidence: number;
-    matchedKeywords: string[];
-  } | null {
-    const scores: Record<string, { score: number; matched: string[] }> = {};
-
-    for (const [agent, categoryKeywords] of Object.entries(KEYWORD_CATEGORIES)) {
-      const matched = keywords.filter((k) => categoryKeywords.includes(k));
-      if (matched.length > 0) {
-        scores[agent] = {
-          score: matched.length / categoryKeywords.length,
-          matched,
-        };
-      }
-    }
-
-    // Find best scoring agent
-    let bestAgent = '';
-    let bestScore = 0;
-    let bestMatched: string[] = [];
-
-    for (const [agent, data] of Object.entries(scores)) {
-      if (data.score > bestScore) {
-        bestScore = data.score;
-        bestAgent = agent;
-        bestMatched = data.matched;
-      }
-    }
-
-    if (bestAgent && bestScore > 0) {
-      return {
-        agent: bestAgent,
-        confidence: Math.min(0.7, 0.3 + bestScore),
-        matchedKeywords: bestMatched,
-      };
-    }
-
-    return null;
-  }
-
-  /**
-   * Get alternative agent suggestions
-   */
-  private getAlternatives(
-    keywords: string[],
-    excludeAgent: string,
-  ): Array<{ agent: string; score: number }> {
-    const alternatives: Array<{ agent: string; score: number }> = [];
-
-    for (const [agent, categoryKeywords] of Object.entries(KEYWORD_CATEGORIES)) {
-      if (agent === excludeAgent) continue;
-
-      const matched = keywords.filter((k) => categoryKeywords.includes(k));
-      if (matched.length > 0) {
-        alternatives.push({
-          agent,
-          score: (matched.length / Math.max(keywords.length, 1)) * 0.5,
-        });
-      }
-    }
-
-    return alternatives.sort((a, b) => b.score - a.score).slice(0, 3);
-  }
-
-  /**
    * Prune old/low-confidence patterns if over limit
    */
   private prunePatterns(): void {
@@ -738,47 +360,6 @@ export class SONAOptimizer {
     for (const { key } of toRemove) {
       this.patterns.delete(key);
     }
-  }
-
-  /**
-   * Validate pattern structure with strict bounds.
-   * SECURITY: confidence/keywords/agent fields must be bounds-checked to
-   * defeat poisoning. typeof NaN === 'number' and typeof Infinity === 'number'
-   * pass the loose typeof check; without bounds, an attacker who writes
-   * sona-patterns.json (poisoned bundle, malicious test fixture, co-located
-   * compromise) can inject `confidence: 1e308` to deterministically win
-   * every routing decision via findBestPatternMatch's `score = matchRatio *
-   * confidence`. Mirrors the pattern in intelligence.ts:loadFromDisk.
-   */
-  private validatePattern(pattern: unknown): pattern is LearnedPattern {
-    if (!pattern || typeof pattern !== 'object') return false;
-    const p = pattern as Record<string, unknown>;
-    if (!Array.isArray(p.keywords) || p.keywords.length > 64) return false;
-    if (!p.keywords.every((k) => typeof k === 'string' && k.length > 0 && k.length <= 128))
-      return false;
-    if (typeof p.agent !== 'string' || p.agent.length === 0 || p.agent.length > 128) return false;
-    if (
-      typeof p.confidence !== 'number' ||
-      !Number.isFinite(p.confidence) ||
-      p.confidence < 0 ||
-      p.confidence > 1
-    )
-      return false;
-    if (
-      typeof p.successCount !== 'number' ||
-      !Number.isFinite(p.successCount) ||
-      p.successCount < 0 ||
-      p.successCount > 1e9
-    )
-      return false;
-    if (
-      typeof p.failureCount !== 'number' ||
-      !Number.isFinite(p.failureCount) ||
-      p.failureCount < 0 ||
-      p.failureCount > 1e9
-    )
-      return false;
-    return true;
   }
 
   /**
@@ -807,7 +388,7 @@ export class SONAOptimizer {
       this.patterns.clear();
       for (const [key, pattern] of Object.entries(state.patterns)) {
         if (typeof key !== 'string' || key.length > 512) continue;
-        if (this.validatePattern(pattern)) {
+        if (validatePattern(pattern)) {
           this.patterns.set(key, pattern);
         }
       }
@@ -894,81 +475,20 @@ export class SONAOptimizer {
 }
 
 // ============================================================================
-// Singleton Instance
+// Re-exports (file-size sweep — see module header)
 // ============================================================================
 
-let sonaOptimizerInstance: SONAOptimizer | null = null;
-let initializationPromise: Promise<SONAOptimizer> | null = null;
-
-/**
- * Get the singleton SONAOptimizer instance
- * Uses lazy initialization to avoid circular imports
- */
-export async function getSONAOptimizer(): Promise<SONAOptimizer> {
-  if (sonaOptimizerInstance) {
-    return sonaOptimizerInstance;
-  }
-
-  // Prevent multiple concurrent initializations
-  if (initializationPromise) {
-    return initializationPromise;
-  }
-
-  initializationPromise = (async () => {
-    const optimizer = new SONAOptimizer();
-    await optimizer.initialize();
-    sonaOptimizerInstance = optimizer;
-    return optimizer;
-  })();
-
-  return initializationPromise;
-}
-
-/**
- * Reset the singleton instance (for testing)
- */
-export function resetSONAOptimizer(): void {
-  if (sonaOptimizerInstance) {
-    sonaOptimizerInstance.reset();
-  }
-  sonaOptimizerInstance = null;
-  initializationPromise = null;
-}
-
-/**
- * Process a trajectory outcome (convenience function)
- */
-export async function processTrajectory(outcome: TrajectoryOutcome): Promise<{
-  learned: boolean;
-  patternKey: string;
-  confidence: number;
-  keywordsExtracted: string[];
-}> {
-  const optimizer = await getSONAOptimizer();
-  return optimizer.processTrajectoryOutcome(outcome);
-}
-
-/**
- * Get routing suggestion (convenience function)
- */
-export async function getSuggestion(task: string): Promise<RoutingSuggestion> {
-  const optimizer = await getSONAOptimizer();
-  return optimizer.getRoutingSuggestion(task);
-}
-
-/**
- * Get SONA statistics (convenience function)
- */
-export async function getSONAStats(): Promise<SONAStats> {
-  const optimizer = await getSONAOptimizer();
-  return optimizer.getStats();
-}
-
-export default {
-  SONAOptimizer,
+export {
+  default,
   getSONAOptimizer,
-  resetSONAOptimizer,
-  processTrajectory,
-  getSuggestion,
   getSONAStats,
-};
+  getSuggestion,
+  processTrajectory,
+  resetSONAOptimizer,
+} from './sona-optimizer-singleton.js';
+export type {
+  LearnedPattern,
+  RoutingSuggestion,
+  SONAStats,
+  TrajectoryOutcome,
+} from './sona-optimizer-types.js';
