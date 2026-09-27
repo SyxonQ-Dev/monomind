@@ -15,192 +15,19 @@
  */
 
 import { EventEmitter } from 'node:events';
-import type { HNSWConfig, HNSWStats, QuantizationConfig } from './types.js';
+import { distanceOptimized, normalizeVector } from './hnsw-distance.js';
+import { pruneConnections, searchLayerOptimized, selectNeighbors } from './hnsw-graph-ops.js';
+import { Quantizer } from './hnsw-quantizer.js';
+import type { HNSWSerialized } from './hnsw-serialize.js';
+import { deserializeNodes, serializeGraph } from './hnsw-serialize.js';
+import type { HNSWConfig, HNSWStats } from './types.js';
 
-/**
- * Binary Min Heap for O(log n) priority queue operations
- * Used for candidate selection in HNSW search
- */
-class BinaryMinHeap<T> {
-  private heap: Array<{ item: T; priority: number }> = [];
-
-  get size(): number {
-    return this.heap.length;
-  }
-
-  insert(item: T, priority: number): void {
-    this.heap.push({ item, priority });
-    this.bubbleUp(this.heap.length - 1);
-  }
-
-  extractMin(): T | undefined {
-    if (this.heap.length === 0) return undefined;
-    const min = this.heap[0].item;
-    const last = this.heap.pop()!;
-    if (this.heap.length > 0) {
-      this.heap[0] = last;
-      this.bubbleDown(0);
-    }
-    return min;
-  }
-
-  peek(): T | undefined {
-    return this.heap[0]?.item;
-  }
-
-  peekPriority(): number | undefined {
-    return this.heap[0]?.priority;
-  }
-
-  isEmpty(): boolean {
-    return this.heap.length === 0;
-  }
-
-  toArray(): T[] {
-    return this.heap
-      .slice()
-      .sort((a, b) => a.priority - b.priority)
-      .map((entry) => entry.item);
-  }
-
-  private bubbleUp(index: number): void {
-    while (index > 0) {
-      const parent = Math.floor((index - 1) / 2);
-      if (this.heap[parent].priority <= this.heap[index].priority) break;
-      [this.heap[parent], this.heap[index]] = [this.heap[index], this.heap[parent]];
-      index = parent;
-    }
-  }
-
-  private bubbleDown(index: number): void {
-    const length = this.heap.length;
-    while (true) {
-      let smallest = index;
-      const left = 2 * index + 1;
-      const right = 2 * index + 2;
-      if (left < length && this.heap[left].priority < this.heap[smallest].priority) {
-        smallest = left;
-      }
-      if (right < length && this.heap[right].priority < this.heap[smallest].priority) {
-        smallest = right;
-      }
-      if (smallest === index) break;
-      [this.heap[smallest], this.heap[index]] = [this.heap[index], this.heap[smallest]];
-      index = smallest;
-    }
-  }
-}
-
-/**
- * Binary Max Heap for bounded top-k tracking
- * Keeps track of k smallest elements by evicting largest when full
- */
-class BinaryMaxHeap<T> {
-  private heap: Array<{ item: T; priority: number }> = [];
-  private maxSize: number;
-
-  constructor(maxSize: number = Infinity) {
-    this.maxSize = maxSize;
-  }
-
-  get size(): number {
-    return this.heap.length;
-  }
-
-  insert(item: T, priority: number): boolean {
-    // If at capacity and new item is worse than worst, reject
-    if (this.heap.length >= this.maxSize && priority >= this.heap[0]?.priority) {
-      return false;
-    }
-
-    if (this.heap.length >= this.maxSize) {
-      // Replace max element
-      this.heap[0] = { item, priority };
-      this.bubbleDown(0);
-    } else {
-      this.heap.push({ item, priority });
-      this.bubbleUp(this.heap.length - 1);
-    }
-    return true;
-  }
-
-  peekMax(): T | undefined {
-    return this.heap[0]?.item;
-  }
-
-  peekMaxPriority(): number {
-    return this.heap[0]?.priority ?? Infinity;
-  }
-
-  extractMax(): T | undefined {
-    if (this.heap.length === 0) return undefined;
-    const max = this.heap[0].item;
-    const last = this.heap.pop()!;
-    if (this.heap.length > 0) {
-      this.heap[0] = last;
-      this.bubbleDown(0);
-    }
-    return max;
-  }
-
-  isEmpty(): boolean {
-    return this.heap.length === 0;
-  }
-
-  toSortedArray(): Array<{ item: T; priority: number }> {
-    return this.heap.slice().sort((a, b) => a.priority - b.priority);
-  }
-
-  private bubbleUp(index: number): void {
-    while (index > 0) {
-      const parent = Math.floor((index - 1) / 2);
-      if (this.heap[parent].priority >= this.heap[index].priority) break;
-      [this.heap[parent], this.heap[index]] = [this.heap[index], this.heap[parent]];
-      index = parent;
-    }
-  }
-
-  private bubbleDown(index: number): void {
-    const length = this.heap.length;
-    while (true) {
-      let largest = index;
-      const left = 2 * index + 1;
-      const right = 2 * index + 2;
-      if (left < length && this.heap[left].priority > this.heap[largest].priority) {
-        largest = left;
-      }
-      if (right < length && this.heap[right].priority > this.heap[largest].priority) {
-        largest = right;
-      }
-      if (largest === index) break;
-      [this.heap[largest], this.heap[index]] = [this.heap[index], this.heap[largest]];
-      index = largest;
-    }
-  }
-}
-
-/**
- * On-disk representation produced by HNSWIndex.serialize() / consumed by
- * HNSWIndex.deserialize(). `version` guards against loading a shape from a
- * future/incompatible format.
- */
-export interface HNSWSerialized {
-  version: 1;
-  config: HNSWConfig;
-  entryPoint: string | null;
-  maxLevel: number;
-  nodes: Array<{
-    id: string;
-    vectorB64: string;
-    level: number;
-    connections: Array<[number, string[]]>;
-  }>;
-}
+export type { HNSWSerialized } from './hnsw-serialize.js';
 
 /**
  * Internal node structure for HNSW graph
  */
-interface HNSWNode {
+export interface HNSWNode {
   /** Node ID (memory entry ID) */
   id: string;
 
@@ -280,8 +107,7 @@ export class HNSWIndex extends EventEmitter {
     const storedVector = this.quantizer ? this.quantizer.encode(vector) : vector;
 
     // Pre-normalize vector for O(1) cosine similarity
-    const normalizedVector =
-      this.config.metric === 'cosine' ? this.normalizeVector(storedVector) : null;
+    const normalizedVector = this.config.metric === 'cosine' ? normalizeVector(storedVector) : null;
 
     // Generate random level for new node
     const level = this.getRandomLevel();
@@ -342,12 +168,12 @@ export class HNSWIndex extends EventEmitter {
     const queryVector = this.quantizer ? this.quantizer.encode(query) : query;
 
     // Pre-normalize query for O(1) cosine similarity
-    const normalizedQuery =
-      this.config.metric === 'cosine' ? this.normalizeVector(queryVector) : null;
+    const normalizedQuery = this.config.metric === 'cosine' ? normalizeVector(queryVector) : null;
 
     // Start from entry point and search down the layers
     let currentNode = this.entryPoint;
-    let _currentDist = this.distanceOptimized(
+    let _currentDist = distanceOptimized(
+      this.config.metric,
       queryVector,
       normalizedQuery,
       this.nodes.get(currentNode)!,
@@ -355,7 +181,9 @@ export class HNSWIndex extends EventEmitter {
 
     // Search through layers from top to 1
     for (let level = this.maxLevel; level > 0; level--) {
-      const layerResult = this.searchLayerOptimized(
+      const layerResult = searchLayerOptimized(
+        this.nodes,
+        this.config.metric,
         queryVector,
         normalizedQuery,
         currentNode,
@@ -363,7 +191,8 @@ export class HNSWIndex extends EventEmitter {
         level,
       );
       currentNode = layerResult[0]?.id || currentNode;
-      _currentDist = this.distanceOptimized(
+      _currentDist = distanceOptimized(
+        this.config.metric,
         queryVector,
         normalizedQuery,
         this.nodes.get(currentNode)!,
@@ -371,7 +200,9 @@ export class HNSWIndex extends EventEmitter {
     }
 
     // Search layer 0 with ef candidates using heap-based search
-    const candidates = this.searchLayerOptimized(
+    const candidates = searchLayerOptimized(
+      this.nodes,
+      this.config.metric,
       queryVector,
       normalizedQuery,
       currentNode,
@@ -490,26 +321,7 @@ export class HNSWIndex extends EventEmitter {
     if (this.quantizer) {
       throw new Error('HNSWIndex.serialize() does not support quantized indexes');
     }
-    const nodes: HNSWSerialized['nodes'] = [];
-    for (const node of this.nodes.values()) {
-      const buf = Buffer.from(node.vector.buffer, node.vector.byteOffset, node.vector.byteLength);
-      nodes.push({
-        id: node.id,
-        vectorB64: buf.toString('base64'),
-        level: node.level,
-        connections: Array.from(node.connections.entries()).map(([lvl, set]) => [
-          lvl,
-          Array.from(set),
-        ]),
-      });
-    }
-    return {
-      version: 1,
-      config: this.config,
-      entryPoint: this.entryPoint,
-      maxLevel: this.maxLevel,
-      nodes,
-    };
+    return serializeGraph(this.nodes, this.config, this.entryPoint, this.maxLevel);
   }
 
   /** Reconstruct an index previously produced by serialize(). */
@@ -518,15 +330,7 @@ export class HNSWIndex extends EventEmitter {
       throw new Error(`HNSWIndex.deserialize: unsupported version ${data.version}`);
     }
     const index = new HNSWIndex(data.config);
-    for (const n of data.nodes) {
-      const buf = Buffer.from(n.vectorB64, 'base64');
-      const vector = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
-      const normalizedVector =
-        data.config.metric === 'cosine' ? index.normalizeVector(vector) : null;
-      const connections = new Map<number, Set<string>>();
-      for (const [lvl, ids] of n.connections) connections.set(lvl, new Set(ids));
-      index.nodes.set(n.id, { id: n.id, vector, normalizedVector, connections, level: n.level });
-    }
+    index.nodes = deserializeNodes(data);
     index.entryPoint = data.entryPoint;
     index.maxLevel = data.maxLevel;
     return index;
@@ -607,11 +411,24 @@ export class HNSWIndex extends EventEmitter {
     const query = node.vector;
     const normalizedQuery = node.normalizedVector;
     let currentNode = this.entryPoint!;
-    let currentDist = this.distanceOptimized(query, normalizedQuery, this.nodes.get(currentNode)!);
+    let currentDist = distanceOptimized(
+      this.config.metric,
+      query,
+      normalizedQuery,
+      this.nodes.get(currentNode)!,
+    );
 
     // Find entry point for the node's level
     for (let level = this.maxLevel; level > node.level; level--) {
-      const result = this.searchLayerOptimized(query, normalizedQuery, currentNode, 1, level);
+      const result = searchLayerOptimized(
+        this.nodes,
+        this.config.metric,
+        query,
+        normalizedQuery,
+        currentNode,
+        1,
+        level,
+      );
       if (result.length > 0 && result[0].distance < currentDist) {
         currentNode = result[0].id;
         currentDist = result[0].distance;
@@ -620,7 +437,9 @@ export class HNSWIndex extends EventEmitter {
 
     // Insert at each level from node.level down to 0
     for (let level = Math.min(node.level, this.maxLevel); level >= 0; level--) {
-      const neighbors = this.searchLayerOptimized(
+      const neighbors = searchLayerOptimized(
+        this.nodes,
+        this.config.metric,
         query,
         normalizedQuery,
         currentNode,
@@ -629,7 +448,7 @@ export class HNSWIndex extends EventEmitter {
       );
 
       // Select M best neighbors
-      const selectedNeighbors = this.selectNeighbors(node.id, query, neighbors, this.config.M);
+      const selectedNeighbors = selectNeighbors(node.id, query, neighbors, this.config.M);
 
       // Add connections
       for (const neighbor of selectedNeighbors) {
@@ -642,7 +461,7 @@ export class HNSWIndex extends EventEmitter {
           const neighborConns = neighborNode.connections.get(level)!;
           const maxConns = level === 0 ? this.config.M * 2 : this.config.M;
           if (neighborConns.size > maxConns) {
-            this.pruneConnections(neighborNode, level, maxConns);
+            pruneConnections(this.nodes, this.config.metric, neighborNode, level, maxConns);
           }
         }
       }
@@ -659,338 +478,6 @@ export class HNSWIndex extends EventEmitter {
       this.maxLevel = node.level;
       this.entryPoint = node.id;
     }
-  }
-
-  /**
-   * OPTIMIZED searchLayer using heap-based priority queues
-   * Performance: O(log n) per operation vs O(n log n) for Array.sort()
-   * Expected speedup: 3-5x for large result sets
-   */
-  private searchLayerOptimized(
-    query: Float32Array,
-    normalizedQuery: Float32Array | null,
-    entryPoint: string,
-    ef: number,
-    level: number,
-  ): Array<{ id: string; distance: number }> {
-    const visited = new Set<string>([entryPoint]);
-
-    // Min-heap for candidates (closest first for expansion)
-    const candidates = new BinaryMinHeap<string>();
-
-    // Max-heap for results (bounded size, tracks worst distance efficiently)
-    const results = new BinaryMaxHeap<string>(ef);
-
-    const entryNode = this.nodes.get(entryPoint)!;
-    const entryDist = this.distanceOptimized(query, normalizedQuery, entryNode);
-
-    candidates.insert(entryPoint, entryDist);
-    results.insert(entryPoint, entryDist);
-
-    while (!candidates.isEmpty()) {
-      // Get closest candidate - O(log n)
-      const currentDist = candidates.peekPriority()!;
-      const currentId = candidates.extractMin()!;
-
-      // Check termination: if closest candidate is worse than worst result, stop
-      const worstResultDist = results.peekMaxPriority();
-      if (currentDist > worstResultDist && results.size >= ef) {
-        break;
-      }
-
-      // Explore neighbors
-      const node = this.nodes.get(currentId);
-      if (!node) continue;
-
-      const connections = node.connections.get(level);
-      if (!connections) continue;
-
-      for (const neighborId of connections) {
-        if (visited.has(neighborId)) continue;
-        visited.add(neighborId);
-
-        const neighborNode = this.nodes.get(neighborId);
-        if (!neighborNode) continue;
-
-        const distance = this.distanceOptimized(query, normalizedQuery, neighborNode);
-
-        // Only add if within threshold or results not full
-        if (results.size < ef || distance < worstResultDist) {
-          candidates.insert(neighborId, distance);
-          // Max-heap handles size bounding automatically - O(log n)
-          results.insert(neighborId, distance);
-        }
-      }
-    }
-
-    // Return sorted results
-    return results.toSortedArray().map(({ item, priority }) => ({
-      id: item,
-      distance: priority,
-    }));
-  }
-
-  private selectNeighbors(
-    nodeId: string,
-    _query: Float32Array,
-    candidates: Array<{ id: string; distance: number }>,
-    M: number,
-  ): Array<{ id: string; distance: number }> {
-    // candidates arrive distance-ascending from searchLayerOptimized/toSortedArray;
-    // filter preserves that order, so no additional sort is needed.
-    return candidates.filter((c) => c.id !== nodeId).slice(0, M);
-  }
-
-  private pruneConnections(node: HNSWNode, level: number, maxConnections: number): void {
-    const connections = node.connections.get(level);
-    if (!connections || connections.size <= maxConnections) return;
-
-    // Calculate distances to all connections
-    const distances: Array<{ id: string; distance: number }> = [];
-    for (const connId of connections) {
-      const connNode = this.nodes.get(connId);
-      if (connNode) {
-        distances.push({
-          id: connId,
-          distance: this.distance(node.vector, connNode.vector),
-        });
-      }
-    }
-
-    // Keep only the closest ones
-    distances.sort((a, b) => a.distance - b.distance);
-    const toKeep = new Set(distances.slice(0, maxConnections).map((d) => d.id));
-
-    // Remove excess connections
-    for (const connId of connections) {
-      if (!toKeep.has(connId)) {
-        connections.delete(connId);
-        this.nodes.get(connId)?.connections.get(level)?.delete(node.id);
-      }
-    }
-  }
-
-  private distance(a: Float32Array, b: Float32Array): number {
-    switch (this.config.metric) {
-      case 'cosine':
-        return this.cosineDistance(a, b);
-      case 'euclidean':
-        return this.euclideanDistance(a, b);
-      case 'dot':
-        return this.dotProductDistance(a, b);
-      case 'manhattan':
-        return this.manhattanDistance(a, b);
-      default:
-        return this.cosineDistance(a, b);
-    }
-  }
-
-  private cosineDistance(a: Float32Array, b: Float32Array): number {
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
-
-    for (let i = 0; i < a.length; i++) {
-      dotProduct += a[i] * b[i];
-      normA += a[i] * a[i];
-      normB += b[i] * b[i];
-    }
-
-    const denom = Math.sqrt(normA) * Math.sqrt(normB);
-    if (denom === 0) return 1; // zero vector has maximum distance
-    const similarity = dotProduct / denom;
-    return 1 - similarity; // Convert to distance
-  }
-
-  /**
-   * OPTIMIZED: Cosine distance using pre-normalized vectors
-   * Only requires dot product (no sqrt operations)
-   * Performance: O(n) with ~2x speedup over standard cosine
-   */
-  private cosineDistanceNormalized(a: Float32Array, b: Float32Array): number {
-    let dotProduct = 0;
-    for (let i = 0; i < a.length; i++) {
-      dotProduct += a[i] * b[i];
-    }
-    // For normalized vectors: cosine_similarity = dot_product
-    // Return distance (1 - similarity)
-    return 1 - dotProduct;
-  }
-
-  /**
-   * Normalize a vector to unit length for O(1) cosine similarity
-   */
-  private normalizeVector(vector: Float32Array): Float32Array {
-    let norm = 0;
-    for (let i = 0; i < vector.length; i++) {
-      const v = Number.isFinite(vector[i]) ? vector[i] : 0;
-      norm += v * v;
-    }
-    norm = Math.sqrt(norm);
-
-    if (norm === 0 || !Number.isFinite(norm)) {
-      return new Float32Array(vector.length); // safe zero vector for non-finite input
-    }
-
-    const normalized = new Float32Array(vector.length);
-    for (let i = 0; i < vector.length; i++) {
-      normalized[i] = (Number.isFinite(vector[i]) ? vector[i] : 0) / norm;
-    }
-    return normalized;
-  }
-
-  /**
-   * OPTIMIZED distance calculation that uses pre-normalized vectors when available
-   */
-  private distanceOptimized(
-    query: Float32Array,
-    normalizedQuery: Float32Array | null,
-    node: HNSWNode,
-  ): number {
-    // Use optimized path for cosine with pre-normalized vectors
-    if (
-      this.config.metric === 'cosine' &&
-      normalizedQuery !== null &&
-      node.normalizedVector !== null
-    ) {
-      return this.cosineDistanceNormalized(normalizedQuery, node.normalizedVector);
-    }
-
-    // Fall back to standard distance calculation
-    return this.distance(query, node.vector);
-  }
-
-  private euclideanDistance(a: Float32Array, b: Float32Array): number {
-    let sum = 0;
-    for (let i = 0; i < a.length; i++) {
-      const diff = a[i] - b[i];
-      sum += diff * diff;
-    }
-    return Math.sqrt(sum);
-  }
-
-  private dotProductDistance(a: Float32Array, b: Float32Array): number {
-    let dotProduct = 0;
-    for (let i = 0; i < a.length; i++) {
-      dotProduct += a[i] * b[i];
-    }
-    // Negative because higher dot product = more similar
-    return -dotProduct;
-  }
-
-  private manhattanDistance(a: Float32Array, b: Float32Array): number {
-    let sum = 0;
-    for (let i = 0; i < a.length; i++) {
-      sum += Math.abs(a[i] - b[i]);
-    }
-    return sum;
-  }
-}
-
-/**
- * Quantizer for vector compression
- */
-class Quantizer {
-  private config: QuantizationConfig;
-  private dimensions: number;
-
-  constructor(config: QuantizationConfig, dimensions: number) {
-    this.config = config;
-    this.dimensions = dimensions;
-  }
-
-  /**
-   * Encode a vector using quantization
-   */
-  encode(vector: Float32Array): Float32Array {
-    if (vector.length !== this.dimensions) {
-      throw new Error(
-        `Vector dimension mismatch: expected ${this.dimensions}, got ${vector.length}`,
-      );
-    }
-    switch (this.config.type) {
-      case 'binary':
-        return this.binaryQuantize(vector);
-      case 'scalar':
-        return this.scalarQuantize(vector);
-      case 'product':
-        return this.productQuantize(vector);
-      default:
-        return vector;
-    }
-  }
-
-  /**
-   * Get compression ratio
-   */
-  getCompressionRatio(): number {
-    switch (this.config.type) {
-      case 'binary':
-        return 1.0; // sign quantization: same dimension, no compression
-      case 'scalar':
-        return 32 / (this.config.bits || 8);
-      case 'product':
-        return this.config.subquantizers || 8;
-      default:
-        return 1;
-    }
-  }
-
-  private binaryQuantize(vector: Float32Array): Float32Array {
-    // Sign quantization: map each component to 0.0 (≤0) or 1.0 (>0).
-    // Result is a valid float vector compatible with all distance metrics.
-    const binary = new Float32Array(vector.length);
-    for (let i = 0; i < vector.length; i++) {
-      binary[i] = vector[i] > 0 ? 1.0 : 0.0;
-    }
-    return binary;
-  }
-
-  private scalarQuantize(vector: Float32Array): Float32Array {
-    // Find min/max for normalization
-    let min = Infinity;
-    let max = -Infinity;
-    for (let i = 0; i < vector.length; i++) {
-      if (vector[i] < min) min = vector[i];
-      if (vector[i] > max) max = vector[i];
-    }
-
-    const range = max - min || 1;
-    const bits = this.config.bits || 8;
-    const levels = 2 ** bits;
-
-    // Quantize each value to [0, levels-1] and normalize back to [0, 1]
-    // so the resulting vector is compatible with cosine/euclidean distance.
-    const quantized = new Float32Array(vector.length);
-    for (let i = 0; i < vector.length; i++) {
-      const normalized = (vector[i] - min) / range;
-      quantized[i] = Math.round(normalized * (levels - 1)) / (levels - 1);
-    }
-
-    return quantized;
-  }
-
-  private productQuantize(vector: Float32Array): Float32Array {
-    // Simplified product quantization
-    // In production, would use trained codebooks
-    const subquantizers = this.config.subquantizers || 8;
-    const subvectorSize = Math.ceil(vector.length / subquantizers);
-
-    const quantized = new Float32Array(subquantizers);
-
-    for (let i = 0; i < subquantizers; i++) {
-      let sum = 0;
-      const start = i * subvectorSize;
-      const end = Math.min(start + subvectorSize, vector.length);
-
-      for (let j = start; j < end; j++) {
-        sum += vector[j];
-      }
-
-      quantized[i] = sum / (end - start);
-    }
-
-    return quantized;
   }
 }
 
