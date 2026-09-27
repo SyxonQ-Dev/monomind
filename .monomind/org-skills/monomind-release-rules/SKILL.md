@@ -32,6 +32,13 @@ those, never values remembered from an earlier run.
   role and by the agent harness's own per-session state, and blanket-deleting its
   contents bricked a role's shell for a whole run (issue #273). Delete only the
   specific subdirectories you created (`<check>-<short-sha>`, `home-<short-sha>`).
+- Never delete another run's GATE under `$HOME/monomind-release/`, whatever its
+  age: issues filed by earlier runs cite logs in it. Cleanup prunes only THIS
+  run's GATE (to `logs/`). In 2.16.14 the captain removed every earlier GATE,
+  including the evidence 2.16.13's issues #351 and #352 pointed at.
+- Before filing an issue, copy the evidence it cites into this run's report
+  folder (`.monomind/orgs/release/reports/<VERSION>-<timestamp>/evidence/`) and
+  cite that path in the issue.
 
 ## Evidence
 - Evidence comes ONLY from this run's `$GATE/logs`: check file mtimes against the
