@@ -742,7 +742,7 @@ function extractGoogleFontFamilies(text) {
   return families;
 }
 
-// --- cli/engine/rules/checks.mjs ---
+// --- cli/engine/rules/checks-pure.mjs ---
 const DETECTOR_IS_BROWSER = typeof window !== 'undefined';
 
 // ─── Section 3: Pure Detection ──────────────────────────────────────────────
@@ -1162,6 +1162,7 @@ function checkGlow(opts) {
   return [];
 }
 
+// --- cli/engine/rules/checks-html.mjs ---
 /**
  * Regex-on-HTML checks shared between browser and Node page-level detection.
  * These don't need DOM access, just the raw HTML string.
@@ -1363,6 +1364,7 @@ function checkHtmlPatterns(html) {
   return findings;
 }
 
+// --- cli/engine/rules/checks-background.mjs ---
 // ─── Section 4: resolveBackground (unified) ─────────────────────────────────
 
 // Read the element's own background color, computed-style first, with a
@@ -1507,6 +1509,7 @@ function resolveBorderRadiusPx(_el, style, widthPx, _win) {
   return 0;
 }
 
+// --- cli/engine/rules/checks-dom.mjs ---
 // ─── Section 5: Element Adapters ────────────────────────────────────────────
 
 // Browser adapters — call getComputedStyle/getBoundingClientRect on live DOM
@@ -1630,6 +1633,8 @@ function checkElementHeroEyebrowDOM(el) {
 // resolution every style-based check silently fails on Tailwind v4
 // builds — the values come back as literal "var(--font-weight-bold)"
 // strings and parseFloat returns NaN.
+
+// --- cli/engine/rules/checks-css-values.mjs ---
 function buildCustomPropMap(document) {
   const map = new Map();
   let sheets;
@@ -1760,6 +1765,7 @@ function parseColorResolved(str, customPropMap) {
   return parseAnyColor(resolved);
 }
 
+// --- cli/engine/rules/checks-dom-effects.mjs ---
 const REPEATED_KICKER_SKIP_SELECTOR = [
   'nav',
   'form',
@@ -1977,6 +1983,7 @@ function checkElementAIPaletteDOM(el) {
   return findings;
 }
 
+// --- cli/engine/rules/checks-quality.mjs ---
 const QUALITY_TEXT_TAGS = new Set(['p', 'li', 'td', 'th', 'dd', 'blockquote', 'figcaption']);
 
 // Resolve a CSS font-size value to pixels by walking up the parent chain.
@@ -2416,6 +2423,7 @@ function checkQuality(opts) {
   return findings;
 }
 
+// --- cli/engine/rules/checks-element.mjs ---
 function checkElementQualityDOM(el) {
   const tag = el.tagName.toLowerCase();
   const style = getComputedStyle(el);
@@ -2661,6 +2669,7 @@ function checkElementGlow(tag, style, effectiveBg) {
   return checkGlow({ tag, boxShadow: style.boxShadow, effectiveBg });
 }
 
+// --- cli/engine/rules/checks-page.mjs ---
 // ─── Section 6: Page-Level Checks ───────────────────────────────────────────
 
 // Browser page-level checks — use document/getComputedStyle globals
@@ -3097,6 +3106,7 @@ function checkElementGptBorderShadowDOM(el) {
   return checkGptThinBorderWideShadow({ borderWidths: borderWidthsFromStyle(style), borderColors: borderColorsFromStyle(style), boxShadow: style.boxShadow || '' });
 }
 
+// --- cli/engine/rules/checks-overflow.mjs ---
 // ─── Clipped overflow container ───────────────────────────────────────────────
 // A clipping container (overflow hidden/clip, not a scroll region) wrapping an
 // absolutely/fixed-positioned descendant clips popovers/menus that must escape.
@@ -3351,6 +3361,7 @@ function checkElementTextOverflowDOM(el) {
   return [];
 }
 
+// --- cli/engine/rules/checks-stylesheet.mjs ---
 // ─── Section 7: Stylesheet-level accessibility rules ─────────────────────────
 // These operate on raw CSS text (concatenated <style> blocks + linked sheets),
 // not per-element computed style — because :hover / :focus-visible / @media
