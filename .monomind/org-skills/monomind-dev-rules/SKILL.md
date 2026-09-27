@@ -1,6 +1,6 @@
 ---
 name: monomind-dev-rules
-description: "Operating rules every role of monomind's monomind-dev org follows on every command: repo and worktree layout, environment prefix, scratch and tmp hygiene, git identity and sandbox limits, evidence format, lint/build/baseline traps, brevity."
+description: "Operating rules every role of monomind's monomind-dev org follows on every command: repo and worktree layout, environment prefix, scratch and tmp hygiene, git identity and sandbox limits, evidence format, independent tests, cross-run lessons, lint/build/baseline traps, brevity."
 tags: ["engineering","operations"]
 tools: []
 license: Apache-2.0
@@ -84,6 +84,50 @@ remembered from an earlier task or run.
   REJECT, REVISE or DROP verdict is a completed task. Its evidence checks are
   the commands that prove the verdict file exists and names the SHA; the failing
   commands and their exit codes go in the result's check table.
+
+## Independent tests
+- test-author creates WT (`git -C REPO worktree add -b dev/<item-id> WT main`)
+  and, before BUILD, commits the item's failing tests in ONE commit that touches
+  only test files, fixtures and test helpers. It writes
+  `RUN/evidence/<item-id>-tests.md`: line 1 `TESTS: <full SHA of that commit>`
+  (or `TESTS: none — <reason>` when nothing can be tested automatically), then
+  one `- <path>` line per file of that commit (the PROTECTED paths), then per
+  acceptance criterion the test that covers it (or `manual: <why>`) and the log
+  of its failing run.
+- Protected paths are read-only for every other role. Developers make those
+  tests pass and may ADD tests in other files, but never edit, rename or delete
+  a protected path. A developer who finds one wrong stops and reports it with
+  evidence; only a test-author TESTS revision changes it (a new commit, and
+  tests.md names the new SHA and paths).
+- TEST INTEGRITY (verifier's ITEM VERIFY, integrator's MERGE GATE): with T the
+  SHA on line 1 and P the protected paths,
+  `git -C WT log --format=%H main..HEAD | grep -qx T` (T is on the branch) and
+  `git -C WT diff --name-only T..HEAD -- P` prints nothing. Otherwise it is a
+  FAIL (verifier) or a REFUSE (integrator) naming the changed path. `TESTS: none`
+  passes trivially.
+
+## Lessons across runs
+Org memory persists across runs of this org (`org_remember` writes it,
+`org_recall` searches it). Lessons are how a finding in one run stops the same
+mistake in the next.
+- RECORD (dev-lead): for every FAIL (verifier), REJECT (reviewer) and REVISE
+  (product-evaluator) finding, distill ONE short reusable rule — what to do next
+  time, not what went wrong in this item; at most two sentences; name the AREA
+  (the package or subsystem, e.g. `orgrt`, `monograph`, `cli init`, `skills`).
+  First `org_recall` with `lesson <area> <key words>`; if a lesson already says
+  it, do not store a reworded copy. Otherwise `org_remember` with scope `org`
+  and content `lesson: [<area>] <rule> (<run-id>/<item-id>, <role> <verdict>)`.
+  Also append that line to `RUN/lessons.md`, this run's list.
+- APPLY (architect, test-author, developer-1, developer-2): at the start of
+  every task, `org_recall` with `lesson <area>` for each area the task touches
+  (from the plan or the task message) and apply the lessons that fit. Name the
+  ones you applied in your `org_task_done` result, one line each. A lesson
+  never overrides the task message, the plan or these rules; when one
+  conflicts, follow those and say so in the result.
+- PROPOSE (dev-lead, at FINISH): REPORT.md gets a `## Lessons` section listing
+  every line of `RUN/lessons.md`, then the lessons you PROPOSE as permanent
+  rules for this skill, each with the exact sentence and the section it belongs
+  in. Never edit this skill or an org config yourself: the owner decides.
 
 ## Destructive commands
 - `cleanup` (any variant), `init --force`, recursive deletes, `git clean`,

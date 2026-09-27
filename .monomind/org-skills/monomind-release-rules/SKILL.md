@@ -1,6 +1,6 @@
 ---
 name: monomind-release-rules
-description: "Operating rules every role of monomind's release org follows on every command: environment prefix, scratch and tmp hygiene, evidence format, git identity and sandbox limits, process safety."
+description: "Operating rules every role of monomind's release org follows on every command: environment prefix, scratch and tmp hygiene, evidence format, git identity and sandbox limits, process safety, cross-run lessons."
 tags: ["operations","devops"]
 tools: []
 license: Apache-2.0
@@ -53,6 +53,10 @@ those, never values remembered from an earlier run.
   on this machine. Never call a failure "environmental" without a reproduction
   that proves the cause.
 - Finish every task with `org_task_done`, putting that table in the result.
+  Keep `result` to the table and summary: `evidence` is a separate argument of
+  `org_task_done`, next to `taskId` and `result` — never text inside `result`,
+  which the gate does not read (2.16.14: docs-writer put its evidence inside
+  `result` three times and escalated).
   This org requires EVIDENCE, and a call without it wastes nothing but time —
   always pass `evidence` = { `headSha`, `worktree`, `checks` }:
   - `headSha`: the commit your checks ran on (`git -C <dir> rev-parse HEAD`);
@@ -90,8 +94,15 @@ those, never values remembered from an earlier run.
     `test -s $GATE/logs/<round>/report.md`); every FAIL you found goes in the
     `result` table and to release-captain as a finding — never as a failing
     acceptance check.
+  - A task that correctly needs no change (e.g. DOCS: "no doc commit needed")
+    still closes with evidence: `headSha` = the unchanged HEAD of the worktree
+    you checked, `worktree` = its absolute path, `checks` = the verification
+    commands you ran (e.g. `node scripts/check-doc-refs.mjs`).
   - A sha that is no longer that worktree's HEAD, or a failing check, is refused;
     after 3 such refusals the task is failed and escalated to release-captain.
+    Only refusals that report "attempt n of 3" count. A refusal of a call with
+    no evidence at all says it "did not count against your attempts" — fix the
+    call and retry; do not escalate on those.
 
 ## Destructive commands
 - `cleanup` (any variant), `init --force`, recursive deletes, `git clean`,
@@ -291,6 +302,33 @@ with the Environment prefix.
   - Never rebase, reset, amend or cherry-pick local main's commits, and never
     push local main. Report the outcome (fast-forwarded, merged as <new sha>,
     or the conflicting files) to release-captain.
+
+## Lessons across runs
+Org memory persists across runs of this org (`org_remember` writes it,
+`org_recall` searches it). Lessons are how a finding in one release stops the
+same mistake in the next.
+- RECORD (release-captain): for every FAIL from builder or a QA role, every
+  release-auditor REJECT and every operator intervention (an operator message
+  that corrects, redirects or unblocks the run), distill ONE short reusable
+  rule — what to do next time, not what went wrong this run; at most two
+  sentences; name the AREA (a QA SCOPE area: init/cleanup/hooks, monograph,
+  memory/knowledge, MCP, agents/agent-exec, orgs, browse/design, packaging,
+  docs-only — or `release-process` for how the org itself works). First
+  `org_recall` with `lesson <area> <key words>`; if a lesson already says it,
+  do not store a reworded copy. Otherwise `org_remember` with scope `org` and
+  content `lesson: [<area>] <rule> (<VERSION>, <role> <finding>)`. Also append
+  that line to `lessons.md` in this run's report folder
+  (`.monomind/orgs/release/reports/<VERSION>-<timestamp>/`).
+- APPLY (maintainer, fixer, docs-writer, cli-qa, integration-qa, runtime-qa):
+  at the start of every task, `org_recall` with `lesson <area>` for each area
+  the brief names and apply the lessons that fit. Name the ones you applied in
+  your `org_task_done` result, one line each. A lesson never overrides the
+  brief or these rules; when one conflicts, follow those and say so.
+- PROPOSE (release-captain, in REPORT.md): a `## Lessons` section listing every
+  line of `lessons.md`, then the lessons you PROPOSE as permanent rules for this
+  skill, each with the exact sentence and the section it belongs in; add any
+  recorded after VERDICT at DONE CHECK. Never edit this skill or an org config
+  yourself: the owner decides.
 
 ## Unattended
 - No web access. Never ask the human anything: org_gate is denied for every role,

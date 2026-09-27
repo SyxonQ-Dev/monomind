@@ -121,4 +121,57 @@ describe('release org config', () => {
       expect(role('publisher')).toMatch(/LOCAL MAIN SYNC[^.]*'Parallel sessions'/);
     });
   });
+
+  /** Cross-run lessons: findings become org memory that later runs recall. */
+  describe('cross-run lessons', () => {
+    const rules = readFileSync(
+      join(
+        configPath,
+        '..',
+        '..',
+        '..',
+        '.monomind',
+        'org-skills',
+        'monomind-release-rules',
+        'SKILL.md',
+      ),
+      'utf8',
+    );
+    const role = (id: string) => def.roles.find((r) => r.id === id)?.responsibilities ?? [];
+
+    it('captain records QA/auditor findings and operator interventions as deduplicated lessons', () => {
+      expect(rules).toMatch(/## Lessons across runs/);
+      expect(rules).toMatch(/First\s+`org_recall` with `lesson <area>/);
+      expect(rules).toMatch(/`org_remember` with scope `org` and\s+content `lesson: /);
+      expect(role('release-captain').join('\n')).toMatch(
+        /LESSONS: turn every FAIL[^.]*REJECT and every operator intervention/,
+      );
+    });
+
+    it('fixing, docs and QA roles recall lessons at the start of each task', () => {
+      for (const id of [
+        'maintainer',
+        'fixer',
+        'docs-writer',
+        'cli-qa',
+        'integration-qa',
+        'runtime-qa',
+      ]) {
+        expect(role(id)[0]).toMatch(/Lessons across runs/);
+      }
+    });
+
+    it('REPORT.md only proposes permanent rules', () => {
+      expect(role('release-captain').join('\n')).toMatch(/## Lessons[^)]*propose, never apply/);
+      expect(rules).toMatch(/Never edit this skill or an org config\s+yourself: the owner decides/);
+    });
+
+    it('the tracked twin in .monomind/orgs is byte-identical', () => {
+      const twin = readFileSync(
+        join(configPath, '..', '..', '..', '.monomind', 'orgs', 'release.json'),
+        'utf8',
+      );
+      expect(twin).toBe(raw);
+    });
+  });
 });
