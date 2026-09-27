@@ -18,7 +18,7 @@ monomind design fix -t ./src --dry-run   # preview fixes
 monomind design palette --from "my-app"  # deterministic brand seed
 ```
 
-The MCP tools and CLI share the same engine (`@monoes/monodesign`) — detect runs in-process via the engine's `detectText`/`walkDir`, fix spawns the bundled CLI codemod with a 2-minute bound.
+The MCP tools and CLI share the same engine (`@monoes/monodesign`) — detect runs in-process via the engine's `detectHtml` for HTML files/dirs/inline content (so cascade-dependent findings like low contrast and computed sizes are caught) and `detectText`/`walkDir` for everything else, fix spawns the bundled CLI codemod with a 2-minute bound.
 
 ## Notes
 
