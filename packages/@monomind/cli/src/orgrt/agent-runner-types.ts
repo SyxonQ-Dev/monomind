@@ -1,0 +1,200 @@
+// packages/@monomind/cli/src/orgrt/agent-runner-types.ts
+import type { z } from 'zod';
+import type { OrgEffortLevel } from './cost-tier.js';
+
+/** A platform-agnostic org tool definition. `schema` is a zod object because
+ *  both the Claude SDK's `tool()` and opencode's `tool()` consume zod. */
+export interface OrgToolDef {
+  name: string;
+  description: string;
+  /** zod shape object (e.g. { query: z.string() }), NOT a z.object() instance.
+   *  Both the Claude SDK's tool() and opencode's tool() consume a shape. */
+  schema: Record<string, z.ZodType<any>>;
+  /** Schema for argument keys `schema` does not list. Unset: unlisted keys are
+   *  stripped. Set (a provider tool whose JSON Schema allows
+   *  additionalProperties): they are kept and validated against it. */
+  catchall?: z.ZodType<any>;
+  /** Reject argument keys `schema` does not list instead of stripping them
+   *  (the built-in org tools). `hints` maps a key callers are known to
+   *  confuse with a real one to the correction the error names. */
+  strict?: { hints?: Record<string, string> };
+  handler: (args: Record<string, unknown>) => Promise<{ text: string }>;
+}
+
+/** Arguments every runner needs to execute one agent session. */
+export interface AgentRunArgs {
+  tools: OrgToolDef[];
+  /** The mailbox prompt stream (or any async iterable of prompt messages). */
+  prompt: AsyncIterable<any>;
+  systemPrompt: string;
+  model?: string;
+  /** ADR-O001 D8: abstract reasoning/thinking effort for this session, set by
+   *  the role's cost tier (see orgrt/cost-tier.ts). Provider-agnostic on
+   *  purpose — each runner maps it to its own mechanism, and a runner with no
+   *  such mechanism ignores it. ClaudeAgentRunner maps it to the SDK's own
+   *  `effort` option ('off' → `thinking: { type: 'disabled' }`); the vendor
+   *  CLI runners take only `--model`, so a tier expresses their effort
+   *  through `cost_tiers.providers.<key>.effort_env` (which arrives in `env`)
+   *  or by naming an effort-encoding model id per tier. Unset = today's
+   *  behavior: the provider's own default. */
+  effort?: OrgEffortLevel;
+  cwd: string;
+  env: Record<string, string>;
+  /**
+   * o-18: only `ClaudeAgentRunner` consults this — the 12 vendor runners
+   * always strip ambient ANTHROPIC_* creds from process.env unconditionally
+   * (no vendor CLI has a legitimate use for one). Claude is the one runtime
+   * where an ambient Anthropic credential CAN be legitimate (that is what
+   * API-key mode is), so it needs a signal rather than a blanket rule.
+   * Defaults to `true` (safe: `args.env`, not the ambient process.env, is
+   * authoritative for ANTHROPIC_API_KEY/ANTHROPIC_BASE_URL/
+   * ANTHROPIC_AUTH_TOKEN — matching `session.ts`'s already-resolved
+   * `resolveProviderEnv` output). Only `orgrt/agent-exec.ts` sets this to
+   * `false`, explicitly and with its own comment: it is the only caller
+   * with no `--provider` concept at all, so preserving today's inherited-
+   * credential behavior for `agent exec --runtime claude` requires opting
+   * OUT of the safe default, not into an unsafe one. Making the safe path
+   * the default means a future caller that forgets this field gets the
+   * safe behavior, not a silent leak.
+   */
+  envAuthoritative?: boolean;
+  maxTurns: number;
+  /** Fence-protocol runners: tool rounds per mailbox message (#326). Unset =
+   *  tool-fence.ts MAX_TOOL_ROUNDS. */
+  maxToolRounds?: number;
+  resume?: string;
+  /** `meta.toolUseId` (#289) is the harness's id for this specific call —
+   *  threaded through so the invocation event can be correlated with the
+   *  `tool_result` message that reports how the call ended. */
+  canUseTool?: (
+    toolName: string,
+    input: Record<string, unknown>,
+    meta?: { toolUseId?: string },
+  ) => Promise<unknown>;
+  /** Provider-specific escape hatch. ClaudeAgentRunner merges this into the
+   *  SDK options verbatim (e.g. the `_orgTest` seam used by test-loop.ts).
+   *  Other runners ignore it. */
+  extras?: Record<string, unknown>;
+  /** OS sandbox settings and permission deny rules enforcing the role's
+   *  policy.git (#258, role-sandbox.ts). ClaudeAgentRunner passes them to
+   *  query() as `sandbox` / `disallowedTools`; other runners ignore them. */
+  claudeRestrictions?: { sandbox?: Record<string, unknown>; disallowedTools?: string[] };
+  /** bubblewrap arguments hiding human authority (authority-mask.ts) from a
+   *  role that runs outside the SDK sandbox. Subprocess runners launch their
+   *  CLI inside it; ClaudeAgentRunner launches the Claude Code process in it. */
+  authorityMask?: string[];
+  /** ADR-O001 D2: directory for spilled tool-result bodies. When set,
+   *  ClaudeAgentRunner installs a PostToolUse hook that writes an oversized
+   *  result here in full and replaces it in the transcript with a bounded
+   *  digest plus this path (see tool-spill.ts). Claude-only: no vendor CLI
+   *  exposes an equivalent seam. Unset = today's unbounded behavior. */
+  toolSpillDir?: string;
+  /** Abort hook. An async generator's return() queues behind its in-flight
+   *  next(), so a subprocess runner blocked in `for await (child.stdout)`
+   *  never reaches its finally/kill on return() alone — the child is
+   *  orphaned. Aborting this signal makes every subprocess runner kill its
+   *  child (SIGTERM, then SIGKILL) so the blocked pull unblocks and the
+   *  turn fails; the in-process Claude runner forwards it to the SDK's
+   *  abortController. Fired by agent-exec.ts's terminate() and session.ts's
+   *  silent-stream abort. */
+  signal?: AbortSignal;
+}
+
+/** Wire `signal` to a child-process kill ladder: SIGTERM on abort, SIGKILL
+ *  after `graceMs` if the child is still alive. If the signal is already
+ *  aborted the ladder fires immediately (the runner was asked to stop before
+ *  this turn spawned). Returns an unsubscribe for the runner's cleanup path;
+ *  the escalation timer is unref'd and a kill() on an exited ChildProcess
+ *  is a no-op, so it needs no clearing. */
+export function killOnAbort(
+  signal: AbortSignal | undefined,
+  child: { kill(signal?: NodeJS.Signals): unknown },
+  graceMs = 5000,
+): () => void {
+  if (!signal) return () => {};
+  const onAbort = () => {
+    try {
+      child.kill('SIGTERM');
+    } catch {
+      /* already gone */
+    }
+    const t = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        /* already gone */
+      }
+    }, graceMs);
+    t.unref?.();
+  };
+  if (signal.aborted) {
+    onAbort();
+    return () => {};
+  }
+  signal.addEventListener('abort', onAbort, { once: true });
+  return () => signal.removeEventListener('abort', onAbort);
+}
+
+/** Normalized message every runner yields. Carries `session_id` on whatever
+ *  message the underlying SDK attaches it to, so session.ts can track it for
+ *  resume — matching the previous `if (m.session_id) sessionId = m.session_id`
+ *  behaviour that read it off ANY message kind.
+ *
+ *  `tool_use` is a lightweight liveness/progress signal: session.ts never
+ *  renders it as chat or usage — it only feeds the StateDetector (which maps
+ *  it to the 'tool-call' state) and refreshes last-activity. Subprocess
+ *  runners (kimicode) emit it for native tool activity so long turns show
+ *  ongoing progress instead of looking silent.
+ *
+ *  `tool_result` (#289) reports how ONE tool call ended: `tool_use_id`
+ *  correlates it with the invocation, `tool` names the tool (resolved from the
+ *  matching tool_use block, since the result block carries only the id),
+ *  `is_error` is the outcome, `text` the raw result body (session.ts redacts
+ *  and caps it before it reaches the bus), and `duration_ms` the wall time
+ *  from the invoking turn to the result landing. A runner that cannot observe
+ *  tool completion simply never yields it.
+ *
+ *  `input_tokens`/`output_tokens` on an 'assistant' message are that ONE
+ *  model turn's real token usage (from the Claude SDK's BetaMessage.usage),
+ *  as opposed to the 'result' message's usage, which the SDK's own type docs
+ *  describe as per-turn (i.e. just the last turn) rather than a cumulative
+ *  total for the whole streaming-input message — see session.ts's
+ *  per-assistant-turn budget accounting for why this distinction matters. */
+export interface AgentMessage {
+  type: 'assistant' | 'result' | 'tool_use' | 'tool_result';
+  session_id?: string;
+  text?: string; // assistant (prose) / tool_use (short progress label) / tool_result (body)
+  subtype?: string; // result
+  is_error?: boolean; // result, tool_result
+  tool_use_id?: string; // tool_result
+  tool?: string; // tool_result
+  duration_ms?: number; // tool_result
+  input_tokens?: number; // result, assistant (that turn's own usage)
+  output_tokens?: number; // result, assistant (that turn's own usage)
+  /** ADR-O001 D1: cache tokens are SIBLINGS of input_tokens in the Anthropic
+   *  API (verified against @anthropic-ai/sdk's BetaUsage), not subsets of it —
+   *  `input_tokens` is the uncached remainder. Both are billable (~0.1x and
+   *  ~1.25x the input rate), so a meter that ignores them reports ~0.3% of a
+   *  well-cached run. A runner whose provider does not report them omits
+   *  them. */
+  cache_read_input_tokens?: number; // result, assistant
+  cache_creation_input_tokens?: number; // result, assistant
+  /** ADR-O001 D1: result only, and only from runners whose SDK reports
+   *  whole-pipeline usage — the Claude Agent SDK's `modelUsage`, which covers
+   *  Task subagents, sidechains and compaction that its `usage` field
+   *  explicitly excludes ("MAIN AGENT LOOP ONLY ... Prefer modelUsage for
+   *  token/cost accounting"). Like `cost_usd` it is CUMULATIVE per session,
+   *  not per turn, so session.ts converts it to a delta against the previous
+   *  value for the same session_id instead of adding it. */
+  cumulative_tokens?: {
+    input: number;
+    output: number;
+    cache_read: number;
+    cache_creation: number;
+  };
+  cost_usd?: number; // result
+}
+
+export interface AgentRunner {
+  run(args: AgentRunArgs): AsyncIterable<AgentMessage>;
+}

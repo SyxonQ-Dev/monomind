@@ -38,7 +38,7 @@ All source files are under `packages/@monomind/cli/src/orgrt/`.
 
 ## 2. Agent Runner Backends
 
-The `AgentRunner` interface ([`orgrt/agent-runner.ts → AgentRunner`](packages/@monomind/cli/src/orgrt/agent-runner.ts#AgentRunner)) decouples the agent loop from any specific provider SDK:
+The `AgentRunner` interface ([`orgrt/agent-runner-types.ts → AgentRunner`](packages/@monomind/cli/src/orgrt/agent-runner-types.ts#AgentRunner)) decouples the agent loop from any specific provider SDK:
 
 ```typescript
 interface AgentRunner {
