@@ -11,19 +11,25 @@
  * integer and whitelist `since` to a relative-date format before either value
  * reaches the shell.
  *
- * server.mjs is one ~4k-line module whose handlers live inside a request
- * listener closure, so there is no unit to import. Like the cost-honesty
- * tests, these assertions run against the shipped source itself.
+ * The handlers live inside the dashboard server's request dispatch (server.mjs
+ * and, since the file-size split, its server-*.mjs route modules), so there
+ * is no unit to import. Like the cost-honesty tests, these assertions run
+ * against the shipped source itself — every server module, so a later move
+ * cannot hide a handler from them.
  */
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const SERVER = join(process.cwd(), 'packages/@monomind/cli/src/ui/server.mjs');
+const UI = join(process.cwd(), 'packages/@monomind/cli/src/ui');
 
-const src = readFileSync(SERVER, 'utf-8');
+const src = readdirSync(UI)
+  .filter((f) => f === 'server.mjs' || /^server-.+\.mjs$/.test(f))
+  .sort()
+  .map((f) => readFileSync(join(UI, f), 'utf-8'))
+  .join('\n');
 
 function handlerBlock(tool: string): string {
   const start = src.indexOf(`tool === '${tool}'`);
@@ -67,6 +73,10 @@ describe('/api/mcp/call shell command construction (issue #82)', () => {
     // are easy to break and would otherwise only surface at request time.
     // server.mjs is ESM (import.meta), so `new Function` cannot check it —
     // ask node itself to parse it instead.
-    execFileSync(process.execPath, ['--check', SERVER]);
+    for (const f of readdirSync(UI).filter(
+      (n) => n === 'server.mjs' || /^server-.+\.mjs$/.test(n),
+    )) {
+      execFileSync(process.execPath, ['--check', join(UI, f)]);
+    }
   });
 });
