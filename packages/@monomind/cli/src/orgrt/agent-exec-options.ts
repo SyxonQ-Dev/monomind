@@ -17,6 +17,10 @@ export interface ToolSpec {
 export interface AgentExecOptions {
   runtime: string;
   prompt: string;
+  /** #355. `scoped` (default) = today's allow-list behavior, byte-identical
+   *  SDK options. `full` = unrestricted native tool access (claude runtime
+   *  only; guarded — see agent-exec-access.ts). */
+  access?: 'scoped' | 'full';
   systemPrompt?: string;
   model?: string;
   cwd?: string;

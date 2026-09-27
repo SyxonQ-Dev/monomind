@@ -39,9 +39,13 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    `doctor --read-only` change no file; the payload carries `read_only` (§10)
  *  - `doctor-offline` — `doctor --offline` skips the checks that use the
  *    network and reports them as `skipped` with `skipped_reason` (§10)
+ *  - `agent-exec-full-access` — `agent exec --access full` (claude runtime):
+ *    unrestricted native tool access, `start.access`, `agent scan --json`'s
+ *    `full_access` field (§3.1/§3.2/§3.4)
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
+  'agent-exec-full-access',
   'agent-scan',
   'agent-scan-read-only',
   'org-json-v1',

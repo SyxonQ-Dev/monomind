@@ -1,0 +1,7 @@
+{"v":1,"type":"start","runtime":"claude","cwd":"/home/user/scratch/coder-smoke","pid":4212,"access":"full","streams_incrementally":true}
+{"v":1,"type":"session","session_id":"th_c0de1"}
+{"v":1,"type":"assistant","text":"Creating hello.txt"}
+{"v":1,"type":"assistant","text":" and listing the directory."}
+{"v":1,"type":"usage","input_tokens":2210,"output_tokens":143,"cost_usd":0.0058}
+{"v":1,"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","text":"Creating hello.txt and listing the directory.","input_tokens":2210,"output_tokens":143,"cost_usd":0.0058}
+{"v":1,"type":"done","exit_code":0}

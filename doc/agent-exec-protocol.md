@@ -1,4 +1,4 @@
-# Agent Exec Protocol — v1 (rev 11)
+# Agent Exec Protocol — v1 (rev 12)
 
 - **Status**: Implemented (Phase 0 of the mono-agent delegation plan — see
   `mono-agent:docs/plans/local-agent-monomind-delegation.md`)
@@ -116,6 +116,18 @@
     `~/.grok`; hermes writes `~/.hermes/logs` and `.update_check`). Scan now reads the version from
     install files and runs a binary only when it is known to be side-effect free or the caller
     passes `--probe`, always in a scratch HOME. Entries gain `version_source` (§6). Additive only.
+  - rev 12 (2026-09-28): **`agent exec --access full`** (issue #355, part of the Coder mode
+    epic #364) — new capability `agent-exec-full-access`. `scoped` (default, unchanged) is
+    exactly today's allow-list behavior, byte-identical SDK options. `full` (claude runtime
+    only): `canUseTool` allows every tool (native, MCP, stdio-bridged) — still wrapped by
+    `coverEveryToolCall`, so every call remains observed — and the SDK gets
+    `permissionMode: "bypassPermissions"` plus the bundled SDK's own required opt-in,
+    `allowDangerouslySkipPermissions: true` (§3.1). `--allow-bash-prefix` is a usage error
+    combined with `--access full` (meaningless there). Guards live in monomind itself, not
+    only the caller (§3.4's new `unsafe`/`unsupported` codes): refuses root, refuses a
+    runtime whose `RunnerSpec.supportsFullAccess` is false, and requires an explicit,
+    existing, directory `--cwd`. `start` gains `access` (§3.2); `agent scan --json` gains
+    `full_access` per runtime (§6). Additive only.
 - **Stability**: Versioned. Frames and events carry `"v": 1`. Breaking changes bump `v` and are
   announced via the capability handshake (§2).
 - **Purpose**: Expose monomind's `AgentRunner` engine (14 local agent CLI runners) and org
@@ -142,7 +154,7 @@ by swarm management and is NOT reused by this protocol — the installed-only vi
 
 ```
 $ monomind --version --json
-{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-scan","agent-scan-read-only","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","doctor-json","doctor-read-only","doctor-offline"]}
+{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-scan","agent-scan-read-only","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","doctor-json","doctor-read-only","doctor-offline"]}
 ```
 
 Callers MUST handshake before use and fail with an actionable message (install/upgrade hint)
@@ -177,6 +189,7 @@ progress go to stderr. A caller must be able to `JSON.parse` every stdout line.
 | `--timeout <dur>` | | Overall wall-clock timeout for the whole exec (default: none). On expiry monomind SIGTERMs the agent child, emits `error {code:"timeout"}` + `done`, exits `124` |
 | `--env KEY=V` | | Extra env for the agent process (repeatable) |
 | `--protocol <v>` | | Protocol version pin (`1`); reserved for the v2 transition window (§5) |
+| `--access <mode>` | | rev 12. `scoped` (default) or `full`. `full` (claude runtime only) gives the turn unrestricted native tool access: `canUseTool` allows everything (still observed via `coverEveryToolCall`), and `permissionMode: "bypassPermissions"` + the SDK's required `allowDangerouslySkipPermissions: true` opt-in are set. Rejects `--allow-bash-prefix` (usage error, exit 2). Requires an explicit, existing, directory `--cwd` and refuses root (uid 0) — both `error {code:"unsafe", fatal:true}` (§3.4). A runtime without full-access support (see `agent scan --json`'s `full_access`, §6) yields `error {code:"unsupported", fatal:true}` |
 | `--budget-usd <n>` | | rev 3. Optional spend cap for this turn, enforced via the same per-role budget mechanism orgrt already uses internally. On breach: SIGTERM the agent child, emit `error {code:"budget", fatal:true}` + `done`, exit 1. Bare `agent exec` has no default cap — callers driving cost-sensitive flows (e.g. a chat UI, not an org role) should set this explicitly. **rev 4 granularity**: on a single-shot exec the cap is checked when the turn's `result` message arrives (the AgentRunner interface surfaces usage at result granularity) — the overspend is reported as the terminal outcome (`error budget` + exit 1, **no success `result` event`) so callers stop, but a single turn's own spend cannot be interrupted mid-flight. Mid-turn enforcement arrives with M2 (`agent_ask` in orgrt, where the mailbox-close mechanism applies). |
 
 Exactly one of `--prompt` / `--prompt-file`. Unknown flags → exit 2 with JSON error on stderr.
@@ -194,7 +207,7 @@ tool_result]* → [usage]* → result → done`. On failure: `start → … → 
 
 | Event | Fields | Notes |
 |---|---|---|
-| `start` | `v, runtime, model?, cwd, resume?, pid, child_pid?, streams_incrementally` | `pid` = the monomind process; `child_pid` = the agent-CLI subprocess when the runner spawns one (omitted for in-process runners). **rev 4**: v1 always omits `child_pid` — the `AgentRunner` interface does not surface child pids; add it if/when runners expose them. **rev 5**: `streams_incrementally` (bool) — whether this runtime delivers real incremental `assistant` text as a turn streams, vs. only ever a complete message at a step/turn boundary (see §9) |
+| `start` | `v, runtime, model?, cwd, resume?, pid, child_pid?, access, streams_incrementally` | `pid` = the monomind process; `child_pid` = the agent-CLI subprocess when the runner spawns one (omitted for in-process runners). **rev 4**: v1 always omits `child_pid` — the `AgentRunner` interface does not surface child pids; add it if/when runners expose them. **rev 5**: `streams_incrementally` (bool) — whether this runtime delivers real incremental `assistant` text as a turn streams, vs. only ever a complete message at a step/turn boundary (see §9). **rev 12**: `access` (`"scoped"` \| `"full"`) — which mode this turn ran in (§3.1) |
 | `session` | `v, session_id` | Runner's session/thread/conversation id; pass back via `--resume` |
 | `assistant` | `v, text` | Incremental assistant text (may be multi-line; callers append) |
 | `tool_call` | `v, id, name, args` | Only with `--tools stdio` — caller must execute and reply (§4) |
@@ -238,6 +251,8 @@ $ monomind agent exec --runtime codex --prompt "summarize ./README"
 | `timeout` | false | `--timeout` or `--tool-timeout` fired |
 | `cancelled` | false | Caller cancel frame or signal |
 | `bad-frame` | false | Malformed caller stdin frame; turn continues |
+| `unsafe` | true | rev 12. `--access full` refused: root (uid 0), or a missing/nonexistent/non-directory `--cwd` |
+| `unsupported` | true | rev 12. `--access full` requested on a runtime whose `RunnerSpec.supportsFullAccess` is false (see `agent scan --json`'s `full_access`, §6) |
 
 Callers must treat unknown codes as `fatal:false`.
 
@@ -299,9 +314,9 @@ Rules:
 ```
 $ monomind agent scan --json
 {"v":1,"agents":[
-  {"id":"claude","installed":true,"binary":"/usr/local/bin/claude","version":"1.0.58","install_hint":"","streams_incrementally":true},
+  {"id":"claude","installed":true,"binary":"/usr/local/bin/claude","version":"1.0.58","install_hint":"","streams_incrementally":true,"full_access":true},
   {"id":"codex","installed":false,"binary":null,"version":null,
-   "install_hint":"npm install -g @openai/codex && codex login","streams_incrementally":false},
+   "install_hint":"npm install -g @openai/codex && codex login","streams_incrementally":false,"full_access":false},
   …
 ]}
 ```
@@ -310,7 +325,7 @@ One entry per known runner (set grows with monomind releases). Honors `<NAME>_CL
 overrides. Binary probes run in parallel with a 5s per-binary timeout so a hung `--version`
 probe cannot stall the scan. Exit 0 always (detection, not a test). **rev 5**: `streams_incrementally`
 is static per-runtime metadata (`RunnerSpec.streamsIncrementally`, §9) — unlike `installed`/`version`,
-it never depends on probing the binary, so it's always present even when `installed:false`.
+it never depends on probing the binary, so it's always present even when `installed:false`. **rev 12**: `full_access` is likewise static per-runtime metadata (`RunnerSpec.supportsFullAccess`) — whether `agent exec --access full` (§3.1) is implemented for this runtime; only `claude` is `true` today.
 
 `agent scan --installed --json` = installed-only view (the name `agent list` is reserved by the
 pre-existing swarm command, §1). `agent test <id>` = one smoke turn via `agent exec`

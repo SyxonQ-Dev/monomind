@@ -4,6 +4,10 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Added
+
+- **`monomind agent exec --access full`** ([#355](https://github.com/monoes/monomind/issues/355)), part of the Coder mode epic ([#364](https://github.com/monoes/monomind/issues/364)). The `claude` runtime can now run a turn with unrestricted native tool access (`canUseTool` allows everything, `permissionMode: "bypassPermissions"`) instead of the default `scoped` allow-list — guarded against root, unsupported runtimes, and a missing/invalid `--cwd`. New capability `agent-exec-full-access` and `agent scan --json`'s `full_access` field.
+
 ### Fixed
 
 - **A second dashboard server no longer takes over the first one's pairing token when the first is too busy to answer.** A secondary decided whether the primary recorded in `.monomind/control.json` was alive only by probing its `/api/status` (3 tries, 1.5 s each); a primary whose event loop was blocked longer than that looked dead, so the secondary overwrote `dashboard-token` — logging out the primary's clients — and never wrote its own `dashboard-token-<port>`. A live recorded pid now also keeps it a secondary.

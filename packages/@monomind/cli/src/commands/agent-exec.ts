@@ -110,7 +110,8 @@ function toolNamesSpecs(raw: unknown): ToolSpec[] {
     }));
 }
 
-async function runExec(
+/** Exported for unit tests (returns the exit code; no process.exit here — see execCommand.action). */
+export async function runExec(
   ctx: CommandContext,
   overrides: Partial<Parameters<typeof runAgentExec>[0]>,
 ): Promise<number> {
@@ -133,6 +134,17 @@ async function runExec(
   const protocol = ctx.flags.protocol;
   if (protocol !== undefined && String(protocol) !== '1') {
     return usageError(`--protocol ${protocol} unsupported (this build implements v1)`);
+  }
+
+  // #355: --access full is a usage-error flag combo, checked before the
+  // engine runs (root/runtime/--cwd guards live inside it — see
+  // agent-exec-access.ts's "not only the caller" doc comment).
+  const access = String(ctx.flags.access ?? 'scoped');
+  if (access !== 'scoped' && access !== 'full') {
+    return usageError(`--access must be "scoped" or "full" (got "${access}")`);
+  }
+  if (access === 'full' && ctx.flags['allow-bash-prefix']) {
+    return usageError('--access full cannot be combined with --allow-bash-prefix');
   }
 
   let toolSpecs: ToolSpec[] = [];
@@ -187,6 +199,7 @@ async function runExec(
 
   const exitCode = await runAgentExec({
     runtime,
+    access: access as 'scoped' | 'full',
     prompt,
     systemPrompt,
     model: ctx.flags.model ? String(ctx.flags.model) : undefined,
@@ -273,8 +286,15 @@ export const execCommand: Command = {
     {
       name: 'allow-bash-prefix',
       description:
-        'CSV of command prefixes (e.g. "monomind,monoagentcli") the Bash tool may run, on top of --tools-file — scoped, not a blanket Bash grant',
+        'CSV of command prefixes (e.g. "monomind,monoagentcli") the Bash tool may run, on top of --tools-file — scoped, not a blanket Bash grant. Incompatible with --access full',
       type: 'string',
+    },
+    {
+      name: 'access',
+      description:
+        'scoped (default, allow-list only) or full — unrestricted native tool access (claude runtime only; requires --cwd, refuses root)',
+      type: 'string',
+      choices: ['scoped', 'full'],
     },
     { name: 'protocol', description: 'Protocol version pin (1)', type: 'string' },
   ],

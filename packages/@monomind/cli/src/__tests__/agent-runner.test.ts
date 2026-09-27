@@ -322,3 +322,57 @@ describe('ClaudeAgentRunner', () => {
     expect(assistantMsgs[0].input_tokens).toBe(1);
   });
 });
+
+// ─── args.access → SDK options (#355) ───────────────────────────────────────
+
+describe('ClaudeAgentRunner: --access full SDK options', () => {
+  async function captureOptions(overrides: Record<string, unknown>): Promise<any> {
+    let capturedOptions: any;
+    const mockQueryFn = (args: any) => {
+      capturedOptions = args.options;
+      return (async function* () {
+        yield { type: 'result', session_id: 's1', subtype: 'success', is_error: false };
+      })();
+    };
+    const runner = new ClaudeAgentRunner(mockQueryFn as any);
+    for await (const _m of runner.run(baseArgs(overrides))) {
+      // drain
+    }
+    // abortController and mcpServers.org are fresh instances every call
+    // (new AbortController/createSdkMcpServer) — irrelevant to this
+    // permissionMode/allowDangerouslySkipPermissions snapshot and not
+    // structurally comparable across two separate runs.
+    const { abortController: _ac, mcpServers: _mcp, ...rest } = capturedOptions;
+    return rest;
+  }
+
+  it('scoped (unset) and explicit "scoped" are byte-identical: permissionMode "default", no allowDangerouslySkipPermissions key', async () => {
+    const unset = await captureOptions({});
+    const scoped = await captureOptions({ access: 'scoped' });
+    expect(unset).toEqual(scoped);
+    expect(unset.permissionMode).toBe('default');
+    expect('allowDangerouslySkipPermissions' in unset).toBe(false);
+  });
+
+  // Pinned against the bundled @anthropic-ai/claude-agent-sdk's own contract
+  // (sdk.d.ts: "Must be set to `true` when using `permissionMode:
+  // 'bypassPermissions'`. This is a safety measure to ensure intentional
+  // bypassing of permissions.") — if a future SDK bump changes what
+  // 'bypassPermissions' requires, this snapshot fails loudly instead of
+  // silently shipping a turn that still prompts (or that skips permissions
+  // without the SDK's own intentional opt-in).
+  it('full sets permissionMode "bypassPermissions" AND allowDangerouslySkipPermissions: true', async () => {
+    const full = await captureOptions({ access: 'full' });
+    expect(full.permissionMode).toBe('bypassPermissions');
+    expect(full.allowDangerouslySkipPermissions).toBe(true);
+  });
+
+  it('full differs from scoped ONLY in permissionMode and allowDangerouslySkipPermissions', async () => {
+    const scoped = await captureOptions({ access: 'scoped' });
+    const full = await captureOptions({ access: 'full' });
+    const { allowDangerouslySkipPermissions, ...fullRest } = full;
+    expect(allowDangerouslySkipPermissions).toBe(true);
+    expect(fullRest.permissionMode).toBe('bypassPermissions');
+    expect({ ...fullRest, permissionMode: scoped.permissionMode }).toEqual(scoped);
+  });
+});

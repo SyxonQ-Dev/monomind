@@ -24,6 +24,12 @@ export interface OrgToolDef {
 /** Arguments every runner needs to execute one agent session. */
 export interface AgentRunArgs {
   tools: OrgToolDef[];
+  /** #355. `full` = ClaudeAgentRunner sets `permissionMode: 'bypassPermissions'`
+   *  + `allowDangerouslySkipPermissions: true`. Unset/`scoped` = today's
+   *  `permissionMode: 'default'`, byte-identical SDK options. Only
+   *  `orgrt/agent-exec.ts` sets this today — session.ts (org runtime) never
+   *  does (see #365 for the future opt-in path). Other runners ignore it. */
+  access?: 'scoped' | 'full';
   /** The mailbox prompt stream (or any async iterable of prompt messages). */
   prompt: AsyncIterable<any>;
   systemPrompt: string;

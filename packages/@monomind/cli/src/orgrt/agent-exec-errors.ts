@@ -10,7 +10,9 @@ export type ExecErrorCode =
   | 'runner-error'
   | 'timeout'
   | 'cancelled'
-  | 'bad-frame';
+  | 'bad-frame'
+  | 'unsafe'
+  | 'unsupported';
 
 export const FATAL_CODES = new Set<ExecErrorCode>([
   'auth',
@@ -18,4 +20,6 @@ export const FATAL_CODES = new Set<ExecErrorCode>([
   'missing-binary',
   'no-runner',
   'budget',
+  'unsafe',
+  'unsupported',
 ]);

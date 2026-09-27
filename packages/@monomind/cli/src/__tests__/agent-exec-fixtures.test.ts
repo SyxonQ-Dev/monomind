@@ -45,7 +45,15 @@ const KNOWN_EVENT_TYPES = new Set([
 ]);
 
 describe('agent exec golden fixtures (§8.4)', () => {
-  const files = ['success', 'tool-loop', 'fatal-auth', 'timeout', 'cancel', 'bad-frame'];
+  const files = [
+    'success',
+    'tool-loop',
+    'fatal-auth',
+    'timeout',
+    'cancel',
+    'bad-frame',
+    'full-access',
+  ];
 
   it('every fixture line is v:1 JSON with a known type', () => {
     for (const f of files) {
@@ -75,6 +83,15 @@ describe('agent exec golden fixtures (§8.4)', () => {
     expect(load('fatal-auth').at(-1)).toMatchObject({ exit_code: 1 });
     expect(load('timeout').at(-1)).toMatchObject({ exit_code: 124 });
     expect(load('cancel').at(-1)).toMatchObject({ exit_code: 130 });
+    expect(load('full-access').at(-1)).toMatchObject({ exit_code: 0 });
+  });
+
+  // #355: start.access records which mode the turn ran in.
+  it('full-access: start.access is "full", turn ends end_turn', () => {
+    const evs = load('full-access');
+    expect(evs[0]).toMatchObject({ access: 'full' });
+    const result = evs.find((e) => e.type === 'result')!;
+    expect(result).toMatchObject({ subtype: 'success', is_error: false, stop_reason: 'end_turn' });
   });
 
   it('success: assistant → usage → result(stop_reason end_turn) ordering', () => {
@@ -93,7 +110,7 @@ describe('agent exec golden fixtures (§8.4)', () => {
   });
 
   it('success/tool-loop (incremental runtime): result.text is the joined assistant texts (rev 7)', () => {
-    for (const f of ['success', 'tool-loop']) {
+    for (const f of ['success', 'tool-loop', 'full-access']) {
       const evs = load(f);
       expect(evs[0], f).toMatchObject({ streams_incrementally: true });
       const joined = evs

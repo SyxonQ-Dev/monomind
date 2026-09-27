@@ -152,7 +152,14 @@ export class ClaudeAgentRunner implements AgentRunner {
         strictMcpConfig: true,
         mcpServers: { org: orgServer },
         maxTurns: args.maxTurns,
-        permissionMode: 'default',
+        // #355: `full` access needs both the permission-mode switch AND the
+        // SDK's explicit opt-in (`allowDangerouslySkipPermissions`) it
+        // requires for 'bypassPermissions' — see sdk.d.ts's own doc comment
+        // on that option. Unset/`scoped` is exactly today's behavior: the
+        // `allowDangerouslySkipPermissions` key is omitted entirely rather
+        // than sent as `false`, so scoped SDK options stay byte-identical.
+        permissionMode: args.access === 'full' ? 'bypassPermissions' : 'default',
+        ...(args.access === 'full' ? { allowDangerouslySkipPermissions: true } : {}),
         resume: args.resume,
         // #289: the SDK hands the permission gate this call's own tool_use id;
         // forward it so the invocation event can be correlated with the

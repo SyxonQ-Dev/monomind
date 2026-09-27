@@ -25,6 +25,7 @@
  * the runner's own 2h/45s ladders remain the backstop for orphaned children.
  */
 
+import { fullAccessCanUseTool, resolveAccess } from './agent-exec-access.js';
 import { StdioToolBridge, UsageTracker } from './agent-exec-bridge.js';
 import { type ExecErrorCode, FATAL_CODES } from './agent-exec-errors.js';
 import {
@@ -76,6 +77,8 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
     return 2;
   }
 
+  const { access, abort: accessDenied } = resolveAccess(opts, emit); // #355
+  if (accessDenied) return 2;
   // Tool specs (§4). The bridge itself is constructed below, after
   // terminate() exists (its cancel callback wires into termination).
   const toolSpecs = opts.toolSpecs ?? null;
@@ -132,6 +135,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
     cwd: opts.cwd ?? process.cwd(),
     ...(opts.resume ? { resume: opts.resume } : {}),
     pid: process.pid,
+    access, // #355
     // rev 5: lets a caller (e.g. a chat UI) set the user's expectations
     // honestly BEFORE assuming a quiet turn is stuck — see runner-registry.ts's
     // RunnerSpec.streamsIncrementally doc comment and doc/agent-exec-protocol.md
@@ -282,6 +286,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
           : `Tool "${toolName}" was not in the tool list this exec call was given.`,
     };
   };
+  const effectiveCanUseTool = access === 'full' ? fullAccessCanUseTool : canUseTool; // #355
 
   // This session's own tool list has no way to reach the real
   // mastermind:createorg skill (no settingSources, no `skills` SDK option,
@@ -324,7 +329,8 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
         envAuthoritative: false,
         maxTurns: opts.maxTurns,
         resume: opts.resume,
-        canUseTool,
+        canUseTool: effectiveCanUseTool,
+        access,
         signal: abort.signal,
         // Opts every runner that supports it (each subprocess runner's own
         // `streamPartials`/equivalent gate — claude, antigravity, qwen-rpc,

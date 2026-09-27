@@ -39,6 +39,15 @@ export interface RunnerSpec {
    * for the checklist a new runner should follow to decide and wire this.
    */
   streamsIncrementally: boolean;
+  /**
+   * #355: whether `agent exec --access full` (unrestricted native tool
+   * access, no `canUseTool` denials) is implemented for this runtime.
+   * `claude` is the only one today — every other runner rejects
+   * `--access full` with `error {code:"unsupported", fatal:true}` rather
+   * than silently running scoped. Discoverable via `agent scan --json`'s
+   * `full_access` field.
+   */
+  supportsFullAccess: boolean;
 }
 
 export const RUNNER_SPECS: RunnerSpec[] = [
@@ -54,6 +63,7 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // events with text_delta arrive per-token, and the complete message
     // still follows with full content/usage.
     streamsIncrementally: true,
+    supportsFullAccess: true, // #355: implemented for claude only
   },
   {
     id: 'codex',
@@ -66,6 +76,7 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // (codex-runner.ts header) — only whole `item.completed` messages.
     // The runner already yields each one the instant it lands.
     streamsIncrementally: false,
+    supportsFullAccess: false,
   },
   {
     id: 'kimicode',
@@ -80,6 +91,7 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // unconfirmed reach into `--output-format stream-json`; worth
     // re-checking before ruling this out permanently.
     streamsIncrementally: false,
+    supportsFullAccess: false,
   },
   {
     id: 'opencode',
@@ -100,6 +112,7 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // runner: session.ts wants one AgentMessage per text part regardless
     // of which runner backs the role.
     streamsIncrementally: true,
+    supportsFullAccess: false,
   },
   {
     id: 'vercel',
@@ -109,6 +122,7 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // `result.fullStream` and yields each real `text-delta` part as it
     // arrives (verified against the installed `ai` package's own types).
     streamsIncrementally: true,
+    supportsFullAccess: false,
   },
   {
     id: 'antigravity',
@@ -126,6 +140,7 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // `claude` below: session.ts wants one complete AgentMessage per step
     // for its chat-bus/state-detector, regardless of which runner backs it.
     streamsIncrementally: true,
+    supportsFullAccess: false,
   },
   {
     id: 'grok',
@@ -140,6 +155,7 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // possible source of real deltas — unconfirmed, left `false` until
     // verified live.
     streamsIncrementally: false,
+    supportsFullAccess: false,
   },
   {
     id: 'qwen',
@@ -151,6 +167,7 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // header states directly "qwen's stream-json sends whole messages per
     // event, not per-token deltas — confirmed live, #182".
     streamsIncrementally: false,
+    supportsFullAccess: false,
   },
   {
     id: 'qwen-rpc',
@@ -174,6 +191,7 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // (agent-exec.ts sets it, session.ts does not) — session.ts wants one
     // AgentMessage per round regardless of which runner backs the role.
     streamsIncrementally: false,
+    supportsFullAccess: false,
   },
   {
     id: 'crush',
@@ -185,6 +203,7 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // header). The runner already streams each line the instant it
     // arrives; there is no finer granularity available to request.
     streamsIncrementally: false,
+    supportsFullAccess: false,
   },
   {
     id: 'copilot',
@@ -198,6 +217,7 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // than qwen/pi's live-confirmed `false`s. Worth re-checking live
     // before assuming it can never stream.
     streamsIncrementally: false,
+    supportsFullAccess: false,
   },
   {
     id: 'pi',
@@ -209,6 +229,7 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // accumulation needed, unlike agy", verified against a live 0.73.1
     // binary.
     streamsIncrementally: false,
+    supportsFullAccess: false,
   },
   {
     id: 'pi-rpc',
@@ -229,6 +250,7 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // Opt-in via AgentRunArgs.extras.includePartialMessages, same as every
     // other subprocess runner: session.ts never sets it.
     streamsIncrementally: true,
+    supportsFullAccess: false,
   },
   {
     id: 'hermes',
@@ -248,6 +270,7 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // plausible path to real streaming but has no published protocol/schema
     // doc found — revisit if one surfaces. See doc/agent-exec-protocol.md §9.
     streamsIncrementally: false,
+    supportsFullAccess: false,
   },
 ];
 
@@ -295,6 +318,8 @@ export interface ScanEntry {
   login_hint: string | null;
   /** Mirrors `RunnerSpec.streamsIncrementally` — see its doc comment. */
   streams_incrementally: boolean;
+  /** #355. Mirrors `RunnerSpec.supportsFullAccess` — see its doc comment. */
+  full_access: boolean;
 }
 
 /**
@@ -422,6 +447,7 @@ export async function scanInstalled(opts: ScanOptions = {}): Promise<{
         install: installRecipe(spec.installHint),
         login_hint: spec.loginHint ?? null,
         streams_incrementally: spec.streamsIncrementally,
+        full_access: spec.supportsFullAccess,
       };
     }),
   );

@@ -45,6 +45,7 @@ describe('version handshake (§2)', () => {
       min_caller: '1.0.0',
       capabilities: [
         'agent-exec',
+        'agent-exec-full-access',
         'agent-scan',
         'agent-scan-read-only',
         'org-json-v1',
@@ -91,6 +92,14 @@ describe('runner registry', () => {
     }
     expect(isKnownRuntime('gemini')).toBe(false);
     expect(isKnownRuntime('cursor')).toBe(false);
+  });
+
+  // #355: claude is the only runtime with --access full implemented today.
+  it('supportsFullAccess is true only for claude', () => {
+    const byId = new Map(RUNNER_SPECS.map((s) => [s.id, s.supportsFullAccess]));
+    expect(byId.get('claude')).toBe(true);
+    for (const s of RUNNER_SPECS)
+      if (s.id !== 'claude') expect(s.supportsFullAccess, s.id).toBe(false);
   });
 
   it('resolveExecRunner: unknown ids → null; claude → default runner', async () => {
@@ -148,6 +157,9 @@ describe('scanInstalled (§6)', () => {
       install: { kind: 'npm', packages: ['@anthropic-ai/claude-code'] },
       login_hint: 'claude login',
     });
+    // #355: full_access is present per-entry and true only for claude.
+    expect(byId.get('claude')).toMatchObject({ full_access: true });
+    expect(byId.get('codex')).toMatchObject({ full_access: false });
     expect(byId.get('antigravity')?.install).toEqual({
       kind: 'script',
       url: 'https://antigravity.google/cli/install.sh',
