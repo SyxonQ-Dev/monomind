@@ -159,6 +159,11 @@ export function killOnAbort(
  *  runners (kimicode) emit it for native tool activity so long turns show
  *  ongoing progress instead of looking silent.
  *
+ *  #357: ClaudeAgentRunner additionally emits a richer 'tool_use' (id/name/
+ *  input/parent id) for agent-exec.ts's tool_activity events, gated behind
+ *  `extras.includePartialMessages` like every other agent-exec-only
+ *  enrichment — session.ts never sets that flag, so this is invisible to it.
+ *
  *  `tool_result` (#289) reports how ONE tool call ended: `tool_use_id`
  *  correlates it with the invocation, `tool` names the tool (resolved from the
  *  matching tool_use block, since the result block carries only the id),
@@ -185,8 +190,13 @@ export interface AgentMessage {
   mcp_servers?: { name: string; status: string }[]; // status(phase:'ready') only
   subtype?: string; // result
   is_error?: boolean; // result, tool_result
-  tool_use_id?: string; // tool_result
-  tool?: string; // tool_result
+  tool_use_id?: string; // tool_use (#357), tool_result
+  tool?: string; // tool_use (#357), tool_result
+  /** #357: raw tool input as the model sent it (native tool_use only). */
+  input?: Record<string, unknown>; // tool_use
+  /** #357: non-null when produced inside a Task/Agent subagent's own turn —
+   *  lets a caller nest tool_activity events under the subagent's call. */
+  parent_tool_use_id?: string | null; // tool_use
   duration_ms?: number; // tool_result
   input_tokens?: number; // result, assistant (that turn's own usage)
   output_tokens?: number; // result, assistant (that turn's own usage)

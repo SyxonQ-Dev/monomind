@@ -897,6 +897,102 @@ describe('agent exec: --settings (#356)', () => {
     const runner: AgentRunner = {
       async *run(a) {
         seen = a.settingSources;
+// ─── tool_activity (#357) ───────────────────────────────────────────────────
+
+describe('agent exec: tool_activity', () => {
+  it('emits a matched start/end pair for a native tool call', async () => {
+    const h = makeHarness();
+    await run(
+      h,
+      scriptedRunner([
+        {
+          type: 'tool_use',
+          tool_use_id: 'toolu_1',
+          tool: 'Bash',
+          input: { command: 'ls' },
+          parent_tool_use_id: null,
+        } as AgentMessage,
+        {
+          type: 'tool_result',
+          tool_use_id: 'toolu_1',
+          tool: 'Bash',
+          is_error: false,
+          text: 'a.ts\n',
+          duration_ms: 12,
+        } as AgentMessage,
+        { type: 'result', subtype: 'success' },
+      ]),
+    );
+    const activity = byType(h, 'tool_activity');
+    expect(activity).toHaveLength(2);
+    expect(activity[0]).toMatchObject({
+      phase: 'start',
+      id: 'toolu_1',
+      name: 'Bash',
+      input: { command: 'ls' },
+      parent_tool_use_id: null,
+    });
+    expect(activity[1]).toMatchObject({
+      phase: 'end',
+      id: 'toolu_1',
+      name: 'Bash',
+      ok: true,
+      output: 'a.ts\n',
+      output_truncated: false,
+      duration_ms: 12,
+    });
+  });
+
+  it('does not emit tool_activity for a bridged (--tools stdio) call — tool_call/tool_result already cover it', async () => {
+    const h = makeHarness({ toolSpecs: [echoTool] });
+    await run(
+      h,
+      scriptedRunner([
+        {
+          type: 'tool_use',
+          tool_use_id: 't1',
+          tool: 'mcp__org__create_nodes',
+          input: { count: 2 },
+          parent_tool_use_id: null,
+        } as AgentMessage,
+        {
+          type: 'tool_result',
+          tool_use_id: 't1',
+          tool: 'mcp__org__create_nodes',
+          is_error: false,
+          text: 'created 2 nodes',
+        } as AgentMessage,
+        { type: 'result', subtype: 'success' },
+      ]),
+    );
+    expect(byType(h, 'tool_activity')).toHaveLength(0);
+  });
+
+  it('a denied call (scoped mode) shows phase:"end", ok:false, denied:true', async () => {
+    const h = makeHarness();
+    const runner: AgentRunner = {
+      async *run(a) {
+        const decision = (await a.canUseTool!(
+          'WebFetch',
+          { url: 'https://evil.example' },
+          {
+            toolUseId: 'toolu_deny',
+          },
+        )) as { message?: string };
+        yield {
+          type: 'tool_use',
+          tool_use_id: 'toolu_deny',
+          tool: 'WebFetch',
+          input: { url: 'https://evil.example' },
+          parent_tool_use_id: null,
+        } as AgentMessage;
+        yield {
+          type: 'tool_result',
+          tool_use_id: 'toolu_deny',
+          tool: 'WebFetch',
+          is_error: true,
+          text: decision.message ?? 'denied',
+        } as AgentMessage;
         yield { type: 'result', subtype: 'success' };
       },
     };
@@ -977,6 +1073,53 @@ describe('agent exec: --settings (#356)', () => {
     const code = await run(h, scriptedRunner([{ type: 'result', subtype: 'success' }]));
     expect(code).toBe(0);
     expect(byType(h, 'status')).toHaveLength(0);
+    const activity = byType(h, 'tool_activity');
+    expect(activity[0]).toMatchObject({ phase: 'start', id: 'toolu_deny' });
+    expect(activity[1]).toMatchObject({ phase: 'end', id: 'toolu_deny', ok: false, denied: true });
+  });
+
+  it('maps a vendor lightweight tool_use signal to a start-only tool_activity (start-only fidelity)', async () => {
+    const h = makeHarness({ runtime: 'codex' });
+    await run(
+      h,
+      scriptedRunner([
+        { type: 'tool_use', text: 'shell' } as AgentMessage,
+        { type: 'result', subtype: 'success' },
+      ]),
+    );
+    const activity = byType(h, 'tool_activity');
+    expect(activity).toHaveLength(1);
+    expect(activity[0]).toMatchObject({ phase: 'start', name: 'shell', input: null });
+  });
+
+  it('cancel/timeout closes any in-flight tool_activity with ok:false, cancelled:true before done', async () => {
+    const h = makeHarness({ timeoutMs: 80, returnGraceMs: 50 });
+    const runner: AgentRunner = {
+      async *run() {
+        yield {
+          type: 'tool_use',
+          tool_use_id: 'toolu_hang',
+          tool: 'Bash',
+          input: { command: 'sleep 100' },
+          parent_tool_use_id: null,
+        } as AgentMessage;
+        await new Promise((r) => setTimeout(r, 10_000)); // wedged: no tool_result ever arrives
+      },
+    };
+    const code = await run(h, runner);
+    expect(code).toBe(124);
+    const activity = byType(h, 'tool_activity');
+    expect(activity).toHaveLength(2);
+    expect(activity[0]).toMatchObject({ phase: 'start', id: 'toolu_hang' });
+    expect(activity[1]).toEqual({
+      v: 1,
+      type: 'tool_activity',
+      id: 'toolu_hang',
+      phase: 'end',
+      name: 'Bash',
+      ok: false,
+      cancelled: true,
+    });
   });
 });
 

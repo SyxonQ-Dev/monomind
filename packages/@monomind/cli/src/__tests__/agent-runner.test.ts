@@ -321,6 +321,70 @@ describe('ClaudeAgentRunner', () => {
     expect(assistantMsgs[0].text).toBe('Whole thing at once.');
     expect(assistantMsgs[0].input_tokens).toBe(1);
   });
+
+  // #357: tool_activity needs the raw tool_use (id/name/input/parent) up
+  // front — gated behind the same opt-in as every other agent-exec-only
+  // enrichment, so session.ts (which never sets it) sees no new message type.
+  it('does NOT yield a tool_use AgentMessage when extras.includePartialMessages is absent (session.ts default)', async () => {
+    const mockQueryFn = () =>
+      (async function* () {
+        yield {
+          type: 'assistant',
+          session_id: 's1',
+          parent_tool_use_id: null,
+          message: {
+            content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }],
+            usage: { input_tokens: 1, output_tokens: 1 },
+          },
+        };
+        yield {
+          type: 'user',
+          session_id: 's1',
+          parent_tool_use_id: null,
+          message: {
+            content: [{ type: 'tool_result', tool_use_id: 't1', is_error: false, content: 'a.ts' }],
+          },
+        };
+        yield { type: 'result', session_id: 's1', subtype: 'success', is_error: false, usage: {} };
+      })();
+    const runner = new ClaudeAgentRunner(mockQueryFn as any);
+
+    const messages: any[] = [];
+    for await (const m of runner.run(baseArgs())) messages.push(m);
+
+    expect(messages.some((m) => m.type === 'tool_use')).toBe(false);
+    // tool_result is unconditional (pre-existing #289 behavior) — unaffected.
+    expect(messages.some((m) => m.type === 'tool_result')).toBe(true);
+  });
+
+  it('yields a rich tool_use AgentMessage (id/name/input/parent) when extras.includePartialMessages is set (agent-exec.ts opt-in)', async () => {
+    const mockQueryFn = () =>
+      (async function* () {
+        yield {
+          type: 'assistant',
+          session_id: 's1',
+          parent_tool_use_id: 'toolu_parent',
+          message: {
+            content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }],
+            usage: { input_tokens: 1, output_tokens: 1 },
+          },
+        };
+        yield { type: 'result', session_id: 's1', subtype: 'success', is_error: false, usage: {} };
+      })();
+    const runner = new ClaudeAgentRunner(mockQueryFn as any);
+
+    const messages: any[] = [];
+    for await (const m of runner.run(baseArgs({ extras: { includePartialMessages: true } })))
+      messages.push(m);
+
+    const toolUse = messages.find((m) => m.type === 'tool_use');
+    expect(toolUse).toMatchObject({
+      tool_use_id: 't1',
+      tool: 'Bash',
+      input: { command: 'ls' },
+      parent_tool_use_id: 'toolu_parent',
+    });
+  });
 });
 
 // ─── args.access → SDK options (#355) ───────────────────────────────────────

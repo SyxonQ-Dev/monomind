@@ -153,6 +153,21 @@
     runtime whose `RunnerSpec.supportsFullAccess` is false, and requires an explicit,
     existing, directory `--cwd`. `start` gains `access` (§3.2); `agent scan --json` gains
     `full_access` per runtime (§6). Additive only.
+  - rev 12 (2026-09-28): **`tool_activity` events** (issue #357) — new capability
+    `agent-exec-tool-activity`. `agent exec` used to emit nothing for the agent's own NATIVE tool
+    calls (Bash, Edit, Write, Read, …) — only `--tools stdio` bridged calls got `tool_call`/
+    `tool_result` frames. Native calls now get matched `tool_activity` start/end pairs on stdout,
+    correlated by the SDK's own tool_use id, in every access mode (§3.2). `Edit`/`MultiEdit` carry
+    `old_string`/`new_string`, `Write` carries `file_path`/`content`; string fields and the flattened
+    tool output are capped at 16 KiB each with a `*_truncated:true` sibling, and the whole event
+    stays well under 64 KiB. `parent_tool_use_id` nests a subagent's own tool calls under the
+    `Task`/`Agent` call that started it. A denied call (scoped mode) closes with
+    `phase:"end", ok:false, denied:true`; a turn cut short by `--timeout` or a `cancel` frame closes
+    any still-open id with `ok:false, cancelled:true` before `done`. Bridged calls are unaffected —
+    they keep their existing `tool_call`/`tool_result` frames. Non-Claude runtimes map their own
+    `{type:'tool_use', text: toolName}` liveness signal to a best-effort, start-only `tool_activity`
+    under a locally-minted id; fidelity per runtime (`"full"|"start-only"|"none"`) is now on both
+    `agent scan --json` entries (`tool_activity_fidelity`) and §9. Additive only.
 - **Stability**: Versioned. Frames and events carry `"v": 1`. Breaking changes bump `v` and are
   announced via the capability handshake (§2).
 - **Purpose**: Expose monomind's `AgentRunner` engine (14 local agent CLI runners) and org
@@ -179,7 +194,7 @@ by swarm management and is NOT reused by this protocol — the installed-only vi
 
 ```
 $ monomind --version --json
-{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-scan","agent-scan-read-only","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","doctor-json","doctor-read-only","doctor-offline"]}
+{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-scan","agent-scan-read-only","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","doctor-json","doctor-read-only","doctor-offline"]}
 ```
 
 Callers MUST handshake before use and fail with an actionable message (install/upgrade hint)
@@ -230,7 +245,8 @@ prompt into a single-message stream and bridges tool handler invocations to §4 
 ### 3.2 Output: NDJSON events (stdout, one JSON object per line)
 
 All events carry `"v": 1`. Order per turn: `start → [status] → [session] → assistant* →
-[tool_call → tool_result]* → [usage]* → result → done`. On failure: `start → … → error → done`.
+[tool_call → tool_result]* → [tool_activity(start) → tool_activity(end)]* → [usage]* → result →
+done`. On failure: `start → … → error → done`.
 
 | Event | Fields | Notes |
 |---|---|---|
@@ -240,6 +256,7 @@ All events carry `"v": 1`. Order per turn: `start → [status] → [session] →
 | `assistant` | `v, text` | Incremental assistant text (may be multi-line; callers append) |
 | `tool_call` | `v, id, name, args` | Only with `--tools stdio` — caller must execute and reply (§4) |
 | `tool_result` | `v, id, ok, result` | Echo of the applied result (post `canUseTool` gating) |
+| `tool_activity` | `v, id, phase ("start"\|"end"), name, input?, parent_tool_use_id?, ok?, output?, output_truncated?, denied?, cancelled?, duration_ms?` | **rev 12** (#357, capability `agent-exec-tool-activity`). NATIVE tool calls only (Bash, Edit, Write, Read, …) — a bridged `--tools stdio` call keeps its `tool_call`/`tool_result` frames instead. `id` is the SDK's own tool_use id (or a locally-minted one for a start-only runtime, see below), correlating a `"start"` with its `"end"`. `"start"`: `input` is the tool's raw input as the model sent it (`Edit`/`MultiEdit` carry `old_string`/`new_string`, `Write` carries `file_path`/`content`); `parent_tool_use_id` is non-null when the call was made inside a `Task`/`Agent` subagent's own turn, for nesting. `"end"`: `ok` (bool), `output` (the tool_result content flattened to text), `duration_ms`; a call denied under scoped mode's default-deny `canUseTool` ends with `ok:false, denied:true` instead of running; a turn cut short by `--timeout` or a `cancel` frame closes every still-open id with `ok:false, cancelled:true` before `done`. Every `input`/`output` string field is capped at 16 KiB with a sibling `<field>_truncated:true` when cut, and the whole event stays well under 64 KiB regardless of how many fields a call's own input has. Fidelity varies by runtime (§9, `agent scan --json`'s `tool_activity_fidelity`): `claude` is `"full"` (a real id, matched end); a runtime whose runner only yields a lightweight `{type:'tool_use', text: toolName}` liveness signal (no id) maps it to a `"start"`-only event with no matching `"end"` (`input: null`, `parent_tool_use_id: null`); a runtime with no tool signal at all emits none |
 | `usage` | `v, input_tokens, output_tokens, cost_usd` | Per-round delta (cumulative→delta conversion handled inside monomind) |
 | `result` | `v, subtype ("success"\|"error"), is_error, text, stop_reason, input_tokens, output_tokens, cost_usd` | Aggregate final result; **rev 7**: `text` is the complete final assistant text — the joined `assistant` texts for a `streams_incrementally` runtime, the last `assistant` message otherwise (omitted only if the turn produced none); `stop_reason`: `end_turn` \| `max_turns` \| `tool_round_cap` \| `cancelled` \| `timeout`. **rev 4**: `tool_round_cap` is detected best-effort — it matches the runner's tool-round-cap assistant note; a fence runner that stops without the note yields `end_turn` |
 | `error` | `v, code, message, fatal (bool)` | Codes in §3.4. `fatal:true` = auth/quota class — callers must not retry |
@@ -342,9 +359,9 @@ Rules:
 ```
 $ monomind agent scan --json
 {"v":1,"agents":[
-  {"id":"claude","installed":true,"binary":"/usr/local/bin/claude","version":"1.0.58","install_hint":"","streams_incrementally":true,"full_access":true},
+  {"id":"claude","installed":true,"binary":"/usr/local/bin/claude","version":"1.0.58","install_hint":"","streams_incrementally":true,"full_access":true,"tool_activity_fidelity":"full"},
   {"id":"codex","installed":false,"binary":null,"version":null,
-   "install_hint":"npm install -g @openai/codex && codex login","streams_incrementally":false,"full_access":false},
+   "install_hint":"npm install -g @openai/codex && codex login","streams_incrementally":false,"full_access":false,"tool_activity_fidelity":"start-only"},
   …
 ]}
 ```
@@ -353,7 +370,9 @@ One entry per known runner (set grows with monomind releases). Honors `<NAME>_CL
 overrides. Binary probes run in parallel with a 5s per-binary timeout so a hung `--version`
 probe cannot stall the scan. Exit 0 always (detection, not a test). **rev 5**: `streams_incrementally`
 is static per-runtime metadata (`RunnerSpec.streamsIncrementally`, §9) — unlike `installed`/`version`,
-it never depends on probing the binary, so it's always present even when `installed:false`. **rev 12**: `full_access` is likewise static per-runtime metadata (`RunnerSpec.supportsFullAccess`) — whether `agent exec --access full` (§3.1) is implemented for this runtime; only `claude` is `true` today.
+it never depends on probing the binary, so it's always present even when `installed:false`. **rev 12**: `full_access` is likewise static per-runtime metadata (`RunnerSpec.supportsFullAccess`) — whether `agent exec --access full` (§3.1) is implemented for this runtime; only `claude` is `true` today. **rev 12**
+(#357): `tool_activity_fidelity` (`"full"|"start-only"|"none"`) is the same kind of static metadata
+(`RunnerSpec.toolActivityFidelity`) for the §3.2 `tool_activity` event — see §9.
 
 `agent scan --installed --json` = installed-only view (the name `agent list` is reserved by the
 pre-existing swarm command, §1). `agent test <id>` = one smoke turn via `agent exec`
@@ -470,15 +489,18 @@ Callers may read `<projectRoot>/.monomind/orgs/<name>/runtime.json` and run `bus
 2. `--json` snapshot tests for §7.2 commands, including the new `org list` and `org events`.
 3. Handshake test (`--version --json` shape + capability gating).
 4. Golden NDJSON transcripts published at `doc/agent-exec-protocol/fixtures/*.ndjson` (success,
-   tool-loop, fatal auth, timeout, cancel, bad-frame) so callers can build contract tests
-   without running monomind; mono-agent's Phase 1 gate consumes these.
+   tool-loop, fatal auth, timeout, cancel, bad-frame, tool-activity) so callers can build contract
+   tests without running monomind; mono-agent's Phase 1 gate consumes these.
 5. Two real runners smoke-tested (whatever is installed in CI/dev).
 
 ### 8.4 Status (rev 4)
 
-Items 1–4 are implemented: `src/__tests__/agent-exec.test.ts` (29 engine tests, fake-runner
-round-trips in both tool modes), `src/__tests__/runner-registry.test.ts` (scan + handshake),
-`src/__tests__/org-json-contracts.test.ts` (§7.2/§7.3 snapshots), and the six fixtures above
+Items 1–4 are implemented: `src/__tests__/agent-exec.test.ts` (fake-runner round-trips in both
+tool modes plus §3.2's `tool_activity` events, #357), `src/__tests__/runner-registry.test.ts`
+(scan + handshake + `tool_activity_fidelity`), `src/__tests__/agent-runner.test.ts`
+(`ClaudeAgentRunner`'s own `tool_use`/`tool_result` shapes), `src/__tests__/tool-activity.test.ts`
+(the event builder's size caps, denial, and cancel-close logic in isolation),
+`src/__tests__/org-json-contracts.test.ts` (§7.2/§7.3 snapshots), and the seven fixtures above
 (validated by `src/__tests__/agent-exec-fixtures.test.ts`). Item 5 is a manual/CI gate —
 run `monomind agent test <id>` for two installed runtimes before release.
 
@@ -535,6 +557,28 @@ protocol already supported better.
    5 — see its `RunnerSpec` comment). Callers use the flag to set the user's expectations honestly
    (§3.2/§6) rather than a live UI implying a turn is stuck when it was never going to show partial
    output.
+
+**`tool_activity_fidelity`** (rev 12, #357, `runner-registry.ts`'s `RunnerSpec.toolActivityFidelity`,
+mirrored on `agent scan --json` entries — §3.2, §6): a second, independent honesty field, orthogonal
+to `streamsIncrementally` above — a runtime can stream real incremental text and still have no way
+to report tool activity, or vice versa. Set it by checking what the runner's own `AgentMessage`
+stream already yields for a tool call (`orgrt/*-runner.ts`), not by adding new runner code for this
+feature alone:
+- `"full"` — the runner yields a real tool_use id, name, and input, AND later a matching
+  `tool_result` for the same id (today: `claude` only, via `ClaudeAgentRunner`'s own
+  `'tool_use'`/`'tool_result'` AgentMessages). `orgrt/tool-activity.ts`'s `ToolActivityTracker`
+  turns this into a matched start/end pair.
+- `"start-only"` — the runner only yields a lightweight `{type:'tool_use', text: toolName}`
+  liveness signal, with no id to correlate an end with (`codex`, `kimicode`, `antigravity`, `grok`,
+  `qwen`, `crush`, `copilot`, `pi` today). `ToolActivityTracker` maps this to a `tool_activity`
+  `"start"` under a locally-minted id, with no matching `"end"` — do not invent one; a fabricated
+  `ok`/`duration_ms` a caller can't verify is worse than omitting it.
+- `"none"` — the runner's `AgentMessage` stream carries no tool signal a caller could act on at all,
+  whether because it never yields `'tool_use'` (`opencode`, `vercel`, `qwen-rpc`, `pi-rpc` today) or
+  because what it yields isn't really per-call information (`hermes`'s own `'tool_use'` is a single
+  fixed `"turn started"` placeholder ping per turn, not a tool name — mapping it through the
+  `"start-only"` path would fabricate a misleading tool_activity event, so it is `"none"` despite
+  matching the AgentMessage shape). `ToolActivityTracker` emits nothing for a `"none"` runtime.
 
 ## 10. `monomind doctor --json` (capability `doctor-json`, rev 9; `doctor-read-only`, `doctor-offline`, rev 10)
 

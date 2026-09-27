@@ -48,6 +48,14 @@ export interface RunnerSpec {
    * `full_access` field.
    */
   supportsFullAccess: boolean;
+   * #357: how faithfully this runner's AgentMessage stream can be turned
+   * into `tool_activity` start/end pairs (doc §3.2/§9) — `"full"` (real
+   * tool_use id, input, and a matched end from a real tool_result — claude
+   * only), `"start-only"` (a lightweight `{type:'tool_use', text: toolName}`
+   * liveness signal with no id to correlate an end with), or `"none"` (no
+   * tool signal surfaces in this runner's AgentMessage stream at all today).
+   */
+  toolActivityFidelity: 'full' | 'start-only' | 'none';
 }
 
 export const RUNNER_SPECS: RunnerSpec[] = [
@@ -64,6 +72,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // still follows with full content/usage.
     streamsIncrementally: true,
     supportsFullAccess: true, // #355: implemented for claude only
+    // #357: real tool_use id/input via ClaudeAgentRunner's own richer
+    // 'tool_use' AgentMessage, matched to a real tool_result end.
+    toolActivityFidelity: 'full',
   },
   {
     id: 'codex',
@@ -77,6 +88,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // The runner already yields each one the instant it lands.
     streamsIncrementally: false,
     supportsFullAccess: false,
+    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
+    // signal with no id — best-effort, start-only tool_activity mapping.
+    toolActivityFidelity: 'start-only',
   },
   {
     id: 'kimicode',
@@ -92,6 +106,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // re-checking before ruling this out permanently.
     streamsIncrementally: false,
     supportsFullAccess: false,
+    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
+    // signal with no id — best-effort, start-only tool_activity mapping.
+    toolActivityFidelity: 'start-only',
   },
   {
     id: 'opencode',
@@ -113,6 +130,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // of which runner backs the role.
     streamsIncrementally: true,
     supportsFullAccess: false,
+    // #357: opencode-runner.ts never yields a 'tool_use' AgentMessage at
+    // all today — no tool signal to map to tool_activity.
+    toolActivityFidelity: 'none',
   },
   {
     id: 'vercel',
@@ -123,6 +143,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // arrives (verified against the installed `ai` package's own types).
     streamsIncrementally: true,
     supportsFullAccess: false,
+    // #357: vercel-runner.ts never yields a 'tool_use' AgentMessage at all
+    // today — no tool signal to map to tool_activity.
+    toolActivityFidelity: 'none',
   },
   {
     id: 'antigravity',
@@ -141,6 +164,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // for its chat-bus/state-detector, regardless of which runner backs it.
     streamsIncrementally: true,
     supportsFullAccess: false,
+    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
+    // signal with no id — best-effort, start-only tool_activity mapping.
+    toolActivityFidelity: 'start-only',
   },
   {
     id: 'grok',
@@ -156,6 +182,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // verified live.
     streamsIncrementally: false,
     supportsFullAccess: false,
+    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
+    // signal with no id — best-effort, start-only tool_activity mapping.
+    toolActivityFidelity: 'start-only',
   },
   {
     id: 'qwen',
@@ -168,6 +197,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // event, not per-token deltas — confirmed live, #182".
     streamsIncrementally: false,
     supportsFullAccess: false,
+    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
+    // signal with no id — best-effort, start-only tool_activity mapping.
+    toolActivityFidelity: 'start-only',
   },
   {
     id: 'qwen-rpc',
@@ -192,6 +224,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // AgentMessage per round regardless of which runner backs the role.
     streamsIncrementally: false,
     supportsFullAccess: false,
+    // #357: qwen-rpc-runner.ts never yields a 'tool_use' AgentMessage at
+    // all today — no tool signal to map to tool_activity.
+    toolActivityFidelity: 'none',
   },
   {
     id: 'crush',
@@ -204,6 +239,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // arrives; there is no finer granularity available to request.
     streamsIncrementally: false,
     supportsFullAccess: false,
+    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
+    // signal with no id — best-effort, start-only tool_activity mapping.
+    toolActivityFidelity: 'start-only',
   },
   {
     id: 'copilot',
@@ -218,6 +256,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // before assuming it can never stream.
     streamsIncrementally: false,
     supportsFullAccess: false,
+    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
+    // signal with no id — best-effort, start-only tool_activity mapping.
+    toolActivityFidelity: 'start-only',
   },
   {
     id: 'pi',
@@ -230,6 +271,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // binary.
     streamsIncrementally: false,
     supportsFullAccess: false,
+    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
+    // signal with no id — best-effort, start-only tool_activity mapping.
+    toolActivityFidelity: 'start-only',
   },
   {
     id: 'pi-rpc',
@@ -251,6 +295,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // other subprocess runner: session.ts never sets it.
     streamsIncrementally: true,
     supportsFullAccess: false,
+    // #357: pi-rpc-runner.ts never yields a 'tool_use' AgentMessage at all
+    // today — no tool signal to map to tool_activity.
+    toolActivityFidelity: 'none',
   },
   {
     id: 'hermes',
@@ -271,6 +318,10 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // doc found — revisit if one surfaces. See doc/agent-exec-protocol.md §9.
     streamsIncrementally: false,
     supportsFullAccess: false,
+    // #357: hermes-runner.ts's own 'tool_use' yield is a single fixed
+    // "turn started" placeholder ping, not a per-call tool name — no real
+    // tool signal to map to tool_activity.
+    toolActivityFidelity: 'none',
   },
 ];
 
@@ -320,6 +371,8 @@ export interface ScanEntry {
   streams_incrementally: boolean;
   /** #355. Mirrors `RunnerSpec.supportsFullAccess` — see its doc comment. */
   full_access: boolean;
+  /** Mirrors `RunnerSpec.toolActivityFidelity` (#357) — see its doc comment. */
+  tool_activity_fidelity: 'full' | 'start-only' | 'none';
 }
 
 /**
@@ -448,6 +501,7 @@ export async function scanInstalled(opts: ScanOptions = {}): Promise<{
         login_hint: spec.loginHint ?? null,
         streams_incrementally: spec.streamsIncrementally,
         full_access: spec.supportsFullAccess,
+        tool_activity_fidelity: spec.toolActivityFidelity,
       };
     }),
   );

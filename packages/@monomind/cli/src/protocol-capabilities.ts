@@ -46,11 +46,14 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    user,project,local>` (coder mode, claude runtime): loads CLAUDE.md,
  *    skills, hooks, and project+user MCP servers; the `status` event and its
  *    startup watchdog (§3.1, §3.2)
+ *  - `agent-exec-tool-activity` — `tool_activity` start/end events for
+ *    NATIVE tool calls on `agent exec` stdout, in every access mode (§3.2)
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
   'agent-exec-full-access',
   'agent-exec-settings',
+  'agent-exec-tool-activity',
   'agent-scan',
   'agent-scan-read-only',
   'org-json-v1',

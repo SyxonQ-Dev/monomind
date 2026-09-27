@@ -47,6 +47,7 @@ describe('version handshake (§2)', () => {
         'agent-exec',
         'agent-exec-full-access',
         'agent-exec-settings',
+        'agent-exec-tool-activity',
         'agent-scan',
         'agent-scan-read-only',
         'org-json-v1',
@@ -109,6 +110,18 @@ describe('runner registry', () => {
     expect(claude).toBeTruthy();
     expect(typeof claude!.run).toBe('function');
   });
+
+  // #357: every runner honestly declares how well its own AgentMessage
+  // stream can be turned into tool_activity events (doc §9).
+  it('every RunnerSpec declares a toolActivityFidelity, and claude is "full"', () => {
+    for (const spec of RUNNER_SPECS) {
+      expect(['full', 'start-only', 'none'], spec.id).toContain(spec.toolActivityFidelity);
+    }
+    const byId = new Map(RUNNER_SPECS.map((s) => [s.id, s]));
+    expect(byId.get('claude')?.toolActivityFidelity).toBe('full');
+    expect(byId.get('codex')?.toolActivityFidelity).toBe('start-only');
+    expect(byId.get('opencode')?.toolActivityFidelity).toBe('none');
+  });
 });
 
 describe('scanInstalled (§6)', () => {
@@ -168,6 +181,18 @@ describe('scanInstalled (§6)', () => {
     });
     expect(byId.get('vercel')?.install).toEqual({ kind: 'manual' });
     for (const a of result.agents) expect(a.install.kind).toMatch(/^(npm|script|manual)$/);
+  });
+
+  // #357: scan --json (§6) mirrors RunnerSpec.toolActivityFidelity per entry.
+  it('every scan entry carries tool_activity_fidelity, mirroring RunnerSpec', async () => {
+    const result = await scanInstalled({ env: { PATH: '/nonexistent' }, skipVersionProbe: true });
+    const byId = new Map(result.agents.map((x) => [x.id, x]));
+    expect(byId.get('claude')?.tool_activity_fidelity).toBe('full');
+    expect(byId.get('codex')?.tool_activity_fidelity).toBe('start-only');
+    expect(byId.get('opencode')?.tool_activity_fidelity).toBe('none');
+    for (const a of result.agents) {
+      expect(['full', 'start-only', 'none'], a.id).toContain(a.tool_activity_fidelity);
+    }
   });
 
   it('installRecipe only accepts hints a caller can run without a shell', () => {
