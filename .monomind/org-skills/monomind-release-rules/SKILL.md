@@ -192,6 +192,13 @@ those, never values remembered from an earlier run.
   Exit 124 means the drill did not finish in 8 minutes: report it as a
   finding with the bus log, never re-run it in a loop. In 2.16.2 an unbounded
   drill ran into the 10-minute Bash limit.
+- Write a drill's task so the run can finish: only the org's boss role
+  (the template's top role, e.g. dev-team's `tech-lead`) has `org_complete`,
+  and its outcome is `achieved` or `blocked`. A drill that tells another role
+  to finish sits idle until the 10-minute idle nudge (`run_config.idle_minutes`)
+  and then hits the 8-minute timeout — issue #352 was exactly that, not a
+  missed wake. In the drill's bus, a tool event's name is `.tool`, not
+  `.data.name`; `org-stopped` carries `data.idleWatchdog.next_nudge_at`.
 - Never run `scripts/check-published-pins.mjs` or a package's `prepublishOnly`
   outside PUBLISH: it asks npm whether each pinned version exists and waits
   ~8.5 minutes when one does not, and before PUBLISH this release's own
