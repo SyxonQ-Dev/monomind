@@ -5,8 +5,9 @@
  * Concatenates the pure detection modules and the browser-injected UI into a
  * single IIFE that runs in any page (detector page, live overlay, extension).
  * Imports/exports are stripped because the bundle is a flat script, not a
- * module. From the registry only the `ANTIPATTERNS` array literal is inlined
- * (the browser path never uses the registry helper functions).
+ * module. From the registry only the `ANTIPATTERNS` array literal is inlined,
+ * rebuilt from its per-category data modules (the browser path never uses the
+ * registry helper functions).
  *
  * Output: cli/engine/detect-antipatterns-browser.js
  *
@@ -72,20 +73,38 @@ function stripImportsExports(src) {
   return trimBlankEdges(out);
 }
 
-// From the registry module, inline ONLY the `const ANTIPATTERNS = [ ... ];`
-// array literal — the browser bundle never calls the helper functions.
-function extractAntipatternsArray(src) {
-  const start = src.indexOf('const ANTIPATTERNS = [');
-  if (start === -1) throw new Error('ANTIPATTERNS array not found in registry');
+// The registry's `ANTIPATTERNS` array is spread from per-category data
+// modules, in this order. The bundle rebuilds the same array literal from
+// their bodies — the browser bundle never calls the registry helper functions.
+const ANTIPATTERN_CATEGORY_MODULES = [
+  'registry/antipatterns-slop.mjs',
+  'registry/antipatterns-quality.mjs',
+  'registry/antipatterns-provider.mjs',
+];
+
+// Inline ONLY the `const ANTIPATTERNS = [ ... ];` array literal, assembled
+// from each category module's array body.
+function extractAntipatternsArray() {
+  const bodies = ANTIPATTERN_CATEGORY_MODULES.map((rel) =>
+    extractArrayBody(fs.readFileSync(path.join(engineDir, rel), 'utf-8'), rel),
+  );
+  return `const ANTIPATTERNS = [\n${bodies.join('\n\n')}\n];`;
+}
+
+// The body (lines between `= [` and the closing `];`) of a category module's
+// single `const X = [ ... ];` array.
+function extractArrayBody(src, rel) {
+  const open = /const \w+ = \[\r?\n/.exec(src);
+  if (!open) throw new Error(`antipattern array not found in ${rel}`);
+  const start = open.index + open[0].length;
   // First line that is exactly `];` closes the array. Tolerate CRLF: a Windows
   // checkout with core.autocrlf=true hands this script \r\n, and an LF-only
   // pattern then finds no close and reports the array as malformed.
   const closeRe = /\r?\n\];\r?\n/g;
   closeRe.lastIndex = start;
   const m = closeRe.exec(src);
-  if (!m) throw new Error('ANTIPATTERNS array close not found');
-  const end = m.index + m[0].length; // include the `];\n`
-  return trimBlankEdges(src.slice(start, end));
+  if (!m) throw new Error(`antipattern array close not found in ${rel}`);
+  return src.slice(start, m.index);
 }
 
 function trimBlankEdges(text) {
