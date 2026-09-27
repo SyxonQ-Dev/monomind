@@ -2,7 +2,7 @@
 
 All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
-## [Unreleased]
+## [2.16.17] — 2026-09-27
 
 ### Fixed
 
