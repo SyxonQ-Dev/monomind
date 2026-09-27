@@ -7,7 +7,7 @@ import type { OrgDaemon } from './daemon.js';
 import type { RunningOrg } from './daemon-types.js';
 import * as decisionOps from './decisions.js';
 import { stopEndpointRetries } from './endpoint-roles.js';
-import { clearIdleRecord } from './idle-deadline.js';
+import { clearIdleRecord, readIdleRecord } from './idle-deadline.js';
 import { historyFile, readRunEvents, summarizeRun } from './reporting.js';
 import { sandboxStubs } from './sandbox-stubs.js';
 
@@ -67,6 +67,19 @@ async function finishStop(
     clearInterval(wd);
     daemon.watchdogs.delete(name);
   }
+  // #352: the watchdog's last published state goes onto the org-stopped
+  // event below, so a run cut short (e.g. a `timeout`-bounded drill) shows
+  // whether an idle nudge was still due or was missed. The file itself is
+  // not a durable record — it is removed here.
+  const idleRecord = readIdleRecord(daemon.root, name, org.run);
+  const idleWatchdog = idleRecord
+    ? {
+        idle_minutes: idleRecord.idle_minutes,
+        next_nudge_at: idleRecord.next_nudge_at ?? null,
+        idle_stop_at: idleRecord.idle_stop_at,
+        hold: idleRecord.hold,
+      }
+    : undefined;
   clearIdleRecord(daemon.root, name);
   // The run's gates are authoritative; put them back over whatever the file
   // holds now (a role may have rewritten it).
@@ -191,7 +204,7 @@ async function finishStop(
     type: 'status',
     reason: 'org-stopped',
     msg: `org stopped${stopSuffix}`,
-    data: { closedBy, runnableTasks },
+    data: { closedBy, runnableTasks, idleWatchdog },
   });
   await org.bus.flush();
   // Append this run's summary to <org>/history.jsonl — read back from the

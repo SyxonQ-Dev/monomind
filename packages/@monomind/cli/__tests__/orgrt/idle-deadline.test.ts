@@ -5,7 +5,8 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OrgDaemon } from '../../src/orgrt/daemon.js';
-import { projectIdleStop } from '../../src/orgrt/idle-deadline.js';
+import { projectIdleNudge, projectIdleStop } from '../../src/orgrt/idle-deadline.js';
+import { readRunEvents } from '../../src/orgrt/reporting.js';
 
 describe('projectIdleStop', () => {
   const base = { lastActivity: 1_000, nudgedAt: 0, nudges: 0, maxNudges: 3, idleMs: 60_000, bossReachable: true };
@@ -18,6 +19,20 @@ describe('projectIdleStop', () => {
   it('stops at the end of this window when the nudge cap is reached or the boss is unreachable', () => {
     expect(projectIdleStop({ ...base, nudges: 3 })).toBe(61_000);
     expect(projectIdleStop({ ...base, bossReachable: false })).toBe(61_000);
+  });
+});
+
+// #352: when the next idle nudge is due, so a run cut short before it (a
+// `timeout`-bounded drill) shows the nudge was not yet due rather than missed.
+describe('projectIdleNudge', () => {
+  const base = { lastActivity: 1_000, nudgedAt: 0, nudges: 0, maxNudges: 3, idleMs: 60_000, bossReachable: true };
+  it('is due one idle window after the last activity', () => {
+    expect(projectIdleNudge(base)).toBe(61_000);
+  });
+  it('is null when no further nudge will be sent', () => {
+    expect(projectIdleNudge({ ...base, nudgedAt: 50_000, nudges: 1 })).toBeNull();
+    expect(projectIdleNudge({ ...base, nudges: 3 })).toBeNull();
+    expect(projectIdleNudge({ ...base, bossReachable: false })).toBeNull();
   });
 });
 
@@ -56,6 +71,23 @@ describe('OrgDaemon — idle deadline record', () => {
 
     await d.stopOrg('alpha');
     expect(existsSync(file)).toBe(false);
+  }, 10_000);
+
+  it('#352: records the watchdog state at stop on the org-stopped event', async () => {
+    const { d, read } = setup(0.05); // 3s window: stop lands before the first nudge
+    const running = await d.startOrg('alpha');
+    const rec = read();
+    expect(Date.parse(rec.next_nudge_at)).toBe(Date.parse(rec.idle_stop_at) - 3_000);
+    await d.stopOrg('alpha');
+    const events = readRunEvents(d.root, 'alpha', running.run);
+    const stopped = events.find((e) => e.reason === 'org-stopped');
+    expect(stopped?.data?.idleWatchdog).toMatchObject({
+      idle_minutes: 0.05,
+      next_nudge_at: rec.next_nudge_at,
+      idle_stop_at: rec.idle_stop_at,
+      hold: null,
+    });
+    expect(events.some((e) => e.reason === 'idle-nudge')).toBe(false);
   }, 10_000);
 
   it('reports the watchdog as disabled for idle_minutes: 0', async () => {

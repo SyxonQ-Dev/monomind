@@ -123,6 +123,10 @@ export interface IdleWatchdogRecord {
   idle_minutes: number;
   /** ISO time the watchdog stops the run if nothing happens before then. */
   idle_stop_at: string | null;
+  /** #352: ISO time the next idle nudge to the boss is due, or null when no
+   *  further nudge will be sent (one is outstanding, the cap is reached, the
+   *  boss is unreachable, or a hold is in force). */
+  next_nudge_at?: string | null;
   hold: IdleHoldState | null;
 }
 
@@ -145,12 +149,39 @@ export function projectIdleStop(s: {
   return s.lastActivity + 2 * s.idleMs;
 }
 
+/** #352: when the watchdog next nudges the boss, assuming no further
+ *  activity — the end of this idle window, if a nudge is still to come. */
+export function projectIdleNudge(s: {
+  lastActivity: number;
+  nudgedAt: number;
+  nudges: number;
+  maxNudges: number;
+  idleMs: number;
+  bossReachable: boolean;
+}): number | null {
+  if (s.nudgedAt !== 0 || s.nudges >= s.maxNudges || !s.bossReachable) return null;
+  return s.lastActivity + s.idleMs;
+}
+
 function recordPath(root: string, name: string): string {
   return join(root, ORG_DIR, name, IDLE_WATCHDOG_FILE);
 }
 
 export function writeIdleRecord(root: string, name: string, rec: IdleWatchdogRecord): void {
   writeJsonFileAtomic(recordPath(root, name), rec);
+}
+
+/** The record `run` published, or null when there is none (or it is another
+ *  run's, or unreadable). */
+export function readIdleRecord(root: string, name: string, run: string): IdleWatchdogRecord | null {
+  const p = recordPath(root, name);
+  if (!existsSync(p)) return null;
+  try {
+    const rec = JSON.parse(readFileSync(p, 'utf8')) as IdleWatchdogRecord;
+    return rec.run === run ? rec : null;
+  } catch {
+    return null;
+  }
 }
 
 export function clearIdleRecord(root: string, name: string): void {
@@ -175,15 +206,8 @@ export function readIdleStatus(
   idle_hold_until?: string | null;
 } {
   const unknown = { idle_stop_at: null, idle_stop_in_seconds: null, idle_hold: 'unknown' as const };
-  const p = recordPath(root, name);
-  if (!run || !existsSync(p)) return unknown;
-  let rec: IdleWatchdogRecord;
-  try {
-    rec = JSON.parse(readFileSync(p, 'utf8')) as IdleWatchdogRecord;
-  } catch {
-    return unknown;
-  }
-  if (rec.run !== run) return unknown;
+  const rec = run ? readIdleRecord(root, name, run) : null;
+  if (!rec) return unknown;
   if (!rec.idle_stop_at) {
     // A pre-D4 daemon wrote the reason as a bare string with no deadline.
     const hold = rec.hold as IdleHoldState | IdleHold | null;

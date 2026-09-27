@@ -10,6 +10,7 @@ import {
   hookedOnWork,
   type IdleHoldState,
   noProgressRoles,
+  projectIdleNudge,
   projectIdleStop,
   type WaitHold,
   writeIdleRecord,
@@ -102,25 +103,25 @@ export function startIdleWatchdog(
     const publishDeadline = (hold: IdleHoldState | null): void => {
       if (stopping) return;
       const bossRt = running.agents.get(bossRole.id);
-      const at = hold
-        ? null
-        : new Date(
-            projectIdleStop({
-              lastActivity: activity.lastActivity(),
-              nudgedAt,
-              nudges,
-              maxNudges: MAX_IDLE_NUDGES,
-              idleMs,
-              bossReachable: bossRt?.status === 'running' && !bossRt.mailbox.isClosed,
-            }),
-          ).toISOString();
-      const key = `${at}|${hold?.reason ?? null}|${hold?.until ?? null}`;
+      const clock = {
+        lastActivity: activity.lastActivity(),
+        nudgedAt,
+        nudges,
+        maxNudges: MAX_IDLE_NUDGES,
+        idleMs,
+        bossReachable: bossRt?.status === 'running' && !bossRt.mailbox.isClosed,
+      };
+      const at = hold ? null : new Date(projectIdleStop(clock)).toISOString();
+      const nudgeAt = hold ? null : projectIdleNudge(clock);
+      const nextNudge = nudgeAt === null ? null : new Date(nudgeAt).toISOString();
+      const key = `${at}|${nextNudge}|${hold?.reason ?? null}|${hold?.until ?? null}`;
       if (key === published) return;
       try {
         writeIdleRecord(daemon.root, name, {
           run,
           idle_minutes: idleMs / 60_000,
           idle_stop_at: at,
+          next_nudge_at: nextNudge,
           hold,
         });
         published = key;
