@@ -76,7 +76,7 @@ describe('P1-19: Command-output-honesty regression (prevents P0-1 to P0-6 recurr
   });
 
   describe('P0-4: swarm init/start — no theatrical output', () => {
-    const src = readSrc('commands/monoswarm.ts');
+    const src = readSrc('commands/monoswarm-init.ts') + readSrc('commands/monoswarm-start.ts');
 
     it('does NOT claim to create coordination topology', () => {
       expect(src).not.toContain('Creating coordination topology');
