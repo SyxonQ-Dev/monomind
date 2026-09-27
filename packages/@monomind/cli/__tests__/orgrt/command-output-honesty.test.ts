@@ -44,7 +44,7 @@ describe('P1-19: Command-output-honesty regression (prevents P0-1 to P0-6 recurr
   });
 
   describe('P0-2: hooks intelligence status — no fabricated MoE metrics', () => {
-    const src = readSrc('commands/hooks-workers.ts');
+    const src = readSrc('commands/hooks-intelligence-command.ts');
 
     it('MoE block is hardcoded off (not conditional on hasLocalData)', () => {
       // The fabricated defaults 8/0.82/0.9 must NOT appear
@@ -59,7 +59,7 @@ describe('P1-19: Command-output-honesty regression (prevents P0-1 to P0-6 recurr
   });
 
   describe('P0-3: hooks intelligence train — no LoRA lie', () => {
-    const src = readSrc('commands/hooks-workers.ts');
+    const src = readSrc('commands/hooks-intelligence-command.ts');
 
     it('does NOT claim "EWC+LoRA applied"', () => {
       expect(src).not.toContain('EWC+LoRA');
@@ -135,7 +135,7 @@ describe('P1-19: Command-output-honesty regression (prevents P0-1 to P0-6 recurr
   });
 
   describe('P0-14: enable-moe flag removed (was never read)', () => {
-    const src = readSrc('commands/hooks-workers.ts');
+    const src = readSrc('commands/hooks-intelligence-command.ts');
 
     it('the dead --enable-moe/-m/--enable-sona/--embedding-provider flags are gone, not just relabeled', () => {
       // Wave 2 (IN-14): these were echoed but never read, so they were
