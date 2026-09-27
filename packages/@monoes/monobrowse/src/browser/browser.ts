@@ -1,4 +1,5 @@
 import { execSync, spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -258,19 +259,27 @@ function readDevToolsActivePort(file: string): number | null {
  * for a free port at bind time — atomic, nothing to collide on — and writes
  * the port it got to DevToolsActivePort in its own (caller-dedicated) profile
  * directory, which is proof the endpoint is the process we spawned.
+ *
+ * A fixed port needs its own proof, since Chrome writes DevToolsActivePort
+ * only for port 0. Once listening, Chrome prints `DevTools listening on
+ * ws://…/devtools/browser/<id>` to stderr, and `<id>` is unique to that
+ * browser process, the same one `/json/version` reports. An endpoint is
+ * adopted only when it reports the id our own child printed. Without that
+ * check, a launch whose Chrome was still booting found a concurrent
+ * launch's Chrome on the shared port and returned it, recording its own
+ * doomed pid there. It also covers Chrome's [::1] fallback described above.
  */
 async function launchOnFreePort(config: BrowserConfig, port: number): Promise<number> {
   const chromePath = findChrome(config.executablePath);
-  // Suffixed with our own pid: two concurrent launches that both probe the
-  // same candidate port as free (the race this function exists to survive —
-  // see the retry-on-collision caller above) briefly run Chrome with
-  // *identical* --user-data-dir values if it were derived from the port
-  // alone, sharing a profile directory (lock files, preferences, the
-  // DevToolsActivePort file itself) between two unrelated Chrome processes
-  // for as long as the loser stays alive. Different processes always have
-  // different pids, so this can never collide even when the port does.
+  // Unique per launch, not just per port and pid: two concurrent launches
+  // that both probe the same candidate port as free (the race this function
+  // exists to survive — see the retry-on-collision caller above) would
+  // otherwise share one profile directory (lock files, preferences, the
+  // DevToolsActivePort file itself) — including two launches from the same
+  // process, where a pid suffix alone is identical.
   const userDataDir =
-    config.userDataDir ?? join(tmpdir(), `monomind-browser-${port}-${process.pid}`);
+    config.userDataDir ??
+    join(tmpdir(), `monomind-browser-${port}-${process.pid}-${randomUUID().slice(0, 8)}`);
   const activePortFile = join(userDataDir, 'DevToolsActivePort');
   // A reused profile dir may hold a previous run's file naming a port some
   // other process now owns.
@@ -317,8 +326,26 @@ async function launchOnFreePort(config: BrowserConfig, port: number): Promise<nu
   const args = [...defaultArgs, ...callerArgs];
   const child = spawn(chromePath, args, {
     detached: true,
-    stdio: 'ignore',
+    // stderr carries the fixed-port ownership proof (see above). The pipe is
+    // closed as soon as this launch settles, so a Chrome that outlives us
+    // never blocks writing to it.
+    stdio: port === 0 ? 'ignore' : ['ignore', 'ignore', 'pipe'],
   });
+  let announcedBrowserId: string | null = null;
+  if (child.stderr) {
+    let stderrTail = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => {
+      if (announcedBrowserId) return;
+      stderrTail = (stderrTail + chunk).slice(-4096);
+      announcedBrowserId = browserIdOf(
+        /DevTools listening on (ws:\/\/\S+)\r?\n/.exec(stderrTail)?.[1],
+      );
+    });
+    child.stderr.on('error', () => {
+      /* closed under us — nothing to read */
+    });
+  }
 
   // Without this, a spawn failure (e.g. EACCES/ENOENT — chromePath exists per
   // findChrome()'s existsSync check but isn't actually executable, or is
@@ -362,8 +389,8 @@ async function launchOnFreePort(config: BrowserConfig, port: number): Promise<nu
   // process's pid overwriting the real winner's, corrupting the very map
   // closeBrowser()'s kill fallback depends on.
 
-  // With port 0 a refused or timed-out launch is not tracked under any port,
-  // so no closeBrowser() could ever reach it — stop it rather than leave it
+  // A refused or timed-out launch is not tracked under any port, so no
+  // closeBrowser() could ever reach it — stop it rather than leave it
   // running.
   const killUntracked = () => {
     try {
@@ -373,52 +400,83 @@ async function launchOnFreePort(config: BrowserConfig, port: number): Promise<nu
     }
   };
 
+  // Our own Chrome, not just some Chrome, is serving `boundPort`. For port 0
+  // the port came from our own profile's DevToolsActivePort, so it is.
+  const isOwnEndpoint = async (boundPort: number): Promise<boolean> => {
+    if (port === 0) return true;
+    if (!announcedBrowserId) return false;
+    const wsUrl = await fetchBrowserWebSocketUrl(boundPort).catch(() => null);
+    return browserIdOf(wsUrl ?? undefined) === announcedBrowserId;
+  };
+
   const launchTimeout = config.launchTimeoutMs ?? LAUNCH_TIMEOUT;
   const deadline = Date.now() + launchTimeout;
-  while (Date.now() < deadline) {
-    if (earlyFailure) throw earlyFailure;
-    await sleep(POLL_INTERVAL);
-    if (earlyFailure) throw earlyFailure;
-    const boundPort = port === 0 ? readDevToolsActivePort(activePortFile) : port;
-    if (boundPort !== null && (await isPortOpen(boundPort))) {
-      const identity = await chromeIdentity(boundPort);
-      if (identity === 'chrome') {
-        track(boundPort);
-        return boundPort;
+  try {
+    while (Date.now() < deadline) {
+      if (earlyFailure) throw earlyFailure;
+      await sleep(POLL_INTERVAL);
+      if (earlyFailure) throw earlyFailure;
+      const boundPort = port === 0 ? readDevToolsActivePort(activePortFile) : port;
+      if (boundPort !== null && (await isPortOpen(boundPort))) {
+        const identity = await chromeIdentity(boundPort);
+        if (identity === 'chrome') {
+          if (await isOwnEndpoint(boundPort)) {
+            track(boundPort);
+            return boundPort;
+          }
+          // Some Chrome answers on the port, but not the one we started: a
+          // concurrent launch's, or ours before its stderr line arrived. Our
+          // child exiting (it lost the bind) or the deadline decides.
+          continue;
+        }
+        // A Chrome that has only just opened its endpoint, on a loaded
+        // machine, can answer /json/list (no timeout) yet miss the identity
+        // check's 1 s timeout on /json/version. That says nothing about who is
+        // listening — keep polling rather than refuse our own Chrome.
+        if (identity === 'unknown') continue;
+        killUntracked();
+        throw new Error(
+          `Port ${boundPort} is occupied by a CDP-speaking process that does not identify as Chrome/Chromium. ` +
+            `Refusing to attach — pass a different port or free port ${boundPort}.`,
+        );
       }
-      // A Chrome that has only just opened its endpoint, on a loaded
-      // machine, can answer /json/list (no timeout) yet miss the identity
-      // check's 1 s timeout on /json/version. That says nothing about who is
-      // listening — keep polling rather than refuse our own Chrome.
-      if (identity === 'unknown') continue;
-      if (port === 0) killUntracked();
+    }
+
+    if (earlyFailure) throw earlyFailure;
+    killUntracked();
+
+    if (port === 0) {
       throw new Error(
-        `Port ${boundPort} is occupied by a CDP-speaking process that does not identify as Chrome/Chromium. ` +
-          `Refusing to attach — pass a different port or free port ${boundPort}.`,
+        `Chrome did not report a CDP port in ${activePortFile} within ${launchTimeout}ms`,
       );
     }
+
+    // Timed out waiting for our Chrome to come up on the port. Distinguish
+    // "another Chrome holds it", "nothing is listening" (real launch failure)
+    // and "something non-CDP is squatting the port" (confusing generic
+    // timeout otherwise).
+    if (await isChromeIdentity(port)) {
+      throw new Error(
+        `Port ${port} is held by a Chrome/Chromium this launch did not start (a concurrent launch took it).`,
+      );
+    }
+    if (await isTcpPortOpen(port)) {
+      throw new Error(
+        `Port ${port} is occupied by a non-Chrome process (TCP connection succeeds but no CDP response within ${launchTimeout}ms). ` +
+          `Free the port or pass a different one.`,
+      );
+    }
+
+    throw new Error(`Chrome failed to start on port ${port} within ${launchTimeout}ms`);
+  } finally {
+    child.stderr?.destroy();
   }
+}
 
-  if (earlyFailure) throw earlyFailure;
-
-  if (port === 0) {
-    killUntracked();
-    throw new Error(
-      `Chrome did not report a CDP port in ${activePortFile} within ${launchTimeout}ms`,
-    );
-  }
-
-  // Timed out waiting for our Chrome to come up on the port. Distinguish
-  // "nothing is listening" (real launch failure) from "something non-CDP is
-  // squatting the port" (confusing generic timeout otherwise) via a raw TCP probe.
-  if (await isTcpPortOpen(port)) {
-    throw new Error(
-      `Port ${port} is occupied by a non-Chrome process (TCP connection succeeds but no CDP response within ${launchTimeout}ms). ` +
-        `Free the port or pass a different one.`,
-    );
-  }
-
-  throw new Error(`Chrome failed to start on port ${port} within ${launchTimeout}ms`);
+/** The per-process id in a browser-level CDP websocket URL
+ *  (`ws://host:port/devtools/browser/<id>`), or null. */
+function browserIdOf(wsUrl: string | undefined): string | null {
+  return wsUrl?.match(/\/devtools\/browser\/([^/?#\s]+)/)?.[1] ?? null;
 }
 
 export async function enableSessionDomains(client: CdpClient, sessionId: string): Promise<void> {

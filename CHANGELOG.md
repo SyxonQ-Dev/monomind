@@ -4,6 +4,10 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Two `browse open` launches racing for the same CDP port no longer end up sharing one Chrome.** Both launches could see the port as free and start Chrome on it. If the losing launch's Chrome was still starting when the winner's began answering, the loser took the winner's browser as its own and returned the same port. It then recorded its own Chrome's pid, which was about to exit, under that port. Both callers then drove one browser, and the winner's Chrome was left running with nothing able to close it. On a fixed port, a launch now accepts an endpoint only when it reports the browser id that its own Chrome printed on stderr (`DevTools listening on ws://…/devtools/browser/<id>`). If another Chrome holds the port, the launch waits for its own Chrome to lose the bind and moves on to the next port. Each launch now gets its own profile directory, even when two launches run in the same process. A launch that gives up now kills the Chrome it started, on a fixed port as well as on port 0.
+
 ## [2.16.14] — 2026-09-27
 
 ### Internal
