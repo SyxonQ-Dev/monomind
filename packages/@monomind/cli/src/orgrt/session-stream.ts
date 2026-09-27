@@ -2,6 +2,8 @@
 // Extracted from session-run.ts — opening one role session's runner stream:
 // the AgentRunner.run() arguments and the silent-first-pull guard.
 import { join } from 'node:path';
+import type { ResolvedAccess } from './access-grant.js';
+import { fullAccessCanUseTool } from './agent-exec-access.js';
 import type { AgentMessage, AgentRunner, OrgToolDef } from './agent-runner.js';
 import { ClaudeAgentRunner } from './agent-runner.js';
 import {
@@ -37,6 +39,10 @@ export function sessionRunArgs(
     resume: string | undefined;
     authorityMask: ReturnType<typeof roleAuthorityMask>;
     abort: AbortController;
+    /** #365: resolved by session-run.ts's resolveRoleAccess before this
+     *  session's git enforcement/authority mask are built. Absent/`'scoped'`
+     *  reproduces every field below byte-for-byte. */
+    resolvedAccess?: ResolvedAccess;
   },
 ): Parameters<AgentRunner['run']>[0] {
   const { org, role, policy, mailbox, cwd } = opts;
@@ -51,7 +57,9 @@ export function sessionRunArgs(
     resume,
     authorityMask,
     abort,
+    resolvedAccess,
   } = s;
+  const fullAccess = resolvedAccess?.access === 'full';
   return {
     tools,
     // No options = the pre-D3 stream, exactly.
@@ -115,33 +123,55 @@ export function sessionRunArgs(
       'tool-results',
       role.id.replace(/[^a-zA-Z0-9_.-]/g, '_'),
     ),
-    canUseTool: gatedCanUseTool(
-      policy,
-      opts.beforeTool,
-      role.id,
-      opts.fence,
-      opts.onDecision
-        ? (toolName, _input, decision, kind) =>
-            opts.onDecision?.(role.id, toolName, decision.message ?? 'denied', kind)
-        : undefined,
-      opts.hasPendingGate,
-    ),
+    // #365: a role whose access resolved to 'full' this session gets the
+    // SAME canUseTool agent-exec.ts's `--access full` uses — every call is
+    // allowed (still observed: coverEveryToolCall/ToolActivityTracker below
+    // both read the message stream, not this function). Every other role's
+    // canUseTool is byte-identical to before this issue.
+    canUseTool: fullAccess
+      ? fullAccessCanUseTool
+      : gatedCanUseTool(
+          policy,
+          opts.beforeTool,
+          role.id,
+          opts.fence,
+          opts.onDecision
+            ? (toolName, _input, decision, kind) =>
+                opts.onDecision?.(role.id, toolName, decision.message ?? 'denied', kind)
+            : undefined,
+          opts.hasPendingGate,
+        ),
     // test seam forwarded through extras: lets the scripted fake SDK
     // (test-loop.ts) drive org_send and tool calls through the real
-    // deliver/policy paths; the real SDK ignores it.
-    extras: opts.runner
-      ? undefined
-      : {
-          _orgTest: {
-            deliver: (to: string, subject: string, body: string) =>
-              opts.deliver(role.id, to, subject, body),
-            callTool: (name: string, input: Record<string, unknown>) => policy.decide(name, input),
+    // deliver/policy paths; the real SDK ignores it. #365 additionally asks
+    // ClaudeAgentRunner for the rich 'tool_use' start event (agent-runner-
+    // claude.ts's `emitToolUse`) so a full-access role's tool_activity bus
+    // events (session-run.ts) get real start/end pairs, without opting a
+    // scoped role into anything.
+    extras:
+      opts.runner && !fullAccess
+        ? undefined
+        : {
+            ...(opts.runner
+              ? undefined
+              : {
+                  _orgTest: {
+                    deliver: (to: string, subject: string, body: string) =>
+                      opts.deliver(role.id, to, subject, body),
+                    callTool: (name: string, input: Record<string, unknown>) =>
+                      policy.decide(name, input),
+                  },
+                }),
+            ...(fullAccess ? { includeToolUseEvents: true } : {}),
           },
-        },
     signal: abort.signal,
     // VercelAgentRunner-only fields — ignored by other runners.
     vendor: role.provider?.vendor,
     providerConfig: role.provider,
+    ...(fullAccess ? { access: 'full' as const } : {}),
+    ...(fullAccess && role.policy?.settings?.length
+      ? { settingSources: role.policy.settings }
+      : {}),
   } as any;
 }
 

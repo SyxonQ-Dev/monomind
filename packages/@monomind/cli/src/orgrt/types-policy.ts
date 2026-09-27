@@ -170,6 +170,41 @@ export const RolePolicySchema = z
      *  Bare form — `org_send`, `monoagent__automation_publish` — never the
      *  `mcp__org__` namespaced form. `autoApproveTools` still wins. */
     approvalTools: z.array(z.string()).optional(),
+    /** #365 (Coder mode for org roles): 'scoped' (default) is every field
+     *  above, unchanged. 'full' removes the remaining PolicyEngine checks —
+     *  no allowTools/denyTools/fileWrite/fileRead/webAllow/sandbox, no OS
+     *  sandbox, no authority mask, `git` behaves as 'push' regardless of its
+     *  own value. Only takes effect when `access_ack` (below) is present AND
+     *  its hash matches the role's current security-relevant config — see
+     *  access-grant.ts's `resolveRoleAccess`, the runtime's ONLY source of
+     *  truth for whether a role actually runs with full access this session.
+     *  Setting this field alone, from any config-writing path, grants
+     *  nothing. */
+    access: z.enum(['scoped', 'full']).default('scoped'),
+    /** Coder mode (#356) settings sources this role's sessions load, when
+     *  `access: 'full'` is active: any of 'user'/'project'/'local'. Ignored
+     *  for a scoped role. Unset/`[]` = today's isolated behavior even when
+     *  full access is active. */
+    settings: z.array(z.enum(['user', 'project', 'local'])).optional(),
+    /** Human-only grant record for `access: 'full'`, written ONLY by
+     *  `monomind org role set-access <org> <role> full` after an interactive
+     *  confirmation or `--yes-i-understand`. `hash` covers the role's
+     *  security-relevant config (see access-ack.ts); the runtime recomputes
+     *  it every session start and drops the role to scoped
+     *  (`access_state: 'suspended'`) the instant it no longer matches — so a
+     *  config-writing path that merely copies this object forward without
+     *  going through the human CLI grants nothing new, and an edit to the
+     *  role's prompt/runtime/model/tools/reports_to after the grant silently
+     *  revokes it until a human re-acknowledges. Never set this by hand or
+     *  from a program other than that command. */
+    access_ack: z
+      .object({
+        by: z.literal('human'),
+        at: z.string(),
+        hash: z.string(),
+      })
+      .strict()
+      .optional(),
   })
   .partial()
   .passthrough();

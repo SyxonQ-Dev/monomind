@@ -177,6 +177,22 @@
     unnecessary once a coder session's first real turn runs; it never writes
     `~/.claude.json`'s `hasTrustDialogAccepted`, which is interactive-CLI-only and out of reach
     headlessly. Additive only.
+  - rev 13 (2026-09-28): **per-role `policy.access: "full"` for org roles** (issue #365, part of
+    the Coder mode epic #364) — new capability `org-role-full-access`. A specific org role can
+    now run with the same unrestricted native tool access as `agent exec --access full`, but only
+    when a human explicitly grants it: `monomind org role set-access <org> <role> full` (interactive
+    confirm or `--yes-i-understand`) writes an `access_ack` hash over the role's security-relevant
+    config (prompt, runtime, model, tool providers, `reports_to`, coder-mode settings, plus the
+    org's unattended/taint knobs). The runtime recomputes that hash every session start; a
+    mismatch (any covered field edited since the grant) or a missing/invalid ack drops the role to
+    scoped (`access_state: "suspended"`), a scheduled/daemon run without
+    `run_config.allow_unattended_full_access` also drops it (`access_state: "unattended-blocked"`),
+    and no MCP tool, hiring flow, or import path can set the grant itself. `org validate` errors on
+    an unsupported runtime, a `policy.git` explicitly authored below `push` alongside `access:
+    "full"`, and taint (a full-access role that itself ingests untrusted input, or is reachable
+    from one via `reports_to`, unless the path is in `run_config.accept_full_access_taint`).
+    `org status --json` gains `roles_access` for any role that declares `access: "full"`
+    (§7.2). Budgets (`maxTokens`/`maxUsd`) are still enforced. Additive only.
 - **Stability**: Versioned. Frames and events carry `"v": 1`. Breaking changes bump `v` and are
   announced via the capability handshake (§2).
 - **Purpose**: Expose monomind's `AgentRunner` engine (14 local agent CLI runners) and org
@@ -204,7 +220,7 @@ by swarm management and is NOT reused by this protocol — the installed-only vi
 
 ```
 $ monomind --version --json
-{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-scan","agent-scan-read-only","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","doctor-json","doctor-read-only","doctor-offline","init-json"]}
+{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-scan","agent-scan-read-only","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","org-role-full-access","doctor-json","doctor-read-only","doctor-offline","init-json"]}
 ```
 
 Callers MUST handshake before use and fail with an actionable message (install/upgrade hint)
@@ -475,6 +491,16 @@ earliest stop; the watchdog checks every min(idle/2, 30 s)). When it is `null`, 
 why: `disabled` (`idle_minutes: 0`), `restarting`, `pending-gate`, `pending-question`,
 `pending-approval`, `endpoint-reply-due`, `task-blocked`, or `unknown` (no record from this run
 yet, e.g. a daemon older than the capability).
+
+**Full-access role visibility** (capability `org-role-full-access`, issue #365): `org status
+--json` gains `roles_access`, an array of `{role, access, access_state, reason?}` — one entry per
+role that declares `policy.access: "full"` in the org's config, omitted entirely for an org with
+none. `access` is what the role actually runs with THIS session (`"scoped"` or `"full"`);
+`access_state` is `"active"`, `"suspended"` (no valid human acknowledgement, or the role's config
+changed since the grant), or `"unattended-blocked"` (a scheduled/daemon run without
+`run_config.allow_unattended_full_access`); `reason` is a human-readable explanation, present
+whenever `access_state !== "active"`. See `doc/concepts/org-runtime.md`'s "Full access" section
+and `monomind org role set-access --help`.
 
 ### 7.3 `monomind org events --ndjson [--follow] [--since]`
 

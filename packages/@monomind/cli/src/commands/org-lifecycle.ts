@@ -5,6 +5,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { rolesAccessStatus } from '../orgrt/access-grant.js';
 import { readIdleStatus } from '../orgrt/idle-deadline.js';
 import {
   describeRunOutcome,
@@ -13,7 +14,7 @@ import {
   summarizeRun,
   utcTime,
 } from '../orgrt/reporting.js';
-import { ORG_DIR } from '../orgrt/types.js';
+import { ORG_DIR, OrgDefSchema } from '../orgrt/types.js';
 import { output } from '../output.js';
 import type { CommandContext, CommandResult } from '../types.js';
 import {
@@ -27,6 +28,19 @@ import {
 const log = (text: string): void => {
   console.log(text);
 };
+
+/** #365: `policy.access: 'full'` roles' resolved access/state, for `org
+ *  status`. Best-effort — an unreadable/invalid config must never break
+ *  `org status` itself, which already tolerates a missing runtime.json. */
+function fullAccessRoles(cwd: string, name: string): ReturnType<typeof rolesAccessStatus> {
+  try {
+    const path = join(cwd, ORG_DIR, `${name}.json`);
+    if (!existsSync(path)) return [];
+    return rolesAccessStatus(OrgDefSchema.parse(JSON.parse(readFileSync(path, 'utf8'))));
+  } catch {
+    return [];
+  }
+}
 
 export const stopAction = async (ctx: CommandContext): Promise<CommandResult> => {
   const validated = validateOrgName(ctx.args[0]);
@@ -167,6 +181,7 @@ export const statusAction = async (ctx: CommandContext): Promise<CommandResult> 
         if (status === 'running' || status === 'crashed') {
           if (classifyRun(ctx.cwd, t, st).state === 'crashed') status = 'crashed';
         }
+        const accessRoles = fullAccessRoles(ctx.cwd, t);
         return {
           name: t,
           status,
@@ -180,6 +195,11 @@ export const statusAction = async (ctx: CommandContext): Promise<CommandResult> 
           memory_error: st.memoryError,
           // #296: when the idle watchdog will stop a running org, or why it won't.
           ...(status === 'running' ? readIdleStatus(ctx.cwd, t, st.run) : {}),
+          // #365 (capability `org-role-full-access`): every policy.access
+          // 'full' role's resolved access/access_state. Omitted (not an
+          // empty array) when the org declares none, so this adds nothing
+          // to the payload for the common case.
+          ...(accessRoles.length ? { roles_access: accessRoles } : {}),
         };
       } catch {
         return { name: t, status: 'unreadable-runtime' };
@@ -268,6 +288,14 @@ export const statusAction = async (ctx: CommandContext): Promise<CommandResult> 
       );
     } else {
       log(output.info(line));
+    }
+    // #365: every policy.access 'full' role's resolved access/state.
+    for (const r of fullAccessRoles(ctx.cwd, t)) {
+      const label =
+        r.access_state === 'active' ? 'full access — active' : `full access — ${r.access_state}`;
+      const suffix = r.reason && r.access_state !== 'active' ? ` (${r.reason})` : '';
+      if (r.access_state === 'active') log(`  ${r.role}: ${label}`);
+      else log(output.warning(`  ${r.role}: ${label}${suffix}`));
     }
     // #293: cross-run memory that was never written. Without this the only
     // symptom is org_recall coming back empty runs later, which points nowhere

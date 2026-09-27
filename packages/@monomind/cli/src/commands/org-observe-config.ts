@@ -6,6 +6,8 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveOrgDefBlueprints } from '../catalog/blueprints.js';
+import { fullAccessTaintFindings } from '../orgrt/access-taint.js';
+import { accessValidationFindings } from '../orgrt/access-validate.js';
 import { checkOrgStructure } from '../orgrt/migrate.js';
 import { gitEnforcementFindings } from '../orgrt/role-sandbox.js';
 import { resolveModel } from '../orgrt/session.js';
@@ -50,12 +52,25 @@ export const validateAction = async (ctx: CommandContext): Promise<CommandResult
       continue;
     }
     try {
-      const parsedDef = OrgDefSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+      const rawText = readFileSync(path, 'utf8');
+      const rawJson = JSON.parse(rawText) as { roles?: { id?: unknown; policy?: unknown }[] };
+      const parsedDef = OrgDefSchema.parse(rawJson);
       const bp = resolveOrgDefBlueprints(parsedDef, ctx.cwd || process.cwd());
       const def = bp.def;
       errors.push(...bp.errors);
       for (const n of bp.notes) log(output.info(`${stem}: ${n}`));
       errors.push(...checkOrgStructure(def));
+      // #365: policy.access 'full' schema/runtime findings and the taint
+      // (untrusted-input reachability) checks for any full-access role.
+      const accessFindings = accessValidationFindings(
+        def,
+        rawJson.roles as { id?: unknown; policy?: Record<string, unknown> }[] | undefined,
+      );
+      errors.push(...accessFindings.errors);
+      warnings.push(...accessFindings.warnings);
+      const taintFindings = fullAccessTaintFindings(def);
+      errors.push(...taintFindings.errors);
+      warnings.push(...taintFindings.warnings);
       // ADR-O001 D8: a cost tier that can't resolve a model for a role's
       // provider is a config error, not a runtime fallback — surface it here
       // as well as at daemon start, so it's caught before a run is attempted.

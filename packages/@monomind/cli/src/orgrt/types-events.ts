@@ -74,7 +74,10 @@ export interface BusEvent {
     | 'usage'
     | 'question'
     | 'gate'
-    | 'trace';
+    | 'trace'
+    /** #365: a `policy.access: 'full'` role's native tool call start/end —
+     *  reuses #357's `tool_activity` shape (tool-activity.ts) as `data`. */
+    | 'tool_activity';
   from?: string;
   to?: string;
   subject?: string;

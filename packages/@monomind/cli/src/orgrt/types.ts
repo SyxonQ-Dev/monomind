@@ -178,6 +178,24 @@ export const OrgDefSchema = z
             }),
           )
           .optional(),
+        /** #365: human-only. A `policy.access: 'full'` role runs scoped
+         *  (`access_state: 'unattended-blocked'`) on an unattended run (a
+         *  scheduled org — `schedule` set — including one ticked by `org
+         *  serve`) unless this is `true`. In this project's ack-hash model
+         *  "human-only" means: never set programmatically by an
+         *  agent-reachable write path; edit the org config directly (like
+         *  `schedule` itself) and re-run `org role set-access <org> <role>
+         *  full` to re-acknowledge, since this value is covered by every
+         *  full-access role's access_ack hash. */
+        allow_unattended_full_access: z.boolean().optional(),
+        /** #365: human-only, in the ack hash (see above). Accepts a specific
+         *  taint path `org validate` would otherwise error on — a role that
+         *  ingests untrusted input (webAllow, or a messaging/social/email
+         *  tool provider) can reach a `policy.access: 'full'` role through
+         *  `reports_to`. Entries match either the full path
+         *  ("scraper → analyst → builder") or just its endpoints
+         *  ("scraper→builder") — see access-taint.ts. */
+        accept_full_access_taint: z.array(z.string()).optional(),
       })
       .partial()
       .passthrough()

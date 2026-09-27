@@ -305,6 +305,9 @@ alongside the shared `'worktree'` mode ([`org-stop.ts → finishStop`](packages/
 | `fence` | _(unset)_ | Per-role MonoFence tool-fence config (`FenceConfigSchema`) — see [Fence Protocol](#fence-protocol-tool-fencets) |
 | `git` | `'read'` | `'none'` \| `'read'` \| `'commit'` \| `'push'` — see [Git policy enforcement](#git-policy-enforcement) |
 | `sandbox` | `{ mode: 'auto' }` | OS sandbox for claude-runtime roles below `git: 'push'`: `mode` `'auto'` \| `'required'` \| `'off'`; `allowedDomains` (default `['*']`); `deniedDomains` (opt-in host deny list); `allowWrite` (extra writable paths); `denyWrite` (paths made read-only for the role's shell and file tools, relative paths resolved against the org root — `["."]` keeps a QA role from writing anywhere in the checkout it tests from); `allowUnixSockets` (default `true` — Chrome needs one) |
+| `access` | `'scoped'` | `'full'` removes every field above — see [Full access](#full-access-policyaccess-full) below. Human-only; never effective without a matching `access_ack` |
+| `settings` | _(unset)_ | `'user'`\|`'project'`\|`'local'` sources loaded when `access: 'full'` is active (reuses the `agent exec --settings` mechanism). Ignored for a scoped role |
+| `access_ack` | _(unset)_ | `{by:'human', at, hash}` — written only by `monomind org role set-access`. Never author this by hand |
 
 **Path placeholders.** `{{org_root}}` (the org's project root, not the role's cwd) and `{{home}}` (the home directory of the user running the org) expand in a role's `responsibilities` and in its path-holding policy lists: `fileRead`, `fileWrite`, `sandbox.allowWrite` and `sandbox.denyWrite` ([`prompt-vars.ts`](packages/@monomind/cli/src/orgrt/prompt-vars.ts)). The policy lists expand when the daemon loads the org (at start, on `org reload`, and for a replay), so the file-tool roots and the OS sandbox only ever see absolute paths, and a tracked config can grant `"allowWrite": ["{{home}}/mrg-tmp"]` without hard-coding anyone's home. An unknown placeholder is left verbatim and `org validate` reports it as an error, naming the field.
 
@@ -396,6 +399,61 @@ Runtimes with no OS sandbox at all get layer 4 only and emit a `git-sandbox-unsu
 - **On codex and grok roles (layer 1b),** the CLI's sandbox confines writes but nothing else: the role's native shell still never consults `canUseTool`, the `.git` directory inside a writable cwd is writable (so refs and objects can be written directly, which is what the guard's `reference-transaction` hook is there to catch), credential files outside the sandbox's own protections stay readable, and network is deliberately left on. grok's `workspace` profile makes `/tmp` writable but not a relocated `$TMPDIR`, so a role with a custom temp dir outside its cwd cannot write there. grok's enforcement needs Linux ≥ 5.13 (Landlock) or macOS Seatbelt and, per its own docs, logs a warning and continues unenforced when it cannot apply — monomind does not detect that.
 - **On the remaining non-claude CLIs,** qwen `--yolo`, copilot `--allow-all-tools`, antigravity `--dangerously-skip-permissions` and the rest still run their native shell with no OS sandbox and without consulting `canUseTool`; see the layer-1b table above for why each was left alone rather than wired.
 - **On Windows,** the hooks' path comparison (`pwd -P` vs. Node realpaths) may not match, so `reference-transaction` protection at `read` is not guaranteed there.
+
+### Full access (`policy.access: 'full'`)
+
+Coder mode (#364) for a specific org role, not just chat (`agent exec --access full`, #355): the
+role runs with **no** `allowTools`/`denyTools`/`fileWrite`/`fileRead`/`webAllow`/`sandbox`, **no**
+OS sandbox, **no** authority mask, and **no** per-tool approval gate — `canUseTool` allows
+everything (still observed: every call still lands a `tool_activity` bus event and a line in
+`~/.monomind/logs/agent-exec-full-access.log`). `policy.git` behaves as `'push'` regardless of its
+own value. Budgets (`maxTokens`/`maxUsd`) are still enforced — full access never bypasses spend
+caps. Nothing about *where* the role runs changes: its worktree/workspace is exactly as
+`run_config.workspace` says.
+
+**This is the single most security-sensitive knob in the org runtime, so it is human-only by
+design:**
+
+1. **Grant it**: `monomind org role set-access <org> <role> full` (interactive confirm, or
+   `--yes-i-understand` for scripts). This is the ONLY place in monomind that writes
+   `policy.access: 'full'` together with a matching `access_ack`. It refuses a role whose resolved
+   runtime doesn't advertise `full_access: true` (`agent scan --json`; only `claude` today).
+   `monomind org role set-access <org> <role> scoped` revokes it.
+2. **The runtime never trusts `policy.access` alone.** [`access-grant.ts`](packages/@monomind/cli/src/orgrt/access-grant.ts)'s
+   `resolveRoleAccess()` is the single function every session start calls, and it is the only
+   thing that turns a declared `'full'` into actual unrestricted behavior:
+   - no `access_ack`, or `access_ack.by !== 'human'` → **scoped**, `access_state: 'suspended'`;
+   - `access_ack.hash` doesn't match a hash recomputed from the role's CURRENT
+     [`access-ack.ts`](packages/@monomind/cli/src/orgrt/access-ack.ts)-covered config (prompt/
+     responsibilities, runtime, model, provider, `tool_providers`, `reports_to`, `review_input`,
+     `policy.settings`, plus the org's `run_config.allow_unattended_full_access` and
+     `run_config.accept_full_access_taint`) → **scoped**, `'suspended'` — so editing ANY of those,
+     by anyone, silently revokes the grant until a human re-runs `org role set-access ... full`;
+   - the run is unattended (the org has a `schedule` — including one ticked by `org serve`) and
+     `run_config.allow_unattended_full_access` isn't `true` → **scoped**,
+     `access_state: 'unattended-blocked'`;
+   - otherwise → **full**, `access_state: 'active'`.
+3. **Every agent-reachable config-writing path is expected to reject or strip `access: 'full'`
+   and `access_ack`** — an org-design MCP tool, a hiring/new-agent flow, an org import. None of
+   those exist inside monomind's own CLI today (they live in the calling tool, e.g. mono-agent's
+   org-design chat tools); `resolveRoleAccess()` above is the backstop regardless of what such a
+   path does or doesn't strip, since a copied-forward `access_ack` only matches when the role's
+   config is byte-for-byte what it was at grant time.
+4. **`org validate`** errors on: an unsupported runtime, `policy.git` explicitly authored below
+   `'push'` alongside `access: 'full'` (misleading — it won't be enforced), and taint (below).
+   It warns on scoped-only fields left set alongside `access: 'full'` (harmless but misleading)
+   and on a role that will run scoped for lack of acknowledgement.
+5. **Taint checks** ([`access-taint.ts`](packages/@monomind/cli/src/orgrt/access-taint.ts)): a
+   full-access role that is ITSELF an untrusted-input role (`policy.webAllow` non-empty, or a
+   `tool_providers` entry that looks like a messages/social/email surface) is always an `org
+   validate` **error** — it must not read inbound third-party content directly. A role that DOES
+   ingest untrusted input reaching the full-access role via `reports_to` is an error too, unless
+   the org names the path in `run_config.accept_full_access_taint` (`["scraper→builder"]` or the
+   full arrow-joined path), which downgrades it to a visible warning — and that acceptance list is
+   itself covered by the ack hash, so editing it also requires re-acknowledging.
+6. **Visibility**: `org status`/`org status --json` (`roles_access`, capability
+   `org-role-full-access` — see `doc/agent-exec-protocol.md` §7.2) show `access` and
+   `access_state` for every role that declares `access: 'full'`.
 
 ### Provider kinds (`ProviderSchema`)
 
