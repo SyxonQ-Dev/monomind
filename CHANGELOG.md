@@ -4,6 +4,10 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Added
+
+- **Org runs record the idle watchdog's state when they stop.** The `org stopped` event in `bus.jsonl` now carries `data.idleWatchdog`: `idle_minutes`, when the next idle nudge was due (`next_nudge_at`), when the run would have been idle-stopped, and any hold in force. `idle-watchdog.json` (read by `org status --json`) also gains `next_nudge_at`. Before this, a run that was cut short, for example a drill bounded by `timeout`, deleted the watchdog file on stop, and its bus did not show whether a nudge had been missed or simply was not due yet. The default nudge comes after 10 idle minutes. The 5-minute interval is `block_recheck_minutes`, which applies only to tasks blocked with `org_task_block`. (#352)
+
 ## [2.16.14] — 2026-09-27
 
 ### Internal
