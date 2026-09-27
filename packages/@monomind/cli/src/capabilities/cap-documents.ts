@@ -1,7 +1,7 @@
 import fs from 'node:fs';
-import { createRequire } from 'node:module';
-import path from 'node:path';
-import { unzipSync } from 'fflate';
+import { extractRtfText } from './cap-documents-rtf.js';
+import { requireXlsx } from './cap-documents-xlsx.js';
+import { extractFromZip, readZipEntries, textFromZipEntries } from './cap-documents-zip.js';
 import type {
   CapabilityModule,
   DirectoryScan,
@@ -49,163 +49,11 @@ const CAPTURE_EXTENSIONS = new Set(['.html', '.htm', '.xhtml', '.mhtml', '.mht']
 
 const MAX_INDEX_FILE_SIZE = 50 * 1024 * 1024;
 
-type XlsxModule = {
-  readFile(
-    filePath: string,
-    options: { type: 'file' },
-  ): {
-    SheetNames: string[];
-    Sheets: Record<string, unknown>;
-  };
-  utils: {
-    sheet_to_csv(sheet: unknown, options: { FS: string; blankrows: boolean }): string;
-  };
-};
-
-/**
- * Load SheetJS from the CLI installation first, then from the initialized
- * project. The second location lets an `npx monomind` user opt into
- * spreadsheet extraction without modifying the npx cache.
- */
-function requireXlsx(): XlsxModule {
-  const requireFromCli = createRequire(import.meta.url);
-  try {
-    return requireFromCli('xlsx') as XlsxModule;
-  } catch {
-    return createRequire(path.join(process.cwd(), 'package.json'))('xlsx') as XlsxModule;
-  }
-}
-
 // In-memory index for T0 (metadata) and T1 (content) — replaced by memory DB in production
 const indexedDocs = new Map<
   string,
   { path: string; content: string; metadata: Record<string, unknown> }
 >();
-
-// ── ZIP-based XML text extraction (pptx, odt, odp, ods, epub) ──────
-// These formats are all ZIP archives containing XML/HTML with text content.
-// Read with fflate (pure JS, no native deps, no shell-out) so this works
-// identically on macOS/Linux/Windows — a prior version shelled out to the
-// `unzip` CLI, which isn't available on Windows by default.
-
-function readZipEntries(filePath: string): Record<string, Uint8Array> {
-  const buffer = fs.readFileSync(filePath);
-  return unzipSync(new Uint8Array(buffer));
-}
-
-function textFromZipEntries(
-  entries: Record<string, Uint8Array>,
-  xmlPaths: string[],
-  stripTags: boolean,
-): string {
-  const parts: string[] = [];
-
-  for (const xmlPath of xmlPaths) {
-    const bytes = entries[xmlPath];
-    if (bytes) parts.push(Buffer.from(bytes).toString('utf-8'));
-  }
-  if (parts.length === 0) {
-    // Fallback: any XML/HTML/XHTML entries (e.g. EPUB chapters, whose names
-    // aren't known ahead of time)
-    const candidates = Object.keys(entries)
-      .filter((f) => /\.(xml|html|xhtml)$/i.test(f))
-      .slice(0, 50);
-    for (const c of candidates) parts.push(Buffer.from(entries[c]).toString('utf-8'));
-  }
-
-  const joined = parts.join('\n');
-  if (!stripTags) return joined;
-  return joined
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&#\d+;/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-async function extractFromZip(
-  filePath: string,
-  xmlPaths: string[],
-  stripTags: boolean,
-): Promise<string> {
-  return textFromZipEntries(readZipEntries(filePath), xmlPaths, stripTags);
-}
-
-// ── RTF text extraction (no dep) ───────────────────────────────────
-// Skips destination groups ({\*\...}), extracts visible text, handles
-// \'xx hex escapes, \par/\line/\tab, and ignores all other control words.
-function extractRtfText(content: string): string {
-  let depth = 0;
-  let skipDepth = 0;
-  let result = '';
-  let i = 0;
-  while (i < content.length) {
-    const ch = content[i];
-    if (ch === '{') {
-      depth++;
-      // Check for destination group {\*\...} — skip entirely
-      if (i + 2 < content.length && content[i + 1] === '\\' && content[i + 2] === '*') {
-        skipDepth = depth;
-      }
-      i++;
-      continue;
-    }
-    if (ch === '}') {
-      if (depth === skipDepth) skipDepth = 0;
-      depth = Math.max(0, depth - 1);
-      i++;
-      continue;
-    }
-    if (skipDepth > 0) {
-      i++;
-      continue;
-    }
-    if (ch === '\\') {
-      i++;
-      if (i >= content.length) break;
-      const next = content[i];
-      if (next === '\n' || next === '\r') {
-        result += '\n';
-        i++;
-        continue;
-      }
-      // Escaped literal chars
-      if (next === '{' || next === '}' || next === '\\') {
-        result += next;
-        i++;
-        continue;
-      }
-      // Hex escape \'xx
-      if (next === "'" && i + 2 < content.length) {
-        const code = parseInt(content.substring(i + 1, i + 3), 16);
-        if (!Number.isNaN(code)) result += String.fromCharCode(code);
-        i += 3;
-        continue;
-      }
-      // Control word: letter sequence + optional signed integer + optional trailing space
-      let word = '';
-      while (i < content.length && /[a-zA-Z]/.test(content[i])) {
-        word += content[i];
-        i++;
-      }
-      while (i < content.length && /[-\d]/.test(content[i])) i++;
-      if (i < content.length && content[i] === ' ') i++;
-      if (word === 'par' || word === 'line') result += '\n';
-      else if (word === 'tab') result += '\t';
-      continue;
-    }
-    result += ch;
-    i++;
-  }
-  return result
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
 
 export async function extractText(file: FileEntry): Promise<string> {
   if (file.size > MAX_INDEX_FILE_SIZE) return '';

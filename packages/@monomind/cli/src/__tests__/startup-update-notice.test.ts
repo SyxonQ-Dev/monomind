@@ -19,7 +19,8 @@ vi.mock('../update/index.js', async (importOriginal) => {
   };
 });
 
-import { CLI } from '../index.js';
+import { checkForUpdatesOnStartup } from '../cli-startup.js';
+import { output } from '../output.js';
 
 describe('startup update notice', () => {
   afterEach(() => {
@@ -37,10 +38,7 @@ describe('startup update notice', () => {
       stderr.push(String(s));
       return true;
     });
-    const cli = new CLI({ interactive: false }) as unknown as {
-      checkForUpdatesOnStartup(): Promise<void>;
-    };
-    await cli.checkForUpdatesOnStartup();
+    await checkForUpdatesOnStartup('monomind', output);
     expect(stdout.join('')).toBe('');
     expect(stderr.join('')).toContain('monomind v9.9.9 available');
   });

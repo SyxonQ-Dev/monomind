@@ -8,24 +8,20 @@
 import { readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveDoctorMode } from './commands/doctor-mode.js';
+import { printCommandHelp, printMainHelp, printVersionInfo } from './cli-help.js';
 import {
-  getCommand,
-  getCommandAsync,
-  getCommandNames,
-  getCommandsByCategory,
-  hasCommand,
-} from './commands/index.js';
+  checkForUpdatesOnStartup,
+  handleCliError,
+  initCliSubsystems,
+  loadCliConfig,
+} from './cli-startup.js';
+import { resolveDoctorMode } from './commands/doctor-mode.js';
+import { getCommand, getCommandAsync, getCommandNames, hasCommand } from './commands/index.js';
 import { type OutputFormatter, output } from './output.js';
 import { type CommandParser, commandParser } from './parser.js';
-import { versionJsonPayload } from './protocol-capabilities.js';
 import { suggestCommand } from './suggest.js';
-import type { CLIError, Command, CommandContext, MonomindConfig } from './types.js';
-import {
-  getUpdateTagline,
-  refreshUpdateCacheInBackground,
-  runStartupUpdateCheck,
-} from './update/index.js';
+import type { Command, CommandContext } from './types.js';
+import { refreshUpdateCacheInBackground } from './update/index.js';
 
 // Read version from package.json at runtime
 function getPackageVersion(): string {
@@ -112,7 +108,7 @@ export class CLI {
       // Handle global flags
       if (flags.version || flags.V) {
         const json = Boolean(flags.json) || flags.format === 'json';
-        this.showVersion(json);
+        printVersionInfo(this.name, this.version, this.output, json);
         // The startup update check below is never reached from here, so a
         // stale cache would keep the tagline silent forever. Refresh it in a
         // detached child — after the line is written, so output is unchanged.
@@ -161,7 +157,7 @@ export class CLI {
       // such as mono-agent run it on a timer to show installed runtimes.
       const probe = isReadOnlyProbe([...commandPath, ...positional]);
       if (flags.update !== false && commandPath[0] !== 'update' && !quietDoctor && !probe) {
-        this.checkForUpdatesOnStartup().catch(() => {
+        checkForUpdatesOnStartup(this.name, this.output).catch(() => {
           /* silent */
         });
       }
@@ -184,7 +180,7 @@ export class CLI {
           // path the dispatcher below resolves — not just the top-level
           // parent's subcommand list. `monomind memory store --help` should
           // show `store`'s own options, not memory's list of subcommands.
-          await this.showCommandHelp(commandPath);
+          await printCommandHelp(this.name, this.output, commandPath);
         } else if (positional.length > 0 && !positional[0].startsWith('-')) {
           // First positional looks like an attempted command - suggest correction
           const attemptedCommand = positional[0];
@@ -194,7 +190,7 @@ export class CLI {
           this.output.writeln(this.output.dim(`  ${message}`));
           process.exit(1);
         } else {
-          await this.showHelp();
+          await printMainHelp(this.name, this.version, this.description, this.parser, this.output);
         }
         return;
       }
@@ -226,7 +222,7 @@ export class CLI {
       // directory that's never been a monomind project) no longer creates
       // .monomind/registry.json as a side effect of just asking for help.
       if (!doctorMode?.readOnly && !probe) {
-        this.initSubsystems().catch(() => {
+        initCliSubsystems().catch(() => {
           /* silent */
         });
       }
@@ -283,7 +279,7 @@ export class CLI {
       const ctx: CommandContext = {
         args: subcommandArgs,
         flags,
-        config: await this.loadConfig(flags.config as string),
+        config: await loadCliConfig(flags.config as string, this.output),
         cwd: process.cwd(),
         interactive: this.interactive && !flags.quiet,
       };
@@ -312,7 +308,11 @@ export class CLI {
         }
       } else {
         // No action - show help for the resolved (sub)command path
-        await this.showCommandHelp(commandPath.length > 0 ? commandPath : [commandName]);
+        await printCommandHelp(
+          this.name,
+          this.output,
+          commandPath.length > 0 ? commandPath : [commandName],
+        );
       }
     } catch (error) {
       // Don't re-handle if this is a process.exit error (from mocked tests)
@@ -320,340 +320,7 @@ export class CLI {
       if (errorMessage?.startsWith('process.exit:')) {
         throw error; // Re-throw so tests can capture the exit code
       }
-      this.handleError(error as Error);
-    }
-  }
-
-  /**
-   * Show main help
-   */
-  private async showHelp(): Promise<void> {
-    const commandsByCategory = await getCommandsByCategory();
-
-    this.output.writeln();
-    const tagline = getUpdateTagline(this.version);
-    this.output.writeln(
-      this.output.bold(`${this.name} v${this.version}`) + this.output.dim(tagline),
-    );
-    this.output.writeln(this.output.dim(this.description));
-    this.output.writeln();
-
-    this.output.writeln(this.output.bold('USAGE:'));
-    this.output.writeln(`  ${this.name} <command> [subcommand] [options]`);
-    this.output.writeln();
-
-    // Primary Commands
-    this.output.writeln(this.output.bold('PRIMARY COMMANDS:'));
-    for (const cmd of commandsByCategory.primary) {
-      if (cmd.hidden) continue;
-      const name = cmd.name.padEnd(12);
-      this.output.writeln(`  ${this.output.highlight(name)} ${cmd.description}`);
-    }
-    this.output.writeln();
-
-    // Advanced Commands
-    this.output.writeln(this.output.bold('ADVANCED COMMANDS:'));
-    for (const cmd of commandsByCategory.advanced) {
-      if (cmd.hidden) continue;
-      const name = cmd.name.padEnd(12);
-      this.output.writeln(`  ${this.output.highlight(name)} ${cmd.description}`);
-    }
-    this.output.writeln();
-
-    // Utility Commands
-    this.output.writeln(this.output.bold('UTILITY COMMANDS:'));
-    for (const cmd of commandsByCategory.utility) {
-      if (cmd.hidden) continue;
-      const name = cmd.name.padEnd(12);
-      this.output.writeln(`  ${this.output.highlight(name)} ${cmd.description}`);
-    }
-    this.output.writeln();
-
-    // Analysis Commands
-    this.output.writeln(this.output.bold('ANALYSIS COMMANDS:'));
-    for (const cmd of commandsByCategory.analysis) {
-      if (cmd.hidden) continue;
-      const name = cmd.name.padEnd(12);
-      this.output.writeln(`  ${this.output.highlight(name)} ${cmd.description}`);
-    }
-    this.output.writeln();
-
-    // Management Commands
-    this.output.writeln(this.output.bold('MANAGEMENT COMMANDS:'));
-    for (const cmd of commandsByCategory.management) {
-      if (cmd.hidden) continue;
-      const name = cmd.name.padEnd(12);
-      this.output.writeln(`  ${this.output.highlight(name)} ${cmd.description}`);
-    }
-    this.output.writeln();
-
-    this.output.writeln(this.output.bold('GLOBAL OPTIONS:'));
-    for (const opt of this.parser.getGlobalOptions()) {
-      const flags = opt.short ? `-${opt.short}, --${opt.name}` : `    --${opt.name}`;
-      this.output.writeln(`  ${flags.padEnd(25)} ${opt.description}`);
-    }
-    this.output.writeln();
-
-    this.output.writeln(this.output.bold('FEATURES:'));
-    this.output.printList([
-      'Local SQLite memory with on-device embeddings (HNSW ANN index above 5,000 entries)',
-      'Monograph codebase knowledge graph (tree-sitter + SQLite)',
-      'Org runtime daemon with per-role policy gates (monomind org run)',
-      "Monoswarm topology, roster and vote state for your assistant's subagents",
-      'Keyword routing + route-outcome measurement',
-    ]);
-    this.output.writeln();
-
-    this.output.writeln(this.output.bold('EXAMPLES:'));
-    this.output.writeln(`  ${this.name} agent spawn -t coder              # Spawn a coder agent`);
-    this.output.writeln(`  ${this.name} monoswarm init --v1-mode          # Initialize monoswarm`);
-    this.output.writeln(`  ${this.name} memory search -q "auth patterns"  # Semantic search`);
-    this.output.writeln(`  ${this.name} mcp start                         # Start MCP server`);
-    this.output.writeln();
-
-    this.output.writeln(this.output.dim(`Run "${this.name} <command> --help" for command help`));
-    this.output.writeln();
-    this.output.writeln(this.output.dim('github.com/monoes/monomind'));
-    this.output.writeln();
-  }
-
-  /**
-   * Show command-specific help
-   */
-  private async showCommandHelp(commandPath: string | string[]): Promise<void> {
-    const path = Array.isArray(commandPath) ? commandPath : [commandPath];
-    const topName = path[0];
-
-    // Try sync first, then lazy load
-    let command = getCommand(topName);
-    if (!command && hasCommand(topName)) {
-      command = await getCommandAsync(topName);
-    }
-
-    if (!command) {
-      this.output.printError(`Unknown command: ${topName}`);
-      return;
-    }
-
-    // Walk the remaining path segments through subcommands/nested
-    // subcommands — mirrors the resolution the dispatcher uses in run() —
-    // so `monomind <command> <subcommand> --help` shows the actual target
-    // (sub)command's own options and examples, not just the parent's list
-    // of subcommands.
-    let target: Command = command;
-    const resolvedNames = [command.name];
-    for (const segment of path.slice(1)) {
-      const next = target.subcommands?.find(
-        (sc) => sc.name === segment || sc.aliases?.includes(segment),
-      );
-      if (!next) break;
-      target = next;
-      resolvedNames.push(next.name);
-    }
-
-    this.output.writeln();
-    this.output.writeln(this.output.bold(`${this.name} ${resolvedNames.join(' ')}`));
-    this.output.writeln(target.description);
-    this.output.writeln();
-
-    // Subcommands
-    if (target.subcommands && target.subcommands.length > 0) {
-      this.output.writeln(this.output.bold('SUBCOMMANDS:'));
-      for (const sub of target.subcommands) {
-        if (sub.hidden) continue;
-        const name = sub.name.padEnd(15);
-        const aliases = sub.aliases ? this.output.dim(` (${sub.aliases.join(', ')})`) : '';
-        this.output.writeln(`  ${this.output.highlight(name)} ${sub.description}${aliases}`);
-      }
-      this.output.writeln();
-    }
-
-    // Options
-    if (target.options && target.options.length > 0) {
-      this.output.writeln(this.output.bold('OPTIONS:'));
-      for (const opt of target.options) {
-        if (opt.hidden) continue;
-        const flags = opt.short ? `-${opt.short}, --${opt.name}` : `    --${opt.name}`;
-        const required = opt.required ? this.output.error(' (required)') : '';
-        const defaultVal =
-          opt.default !== undefined ? this.output.dim(` [default: ${opt.default}]`) : '';
-        this.output.writeln(`  ${flags.padEnd(25)} ${opt.description}${required}${defaultVal}`);
-      }
-      this.output.writeln();
-    }
-
-    // Examples
-    if (target.examples && target.examples.length > 0) {
-      this.output.writeln(this.output.bold('EXAMPLES:'));
-      for (const example of target.examples) {
-        this.output.writeln(`  ${this.output.dim('$')} ${example.command}`);
-        this.output.writeln(`    ${this.output.dim(example.description)}`);
-      }
-      this.output.writeln();
-    }
-  }
-
-  /**
-   * Show version. `--version --json` emits the Agent Exec Protocol
-   * capability handshake (doc/agent-exec-protocol.md §2) — machine callers
-   * handshake before using `agent exec`/`agent scan`/org `--json`.
-   */
-  private showVersion(json = false): void {
-    if (json) {
-      process.stdout.write(`${JSON.stringify(versionJsonPayload(this.version))}\n`);
-      return;
-    }
-    const tagline = getUpdateTagline(this.version);
-    this.output.writeln(`${this.name} v${this.version}${tagline}`);
-  }
-
-  /**
-   * Check for updates on startup (non-blocking)
-   * Shows notification if updates are available
-   */
-  private async checkForUpdatesOnStartup(): Promise<void> {
-    try {
-      const result = await runStartupUpdateCheck({
-        autoUpdate: true,
-      });
-
-      if (!result.checked) return;
-
-      // Notify-only: never auto-install (GitHub issue #83).
-      const available = result.updatesAvailable.filter((u) => u.updateType !== 'none');
-      if (available.length > 0) {
-        // stderr, not stdout: `--json` commands (agent scan, doctor, org
-        // observe) promise stdout holds only their JSON (protocol §3.2), and
-        // this notice fires on the first run of any command after a release.
-        this.output.writeErrorln(
-          this.output.dim(
-            `  ↑ ${available.map((u) => `${u.package} v${u.latestVersion}`).join(', ')} available  →  run: npm install -g ${this.name}@latest`,
-          ),
-        );
-      }
-    } catch {
-      // Silently fail - don't interrupt CLI usage
-    }
-  }
-
-  /**
-   * Load configuration file
-   */
-  private async loadConfig(configPath?: string): Promise<MonomindConfig | undefined> {
-    const { configManager } = await import('./services/config-file-manager.js');
-
-    // An explicit --config/-c path names an EXACT file — load it directly
-    // instead of directory-searching from its dirname (which previously
-    // discarded the filename the user gave and either loaded an unrelated
-    // monomind.config.json from that directory or found nothing). Failure
-    // to find/parse an explicitly-named config file is a loud error, not a
-    // silent fallback to defaults.
-    if (configPath) {
-      const raw = configManager.loadExact(configPath);
-      return raw as unknown as MonomindConfig;
-    }
-
-    try {
-      const raw = configManager.load(process.cwd());
-      if (!raw) return undefined;
-      return raw as unknown as MonomindConfig;
-    } catch (error) {
-      // Config loading is optional - don't fail if it doesn't exist
-      if (process.env.DEBUG) {
-        this.output.writeln(this.output.dim(`Config loading failed: ${(error as Error).message}`));
-      }
-      return undefined;
-    }
-  }
-
-  /**
-   * Initialize optional subsystems at startup (non-blocking, all failures are silent).
-   * Starts the @monoes/hooks WorkerManager, wires MonoswarmCheckpointer, and builds
-   * the unified agent registry so that packages/@monomind/* actually contribute
-   * to the live runtime.
-   */
-  private async initSubsystems(): Promise<void> {
-    // NOTE: the @monoes/hooks WorkerManager is intentionally NOT started
-    // here. Workers run from the session-restore hook (6h staleness gate) and
-    // on demand via `monomind hooks worker run <name>`. Starting it on every
-    // CLI invocation scheduled staggered 1-10s timers that usually died with
-    // the process — but long-lived commands (browse: Chrome launch + CDP work)
-    // outlived the stagger, so the consolidate worker fired mid-command,
-    // loaded the onnxruntime embedding model, and its thread pool crashed the
-    // process at exit ("mutex lock failed: Invalid argument" from libc++).
-
-    // GAP-007: MonoswarmCheckpointer — write checkpoint files so crashed monoswarms can resume
-    try {
-      const { MonoswarmCheckpointer } = await import('@monoes/memory' as string);
-      const _swarmCheckpointer = new MonoswarmCheckpointer({
-        dbPath: '.monomind/checkpoints/monoswarm.jsonl',
-        monoswarmId: 'default',
-        sessionId: `session-${Date.now()}`,
-      });
-      void _swarmCheckpointer;
-    } catch (e) {
-      // optional — monomind/memory may not be installed
-      if (process.env.DEBUG || process.env.MONOMIND_DEBUG)
-        console.error('[index] MonoswarmCheckpointer init failed:', e);
-    }
-
-    // Task 30: Keep the project's agent registry fresh. The project root is
-    // found by walking up from cwd (a CLI run from a directory without agent
-    // files must not overwrite the registry with an empty one), and the build
-    // only runs when registry.json is older than an agent definition. Readers
-    // that need it (`monomind pick`) call ensureRegistry themselves, so this
-    // unawaited refresh never has to win a race.
-    try {
-      const { findProjectRoot, ensureRegistry } = await import('./agents/registry-freshness.js');
-      const root = findProjectRoot(process.cwd());
-      if (root) ensureRegistry(root);
-    } catch (e) {
-      // optional — registry build failures must never block startup
-      if (process.env.DEBUG || process.env.MONOMIND_DEBUG)
-        console.error('[index] agent registry build failed:', e);
-    }
-
-    // Task 04: CapabilityMetadata validation moved to `monomind doctor -c registry`
-    // (see doctor-routing-checks.ts:checkAgentRegistry). Printing this from a
-    // fire-and-forget startup task raced process exit — short-lived commands
-    // could skip the warning even when the underlying issue was present. Doctor
-    // runs it synchronously within its own check pass instead, so it's always
-    // visible and itemized when you actually look for it.
-
-    // NOTE: Semantic routing (@monoes/routing) is constructed on-demand by
-    // its consumers — `monomind route semantic` (commands/route.ts) and the
-    // `hooks_route_semantic` MCP tool (mcp-tools/hooks-route.ts), both via
-    // routing/route-layer-factory.ts. `monomind agent` has no --task flag —
-    // that routing point does not exist yet. It is intentionally NOT eagerly
-    // initialized here: building all route centroids and probing for the
-    // `claude` CLI on every CLI startup would regress the <500ms startup
-    // budget for zero benefit (nothing reads a process-global route layer).
-  }
-
-  /**
-   * Handle errors
-   */
-  private handleError(error: Error): void {
-    if ('code' in error) {
-      // CLIError
-      const cliError = error as CLIError;
-      this.output.printError(cliError.message);
-
-      if (cliError.details) {
-        this.output.writeln(this.output.dim(JSON.stringify(cliError.details, null, 2)));
-      }
-
-      process.exit(cliError.exitCode);
-    } else {
-      // Generic error
-      this.output.printError(error.message);
-
-      if (process.env.DEBUG) {
-        this.output.writeln();
-        this.output.writeln(this.output.dim(error.stack || ''));
-      }
-
-      process.exit(1);
+      handleCliError(error as Error, this.output);
     }
   }
 }
@@ -661,74 +328,7 @@ export class CLI {
 // =============================================================================
 // Module Exports
 // =============================================================================
-
-// Commands (internal use)
-export * from './commands/index.js';
-// MCP Server management
-export {
-  createMCPServerManager,
-  getMCPServerStatus,
-  getServerManager,
-  MCPServerManager,
-  type MCPServerOptions,
-  type MCPServerStatus,
-  startMCPServer,
-  stopMCPServer,
-} from './mcp-server.js';
-export {
-  benchmarkAdaptation,
-  clearAllPatterns,
-  clearIntelligence,
-  deletePattern,
-  distillLearning,
-  // RL loop API
-  endTrajectoryWithVerdict,
-  findSimilarPatterns,
-  flushPatterns,
-  // Pattern persistence API
-  getAllPatterns,
-  getIntelligenceStats,
-  getNeuralDataDir,
-  getPatternsByType,
-  getPersistenceStatus,
-  getReasoningBank,
-  getSonaCoordinator,
-  type IntelligenceStats,
-  initializeIntelligence,
-  type Pattern,
-  recordStep,
-  recordTrajectory,
-  type SonaConfig,
-  type TrajectoryStep,
-} from './memory/intelligence.js';
-// Memory & Intelligence (V1 Performance Features)
-export {
-  // Batched cosine similarity operations
-  batchCosineSim,
-  dequantizeInt8,
-  flashAttentionSearch,
-  forceBuildHNSWIndex,
-  generateBatchEmbeddings,
-  generateEmbedding,
-  getHNSWStatus,
-  getQuantizationStats,
-  initializeMemoryDatabase,
-  type MemoryInitResult,
-  quantizedCosineSim,
-  quantizeInt8,
-  searchEntries,
-  softmaxAttention,
-  storeEntry,
-  topKIndices,
-} from './memory/memory-initializer.js';
-// Output
-export { OutputFormatter, output, Progress, Spinner, type VerbosityLevel } from './output.js';
-// Parser
-export { CommandParser, commandParser } from './parser.js';
-// Prompt
-export * from './prompt.js';
-// Types
-export * from './types.js';
+export * from './index-exports.js';
 
 // Default export
 export default CLI;

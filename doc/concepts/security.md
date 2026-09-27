@@ -127,7 +127,7 @@ MonoFence AI reports real-time latency and threat metrics via the CLI and MCP to
 | Component | Source File Pointer |
 |---|---|
 | Defence Facade API | [`packages/monofence-ai/src/index.ts → createMonoDefence`](packages/monofence-ai/src/index.ts#createMonoDefence) |
-| Threat Detection Rules | [`packages/monofence-ai/src/domain/services/threat-detection-service.ts → PROMPT_INJECTION_PATTERNS`](packages/monofence-ai/src/domain/services/threat-detection-service.ts#PROMPT_INJECTION_PATTERNS) |
+| Threat Detection Rules | [`packages/monofence-ai/src/domain/services/threat-patterns.ts → PROMPT_INJECTION_PATTERNS`](packages/monofence-ai/src/domain/services/threat-patterns.ts#PROMPT_INJECTION_PATTERNS) |
 | Evasion Normalizer | [`packages/monofence-ai/src/domain/services/evasion-detector.ts → EvasionDetector`](packages/monofence-ai/src/domain/services/evasion-detector.ts#EvasionDetector) |
 | Multi-Turn Context Tracker | [`packages/monofence-ai/src/domain/services/context-tracker.ts → ContextTracker`](packages/monofence-ai/src/domain/services/context-tracker.ts#ContextTracker) |
 | Output Verification Scanner | [`packages/monofence-ai/src/domain/services/output-scanner.ts → scan`](packages/monofence-ai/src/domain/services/output-scanner.ts#scan) |
