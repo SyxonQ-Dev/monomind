@@ -13,6 +13,8 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { computeAccessAckHash } from '../orgrt/access-ack.js';
+import { ensureFullAccessGrantKey, signAccessAck } from '../orgrt/access-grant-key.js';
+import { detectAgentContextMarker } from '../orgrt/agent-context.js';
 import { runnerSpec } from '../orgrt/runner-registry.js';
 import { ORG_DIR, OrgDefSchema } from '../orgrt/types.js';
 import { output } from '../output.js';
@@ -50,6 +52,23 @@ export const setAccessAction = async (ctx: CommandContext): Promise<CommandResul
       message:
         'usage: monomind org role set-access <org> <role> <full|scoped> [--yes-i-understand]',
     };
+  }
+  // #365 (integrator review): scoped chats/orgs already let an agent run
+  // `monomind org …` through an allowed Bash prefix. A `full` grant must be
+  // impossible to reach that way — no flag, TTY, or confirmation overrides
+  // this. Checked before anything else, so it refuses even for an org/role
+  // that doesn't exist. `scoped` (a revoke) stays allowed everywhere.
+  if (mode === 'full') {
+    const marker = detectAgentContextMarker();
+    if (marker) {
+      log(
+        output.error(
+          `Refusing: this looks like an agent/automated context (${marker} is set) — ` +
+            'granting full access must be done by a human. Run this yourself in a terminal.',
+        ),
+      );
+      return { success: false, message: `refused: agent context detected (${marker})` };
+    }
   }
   const path = join(ctx.cwd, ORG_DIR, `${name}.json`);
   if (!existsSync(path)) {
@@ -112,13 +131,19 @@ export const setAccessAction = async (ctx: CommandContext): Promise<CommandResul
     return { success: false, message: 'confirmation required (--yes-i-understand)' };
   }
 
+  const at = new Date().toISOString();
+  const by = 'human' as const;
+  const hash = computeAccessAckHash(def, role);
+  // #365 (integrator review): the key lives in the operator-credential dir
+  // (authority-mask.ts's authorityDirs) — created here, on first grant, and
+  // never by any other code path. Its own doc comment covers the residual
+  // risk (an ACTIVE full-access role can read it, same as any other
+  // same-user credential).
+  const key = ensureFullAccessGrantKey();
+  const sig = signAccessAck({ org: def.name, role: role.id, hash, at, by, key });
   rawRole.policy = rawRole.policy ?? {};
   rawRole.policy.access = 'full';
-  rawRole.policy.access_ack = {
-    by: 'human',
-    at: new Date().toISOString(),
-    hash: computeAccessAckHash(def, role),
-  };
+  rawRole.policy.access_ack = { by, at, hash, sig };
   writeFileSync(path, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
   log(output.success(`Role "${roleId}" in org "${name}" granted full access.`));
   log(

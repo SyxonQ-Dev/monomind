@@ -11,6 +11,7 @@
  */
 
 import { computeAccessAckHash } from './access-ack.js';
+import { readFullAccessGrantKey, verifyAccessAckSignature } from './access-grant-key.js';
 import { runnerSpec } from './runner-registry.js';
 import type { OrgDef, OrgRole } from './types.js';
 
@@ -44,7 +45,7 @@ export function isUnattendedRun(def: Pick<OrgDef, 'schedule'>): boolean {
 export function resolveRoleAccess(
   def: OrgDef,
   role: OrgRole,
-  opts: { unattended?: boolean; runtimeId?: string } = {},
+  opts: { unattended?: boolean; runtimeId?: string; grantKeyDir?: string } = {},
 ): ResolvedAccess {
   const declared = (role.policy?.access ?? 'scoped') as 'scoped' | 'full';
   if (declared !== 'full') return { access: 'scoped', declared: 'scoped' };
@@ -70,6 +71,40 @@ export function resolveRoleAccess(
         'no human acknowledgement on file — run `monomind org role set-access <org> <role> full`',
     };
   }
+  // #365 (integrator review): `hash` alone is a PUBLIC drift check — anyone
+  // who can write the org JSON could recompute it. Verify the HMAC `sig`
+  // against the machine-local grant key (access-grant-key.ts, stored where
+  // no scoped/sandboxed role can read it) BEFORE trusting `hash` at all, so
+  // a forged ack (correct hash, no/invalid sig) is refused the same way a
+  // missing one is — distinguished only for a human reading `org status`.
+  if (!ack.sig) {
+    return {
+      access: 'scoped',
+      declared: 'full',
+      state: 'suspended',
+      reason:
+        'access_ack has no signature (unsigned) — re-run `monomind org role set-access <org> <role> full`',
+    };
+  }
+  const key = readFullAccessGrantKey(opts.grantKeyDir);
+  const sigOk = verifyAccessAckSignature({
+    org: def.name,
+    role: role.id,
+    hash: ack.hash,
+    at: ack.at,
+    by: ack.by,
+    sig: ack.sig,
+    key,
+  });
+  if (!sigOk) {
+    return {
+      access: 'scoped',
+      declared: 'full',
+      state: 'suspended',
+      reason:
+        'access_ack signature is invalid (invalid-signature) — the grant key may be missing on this host; re-run `monomind org role set-access <org> <role> full`',
+    };
+  }
   const expected = computeAccessAckHash(def, role);
   if (ack.hash !== expected) {
     return {
@@ -77,7 +112,7 @@ export function resolveRoleAccess(
       declared: 'full',
       state: 'suspended',
       reason:
-        'role or org config changed since the access grant — re-acknowledge with `monomind org role set-access <org> <role> full`',
+        'role or org config changed since the access grant (config-changed) — re-acknowledge with `monomind org role set-access <org> <role> full`',
     };
   }
 

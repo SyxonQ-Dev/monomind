@@ -261,7 +261,10 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
         systemPrompt,
         model: opts.model,
         cwd: opts.cwd ?? process.cwd(),
-        env: opts.env ?? {},
+        // #365: marks this child as an agent-turn process tree so `monomind
+        // org role set-access ... full` (agent-context.ts) refuses to run
+        // inside it even under --yes-i-understand.
+        env: { ...opts.env, MONOMIND_AGENT_EXEC: '1' },
         // o-18: this command has no --provider concept at all (no config
         // resolved, no resolveProviderEnv call anywhere in this file), so an
         // ambient/inherited ANTHROPIC_API_KEY is the only way to get

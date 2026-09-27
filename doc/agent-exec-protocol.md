@@ -180,19 +180,30 @@
   - rev 13 (2026-09-28): **per-role `policy.access: "full"` for org roles** (issue #365, part of
     the Coder mode epic #364) — new capability `org-role-full-access`. A specific org role can
     now run with the same unrestricted native tool access as `agent exec --access full`, but only
-    when a human explicitly grants it: `monomind org role set-access <org> <role> full` (interactive
-    confirm or `--yes-i-understand`) writes an `access_ack` hash over the role's security-relevant
-    config (prompt, runtime, model, tool providers, `reports_to`, coder-mode settings, plus the
-    org's unattended/taint knobs). The runtime recomputes that hash every session start; a
-    mismatch (any covered field edited since the grant) or a missing/invalid ack drops the role to
-    scoped (`access_state: "suspended"`), a scheduled/daemon run without
-    `run_config.allow_unattended_full_access` also drops it (`access_state: "unattended-blocked"`),
-    and no MCP tool, hiring flow, or import path can set the grant itself. `org validate` errors on
-    an unsupported runtime, a `policy.git` explicitly authored below `push` alongside `access:
-    "full"`, and taint (a full-access role that itself ingests untrusted input, or is reachable
-    from one via `reports_to`, unless the path is in `run_config.accept_full_access_taint`).
-    `org status --json` gains `roles_access` for any role that declares `access: "full"`
-    (§7.2). Budgets (`maxTokens`/`maxUsd`) are still enforced. Additive only.
+    when a human explicitly grants it: `monomind org role set-access <org> <role> full` refuses
+    outright when it detects an agent-context env var (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`,
+    `MONOMIND_ORG_ROLE`, `MONOMIND_SDK_AGENT`, `MONOMIND_AGENT_EXEC` — the last set on `agent
+    exec`'s own runner child env, §3), not overridable by `--yes-i-understand` or a TTY — this is
+    what stops a scoped chat/org from reaching a grant through an allowed `monomind org …` Bash
+    prefix. Outside an agent context it requires an interactive confirmation or
+    `--yes-i-understand`, then writes an `access_ack` with a `hash` over the role's
+    security-relevant config (prompt, runtime, model, tool providers, `reports_to`, coder-mode
+    settings, plus the org's unattended/taint knobs) AND a `sig` — an HMAC-SHA256 of that hash
+    under a machine-local secret key created on first grant and stored in the operator-credential
+    directory, which every scoped/sandboxed role is denied Read/Edit on. `hash` alone is a public,
+    recomputable drift check, not an authenticator, so the runtime verifies `sig` (timing-safe)
+    before ever trusting it: no `sig`, an invalid `sig` (missing/wrong key), or a `hash` mismatch
+    (any covered field edited since the grant) drops the role to scoped
+    (`access_state: "suspended"`, reason distinguishing unsigned/invalid-signature/config-changed);
+    a scheduled/daemon run without `run_config.allow_unattended_full_access` also drops it
+    (`access_state: "unattended-blocked"`); and no MCP tool, hiring flow, or import path can
+    produce a grant the runtime will honor, since none of them can read the signing key. `org
+    validate` errors on an unsupported runtime, a `policy.git` explicitly authored below `push`
+    alongside `access: "full"`, and taint (a full-access role that itself ingests untrusted input,
+    or is reachable from one via `reports_to`, unless the path is in
+    `run_config.accept_full_access_taint`). `org status --json` gains `roles_access` for any role
+    that declares `access: "full"` (§7.2). Budgets (`maxTokens`/`maxUsd`) are still enforced.
+    Additive only.
 - **Stability**: Versioned. Frames and events carry `"v": 1`. Breaking changes bump `v` and are
   announced via the capability handshake (§2).
 - **Purpose**: Expose monomind's `AgentRunner` engine (14 local agent CLI runners) and org

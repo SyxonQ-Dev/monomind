@@ -2,8 +2,8 @@
 /**
  * #365 (Coder mode for org roles): the `access_ack.hash` computation.
  *
- * The hash is a DRIFT DETECTOR, not a secret: it covers every field of a
- * role's config that is security-relevant to a `policy.access: 'full'`
+ * The hash is a DRIFT DETECTOR, not an authenticator: it covers every field
+ * of a role's config that is security-relevant to a `policy.access: 'full'`
  * grant (what it runs, what it can reach, who can talk to it) plus the two
  * org-level knobs that gate an unattended run and accept a taint path. Both
  * `monomind org role set-access` (the only place that WRITES an
@@ -13,15 +13,19 @@
  * re-saved with the same content, and any change to a covered field —
  * anyone's edit, not just an attacker's — invalidates it.
  *
- * Deliberately a plain SHA-256, not an HMAC: this project's existing
- * same-user threat model already documents comparable bypasses as accepted
- * (role-sandbox.ts's git guard, "a same-user role can bypass"). The real
- * guarantee is that `resolveRoleAccess` (access-grant.ts) is the ONLY code
- * path that turns `access: 'full'` into actual unrestricted behavior, and it
- * requires this hash to match — so no agent-reachable config-writing path
- * (MCP tools, hiring flows, import, reload) can grant anything by copying an
- * `access_ack` object forward; only re-running the human CLI command, which
- * recomputes the hash against the role's CURRENT config, produces a match.
+ * Deliberately a plain SHA-256, computed from fields an org file already
+ * contains in the clear: it is public and RECOMPUTABLE by anything that can
+ * write the org JSON, so it alone proves nothing about who granted access —
+ * only that the config hasn't drifted since whoever set `hash` did.
+ * Authentication is a SEPARATE field, `access_ack.sig`
+ * (access-grant-key.ts): an HMAC-SHA256 of `{org, role, hash, at, by}` under
+ * a machine-local secret key stored where no scoped/sandboxed role can read
+ * it. `resolveRoleAccess` (access-grant.ts) — the ONLY code path that turns
+ * `access: 'full'` into actual unrestricted behavior — verifies `sig`
+ * against that key BEFORE it ever trusts `hash`, so copying an `access_ack`
+ * object forward (or fabricating a new one with a correctly recomputed
+ * `hash`) from any path without the key produces an unverifiable signature,
+ * not a valid grant.
  */
 
 import { createHash } from 'node:crypto';

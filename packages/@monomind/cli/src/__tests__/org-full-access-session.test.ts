@@ -5,8 +5,9 @@
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { computeAccessAckHash } from '../orgrt/access-ack.js';
+import { ensureFullAccessGrantKey, signAccessAck } from '../orgrt/access-grant-key.js';
 import { fullAccessCanUseTool } from '../orgrt/agent-exec-access.js';
 import type { AgentRunArgs, AgentRunner } from '../orgrt/agent-runner.js';
 import { OrgBus } from '../orgrt/bus.js';
@@ -16,6 +17,22 @@ import { PolicyEngine } from '../orgrt/policy.js';
 import { runAgentSession } from '../orgrt/session.js';
 import { type OrgDef, OrgDefSchema, type OrgRole } from '../orgrt/types.js';
 import type { BusEvent } from '../orgrt/types-events.js';
+
+// session-run.ts's resolveRoleAccess call has no test seam of its own — it
+// always resolves the grant key from the real operator-dir default
+// (defaultOperatorDir()), so exercising an 'active' grant through the full
+// session stack means redirecting that default to a throwaway dir, exactly
+// like a human's `org role set-access ... full` would populate it.
+let operatorDir: string;
+
+beforeEach(() => {
+  operatorDir = mkdtempSync(join(tmpdir(), 'full-access-session-operator-'));
+  vi.stubEnv('MONOMIND_ORGRT_OPERATOR_DIR', operatorDir);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 function ackedFullAccessDef(): OrgDef {
   const raw = {
@@ -27,14 +44,12 @@ function ackedFullAccessDef(): OrgDef {
   };
   const def = OrgDefSchema.parse(raw);
   const role = def.roles.find((r) => r.id === 'builder')!;
-  role.policy = {
-    access: 'full',
-    access_ack: {
-      by: 'human',
-      at: '2026-01-01T00:00:00.000Z',
-      hash: computeAccessAckHash(def, role),
-    },
-  };
+  const at = '2026-01-01T00:00:00.000Z';
+  const by = 'human' as const;
+  const hash = computeAccessAckHash(def, role);
+  const key = ensureFullAccessGrantKey(operatorDir);
+  const sig = signAccessAck({ org: def.name, role: role.id, hash, at, by, key });
+  role.policy = { access: 'full', access_ack: { by, at, hash, sig } };
   return def;
 }
 

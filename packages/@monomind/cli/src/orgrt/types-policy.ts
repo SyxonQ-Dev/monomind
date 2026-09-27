@@ -189,19 +189,28 @@ export const RolePolicySchema = z
     /** Human-only grant record for `access: 'full'`, written ONLY by
      *  `monomind org role set-access <org> <role> full` after an interactive
      *  confirmation or `--yes-i-understand`. `hash` covers the role's
-     *  security-relevant config (see access-ack.ts); the runtime recomputes
-     *  it every session start and drops the role to scoped
-     *  (`access_state: 'suspended'`) the instant it no longer matches — so a
-     *  config-writing path that merely copies this object forward without
-     *  going through the human CLI grants nothing new, and an edit to the
-     *  role's prompt/runtime/model/tools/reports_to after the grant silently
-     *  revokes it until a human re-acknowledges. Never set this by hand or
-     *  from a program other than that command. */
+     *  security-relevant config (see access-ack.ts); `sig` is an
+     *  HMAC-SHA256 of `{org, role, hash, at, by}` under a machine-local
+     *  secret key that lives in the operator-credential directory
+     *  (authority-mask.ts's `authorityDirs`) — a directory every
+     *  scoped/sandboxed role is denied Read/Edit on. `hash` alone is a
+     *  PUBLIC drift check, not an authenticator: anything that can write the
+     *  org JSON could recompute it, so `resolveRoleAccess`
+     *  (access-grant.ts) — the runtime's ONLY source of truth for whether a
+     *  role actually runs with full access this session — verifies `sig`
+     *  against that key before it ever trusts `hash`. The runtime
+     *  recomputes `hash` every session start and drops the role to scoped
+     *  (`access_state: 'suspended'`) the instant `sig` doesn't verify or
+     *  `hash` no longer matches — so a config-writing path that merely
+     *  copies this object forward without going through the human CLI (and
+     *  without the key, which it cannot read) grants nothing. Never set
+     *  this by hand or from a program other than that command. */
     access_ack: z
       .object({
         by: z.literal('human'),
         at: z.string(),
         hash: z.string(),
+        sig: z.string().optional(),
       })
       .strict()
       .optional(),
