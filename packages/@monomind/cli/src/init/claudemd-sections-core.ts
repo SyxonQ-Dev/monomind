@@ -1,0 +1,178 @@
+/**
+ * CLAUDE.md section generators: behavioral rules, coding principles, layout,
+ * architecture and swarm/concurrency/execution rules.
+ */
+
+import { detectStackConventions } from './claudemd-detect.js';
+import type { InitOptions } from './types.js';
+
+// i-035: `monoswarm_init` writes a JSON state record and starts no process —
+// nothing links its state to Claude Code's Task agents. The templates used to
+// tell every project it "MUST initialize the monoswarm" before complex work;
+// this is the honest replacement, worded from the same disclosure this repo
+// already carries at .claude/agents/core/coordinator.md:105 and
+// packages/@monomind/cli/CLAUDE.md's `adaptive`/`hybrid` topology annotation.
+export const HONEST_MONOSWARM_SENTENCE =
+  "Monoswarm records topology, roster and votes in a state file; it starts no process, and Claude Code's Task-tool agents do the work.";
+
+// --- Section Generators (each returns enforceable markdown) ---
+
+export function behavioralRules(): string {
+  return `## Behavioral Rules (Always Enforced)
+
+- Do what has been asked; nothing more, nothing less
+- NEVER create files unless they're absolutely necessary for achieving your goal
+- ALWAYS prefer editing an existing file to creating a new one
+- NEVER proactively create documentation files (*.md) or README files unless explicitly requested
+- NEVER save working files, text/mds, or tests to the root folder
+- Never continuously check status after spawning a swarm — wait for results
+- ALWAYS read a file before editing it
+- NEVER commit secrets, credentials, or .env files
+- ALWAYS call \`mcp__monomind__monograph_query\` BEFORE running grep/rg/find via Bash for code exploration — only fall back to Bash grep if monograph returns 0 results or the DB does not exist
+- When starting any task that touches 3+ files: call \`mcp__monomind__monograph_suggest\` first to get relevant nodes ranked by task relevance`;
+}
+
+export function codingPrinciples(): string {
+  return `## Coding Principles
+
+### Think Before Coding
+- State assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them — don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+### Simplicity First
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+### Surgical Changes
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+- Every changed line should trace directly to the user's request.
+
+### Goal-Driven Execution
+- Transform tasks into verifiable goals with success criteria.
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- For multi-step tasks, state a brief plan with verification steps.`;
+}
+
+export function fileOrganization(options: InitOptions): string {
+  const { srcDir, testDir } = detectStackConventions(options.targetDir);
+  const lines = ['- NEVER save to root folder — use the directories below'];
+  if (srcDir) lines.push(`- Use \`/${srcDir}\` for source code files`);
+  if (testDir) lines.push(`- Use \`/${testDir}\` for test files`);
+  lines.push(
+    '- Use `/docs` for documentation and markdown files',
+    '- Use `/config` for configuration files',
+    '- Use `/scripts` for utility scripts',
+    '- Use `/examples` for example code',
+  );
+  return `## File Organization\n\n${lines.join('\n')}`;
+}
+
+export function projectArchitecture(options: InitOptions): string {
+  return `## Project Architecture
+
+- Follow Domain-Driven Design with bounded contexts
+- Keep files under 500 lines
+- Use typed interfaces for all public APIs
+- Prefer TDD London School (mock-first) for new code
+- Use event sourcing for state changes
+- Ensure input validation at system boundaries
+
+### Project Config
+
+- **Topology**: ${options.runtime.topology}
+- **Max Agents**: ${options.runtime.maxAgents}
+- **Memory**: ${options.runtime.memoryBackend}
+- **Neural**: Disabled (keyword routing only)`;
+}
+
+export function concurrencyRules(): string {
+  return `## Concurrency: 1 MESSAGE = ALL RELATED OPERATIONS
+
+- All operations MUST be concurrent/parallel in a single message
+- Use Claude Code's Task tool for spawning agents, not just MCP
+- ALWAYS batch ALL todos in ONE TodoWrite call (5-10+ minimum)
+- ALWAYS spawn ALL agents in ONE message with full instructions via Task tool
+- ALWAYS batch ALL file reads/writes/edits in ONE message
+- ALWAYS batch ALL Bash commands in ONE message`;
+}
+
+export function swarmOrchestration(): string {
+  return `## Monoswarm Orchestration
+
+- MUST spawn concurrent agents using Claude Code's Task tool
+- ${HONEST_MONOSWARM_SENTENCE}`;
+}
+
+// Consolidated spawn/anti-drift rule — emitted ONCE in the standard template
+// (previously repeated across Monoswarm Orchestration, Anti-Drift, and
+// Execution Rules). Kept out of the minimal template entirely.
+export function swarmRules(): string {
+  return `## Monoswarm Rules
+
+- ${HONEST_MONOSWARM_SENTENCE}
+- ALWAYS spawn ALL agents in ONE message via the Task tool with \`run_in_background: true\` — CLI tools coordinate, Task agents do the work
+- After spawning, STOP — never poll TaskOutput or check monoswarm status; trust agents to return
+- When agent results arrive, review ALL results before proceeding
+- Keep shared memory namespace for all agents; run frequent checkpoints via \`post-task\` hooks`;
+}
+
+export function antiDriftConfig(): string {
+  return `## Monoswarm Configuration & Anti-Drift
+
+- ALWAYS use hierarchical topology for coding swarms
+- Keep maxAgents at 6-8 for tight coordination
+- Use specialized strategy for clear role boundaries
+- Use \`majority\` consensus for monoswarm
+- Run frequent checkpoints via \`post-task\` hooks
+- Keep shared memory namespace for all agents`;
+}
+
+export function autoStartProtocol(): string {
+  return `## Monoswarm Protocols & Routing
+
+### Auto-Start Monoswarm Protocol
+
+When the user requests a complex task, spawn agents in background and WAIT:
+
+\`\`\`javascript
+// STEP 1: Spawn ALL agents IN BACKGROUND in a SINGLE message
+Task({prompt: "Research requirements...", subagent_type: "researcher", run_in_background: true})
+Task({prompt: "Design architecture...", subagent_type: "system-architect", run_in_background: true})
+Task({prompt: "Implement solution...", subagent_type: "coder", run_in_background: true})
+Task({prompt: "Write tests...", subagent_type: "tester", run_in_background: true})
+Task({prompt: "Review code quality...", subagent_type: "reviewer", run_in_background: true})
+\`\`\`
+
+### Agent Routing
+
+Pick agents per task with the \`[PICK]\` line or \`mcp__monomind__pick\` (CLI: \`monomind pick\`). When
+neither answers, these real agents are safe defaults:
+
+| Code | Task | Agents |
+|------|------|--------|
+| 1 | Bug Fix | coordinator, researcher, coder, tester |
+| 3 | Feature | coordinator, system-architect, coder, tester, reviewer |
+| 5 | Refactor | coordinator, system-architect, coder, reviewer |
+| 7 | Performance | coordinator, Performance Benchmarker, coder |
+| 9 | Security | coordinator, Security Engineer, reviewer |`;
+}
+
+export function executionRules(): string {
+  return `## Monoswarm Execution Rules
+
+- ALWAYS use \`run_in_background: true\` for all agent Task calls
+- ALWAYS put ALL agent Task calls in ONE message for parallel execution
+- After spawning, STOP — do NOT add more tool calls or check status
+- Never poll TaskOutput or check monoswarm status — trust agents to return
+- When agent results arrive, review ALL results before proceeding`;
+}

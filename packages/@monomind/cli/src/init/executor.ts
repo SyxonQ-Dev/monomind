@@ -4,11 +4,9 @@
  */
 
 import * as fs from 'node:fs';
-import { createRequire } from 'node:module';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { dirname } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 // ESM-compatible __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -29,8 +27,14 @@ import { DIRECTORIES } from './asset-maps.js';
 import { copyAgents, copyCommands, copySkills } from './copy-assets.js';
 import { finalizeGuard, guardFor, pruneBackups } from './file-guard.js';
 import { initProjectMemory, seedProjectMemory } from './init-memory.js';
+import { initKnowledgeGraph, runDoctorFix } from './init-post-steps.js';
 import { buildProjectIndexes } from './project-indexes.js';
-import { findSourceHelpersDir, MAX_EXEC_FILE_BYTES } from './shared.js';
+import {
+  _registerMonomindProject,
+  findMonomindProjects,
+  shouldRegisterMonomindProject,
+} from './project-registry.js';
+import { findSourceHelpersDir } from './shared.js';
 import { writeSharedInstructions } from './shared-instructions-generator.js';
 import type { InitOptions, InitResult } from './types.js';
 import { detectPlatform } from './types.js';
@@ -45,6 +49,7 @@ import { writeSettings } from './write-settings.js';
 export type { UpgradeResult } from './upgrade.js';
 // Re-export upgrade functions so index.ts barrel still works via './executor.js'
 export { executeUpgrade, executeUpgradeWithMissing } from './upgrade.js';
+export { findMonomindProjects, shouldRegisterMonomindProject };
 
 /**
  * Execute initialization
@@ -357,208 +362,6 @@ export async function executeInit(options: InitOptions): Promise<InitResult> {
 }
 
 /**
- * Initialize the Monograph code graph — parsed code structure and dependencies.
- * This is not the memory knowledge graph or the Second Brain document index.
- * Spawns buildAsync as a detached child process to avoid SQLite lock contention.
- * Uses the same build.lock file as monograph-freshen.cjs — if a session-start
- * hook build is already running, we skip to avoid SQLITE_BUSY.
- */
-async function initKnowledgeGraph(
-  targetDir: string,
-  result: InitResult,
-  allowInstall: boolean,
-): Promise<void> {
-  const outputDir = path.join(targetDir, '.monomind', 'graph');
-  fs.mkdirSync(outputDir, { recursive: true });
-
-  const lockPath = path.join(outputDir, 'build.lock');
-  const now = Date.now();
-
-  // If monograph-freshen.cjs (session-start hook) already holds a fresh lock, skip.
-  try {
-    const stat = fs.statSync(lockPath);
-    if (now - stat.mtimeMs < 5 * 60 * 1000) {
-      result.skipped.push(
-        'Monograph code graph build: already in progress (session-start hook running)',
-      );
-      return;
-    }
-    fs.unlinkSync(lockPath);
-  } catch {
-    /* no lock — proceed */
-  }
-
-  // Resolve @monoes/monograph from the CLI package's own node_modules first
-  // (correct for npm/npx installs), then fall back to user project node_modules.
-  let entryPoint: string | null = null;
-  try {
-    const cliRequire = createRequire(import.meta.url);
-    entryPoint = cliRequire.resolve('@monoes/monograph/dist/src/index.js');
-  } catch {
-    const fallback = path.join(
-      targetDir,
-      'node_modules',
-      '@monoes',
-      'monograph',
-      'dist',
-      'src',
-      'index.js',
-    );
-    if (fs.existsSync(fallback)) entryPoint = fallback;
-  }
-  if (!entryPoint) {
-    // P1-13: --no-install (options.installClaudeCode === false) must actually
-    // gate this install, not just say it does — skip entirely when disallowed.
-    if (!allowInstall) {
-      result.skipped.push(
-        'Monograph code graph: @monoes/monograph not found (auto-install skipped, --no-install)',
-      );
-      return;
-    }
-    // Auto-install @monoes/monograph and retry before giving up.
-    // Disclose the install before running it (consistent with the
-    // claude-code global install disclosure pattern from #131/#132).
-    try {
-      const { execSync } = await import('node:child_process');
-      const { output } = await import('../output.js');
-      output.printInfo(
-        'Installing @monoes/monograph (code graph dependency) — pass --no-install to skip',
-      );
-      execSync('npm install @monoes/monograph', {
-        cwd: targetDir,
-        stdio: 'ignore',
-        timeout: 60000,
-      });
-      try {
-        const cliRequire2 = createRequire(import.meta.url);
-        entryPoint = cliRequire2.resolve('@monoes/monograph/dist/src/index.js');
-      } catch {
-        const fallback2 = path.join(
-          targetDir,
-          'node_modules',
-          '@monoes',
-          'monograph',
-          'dist',
-          'src',
-          'index.js',
-        );
-        if (fs.existsSync(fallback2)) entryPoint = fallback2;
-      }
-    } catch {
-      /* install failed, fall through */
-    }
-    if (!entryPoint) {
-      result.skipped.push(
-        'Monograph code graph: @monoes/monograph not found (auto-install failed)',
-      );
-      return;
-    }
-    result.created.files.push('@monoes/monograph (auto-installed for the code graph)');
-  }
-
-  // Acquire lock before spawning so monograph-freshen.cjs sees it and skips
-  try {
-    fs.writeFileSync(lockPath, String(process.pid));
-  } catch {
-    /* non-fatal */
-  }
-
-  const { spawn } = await import('node:child_process');
-  const logPath = path.join(outputDir, 'build.log');
-  let logFd: number | 'ignore' = 'ignore';
-  try {
-    logFd = fs.openSync(logPath, 'a');
-  } catch {
-    /* non-fatal */
-  }
-
-  const script = `
-import { buildAsync } from ${JSON.stringify(pathToFileURL(entryPoint).href)};
-import { unlinkSync } from 'fs';
-try { await buildAsync(${JSON.stringify(targetDir)}); } finally {
-  try { unlinkSync(${JSON.stringify(lockPath)}); } catch {}
-}`;
-  const child = spawn(process.execPath, ['--input-type=module', '--eval', script], {
-    detached: true,
-    stdio: ['ignore', logFd, logFd],
-    cwd: targetDir,
-  });
-  child.unref();
-  // Close the parent's copy of the fd — the child has its own inherited copy
-  if (typeof logFd === 'number') {
-    try {
-      fs.closeSync(logFd);
-    } catch {
-      /* non-fatal */
-    }
-  }
-
-  result.created.files.push('.monomind/graph/ (Monograph code graph building in background)');
-  // result.created.files only ever surfaces as a bare count in init's own
-  // summary box (see commands/init.ts) — print this directly so the one
-  // thing pointing at how to check on a background build that might have
-  // already failed is actually visible in the foreground output.
-  try {
-    const { output } = await import('../output.js');
-    output.printInfo(
-      'Monograph code graph building in background — check `monomind doctor` in a minute, or .monomind/graph/build.log if it never shows up',
-    );
-  } catch {
-    /* non-fatal */
-  }
-}
-
-/**
- * Run doctor --install to auto-fix any remaining issues.
- * Non-fatal: best-effort health check and auto-install.
- *
- * `install` gates the Claude Code CLI auto-install specifically (a real
- * network fetch + global write, `npm install -g @anthropic-ai/claude-code`)
- * — pass false (`monomind init --no-install`) to run only the local,
- * no-network doctor fixes. When it will run, disclose it up front rather
- * than letting it appear silently mid-summary (#132).
- */
-async function runDoctorFix(targetDir: string, result: InitResult, install = true): Promise<void> {
-  try {
-    const { doctorCommand } = await import('../commands/doctor.js');
-    if (!doctorCommand.action) {
-      result.skipped.push('doctor: auto-fix unavailable (run: monomind doctor --install)');
-      return;
-    }
-    if (install) {
-      const { checkClaudeCode } = await import('../commands/doctor-env-checks.js');
-      const claudeCheck = await checkClaudeCode();
-      if (claudeCheck.status !== 'pass') {
-        const { output } = await import('../output.js');
-        output.printInfo(
-          'Installing Claude Code CLI globally (npm install -g @anthropic-ai/claude-code) — pass --no-install to skip',
-        );
-      }
-    }
-    const res = await doctorCommand.action({
-      args: [],
-      // `fix: true` keeps the local, no-network fixes (monoes tool shims,
-      // gitignore coverage) running even when `install` is false — only the
-      // Claude Code CLI's global npm install is gated by `install`.
-      flags: { install, fix: true },
-      cwd: targetDir,
-    } as never);
-    if (res && (res as { success?: boolean }).success === false) {
-      result.skipped.push('doctor: reported issues (run: monomind doctor for details)');
-    } else {
-      result.created.files.push(
-        install
-          ? 'doctor --install (health check + auto-fix)'
-          : 'doctor --fix (health check, no network install)',
-      );
-    }
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    result.skipped.push(`doctor: auto-fix failed (${detail}) — run: monomind doctor --install`);
-  }
-}
-
-/**
  * Create directory structure
  */
 async function createDirectories(
@@ -593,114 +396,6 @@ function countEnabledHooks(options: InitOptions): number {
   if (hooks.notification) count++;
 
   return count;
-}
-
-/**
- * Register a project directory in ~/.monomind-projects.json so that
- * `monomind init upgrade --all` can find it without doing a directory scan.
- * Best-effort: failures are silently swallowed.
- */
-export function shouldRegisterMonomindProject(dir: string): boolean {
-  // A worktree is an execution view of its parent project, not an independent
-  // project. Registering it makes `init upgrade --all` revisit the same
-  // repository once per worktree and leaves stale entries when worktrees are
-  // removed. This is intentionally path-component based so a project merely
-  // containing the text ".worktrees" in another directory name is unaffected.
-  const resolved = path.resolve(dir);
-  if (resolved.split(path.sep).includes('.worktrees')) return false;
-  // Nor is a project under the temp directory: test suites and sandboxes init
-  // there by the hundred, and every entry is revisited by upgrade --all.
-  const inTmp = path.relative(path.resolve(os.tmpdir()), resolved);
-  return inTmp.startsWith('..') || path.isAbsolute(inTmp);
-}
-
-function _registerMonomindProject(dir: string): void {
-  if (!shouldRegisterMonomindProject(dir)) return;
-  try {
-    const esmReq = createRequire(import.meta.url);
-    const os = esmReq('os') as typeof import('os');
-    const registryPath = path.join(os.homedir(), '.monomind-projects.json');
-    let reg: { projects: string[] } = { projects: [] };
-    try {
-      if (fs.existsSync(registryPath) && fs.statSync(registryPath).size <= MAX_EXEC_FILE_BYTES) {
-        reg = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
-      }
-    } catch (e) {
-      if (process.env.DEBUG || process.env.MONOMIND_DEBUG)
-        console.error(
-          '[_registerMonomindProject] ~/.monomind-projects.json unparseable, resetting:',
-          e,
-        );
-    }
-    if (!Array.isArray(reg.projects)) reg.projects = [];
-    const abs = path.resolve(dir);
-    if (!reg.projects.includes(abs)) {
-      reg.projects.push(abs);
-      fs.writeFileSync(registryPath, JSON.stringify(reg, null, 2), 'utf-8');
-    }
-  } catch {
-    /* non-fatal */
-  }
-}
-
-/**
- * Scan common locations for directories that have monomind installed
- * (presence of .claude/helpers/hook-handler.cjs is the definitive signal).
- * Searches up to maxDepth directory levels below each search root.
- */
-export function findMonomindProjects(maxDepth = 3): string[] {
-  const esmReq = createRequire(import.meta.url);
-  const os = esmReq('os') as typeof import('os');
-  const home = os.homedir();
-  const searchRoots = [
-    path.join(home, 'Desktop'),
-    path.join(home, 'projects'),
-    path.join(home, 'code'),
-    path.join(home, 'work'),
-    path.join(home, 'dev'),
-    path.join(home, 'repos'),
-    path.join(home, 'src'),
-  ].filter((r) => fs.existsSync(r));
-
-  // Also check known-projects registry if it exists
-  const registryPath = path.join(home, '.monomind-projects.json');
-  if (fs.existsSync(registryPath) && fs.statSync(registryPath).size <= MAX_EXEC_FILE_BYTES) {
-    try {
-      const reg = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
-      if (Array.isArray(reg.projects)) {
-        for (const p of reg.projects) {
-          if (!searchRoots.includes(p) && fs.existsSync(p)) searchRoots.push(p);
-        }
-      }
-    } catch {}
-  }
-
-  const found: Set<string> = new Set();
-
-  function walk(dir: string, depth: number): void {
-    if (depth > maxDepth) return;
-    const marker = path.join(dir, '.claude', 'helpers', 'hook-handler.cjs');
-    if (fs.existsSync(marker)) {
-      found.add(dir);
-      return;
-    }
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (!e.isDirectory()) continue;
-      if (e.name.startsWith('.') || e.name === 'node_modules') continue;
-      walk(path.join(dir, e.name), depth + 1);
-    }
-  }
-
-  for (const root of searchRoots) {
-    walk(root, 0);
-  }
-  return [...found];
 }
 
 export default executeInit;
