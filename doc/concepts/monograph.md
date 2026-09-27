@@ -125,19 +125,19 @@ category boundary (default vs. advanced-gated):
 
 1. `monograph_build` ([`build-tools.ts → monographBuildTool`](packages/@monomind/cli/src/mcp-tools/monograph/build-tools.ts#monographBuildTool)): Rebuilds or incrementally updates the knowledge graph.
 2. `monograph_watch` ([`build-tools.ts → monographWatchTool`](packages/@monomind/cli/src/mcp-tools/monograph/build-tools.ts#monographWatchTool)): Starts the live file-watcher described in §5.3 above.
-3. `monograph_query` ([`query-tools.ts → monographQueryTool`](packages/@monomind/cli/src/mcp-tools/monograph/query-tools.ts#monographQueryTool)): BM25/FTS search with optional one-hop neighbor-expansion reranking (a single outgoing hop taking the maximum propagated score — not iterative Personalized PageRank).
+3. `monograph_query` ([`query-tools-search.ts → monographQueryTool`](packages/@monomind/cli/src/mcp-tools/monograph/query-tools-search.ts#monographQueryTool)): BM25/FTS search with optional one-hop neighbor-expansion reranking (a single outgoing hop taking the maximum propagated score — not iterative Personalized PageRank).
 4. `monograph_stats` ([`health-tools.ts → monographStatsTool`](packages/@monomind/cli/src/mcp-tools/monograph/health-tools.ts#monographStatsTool)): Reports node/edge totals and graph density metrics.
 5. `monograph_health` ([`health-tools.ts → monographHealthTool`](packages/@monomind/cli/src/mcp-tools/monograph/health-tools.ts#monographHealthTool)): Computes graph connectivity and complexity health scores.
-6. `monograph_god_nodes` ([`query-tools.ts → monographGodNodesTool`](packages/@monomind/cli/src/mcp-tools/monograph/query-tools.ts#monographGodNodesTool)): Identifies central high-degree nodes (architectural hubs).
-7. `monograph_get_node` ([`query-tools.ts → monographGetNodeTool`](packages/@monomind/cli/src/mcp-tools/monograph/query-tools.ts#monographGetNodeTool)): Retrieves attributes and edge connections for a specific node.
-8. `monograph_shortest_path` ([`query-tools.ts → monographShortestPathTool`](packages/@monomind/cli/src/mcp-tools/monograph/query-tools.ts#monographShortestPathTool)): Executes BFS pathfinding between two code nodes.
+6. `monograph_god_nodes` ([`query-tools-graph.ts → monographGodNodesTool`](packages/@monomind/cli/src/mcp-tools/monograph/query-tools-graph.ts#monographGodNodesTool)): Identifies central high-degree nodes (architectural hubs).
+7. `monograph_get_node` ([`query-tools-nav.ts → monographGetNodeTool`](packages/@monomind/cli/src/mcp-tools/monograph/query-tools-nav.ts#monographGetNodeTool)): Retrieves attributes and edge connections for a specific node.
+8. `monograph_shortest_path` ([`query-tools-graph.ts → monographShortestPathTool`](packages/@monomind/cli/src/mcp-tools/monograph/query-tools-graph.ts#monographShortestPathTool)): Executes BFS pathfinding between two code nodes.
 9. `monograph_community` ([`group-tools.ts → monographCommunityTool`](packages/@monomind/cli/src/mcp-tools/monograph/group-tools.ts#monographCommunityTool)): Inspects Louvain community clusters.
 10. `monograph_surprises` ([`group-tools.ts → monographSurprisesTool`](packages/@monomind/cli/src/mcp-tools/monograph/group-tools.ts#monographSurprisesTool)): Detects unusual cross-boundary coupling and non-obvious dependencies.
-11. `monograph_suggest` ([`query-tools.ts → monographSuggestTool`](packages/@monomind/cli/src/mcp-tools/monograph/query-tools.ts#monographSuggestTool)): Recommends relevant code files for task prompts.
+11. `monograph_suggest` ([`query-tools-search.ts → monographSuggestTool`](packages/@monomind/cli/src/mcp-tools/monograph/query-tools-search.ts#monographSuggestTool)): Recommends relevant code files for task prompts.
 12. `monograph_staleness` ([`health-tools.ts → monographStalenessTool`](packages/@monomind/cli/src/mcp-tools/monograph/health-tools.ts#monographStalenessTool)): Checks graph freshness against the Git HEAD commit.
-13. `monograph_context` ([`query-tools.ts → monographContextTool`](packages/@monomind/cli/src/mcp-tools/monograph/query-tools.ts#monographContextTool)): Assembles deep multi-hop graph context for LLM prompts.
+13. `monograph_context` ([`query-tools-nav.ts → monographContextTool`](packages/@monomind/cli/src/mcp-tools/monograph/query-tools-nav.ts#monographContextTool)): Assembles deep multi-hop graph context for LLM prompts.
 14. `monograph_impact` ([`impact-tools.ts → monographImpactTool`](packages/@monomind/cli/src/mcp-tools/monograph/impact-tools.ts#monographImpactTool)): Computes change blast radius and affected downstream files.
-15. `monograph_cypher` ([`query-tools.ts → monographCypherTool`](packages/@monomind/cli/src/mcp-tools/monograph/query-tools.ts#monographCypherTool)): Executes custom subset Cypher pattern queries against the SQLite graph.
+15. `monograph_cypher` ([`query-tools-graph.ts → monographCypherTool`](packages/@monomind/cli/src/mcp-tools/monograph/query-tools-graph.ts#monographCypherTool)): Executes custom subset Cypher pattern queries against the SQLite graph.
 
 > **The 15 tools listed above are not a meaningful subset — they're carried over from an
 > earlier, smaller version of this section (14 tools) plus the one addition below, not a

@@ -282,7 +282,7 @@ Commands with a risk level of `0.7` or higher (`sudo`, `curl | sh`, `rm -rf`) ar
 ## Configuration & Persistent Outcome Stores
 
 - **Status Line Integration**: Local status bar / hook integration helper is executed via `.gemini/helpers/statusline.sh` and [`node .gemini/helpers/statusline.cjs`](.gemini/helpers/statusline.cjs).
-- **Persistent Routing Outcome Store**: Task and routing outcomes are persisted under `.monomind/routing-outcomes.json` ([`hooks-embedding.ts → getRoutingOutcomesPath`](packages/@monomind/cli/src/mcp-tools/hooks-embedding.ts#getRoutingOutcomesPath)) and appended to `.monomind/route-outcomes.jsonl`.
+- **Persistent Routing Outcome Store**: Task and routing outcomes are persisted under `.monomind/routing-outcomes.json` ([`hooks-embedding-routing.ts → getRoutingOutcomesPath`](packages/@monomind/cli/src/mcp-tools/hooks-embedding-routing.ts#getRoutingOutcomesPath)) and appended to `.monomind/route-outcomes.jsonl`.
 - **Memory Store**: Standard JSON memory fallback state is stored at `.monomind/memory/store.json`.
 
 ---
