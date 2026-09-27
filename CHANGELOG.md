@@ -4,6 +4,10 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The sandbox-stub crash ledger no longer keeps a killed sandboxed runtime's entries forever.** An org runtime started inside a role's sandbox (a QA drill) runs in its own pid namespace; when it is killed before its cleanup, other runtimes left its entries alone because a pid in another namespace cannot be checked, so they accumulated (18 after the 2.16.16 release run). A runtime in the initial pid namespace — which sees every process — now reclaims such entries once no process of that namespace is left; a runtime inside a sandbox still leaves them alone.
+
 ## [2.16.16] — 2026-09-27
 
 ### Fixed

@@ -222,6 +222,38 @@ describe('pid-namespace and boot-id aware reclaim', () => {
     expect(read(l.ledger)).toHaveLength(created.length);
   });
 
+  it("reclaims a different-namespace entry once that namespace provably has no process left", () => {
+    // 2.16.16: a drill runtime inside a role's sandbox was killed before its
+    // cleanup; its entries sat in the ledger for good.
+    const l = layout();
+    const created = new SandboxStubs(l.ledger, identity('ns-A', 'boot-1')).hold('org:run-1', l.paths);
+    const entries = read(l.ledger).map((e) => ({ ...e, pid: deadPid(), pidNamespace: 'ns-B' }));
+    writeFileSync(l.ledger, JSON.stringify({ entries }));
+    const next = new SandboxStubs(l.ledger, {
+      ...identity('ns-A', 'boot-1'),
+      namespaceLive: (ns: string) => (ns === 'ns-B' ? false : undefined),
+    });
+    expect(next.reclaim().sort()).toEqual([...created].sort());
+    for (const p of created) expect(existsSync(p)).toBe(false);
+    expect(read(l.ledger)).toEqual([]);
+  });
+
+  it('keeps a different-namespace entry while that namespace is live or cannot be judged', () => {
+    for (const verdict of [true, undefined]) {
+      const l = layout();
+      const created = new SandboxStubs(l.ledger, identity('ns-A', 'boot-1')).hold('org:run-1', l.paths);
+      const entries = read(l.ledger).map((e) => ({ ...e, pid: deadPid(), pidNamespace: 'ns-B' }));
+      writeFileSync(l.ledger, JSON.stringify({ entries }));
+      const next = new SandboxStubs(l.ledger, {
+        ...identity('ns-A', 'boot-1'),
+        namespaceLive: () => verdict,
+      });
+      expect(next.reclaim()).toEqual([]);
+      for (const p of created) expect(existsSync(p)).toBe(true);
+      expect(read(l.ledger)).toHaveLength(created.length);
+    }
+  });
+
   it('reclaims a different-boot entry even though its pid still resolves to a live process', () => {
     const l = layout();
     const created = new SandboxStubs(l.ledger, identity('ns-A', 'boot-OLD')).hold('org:run-1', l.paths);

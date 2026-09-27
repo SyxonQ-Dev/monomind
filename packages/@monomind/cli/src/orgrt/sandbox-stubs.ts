@@ -269,7 +269,16 @@ export interface IdentitySource {
   /** `/proc/sys/kernel/random/boot_id`, stable for one boot and never reused
    *  across a reboot — unlike a pid, which is. */
   bootId(): string | undefined;
+  /** Is any process still in pid namespace `ns`? `false` only when that is
+   *  provable — we are in the initial pid namespace, which sees every
+   *  process, and none of our own readable processes is in `ns` (a namespace
+   *  our roles' bwrap created holds only this user's processes). `undefined`
+   *  when we cannot tell: inside a sandbox's own namespace, or no /proc. */
+  namespaceLive?(ns: string): boolean | undefined;
 }
+
+/** The initial pid namespace's inode on Linux (PROC_PID_INIT_INO). */
+const INIT_PID_NS = 'pid:[4026531836]';
 
 const defaultIdentity: IdentitySource = {
   pidNamespace(): string | undefined {
@@ -282,6 +291,22 @@ const defaultIdentity: IdentitySource = {
   bootId(): string | undefined {
     try {
       return readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+    } catch {
+      return undefined;
+    }
+  },
+  namespaceLive(ns: string): boolean | undefined {
+    try {
+      if (readlinkSync('/proc/self/ns/pid') !== INIT_PID_NS) return undefined;
+      for (const pid of readdirSync('/proc')) {
+        if (!/^\d+$/.test(pid)) continue;
+        try {
+          if (readlinkSync(`/proc/${pid}/ns/pid`) === ns) return true;
+        } catch {
+          /* exited, or another user's process — never in our roles' namespaces */
+        }
+      }
+      return false;
     } catch {
       return undefined;
     }
@@ -463,9 +488,11 @@ export class SandboxStubs {
 
   /** Is `e` safe to reclaim? A different boot always is (pids and namespace
    *  ids are meaningless across a reboot). Same boot but a different pid
-   *  namespace never is — we cannot tell alive from dead across namespaces
-   *  (`process.kill` always throws ESRCH there), so it is left alone rather
-   *  than guessed at. Same boot and same namespace (or a legacy entry) falls
+   *  namespace is only when that namespace provably has no process left
+   *  (identity.namespaceLive: a sandboxed drill runtime killed before its
+   *  cleanup, 2.16.16 release run) — otherwise we cannot tell alive from dead
+   *  across namespaces (`process.kill` always throws ESRCH there), so it is
+   *  left alone rather than guessed at. Same boot and same namespace (or a legacy entry) falls
    *  back to the bare pid-alive check — and so does every entry when OUR OWN
    *  identity could not be read (older kernel, no /proc): without `ourNs`/
    *  `ourBootId` to compare against, a modern entry's real boot/namespace
@@ -480,7 +507,8 @@ export class SandboxStubs {
       return e.pid === process.pid || !alive(e.pid);
     }
     if (e.bootId !== ourBootId) return true;
-    if (e.pidNamespace !== ourNs) return false;
+    if (e.pidNamespace !== ourNs)
+      return this.identity.namespaceLive?.(e.pidNamespace as string) === false;
     return e.pid === process.pid || !alive(e.pid);
   }
 
