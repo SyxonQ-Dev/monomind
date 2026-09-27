@@ -16,9 +16,9 @@ import type { Command } from '../types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-/** Extract every single-quoted `solution: '...'` literal from performance.ts. */
+/** Extract every single-quoted `solution: '...'` literal from performance-bottleneck.ts. */
 function extractSolutionStrings(): string[] {
-  const src = readFileSync(join(__dirname, '..', 'commands', 'performance.ts'), 'utf8');
+  const src = readFileSync(join(__dirname, '..', 'commands', 'performance-bottleneck.ts'), 'utf8');
   const matches = [...src.matchAll(/solution:\s*'((?:[^'\\]|\\.)*)'/g)];
   return matches.map((m) => m[1]);
 }
