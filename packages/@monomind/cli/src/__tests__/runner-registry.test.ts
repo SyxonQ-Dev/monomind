@@ -45,6 +45,7 @@ describe('version handshake (§2)', () => {
       min_caller: '1.0.0',
       capabilities: [
         'agent-exec',
+        'agent-exec-settings',
         'agent-scan',
         'agent-scan-read-only',
         'org-json-v1',

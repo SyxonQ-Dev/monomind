@@ -13,6 +13,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { runAgentExec, type ToolSpec } from '../orgrt/agent-exec.js';
+import { parseSettingsFlag } from '../orgrt/agent-exec-settings.js';
 import { scanInstalled } from '../orgrt/runner-registry.js';
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
@@ -153,6 +154,10 @@ async function runExec(
     return usageError('--tools-file/--tool-names require --tools stdio');
   }
 
+  // Coder mode (#356): none (default) = today's isolated behavior.
+  const parsedSettings = parseSettingsFlag(ctx.flags.settings);
+  if ('error' in parsedSettings) return usageError(parsedSettings.error);
+
   let systemPrompt: string | undefined;
   const systemFile = ctx.flags['system-file'] as string | undefined;
   if (systemFile) {
@@ -165,9 +170,11 @@ async function runExec(
 
   let timeoutMs: number | undefined;
   let toolTimeoutMs = 120_000;
+  let startupTimeoutMs = 30_000;
   try {
     timeoutMs = overrides.timeoutMs ?? parseDuration(ctx.flags.timeout, 'timeout');
     toolTimeoutMs = parseDuration(ctx.flags['tool-timeout'], 'tool-timeout') ?? 120_000;
+    startupTimeoutMs = parseDuration(ctx.flags['startup-timeout'], 'startup-timeout') ?? 30_000;
   } catch (e) {
     return usageError(e instanceof Error ? e.message : String(e));
   }
@@ -199,6 +206,8 @@ async function runExec(
     env,
     toolSpecs: toolSpecs.length ? toolSpecs : null,
     allowBashPrefixes: parseBashPrefixesFlag(ctx.flags['allow-bash-prefix']),
+    settings: parsedSettings.sources,
+    startupTimeoutMs,
     emit: (ev) => {
       process.stdout.write(`${JSON.stringify(ev)}\n`);
     },
@@ -277,6 +286,17 @@ export const execCommand: Command = {
       type: 'string',
     },
     { name: 'protocol', description: 'Protocol version pin (1)', type: 'string' },
+    {
+      name: 'settings',
+      description:
+        'Coder mode: "none" (default) or a CSV of user,project,local — loads CLAUDE.md, skills, hooks, and project+user MCP servers (claude runtime only)',
+      type: 'string',
+    },
+    {
+      name: 'startup-timeout',
+      description: 'Max wait for claude to report ready when --settings is non-none (default 30s)',
+      type: 'string',
+    },
   ],
   examples: [
     {

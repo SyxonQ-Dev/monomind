@@ -4,6 +4,10 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Added
+
+- **`monomind agent exec --settings none|<csv of user,project,local>`** ([#356](https://github.com/monoes/monomind/issues/356)). A non-`none` value (claude runtime only) loads the normal Claude Code setup for the turn — CLAUDE.md, skills, hooks, and project/user MCP servers — and appends the caller's system prompt to Claude Code's own preset instead of replacing it; `--settings none` (default) stays byte-identical to before. New `status` NDJSON event reports SDK startup progress, and a `--startup-timeout` watchdog (default 30s) reports a clear error instead of hanging if the SDK never reports ready. Capability `agent-exec-settings`.
+
 ### Fixed
 
 - **A second dashboard server no longer takes over the first one's pairing token when the first is too busy to answer.** A secondary decided whether the primary recorded in `.monomind/control.json` was alive only by probing its `/api/status` (3 tries, 1.5 s each); a primary whose event loop was blocked longer than that looked dead, so the secondary overwrote `dashboard-token` — logging out the primary's clients — and never wrote its own `dashboard-token-<port>`. A live recorded pid now also keeps it a secondary.

@@ -83,6 +83,13 @@ export interface AgentRunArgs {
    *  role that runs outside the SDK sandbox. Subprocess runners launch their
    *  CLI inside it; ClaudeAgentRunner launches the Claude Code process in it. */
   authorityMask?: string[];
+  /** Coder mode (#356): `--settings` sources to load via the SDK's own
+   *  discovery ('user'/'project'/'local' settings.json, CLAUDE.md, skills,
+   *  hooks, project+user MCP servers). ClaudeAgentRunner-only; other runners
+   *  ignore it. Unset/`[]` = today's isolated behavior (settingSources: [],
+   *  strictMcpConfig: true, plain-string system prompt) — see
+   *  agent-runner-claude-settings.ts. */
+  settingSources?: Array<'user' | 'project' | 'local'>;
   /** ADR-O001 D2: directory for spilled tool-result bodies. When set,
    *  ClaudeAgentRunner installs a PostToolUse hook that writes an oversized
    *  result here in full and replaces it in the transcript with a bounded
@@ -159,11 +166,17 @@ export function killOnAbort(
  *  as opposed to the 'result' message's usage, which the SDK's own type docs
  *  describe as per-turn (i.e. just the last turn) rather than a cumulative
  *  total for the whole streaming-input message — see session.ts's
- *  per-assistant-turn budget accounting for why this distinction matters. */
+ *  per-assistant-turn budget accounting for why this distinction matters.
+ *
+ *  `status` (#356): startup progress, ClaudeAgentRunner-only and only when
+ *  `AgentRunArgs.settingSources` is non-empty (coder mode) — see its own
+ *  doc comment there and agent-exec-settings.ts's startup watchdog. */
 export interface AgentMessage {
-  type: 'assistant' | 'result' | 'tool_use' | 'tool_result';
+  type: 'assistant' | 'result' | 'tool_use' | 'tool_result' | 'status';
   session_id?: string;
   text?: string; // assistant (prose) / tool_use (short progress label) / tool_result (body)
+  phase?: 'initializing' | 'ready'; // status only
+  mcp_servers?: { name: string; status: string }[]; // status(phase:'ready') only
   subtype?: string; // result
   is_error?: boolean; // result, tool_result
   tool_use_id?: string; // tool_result

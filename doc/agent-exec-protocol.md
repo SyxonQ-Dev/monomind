@@ -1,8 +1,33 @@
-# Agent Exec Protocol — v1 (rev 11)
+# Agent Exec Protocol — v1 (rev 12)
 
 - **Status**: Implemented (Phase 0 of the mono-agent delegation plan — see
   `mono-agent:docs/plans/local-agent-monomind-delegation.md`)
 - **Revision history**:
+  - rev 12 (2026-09-28): **`--settings` / coder mode** (issue #356, capability
+    `agent-exec-settings`). `agent exec --settings none|<csv of
+    user,project,local>` (default `none`, byte-identical to before — proven by
+    an SDK-options snapshot test); a non-empty list (claude runtime only) sets
+    `settingSources`, `strictMcpConfig: false`, merges the in-process `org` MCP
+    server only when `--tools stdio` supplied caller tools (otherwise no
+    `mcpServers` override at all, letting the SDK's own discovery be the sole
+    MCP surface), and switches the system prompt to `{type:'preset',
+    preset:'claude_code', append: <text>}` instead of replacing Claude Code's
+    own prompt. The programmatic hooks (`coverEveryToolCall`, tool spill) keep
+    registering over the SDK control protocol alongside any filesystem hooks
+    the settings sources load — the user's own `PreToolUse` hooks (e.g. a
+    graph-gate) **will** run on coder-mode turns. New `status` event (§3.2)
+    from the SDK's `system/init` message, only when `--settings` is non-none;
+    a startup watchdog (`--startup-timeout`, default 30s) emits
+    `error {code:"runner-error"}` instead of hanging if `phase:"ready"` never
+    arrives. The historical hang this isolation was added for (settings
+    discovery vs. a concurrent interactive Claude Code session's
+    multi-agent-teams handshake) was re-verified live — 8 trials of
+    `settingSources:['user','project','local']` against a real account, with
+    3+ interactive `claude` sessions already running throughout (sequential,
+    repeated, and 3 concurrent SDK sessions sharing one HOME) — and did not
+    reproduce with the currently pinned SDK/CLI versions; the startup watchdog
+    stays in place regardless, as a backstop. `agent-exec.ts` (org runtime)
+    never sets `--settings`, so its behavior is unchanged.
   - rev 1 (2026-08-24): initial draft.
   - rev 2 (2026-08-25): review fixes — `agent list` collision resolved (§6), dual-mode tool
     definitions via `--tools-file` (§4), `--timeout` added so exit 124 is defined (§3.1),
@@ -142,7 +167,7 @@ by swarm management and is NOT reused by this protocol — the installed-only vi
 
 ```
 $ monomind --version --json
-{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-scan","agent-scan-read-only","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","doctor-json","doctor-read-only","doctor-offline"]}
+{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-settings","agent-scan","agent-scan-read-only","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","doctor-json","doctor-read-only","doctor-offline"]}
 ```
 
 Callers MUST handshake before use and fail with an actionable message (install/upgrade hint)
@@ -177,6 +202,8 @@ progress go to stderr. A caller must be able to `JSON.parse` every stdout line.
 | `--timeout <dur>` | | Overall wall-clock timeout for the whole exec (default: none). On expiry monomind SIGTERMs the agent child, emits `error {code:"timeout"}` + `done`, exits `124` |
 | `--env KEY=V` | | Extra env for the agent process (repeatable) |
 | `--protocol <v>` | | Protocol version pin (`1`); reserved for the v2 transition window (§5) |
+| `--settings <sources>` | | rev 12, capability `agent-exec-settings`. Coder mode: `none` (default) or a CSV of `user,project,local`. Non-`none` (claude runtime only) loads the SDK's own settings discovery — CLAUDE.md, skills, hooks, and project/user MCP servers — appends the caller's system prompt to Claude Code's own preset instead of replacing it, and merges the `org` MCP server only when `--tools stdio` gave this turn caller tools. `--settings bogus` → exit 2. See §3.2's `status` event and the `agent-exec-settings` capability note in §2. |
+| `--startup-timeout <dur>` | | rev 12. Max wait for `phase:"ready"` when `--settings` is non-none (default `30s`); on expiry monomind emits `error {code:"runner-error", message:"claude did not initialize (settings/MCP startup hang?)"}` + `done`, exit 1, instead of hanging until `--timeout`. No effect with `--settings none`. |
 | `--budget-usd <n>` | | rev 3. Optional spend cap for this turn, enforced via the same per-role budget mechanism orgrt already uses internally. On breach: SIGTERM the agent child, emit `error {code:"budget", fatal:true}` + `done`, exit 1. Bare `agent exec` has no default cap — callers driving cost-sensitive flows (e.g. a chat UI, not an org role) should set this explicitly. **rev 4 granularity**: on a single-shot exec the cap is checked when the turn's `result` message arrives (the AgentRunner interface surfaces usage at result granularity) — the overspend is reported as the terminal outcome (`error budget` + exit 1, **no success `result` event`) so callers stop, but a single turn's own spend cannot be interrupted mid-flight. Mid-turn enforcement arrives with M2 (`agent_ask` in orgrt, where the mailbox-close mechanism applies). |
 
 Exactly one of `--prompt` / `--prompt-file`. Unknown flags → exit 2 with JSON error on stderr.
@@ -189,12 +216,13 @@ prompt into a single-message stream and bridges tool handler invocations to §4 
 
 ### 3.2 Output: NDJSON events (stdout, one JSON object per line)
 
-All events carry `"v": 1`. Order per turn: `start → [session] → assistant* → [tool_call →
-tool_result]* → [usage]* → result → done`. On failure: `start → … → error → done`.
+All events carry `"v": 1`. Order per turn: `start → [status] → [session] → assistant* →
+[tool_call → tool_result]* → [usage]* → result → done`. On failure: `start → … → error → done`.
 
 | Event | Fields | Notes |
 |---|---|---|
 | `start` | `v, runtime, model?, cwd, resume?, pid, child_pid?, streams_incrementally` | `pid` = the monomind process; `child_pid` = the agent-CLI subprocess when the runner spawns one (omitted for in-process runners). **rev 4**: v1 always omits `child_pid` — the `AgentRunner` interface does not surface child pids; add it if/when runners expose them. **rev 5**: `streams_incrementally` (bool) — whether this runtime delivers real incremental `assistant` text as a turn streams, vs. only ever a complete message at a step/turn boundary (see §9) |
+| `status` | `v, phase ("initializing"\|"ready"), mcp_servers? ([{name,status}])` | rev 12, capability `agent-exec-settings`. Only with `--settings` non-`none` (claude runtime): `initializing` right after `start`, `ready` (with `mcp_servers`) from the SDK's own `system/init` message. Absent entirely for `--settings none` and every non-claude runtime. |
 | `session` | `v, session_id` | Runner's session/thread/conversation id; pass back via `--resume` |
 | `assistant` | `v, text` | Incremental assistant text (may be multi-line; callers append) |
 | `tool_call` | `v, id, name, args` | Only with `--tools stdio` — caller must execute and reply (§4) |

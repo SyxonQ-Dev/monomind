@@ -39,9 +39,14 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    `doctor --read-only` change no file; the payload carries `read_only` (§10)
  *  - `doctor-offline` — `doctor --offline` skips the checks that use the
  *    network and reports them as `skipped` with `skipped_reason` (§10)
+ *  - `agent-exec-settings` — `agent exec --settings none|<csv of
+ *    user,project,local>` (coder mode, claude runtime): loads CLAUDE.md,
+ *    skills, hooks, and project+user MCP servers; the `status` event and its
+ *    startup watchdog (§3.1, §3.2)
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
+  'agent-exec-settings',
   'agent-scan',
   'agent-scan-read-only',
   'org-json-v1',
