@@ -26,230 +26,44 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { buildCorpus, type Corpus, type CorpusDoc, readDoc, resolveRepoRoot } from './corpus.js';
+import { buildCorpus, type Corpus, readDoc, resolveRepoRoot } from './corpus.js';
+import { GOLDEN_SET, type GoldenPair, pairsForSplit, SPLIT_SCHEME } from './golden-set.js';
 import {
-  GOLDEN_SET,
-  type GoldenPair,
-  pairsForSplit,
-  SPLIT_SCHEME,
-  type Split,
-} from './golden-set.js';
+  buildChunks,
+  corpusComposition,
+  detectDbDriver,
+  partitionTrivialPairs,
+} from './harness-prep.js';
+import {
+  type EvalOptions,
+  type EvalReport,
+  MAX_K_CORPUS_RATIO,
+  type RetrieverResult,
+} from './harness-types.js';
 import {
   aggregate,
-  assessTriviality,
   buildIdf,
   dedupeByDoc,
   idfOverlap,
   type QueryOutcome,
-  type Scoreboard,
   scoreQuery,
   terciles,
 } from './metrics.js';
-import { assertModelProvisioned, type ModelPresence } from './model-presence.js';
-import { installNetworkGuard, type NetworkAttempt } from './network-guard.js';
+import { assertModelProvisioned } from './model-presence.js';
+import { installNetworkGuard } from './network-guard.js';
 import {
   Bm25Retriever,
-  type EvalChunk,
   FnRetriever,
   RandomRetriever,
   type RawHit,
   type Retriever,
   RrfRetriever,
 } from './retrievers.js';
-import { type SignalResult, scoreSignals } from './signals.js';
+import { scoreSignals } from './signals.js';
 
-/** Which kind of store produced a row. Rows with different profiles are NOT comparable. */
-export type StoreProfile = 'fresh' | 'polluted-live' | 'eval-fixture';
-
-/** k must be at most this share of the corpus, else the eval is vacuous. */
-export const MAX_K_CORPUS_RATIO = 0.05;
-
-export interface EvalOptions {
-  repoRoot: string;
-  /** Retrieval cutoff. Metrics are reported at 1/5/10 regardless. */
-  k?: number;
-  /** Rebuild the eval store from scratch even if a matching one exists. */
-  rebuild?: boolean;
-  /** Where the isolated eval store lives. Default: <repo>/.monomind/eval. */
-  storeRoot?: string;
-  /**
-   * Which half of the golden set to score.
-   *  - 'dev'  freely inspectable; tune against it.
-   *  - 'test' SEALED. No per-query output. The only split the stop condition
-   *           may be evaluated on. Every run is appended to the exposure ledger.
-   *  - 'all'  diagnostic only; can never satisfy the stop condition.
-   */
-  split?: Split | 'all';
-  onProgress?: (msg: string) => void;
-}
-
-export interface RetrieverResult {
-  name: string;
-  description: string;
-  scoreboard: Scoreboard;
-  terciles: ReturnType<typeof terciles>;
-  /** ALWAYS EMPTY on the test split — seeing which queries failed is how a
-   *  held-out set silently becomes a tuned one. */
-  outcomes: QueryOutcome[];
-  /** Queries that came back with fewer than k results — their @k is unsupported. */
-  shortReturns: number;
-  shortReturnRate: number;
-}
-
-export interface EvalReport {
-  schemaVersion: 1;
-  generatedAt: string;
-  method: {
-    goldenSetVersion: string;
-    split: Split | 'all';
-    /** How many times TEST has been run. Repeated exposure turns it into a dev set. */
-    testExposureCount: number | null;
-    stopConditionEvaluable: boolean;
-    corpusHash: string;
-    corpusFiles: number;
-    corpusDocs: number;
-    duplicateGroupsCollapsed: number;
-    appleDoubleCount: number;
-    corpusChunks: number;
-    /** Rows actually present in the isolated eval store. Must equal
-     *  corpusChunks: any excess means superseded versions leaked in. */
-    evalStoreRows: number;
-    /** How the corpus is frozen, stated in the artefact rather than in prose. */
-    corpusPinning: string;
-    /** The standing limitation of this corpus, carried on the artefact itself. */
-    representativeness: string;
-    /**
-     * Which kind of store produced this row. Mandatory, and a required field
-     * rather than a convention: a labelling rule enforced by prose decays,
-     * one enforced by a field that must be filled cannot be quietly omitted.
-     *  - 'fresh'        rebuilt from a clean corpus, one ingest per document
-     *  - 'polluted-live' the user's real store, with its churn and dangling rows
-     *  - 'eval-fixture' deliberately versioned/dangling fixture (items 4, 4b, 7)
-     * Rows with different store profiles are NOT comparable.
-     */
-    storeProfile: StoreProfile;
-    topK: number;
-    kCorpusRatio: number;
-    pairsAuthored: number;
-    pairsAuthoredTotal: number;
-    pairsScored: number;
-    pairsDroppedTrivial: number;
-    relevancePinnedToLiveDocs: true;
-    embeddingModel: string;
-    dbDriver: string;
-    searchMethodProbe: string;
-    /** Proof the weights were on disk BEFORE any query ran. */
-    modelPresence: ModelPresence;
-    /**
-     * Item 0b's pre-registered signal, as a single scoreable number: 1 only if
-     * the weights were present before any query AND the query phase was
-     * network-blocked AND nothing was fetched. Expressed numerically so the
-     * regression suite can score it like any other signal rather than needing
-     * a special case — a special case is a place a check goes to be forgotten.
-     */
-    provisioningIntact: number;
-    includesGlobalBrain: boolean;
-    hardware: {
-      platform: string;
-      arch: string;
-      cpus: number;
-      cpuModel: string;
-      nodeVersion: string;
-    };
-  };
-  networkFree: {
-    verdict: 'proven-blocked' | 'partial' | 'violated';
-    method: string;
-    attempts: NetworkAttempt[];
-    /** Entry points the guard could not replace. Non-empty => 'partial'. */
-    unpatched: string[];
-    /**
-     * Ruled carve-out, stated on the artefact rather than left implicit.
-     * Clause 4's scope is the RETRIEVAL path: everything a query requires or
-     * triggers in order to return results. Crash reporting and the update
-     * checker are outside it — neither is required for a query to succeed and
-     * neither runs on the success path — but both are DISABLED for the run, so
-     * "0 attempts" is a statement about retrieval and not an artifact of
-     * nothing having crashed.
-     */
-    telemetryCarveOut: string;
-  };
-  droppedPairs: Array<{
-    id: string;
-    reason: string;
-    maxContiguousRun: number;
-    overlapRatio: number;
-  }>;
-  overlap: { p25: number; p50: number; p75: number; tercileCutLow: number; tercileCutHigh: number };
-  results: Record<string, RetrieverResult>;
-  /**
-   * Every prior item's pre-registered signal, re-scored on THIS row. Without
-   * this the table can only report novelty: an item's win is measured once and
-   * never again, so a win that later evaporates is invisible forever.
-   */
-  regressionSuite: SignalResult[];
-  /** What the corpus is actually made of — a corpus that silently became 40%
-   *  one generated subtree would otherwise pass every check we have. */
-  corpusComposition: { byTopLevel: Record<string, number>; byExtension: Record<string, number> };
-  /** The headline row for the scoreboard-history table. */
-  headline: {
-    retriever: string;
-    recallAt1: number;
-    recallAt5: number;
-    recallAt10: number;
-    mrrAt10: number;
-    lowOverlapRecallAt5: number;
-    bm25FloorRecallAt5: number;
-    randomFloorRecallAt5: number;
-    gapOverBm25: number;
-  };
-  timings: { ingestMs: number; evalMs: number };
-}
-
-function detectDbDriver(): string {
-  try {
-    const req = createRequire(import.meta.url);
-    req.resolve('better-sqlite3');
-    try {
-      req('better-sqlite3');
-      return 'better-sqlite3';
-    } catch {
-      return 'sql.js (better-sqlite3 present but failed to load)';
-    }
-  } catch {
-    return 'sql.js (WASM fallback)';
-  }
-}
-
-import { createRequire } from 'node:module';
-
-async function buildChunks(docs: CorpusDoc[]): Promise<EvalChunk[]> {
-  let chunker: ((id: string, text: string) => any) | null = null;
-  try {
-    const mem: any = await import('@monoes/memory');
-    if (typeof mem.chunkDocument === 'function') chunker = mem.chunkDocument;
-  } catch {
-    /* fall through to whole-document chunks */
-  }
-
-  const out: EvalChunk[] = [];
-  for (const d of docs) {
-    const text = readDoc(d);
-    if (!chunker) {
-      out.push({ docId: d.id, chunkIndex: 0, text });
-      continue;
-    }
-    const chunks = await chunker(d.id, text);
-    const list = Array.isArray(chunks) ? chunks : [];
-    if (list.length === 0) {
-      out.push({ docId: d.id, chunkIndex: 0, text });
-      continue;
-    }
-    for (const c of list)
-      out.push({ docId: d.id, chunkIndex: c.chunkIndex ?? 0, text: c.text ?? '' });
-  }
-  return out;
-}
+export { renderReport } from './harness-render.js';
+export * from './harness-screen.js';
+export * from './harness-types.js';
 
 export async function runEval(opts: EvalOptions): Promise<EvalReport> {
   const k = opts.k ?? 10;
@@ -309,38 +123,7 @@ export async function runEval(opts: EvalOptions): Promise<EvalReport> {
   };
 
   const candidatePairs = pairsForSplit(split);
-  for (const pair of candidatePairs) {
-    const unknown = pair.relevant.filter((r) => !byId.has(r));
-    if (unknown.length > 0) {
-      // Never a silent skip: a golden set pointing at documents the corpus does
-      // not contain is a broken set, and a broken set produces a fake number.
-      throw new Error(
-        `[doc eval] golden pair "${pair.id}" references documents not in the corpus: ${unknown.join(', ')}`,
-      );
-    }
-    let worst = { trivial: false, reason: '', maxContiguousRun: 0, overlapRatio: 0 };
-    for (const r of pair.relevant) {
-      const t = assessTriviality(pair.query, textOf(r));
-      if (t.maxContiguousRun > worst.maxContiguousRun) {
-        worst = {
-          trivial: t.trivial,
-          reason: t.reason ?? '',
-          maxContiguousRun: t.maxContiguousRun,
-          overlapRatio: t.overlapRatio,
-        };
-      }
-    }
-    if (worst.trivial) {
-      dropped.push({
-        id: pair.id,
-        reason: worst.reason,
-        maxContiguousRun: worst.maxContiguousRun,
-        overlapRatio: worst.overlapRatio,
-      });
-    } else {
-      scored.push(pair);
-    }
-  }
+  partitionTrivialPairs(candidatePairs, byId, textOf, scored, dropped);
   progress(`golden set: ${scored.length} scored, ${dropped.length} dropped as trivially solvable`);
   if (scored.length === 0)
     throw new Error('[doc eval] no golden pairs survived the triviality filter');
@@ -671,18 +454,7 @@ export async function runEval(opts: EvalOptions): Promise<EvalReport> {
         gapOverBm25: dense.scoreboard.recallAt5 - (bm25?.scoreboard.recallAt5 ?? 0),
       },
       regressionSuite: [],
-      corpusComposition: (() => {
-        const byTopLevel: Record<string, number> = {};
-        const byExtension: Record<string, number> = {};
-        for (const d of corpus.docs) {
-          if (corpus.canonicalOf.get(d.id) !== d.id) continue;
-          const top = d.id.includes('/') ? d.id.split('/')[0] : '<root>';
-          byTopLevel[top] = (byTopLevel[top] ?? 0) + 1;
-          const ext = path.extname(d.id).toLowerCase() || '<none>';
-          byExtension[ext] = (byExtension[ext] ?? 0) + 1;
-        }
-        return { byTopLevel, byExtension };
-      })(),
+      corpusComposition: corpusComposition(corpus),
       timings: { ingestMs, evalMs },
     };
 
@@ -724,292 +496,4 @@ export async function runEval(opts: EvalOptions): Promise<EvalReport> {
 
   void t0;
   return report;
-}
-
-// ── Human-readable rendering ────────────────────────────────────────
-
-function pct(x: number): string {
-  return `${(x * 100).toFixed(1)}%`;
-}
-function f3(x: number): string {
-  return x.toFixed(3);
-}
-
-export function renderReport(r: EvalReport): string {
-  const L: string[] = [];
-  const m = r.method;
-  L.push('');
-  L.push('Second Brain retrieval scoreboard');
-  L.push('='.repeat(72));
-  L.push(
-    `corpus        ${m.corpusDocs} distinct documents from ${m.corpusFiles} files / ${m.corpusChunks} chunks  (hash ${m.corpusHash})`,
-  );
-  L.push(
-    `              ${m.duplicateGroupsCollapsed} byte-identical groups collapsed to one unit each; AppleDouble "._" files: ${m.appleDoubleCount} (asserted zero)`,
-  );
-  L.push(
-    `eval store    ${m.evalStoreRows < 0 ? 'unknown' : `${m.evalStoreRows} rows`}${m.evalStoreRows >= 0 && m.evalStoreRows !== m.corpusChunks ? '  <- MISMATCH vs chunk count, superseded rows may have leaked in' : ''}`,
-  );
-  L.push(
-    `split         ${m.split.toUpperCase()}${m.split === 'test' ? '  (SEALED — aggregates only, no per-query output)' : m.split === 'dev' ? '  (tunable; cannot satisfy the stop condition)' : '  (diagnostic; cannot satisfy the stop condition)'}`,
-  );
-  if (m.testExposureCount !== null)
-    L.push(`exposure      TEST has now been run ${m.testExposureCount} time(s)`);
-  L.push(
-    `golden set    ${m.pairsScored} scored of ${m.pairsAuthored} in this split (${m.pairsAuthoredTotal} authored overall; ${m.pairsDroppedTrivial} dropped as trivially solvable)`,
-  );
-  L.push(`top_k         ${m.topK}  =  ${(m.kCorpusRatio * 100).toFixed(2)}% of corpus`);
-  L.push(`embeddings    ${m.embeddingModel}`);
-  L.push(`db driver     ${m.dbDriver}   search path probe: ${m.searchMethodProbe}`);
-  L.push(
-    `model weights ${m.modelPresence.present ? 'PRESENT before any query' : 'ABSENT'} ` +
-      `(${(m.modelPresence.bytes / 1e6).toFixed(0)}MB, ${m.modelPresence.provenance})`,
-  );
-  L.push(`relevance     pinned to LIVE documents only (store rebuilt, no superseded versions)`);
-  L.push(
-    `hardware      ${m.hardware.cpuModel} x${m.hardware.cpus}, ${m.hardware.platform}/${m.hardware.arch}, node ${m.hardware.nodeVersion}`,
-  );
-  L.push(`store profile ${m.storeProfile}  (rows with a different profile are NOT comparable)`);
-  L.push(`caveat        ${m.representativeness}`);
-  L.push(`carve-out     ${r.networkFree.telemetryCarveOut}`);
-  L.push(
-    `network       ${r.networkFree.verdict.toUpperCase()} (${r.networkFree.attempts.length} attempts blocked during query phase` +
-      (r.networkFree.unpatched.length ? `; UNPATCHED: ${r.networkFree.unpatched.join(', ')}` : '') +
-      ')',
-  );
-  L.push('');
-
-  const rows = Object.values(r.results);
-  const w = Math.max(...rows.map((x) => x.name.length), 10);
-  const head = [
-    'retriever'.padEnd(w),
-    'R@1'.padStart(7),
-    'R@5'.padStart(7),
-    'R@10'.padStart(7),
-    'MRR@10'.padStart(7),
-    'p50ms'.padStart(7),
-    'p95ms'.padStart(7),
-    'short'.padStart(7),
-  ];
-  L.push(head.join(' '));
-  L.push('-'.repeat(head.join(' ').length));
-  for (const row of rows) {
-    const s = row.scoreboard;
-    L.push(
-      [
-        row.name.padEnd(w),
-        f3(s.recallAt1).padStart(7),
-        f3(s.recallAt5).padStart(7),
-        f3(s.recallAt10).padStart(7),
-        f3(s.mrrAt10).padStart(7),
-        String(s.latencyMsP50).padStart(7),
-        String(s.latencyMsP95).padStart(7),
-        pct(row.shortReturnRate).padStart(7),
-      ].join(' '),
-    );
-  }
-  L.push('');
-  L.push('Recall@5 by IDF-weighted query/document overlap tercile');
-  L.push(
-    `  (tercile cuts: low < ${f3(r.overlap.tercileCutLow)} <= mid < ${f3(r.overlap.tercileCutHigh)} <= high)`,
-  );
-  L.push(
-    ['retriever'.padEnd(w), 'low'.padStart(7), 'mid'.padStart(7), 'high'.padStart(7)].join(' '),
-  );
-  L.push('-'.repeat(w + 24));
-  for (const row of rows) {
-    L.push(
-      [
-        row.name.padEnd(w),
-        f3(row.terciles.low.recallAt5).padStart(7),
-        f3(row.terciles.mid.recallAt5).padStart(7),
-        f3(row.terciles.high.recallAt5).padStart(7),
-      ].join(' '),
-    );
-  }
-  L.push('');
-  L.push('Reading this scoreboard');
-  L.push(
-    `  gap over BM25-only      ${f3(r.headline.gapOverBm25)}  <- the real signal. A small gap means the`,
-  );
-  L.push('                                 golden set is too easy, not that the stack is good.');
-  L.push(
-    `  random floor Recall@5   ${f3(r.headline.randomFloorRecallAt5)}  <- anything but ~0 means a vacuous eval.`,
-  );
-  L.push(
-    `  low-overlap Recall@5    ${f3(r.headline.lowOverlapRecallAt5)}  <- the closest proxy to real-world queries.`,
-  );
-  const ci = rows[0]?.scoreboard.hitRateAt5Ci95 ?? 0;
-  L.push(
-    `  95% CI half-width       ${f3(ci)}  <- a delta smaller than this is noise, not improvement.`,
-  );
-  L.push('');
-  if (r.regressionSuite.length > 0) {
-    L.push("Regression suite — every prior item's pre-registered signal, re-scored on this row");
-    for (const sig of r.regressionSuite) {
-      const cur = sig.currentValue === null ? '   n/a' : f3(sig.currentValue);
-      const ref = sig.shipValue ?? sig.baselineValue;
-      L.push(`  [${sig.verdict.padEnd(9)}] item ${sig.item.padEnd(3)} ${sig.id}`);
-      L.push(
-        `               now ${cur}` +
-          (ref !== null && ref !== undefined ? `  vs ${f3(ref)} at ship/baseline` : '') +
-          (sig.nullVerdict ? `  null-verdict: ${sig.nullVerdict}` : ''),
-      );
-      L.push(`               ${sig.note}`);
-    }
-    const decayed = r.regressionSuite.filter((x) => x.verdict === 'DECAYED');
-    if (decayed.length > 0) {
-      L.push(`  !! ${decayed.length} PRE-REGISTERED SIGNAL(S) HAVE DECAYED — a win recorded on an`);
-      L.push(
-        '     earlier row no longer holds. This is the only evidence that justifies a revert.',
-      );
-    }
-    L.push('');
-  }
-  L.push('Corpus composition (distinct documents by top-level directory)');
-  L.push(
-    '  ' +
-      Object.entries(r.corpusComposition.byTopLevel)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 8)
-        .map(([k, v]) => `${k} ${v}`)
-        .join('   '),
-  );
-  L.push('');
-  L.push(`Stop condition: Recall@5 >= 0.900 and MRR@10 >= 0.800 on >= 500 documents.`);
-  const s = r.results[r.headline.retriever].scoreboard;
-  const met = s.recallAt5 >= 0.9 && s.mrrAt10 >= 0.8 && m.corpusDocs >= 500;
-  if (!m.stopConditionEvaluable) {
-    L.push(
-      `  currently: Recall@5 ${f3(s.recallAt5)}, MRR@10 ${f3(s.mrrAt10)}, corpus ${m.corpusDocs}`,
-    );
-    L.push(
-      `  NOT EVALUABLE on the ${m.split} split — the stop condition may only be checked on TEST.`,
-    );
-  } else {
-    L.push(
-      `  currently: Recall@5 ${f3(s.recallAt5)}, MRR@10 ${f3(s.mrrAt10)}, corpus ${m.corpusDocs} -> ${met ? 'MET' : 'NOT MET'}`,
-    );
-  }
-  L.push('');
-  return L.join('\n');
-}
-
-// -- Authoring-time candidate screening ------------------------------
-//
-// The expansion's real risk is drift under volume: authoring 300 queries is
-// tedious in a way authoring 96 is not, and the path of least resistance is to
-// open the document and paraphrase it. That is precisely how the v1 set became
-// high-overlap dominated, which is why BM25 wins its aggregate. Screening
-// candidates AS THEY ARE AUTHORED — rather than measuring the distribution
-// afterwards and being disappointed — is the only defence that survives
-// tedium.
-
-export interface ScreenedCandidate {
-  id: string;
-  query: string;
-  relevant: string[];
-  idfOverlap: number;
-  maxContiguousRun: number;
-  band: 'low' | 'mid' | 'high';
-  accepted: boolean;
-  reason?: string;
-}
-
-export interface ScreenReport {
-  corpusHash: string;
-  total: number;
-  accepted: number;
-  rejected: number;
-  bands: { low: number; mid: number; high: number };
-  candidates: ScreenedCandidate[];
-}
-
-/**
- * @param bandCuts overlap thresholds; defaults match the v1 TEST terciles so a
- *                 candidate is judged against the distribution we are trying
- *                 to move, not against the one it would itself create.
- */
-export async function screenCandidates(
-  repoRootIn: string,
-  candidates: Array<{ id: string; query: string; relevant: string[] }>,
-  bandCuts: { low: number; high: number } = { low: 0.247, high: 0.455 },
-): Promise<ScreenReport> {
-  const repoRoot = resolveRepoRoot(repoRootIn);
-  const corpus = buildCorpus(repoRoot);
-  const byId = new Map(corpus.docs.map((d) => [d.id, d]));
-  const cache = new Map<string, string>();
-  const textOf = (id: string): string => {
-    let t = cache.get(id);
-    if (t === undefined) {
-      t = readDoc(byId.get(id)!);
-      cache.set(id, t);
-    }
-    return t;
-  };
-  const idf = buildIdf(corpus.docs.map((d) => textOf(d.id)));
-
-  const seen = new Set<string>();
-  const out: ScreenedCandidate[] = [];
-  for (const c of candidates) {
-    const missing = c.relevant.filter((r) => !byId.has(r));
-    if (missing.length > 0) {
-      out.push({
-        ...c,
-        idfOverlap: 0,
-        maxContiguousRun: 0,
-        band: 'low',
-        accepted: false,
-        reason: `target not in corpus: ${missing.join(', ')}`,
-      });
-      continue;
-    }
-    if (seen.has(c.id)) {
-      out.push({
-        ...c,
-        idfOverlap: 0,
-        maxContiguousRun: 0,
-        band: 'low',
-        accepted: false,
-        reason: 'duplicate id',
-      });
-      continue;
-    }
-    seen.add(c.id);
-
-    const overlap = Math.max(...c.relevant.map((r) => idfOverlap(idf, c.query, textOf(r))));
-    const run = Math.max(
-      ...c.relevant.map((r) => assessTriviality(c.query, textOf(r)).maxContiguousRun),
-    );
-    const trivial = c.relevant.some((r) => assessTriviality(c.query, textOf(r)).trivial);
-    const band: 'low' | 'mid' | 'high' =
-      overlap < bandCuts.low ? 'low' : overlap < bandCuts.high ? 'mid' : 'high';
-
-    out.push({
-      ...c,
-      idfOverlap: overlap,
-      maxContiguousRun: run,
-      band,
-      accepted: !trivial,
-      ...(trivial
-        ? {
-            reason: `trivially solvable: ${run}-token verbatim run from the query appears in the target`,
-          }
-        : {}),
-    });
-  }
-
-  const acc = out.filter((c) => c.accepted);
-  return {
-    corpusHash: corpus.corpusHash,
-    total: out.length,
-    accepted: acc.length,
-    rejected: out.length - acc.length,
-    bands: {
-      low: acc.filter((c) => c.band === 'low').length,
-      mid: acc.filter((c) => c.band === 'mid').length,
-      high: acc.filter((c) => c.band === 'high').length,
-    },
-    candidates: out,
-  };
 }
