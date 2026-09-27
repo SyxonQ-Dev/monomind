@@ -52,6 +52,7 @@ let tmpDir = '';
 let globalBrainDir = '';
 let serverA: ChildProcess | null = null;
 let serverB: ChildProcess | null = null;
+let serverC: ChildProcess | null = null;
 
 /** Mirror of memory-bridge projectDataDir() so afterAll can remove the
  *  temp project's isolated store. Keep in sync with memory-bridge.ts. */
@@ -223,7 +224,7 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(() => {
-  for (const c of [serverA, serverB]) {
+  for (const c of [serverA, serverB, serverC]) {
     try {
       c?.kill('SIGKILL');
     } catch {
@@ -331,5 +332,33 @@ describe('dashboard-token pairing guard (secondary instances)', () => {
     // And the primary keeps answering with the untouched primary pairing.
     const resA = await search(PORT_A, primaryBefore, { query: 'sanity check on primary' });
     expect(resA.status).toBe(200);
+  }, 60_000);
+
+  // A primary whose event loop is blocked answers no probe at all — on a
+  // loaded CI host the secondary then took the primary token (a Tests run on
+  // the 2.16.19 release commit). A live recorded pid alone must keep it a
+  // secondary: here control.json names this test process on a port nothing
+  // listens on, so every probe fails but the pid is alive.
+  it('a primary that answers no probe but whose pid is alive is not clobbered', async () => {
+    const PORT_C = await freePort();
+    const silentPort = await freePort();
+    fs.writeFileSync(
+      path.join(tmpDir, '.monomind', 'control.json'),
+      JSON.stringify({
+        pid: process.pid,
+        port: silentPort,
+        url: `http://localhost:${silentPort}`,
+        startedAt: new Date().toISOString(),
+      }),
+    );
+    const primaryBefore = readPairing();
+
+    serverC = spawnServer(PORT_C);
+    await waitForBind(PORT_C);
+    await waitForServer(PORT_C);
+    await waitForFile(`dashboard-token-${PORT_C}`, 20000);
+
+    expect(readPairing()).toBe(primaryBefore);
+    expect(readPairing(`dashboard-token-${PORT_C}`)).toMatch(/^[0-9a-f]{32,}$/);
   }, 60_000);
 });

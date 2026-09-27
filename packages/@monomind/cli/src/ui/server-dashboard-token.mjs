@@ -44,6 +44,20 @@ function createDashboardTokenManager({ projectDir, dashboardAuthValue }) {
               if (attempt < 2) await new Promise((r) => setTimeout(r, 250));
             }
           }
+          // The probes can all time out while the primary is alive but busy
+          // for longer than they wait (a loaded CI host: the secondary then
+          // clobbered the primary's token and never wrote its own). A live
+          // recorded pid still means "don't clobber"; a recycled pid only errs
+          // towards the port-scoped token, and control-start rewrites
+          // control.json when it starts a new primary.
+          if (primary && Number.isInteger(ctl.pid) && ctl.pid > 0) {
+            try {
+              process.kill(ctl.pid, 0);
+              primary = false;
+            } catch (err) {
+              if (err?.code === 'EPERM') primary = false; // alive, owned by someone else
+            }
+          }
         }
       } catch (_) {
         /* no readable control.json — treat as primary */
