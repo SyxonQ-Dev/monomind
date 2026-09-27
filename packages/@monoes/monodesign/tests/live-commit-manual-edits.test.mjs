@@ -16,7 +16,15 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
 const SCRIPT = path.join(REPO_ROOT, 'skill/scripts/live-commit-manual-edits.mjs');
-const COMMIT_SOURCE = fs.readFileSync(SCRIPT, 'utf-8');
+// live-commit-manual-edits.mjs is split into cohesive sibling modules
+// (live-commit-manual-edits-*.mjs); concatenate them all so source-text
+// assertions below still find code that now lives in a sibling file.
+const COMMIT_SOURCE = [
+  SCRIPT,
+  ...fs.readdirSync(path.dirname(SCRIPT))
+    .filter((name) => name.startsWith('live-commit-manual-edits-') && name.endsWith('.mjs'))
+    .map((name) => path.join(path.dirname(SCRIPT), name)),
+].map((file) => fs.readFileSync(file, 'utf-8')).join('\n');
 
 let tmpDir;
 
