@@ -585,6 +585,7 @@ export function dagCompleteTask(
       worktreeLabel: evidence?.worktree,
       caller: role,
       assignee: task.assignee,
+      result,
     });
     if (refusal) {
       // ADR-O001 D4: the correction loop is bounded. Only the assignee's own
@@ -636,15 +637,22 @@ export function dagCompleteTask(
         msg: `task ${taskId} not closed — evidence refused`,
         data: { taskId, assignee: task.assignee, attempts, cap, refusal },
       });
+      // The tool result carries the count too: without it a role cannot tell
+      // a free refusal from a counted one, and escalates early (2.16.14, task-10).
+      const count = attempts
+        ? ` (attempt ${attempts} of ${cap}; after ${cap} this task is escalated instead of returned)`
+        : evidence === undefined
+          ? ' (no evidence was attached, so this did not count against your attempts)'
+          : '';
       queueDispatch(
         running,
         task.assignee,
-        `${taskTag(task)} NOT CLOSED — ${refusal}${attempts ? ` (attempt ${attempts} of ${cap}; after ${cap} this task is escalated instead of returned)` : evidence === undefined ? ' (no evidence was attached, so this did not count against your attempts)' : ''}`,
+        `${taskTag(task)} NOT CLOSED — ${refusal}${count}`,
         taskId,
         true,
       );
       dispatchReadyTasks(daemon, org, running);
-      return JSON.stringify({ error: refusal, requeued: taskId });
+      return JSON.stringify({ error: `${refusal}${count}`, requeued: taskId });
     }
   }
   const stored = evidence ? `${result ? `${result}\n\n` : ''}${evidenceSummary(evidence)}` : result;

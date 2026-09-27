@@ -603,3 +603,75 @@ describe('checkTaskEvidence — expectExit may not hide failures in an aggregate
     expect(msg).toContain('404 = branch not protected');
   });
 });
+
+/**
+ * 2.16.14 release run (run-20260926223833-sb83, task-10): docs-writer found no
+ * doc change was needed and called org_task_done three times with honest
+ * evidence — and was refused three times with "closing a task needs
+ * verifiable evidence, not a summary". The evidence never arrived as an
+ * argument: each call closed `result` with a stray `</result>` and wrote
+ * `<parameter name="evidence">{…}` INSIDE the result string, so the runtime
+ * saw `{ taskId, result }` and nothing else. The generic refusal restated the
+ * shape the role believed it had already sent, so it resent the same call,
+ * then escalated. The refusal was correct; its message has to say where the
+ * evidence went.
+ */
+describe('checkTaskEvidence — evidence swallowed into `result`', () => {
+  const EVIDENCE_JSON = JSON.stringify({
+    headSha: HEAD,
+    worktree: '/repo/work/docs',
+    checks: [{ command: 'node scripts/check-doc-refs.mjs', exitCode: 0, output: 'all resolve' }],
+  });
+  // The shape verbatim from the run, shortened.
+  const SWALLOWED = `DOCS r1 2.16.14: no doc commit needed.</result>\n<parameter name="evidence">${EVIDENCE_JSON}`;
+
+  it('still refuses — nothing reached the gate to check', () => {
+    expect(checkTaskEvidence({ ...PASSING, evidence: undefined, result: SWALLOWED })).not.toBeNull();
+  });
+
+  it('says the evidence arrived inside `result` and must be its own argument', () => {
+    const msg = checkTaskEvidence({ ...PASSING, evidence: undefined, result: SWALLOWED })!;
+    expect(msg).toMatch(/inside `result`/);
+    expect(msg).toMatch(/`evidence` as its own argument/);
+    expect(msg).not.toMatch(/not a summary/);
+  });
+
+  it('also recognises evidence pasted into `result` as bare JSON', () => {
+    const msg = checkTaskEvidence({
+      ...PASSING,
+      evidence: undefined,
+      result: `no change needed. evidence: ${EVIDENCE_JSON}`,
+    })!;
+    expect(msg).toMatch(/inside `result`/);
+  });
+
+  it('keeps the generic refusal for a plain summary with no evidence in it', () => {
+    const msg = checkTaskEvidence({ ...PASSING, evidence: undefined, result: 'all done, looks good' })!;
+    expect(msg).toMatch(/not a summary/);
+    expect(msg).not.toMatch(/inside `result`/);
+  });
+});
+
+// A task that legitimately changes nothing (DOCS: "no doc commit needed")
+// closes on the unchanged HEAD it verified — the same sha as the other
+// worktrees it was branched from — as long as that is its worktree's head.
+describe('checkTaskEvidence — a task that made no commit', () => {
+  const heads = [
+    { sha: HEAD, worktree: '/repo', branch: 'main' },
+    { sha: HEAD, worktree: '/repo/work/src', branch: 'release/src' },
+    { sha: HEAD, worktree: '/repo/work/docs', branch: 'release/docs' },
+  ];
+  const ev = (headSha: string) => ({
+    headSha,
+    worktree: '/repo/work/docs',
+    checks: [{ command: 'node scripts/check-doc-refs.mjs', exitCode: 0, output: 'all resolve' }],
+  });
+
+  it('accepts evidence pinned to the unchanged head of its worktree', () => {
+    expect(checkTaskEvidence({ ...PASSING, heads, evidence: ev(HEAD) })).toBeNull();
+  });
+
+  it('still refuses a sha that is not that worktree head', () => {
+    expect(checkTaskEvidence({ ...PASSING, heads, evidence: ev(STALE) })).toMatch(/STALE/);
+  });
+});
