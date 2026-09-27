@@ -16,6 +16,11 @@ import type { TaskDag } from './task-dag.js';
 import type { ChainTrace } from './tool-providers.js';
 import type { BusEvent, DecisionGate, OrgDef, OrgRole } from './types.js';
 
+/** The parameters of an extracted `fn(daemon, ...rest)` helper after its
+ *  daemon argument — lets OrgDaemon's forwarding methods mirror the helper's
+ *  signature (parameter names, optionality, types) without restating it. */
+export type DaemonArgs<F> = F extends (daemon: never, ...rest: infer R) => unknown ? R : never;
+
 /** Per-role token budget: a role's own `budget_tokens` wins; otherwise the
  *  even split of run_config.budget_tokens across all roles. */
 export function roleTokenBudget(role: OrgRole, def: OrgDef): number {
