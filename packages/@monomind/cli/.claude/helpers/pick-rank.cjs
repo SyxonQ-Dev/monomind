@@ -84,7 +84,14 @@ function strip(tok, suffix, min) {
 
 /** Light stemmer: test/tests/testing/tester/tested all meet at "test",
  *  optimize/optimization/optimizing at "optimiz". Deliberately crude — it
- *  only has to make a word's forms collide, never produce a real word. */
+ *  only has to make a word's forms collide, never produce a real word.
+ *  Evaluated and left out (tests/pick-eval, 2026-09): -ment (deployment ->
+ *  deploy), -ate / -ator aligned with -ation (evaluate, evaluator ->
+ *  evaluation) and -ction/-ption/-ution/-etion/-rtion/-ssion (execution ->
+ *  execute). No top-1/top-3 gain on any catalog; -ment showed a wrong agent
+ *  (production-validator's own "deployment-ready" cancels its "not for
+ *  deploying it"), -ator cost an agent top-1 ("generation" met "Document
+ *  Generator"), -ate one correct shown pick, -ion changed nothing. */
 function stem(tok) {
   if (tok.length <= 3 || /^[0-9]/.test(tok)) return tok;
   var s = tok;

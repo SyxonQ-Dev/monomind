@@ -83,6 +83,16 @@ describe('pick-rank tokens', () => {
     expect(new Set(['plan', 'planning', 'planner'].map(pr.stem)).size).toBe(1);
   });
 
+  it('keeps -ment, -ate/-ator and -ion forms apart (evaluated and rejected, see stem())', () => {
+    // Merging these moved the eval without a gain and showed wrong [PICK]s;
+    // change them only with a before/after run of tests/pick-eval.
+    expect(pr.stem('deployment')).not.toBe(pr.stem('deploy'));
+    expect(pr.stem('evaluate')).not.toBe(pr.stem('evaluation'));
+    expect(pr.stem('generator')).not.toBe(pr.stem('generation'));
+    expect(pr.stem('execution')).not.toBe(pr.stem('execute'));
+    expect(pr.stem('production')).not.toBe(pr.stem('product'));
+  });
+
   it('drops stopwords, so function words match nothing', () => {
     expect(pr.tokens('for the and with our')).toEqual([]);
     expect(top('for the and with our', catalog.agents)).toEqual([]);
