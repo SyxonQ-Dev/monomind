@@ -257,7 +257,7 @@ alongside the shared `'worktree'` mode ([`org-stop.ts → finishStop`](packages/
 |---|---|---|
 | `max_concurrent_agents` | `4` | How many role sessions run concurrently |
 | `budget_tokens` | `1 000 000` | Token spend ceiling for the entire org run, split evenly across roles unless a role sets its own `budget_tokens`. The coordinator is told once when the run passes 80% of it. Hot-reloadable — see [Budget-closed assignees](#budget-closed-assignees) |
-| `max_turns_per_message` | `100 000` | Agent turns cap per inbound mailbox message. Deliberately huge (`DEFAULT_MAX_TURNS_PER_MESSAGE`, [`types.ts → DEFAULT_MAX_TURNS_PER_MESSAGE`](packages/@monomind/cli/src/orgrt/types.ts#DEFAULT_MAX_TURNS_PER_MESSAGE)) so the ceiling never bricks a long task — set it explicitly, or a role's own `max_turns_per_message`, to impose a real cap |
+| `max_turns_per_message` | `100 000` | Agent turns cap per inbound mailbox message. Deliberately huge (`DEFAULT_MAX_TURNS_PER_MESSAGE`, [`types-role.ts → DEFAULT_MAX_TURNS_PER_MESSAGE`](packages/@monomind/cli/src/orgrt/types-role.ts#DEFAULT_MAX_TURNS_PER_MESSAGE)) so the ceiling never bricks a long task — set it explicitly, or a role's own `max_turns_per_message`, to impose a real cap |
 | `max_tool_rounds` | `10` | Tool-call rounds per inbound message on the fence-protocol runtimes (every runtime but `claude` and `vercel`, which are bounded by `max_turns_per_message`). A positive integer up to 200 (`MAX_TOOL_ROUNDS_LIMIT`). A role's own `max_tool_rounds` overrides it. What happens at the cap: see the Fence Protocol section |
 | `workspace` | `'repo'` | `'repo'` \| `'isolated'` \| `'worktree'` \| `'worktree-per-role'` |
 | `idle_minutes` | `10` | Idle timeout in minutes before the watchdog nudges the boss and ultimately calls `stopOrg()`. Unset falls back to 10 ([`idle-watchdog.ts → startIdleWatchdog`](packages/@monomind/cli/src/orgrt/idle-watchdog.ts#startIdleWatchdog)); `0` disables the watchdog. Fractions allowed |
@@ -416,7 +416,7 @@ Runtimes with no OS sandbox at all get layer 4 only and emit a `git-sandbox-unsu
 
 Roles can declare `tool_providers[]` — stdio MCP servers whose tools are exposed to the role alongside the built-in org tools. Each provider's tools are prefixed as `<prefix>__<mcpToolName>` (on the Claude runner: `mcp__org__<prefix>__<tool>`).
 
-**Config shape** ([`types.ts → ToolProviderSchema`](packages/@monomind/cli/src/orgrt/types.ts#ToolProviderSchema)):
+**Config shape** ([`types-role.ts → ToolProviderSchema`](packages/@monomind/cli/src/orgrt/types-role.ts#ToolProviderSchema)):
 
 ```json
 {
@@ -480,7 +480,7 @@ Roles can declare `tool_providers[]` — stdio MCP servers whose tools are expos
 
 A role with `kind: "endpoint"` is **not an agent session** — it's an automation reached over HTTP. Endpoint roles have no session, mailbox, policy engine, slot, or budget share.
 
-**Config shape** ([`types.ts → EndpointSchema`](packages/@monomind/cli/src/orgrt/types.ts#EndpointSchema)):
+**Config shape** ([`types-role.ts → EndpointSchema`](packages/@monomind/cli/src/orgrt/types-role.ts#EndpointSchema)):
 
 ```json
 {
