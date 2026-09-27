@@ -201,7 +201,7 @@ So the text you write *is* the routing: `when_to_use`, `description` and `tags` 
 
 ## 6. Contributing to monomind itself
 
-In this repository the npm-shipped tree `packages/@monomind/cli/.claude/` is the source `monomind init` copies from; the root `.claude/` is the copy the repository itself uses. `node scripts/sync-claude-trees.mjs` (`pnpm run sync:claude-trees`) makes every file present in both trees identical to the root copy; it never creates or deletes a file.
+In this repository the npm-shipped tree `packages/@monomind/cli/.claude/` is the source `monomind init` copies from; the root `.claude/` is the copy the repository itself uses. `node scripts/sync-claude-trees.mjs` (`pnpm run sync:claude-trees`) makes every file present in both trees identical to the root copy; it never deletes a file, and only creates one for `.agents/skills` and `.gemini/skills` (a file missing inside a skill directory the mirror already holds) and `.gemini/helpers` (a full install copy of `.claude/helpers`).
 
 - **New agent, skill or command:** add it to `packages/@monomind/cli/.claude/…` (and to the root `.claude/…` if the repo should use it too). A new agent category directory, a new skill or a new command group must also be listed in `AGENTS_MAP`, `SKILLS_MAP` or `COMMANDS_MAP` in [`init/asset-maps.ts`](packages/@monomind/cli/src/init/asset-maps.ts#SKILLS_MAP) (skills named `mastermind-*` are matched by a wildcard), or `init` will not copy it.
 - **Editing an existing one:** edit the root `.claude/` copy, then run `pnpm run sync:claude-trees`.

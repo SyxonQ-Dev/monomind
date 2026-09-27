@@ -183,9 +183,13 @@ pnpm run sync:claude-trees:check    # report only; exit 1 on divergence
 ```
 
 It **mirrors only the intersection.** A path in both trees is made to agree with the root
-`.claude/` copy; a path in only one is never created and never deleted. That is what keeps the
-shipped superset safe — its predecessor `sync-claude-assets.sh` had `rsync --delete`
-semantics, had to be hard-disabled in 2026-07, and is now gone.
+`.claude/` copy; a path in only one is never deleted, and is created only for the two mirrors
+that opt in: `.agents/skills` and `.gemini/skills` get a file missing inside a skill directory
+they already hold (a skill that gained a new file keeps mirroring), and `.gemini/helpers` gets
+any file missing from its full install copy of `.claude/helpers`. Nothing is ever deleted from
+any mirror. That is what keeps the shipped superset safe — its predecessor
+`sync-claude-assets.sh` had `rsync --delete` semantics, had to be hard-disabled in 2026-07, and
+is now gone.
 `tests/repo/no-skill-ownership-markers.test.ts` fails if a committed skill file carries a
 `skills:` ownership marker.
 

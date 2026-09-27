@@ -81,7 +81,7 @@ console.log(radius.lg);       // 12px
 
 ## Antipattern Detection (51 Rules)
 
-Source: [`cli/engine/registry/antipatterns.mjs`](packages/@monoes/monodesign/cli/engine/registry/antipatterns.mjs) — 564 lines, 51 entries.
+Source: [`cli/engine/registry/antipatterns.mjs`](packages/@monoes/monodesign/cli/engine/registry/antipatterns.mjs) (entry point, re-exports from `antipatterns-slop.mjs`, `antipatterns-quality.mjs` and `antipatterns-provider.mjs`) — 51 entries.
 
 ### Rule Categories
 
@@ -178,7 +178,7 @@ Manage via `monomind design ignores` or `/monodesign hooks <on|off|status|ignore
 
 ## Design System Consistency
 
-Source: [`cli/engine/design-system.mjs`](packages/@monoes/monodesign/cli/engine/design-system.mjs) — 815 lines
+Source: [`cli/engine/design-system.mjs`](packages/@monoes/monodesign/cli/engine/design-system.mjs) (entry point, split across `design-system-parse.mjs` and `design-system-checks.mjs`)
 
 Parses `DESIGN.md` / `.monodesign/design.json` to enforce consistency rules (`design-system-font`, `design-system-color`, `design-system-radius`, `design-system-font-size`). The skill writes `DESIGN.md`; the detector reads it for drift detection.
 

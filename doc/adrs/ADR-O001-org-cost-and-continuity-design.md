@@ -65,7 +65,7 @@ the meter sees — it reported 0.3% of consumption precisely because caching was
 
 Tool output is 76% of context mass and nothing bounds it. The mechanism already exists and is
 aimed at the wrong channel: inbound mail over 4,096 chars spills to `.mail/<id>.md` with a
-1,024-char digest (`cross-org.ts:38-129`) — applied to the 0.1% channel.
+1,024-char digest (`cross-org-mail.ts → mailBody`, lines 39-59; re-exported from `cross-org.ts` after the file-size sweep) — applied to the 0.1% channel.
 
 - Spill tool results over a threshold to disk; put a reference plus a short digest in context.
 - Note the shape: p50 451 chars, p90 3,506, p99 11,739, max 59,805. It is a **long tail of small
