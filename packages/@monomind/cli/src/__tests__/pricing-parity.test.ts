@@ -58,12 +58,12 @@ describe('#124: pricing table parity across the 4 duplicated sources', () => {
     expect([...keys].sort()).toEqual([...canonicalKeys].sort());
   });
 
-  it("org-run.ts's cost-estimate rate table derives from model-pricing.ts (ORG-14)", () => {
-    // org-run.ts no longer hand-copies a rate table — it imports MODEL_PRICING and
+  it("org run's cost-estimate rate table derives from model-pricing.ts (ORG-14)", () => {
+    // org run (org-run-preview.ts's printCostEstimate) no longer hand-copies a rate table — it imports MODEL_PRICING and
     // derives a per-1M blended rate from each model's output price. This test
     // guards against a future regression back to a hardcoded literal copy.
     const source = readFileSync(
-      join(REPO_ROOT, 'packages/@monomind/cli/src/commands/org-run.ts'),
+      join(REPO_ROOT, 'packages/@monomind/cli/src/commands/org-run-preview.ts'),
       'utf-8',
     );
     expect(source).toMatch(

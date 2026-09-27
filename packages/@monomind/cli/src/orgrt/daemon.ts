@@ -7,11 +7,9 @@ import { isAbsolute, join } from 'node:path';
 import * as approvalOps from './approvals.js';
 import type { BrokerLease } from './broker.js';
 import type { OrgBus } from './bus.js';
-import type { OrgCheckpoint, RoleCheckpoint } from './checkpoint.js';
 import * as checkpointOps from './checkpoint-ops.js';
-import type { TaskEvidence } from './completion-gate.js';
 import * as crossOrg from './cross-org.js';
-import type { AgentRuntime, DaemonOpts, RunningOrg } from './daemon-types.js';
+import type { AgentRuntime, DaemonArgs, DaemonOpts, RunningOrg } from './daemon-types.js';
 import * as decisionOps from './decisions.js';
 import type { attachForwarder } from './forwarder.js';
 import * as orgMemory from './org-memory.js';
@@ -27,46 +25,8 @@ import type { RespawnReceipt } from './role-slot.js';
 import { currentRoleTrace, type RoleTrace } from './role-trace.js';
 import { buildRuntimeOptions, type RuntimeOptionsReceipt } from './runtime-options.js';
 import * as scheduler from './scheduler-integration.js';
-import type { TaskPick } from './task-match.js';
 import { ToolProviderHub } from './tool-providers.js';
-import {
-  type BusEvent,
-  type DecisionGate,
-  type DecisionKind,
-  ORG_DIR,
-  type OrgDef,
-  type OrgRole,
-} from './types.js';
-
-/** OpenTelemetry tracing helper - creates spans for major operations */
-class _OtelTracer {
-  private enabled = false;
-  private spans = new Map<string, { start: number; metadata: Record<string, unknown> }>();
-
-  enable(): void {
-    this.enabled = true;
-  }
-
-  startSpan(name: string, metadata: Record<string, unknown> = {}): void {
-    if (!this.enabled) return;
-    this.spans.set(name, { start: Date.now(), metadata });
-  }
-
-  endSpan(name: string): void {
-    if (!this.enabled) return;
-    const span = this.spans.get(name);
-    if (span) {
-      const _duration = Date.now() - span.start;
-      // Emit span as a bus event for export
-      this.spans.delete(name);
-    }
-  }
-
-  recordEvent(_name: string, _attributes: Record<string, unknown>): void {
-    if (!this.enabled) return;
-    // Could emit to bus for collection
-  }
-}
+import { type BusEvent, type DecisionGate, ORG_DIR, type OrgDef } from './types.js';
 
 export {
   type AgentRuntime,
@@ -100,30 +60,7 @@ export class OrgDaemon {
    *  startOrg(name) calls could both pass the `orgs.has(name)` check before
    *  either registered and spawn duplicate runs. */
   /** @internal */ startingOrgs = new Set<string>();
-  /** @internal */ approvals = new Map<
-    string,
-    Array<{
-      roleId: string;
-      action: string;
-      /** Fingerprint of the tool call's actual arguments (e.g. the Bash command,
-       *  the WebFetch url) — see approvals.ts's checkApproval. Distinguishes a
-       *  materially different call from one already approved/pending under the
-       *  same (roleId, action), so one human approval can't silently authorize
-       *  every future call to that tool. Optional only so pre-fix entries
-       *  loaded from an old approvals.json don't fail to parse. */
-      fingerprint?: string;
-      question: string;
-      ts: number;
-      approved: boolean | null;
-      /** M5: `apr-<ms>-<8 hex>` — addresses exactly this request. */
-      requestId?: string;
-      /** M5: the redacted argument summary `policy.decide` logged. */
-      input?: Record<string, unknown>;
-      /** M5: who resolved it (`human` by default). */
-      resolvedBy?: string;
-      resolvedAt?: number;
-    }>
-  >();
+  /** @internal */ approvals = new Map<string, approvalOps.ApprovalEntry[]>();
   /** @internal #345: per org, the actions `org run --auto-approve` pre-approved
    *  for the current run (approvals.ts's checkApproval). Kept across a boss
    *  auto-restart, replaced by every other start. */
@@ -238,12 +175,8 @@ export class OrgDaemon {
     return isAbsolute(ws) ? ws : join(this.root, ws);
   }
 
-  async startOrg(
-    name: string,
-    taskOverride?: string,
-    options?: { resume?: boolean; autoApprove?: string[] },
-  ): Promise<RunningOrg> {
-    return orgStart.startOrg(this, name, taskOverride, options);
+  async startOrg(...args: DaemonArgs<typeof orgStart.startOrg>): Promise<RunningOrg> {
+    return orgStart.startOrg(this, ...args);
   }
 
   /** Build one role incarnation: mailbox, policy, AgentRuntime, sessionOpts,
@@ -251,18 +184,11 @@ export class OrgDaemon {
    *  path (generation 0, via the `spawnRole` closure inside startOrgInner)
    *  and respawnRole() (generation N+1). Does not touch running.agents or
    *  running.roleSlots — callers publish the result themselves. */
-  spawnRoleIncarnation(
-    name: string,
-    running: RunningOrg,
-    role: OrgRole,
-    generation: number,
-    opts: {
-      roleCheckpoint?: RoleCheckpoint;
-      abort?: AbortController;
-      budgetTokensOverride?: number;
-    } = {},
-  ): { runtime: AgentRuntime; abort: AbortController } {
-    return roleIncarnation.spawnRoleIncarnation(this, name, running, role, generation, opts);
+  spawnRoleIncarnation(...args: DaemonArgs<typeof roleIncarnation.spawnRoleIncarnation>): {
+    runtime: AgentRuntime;
+    abort: AbortController;
+  } {
+    return roleIncarnation.spawnRoleIncarnation(this, ...args);
   }
 
   /** org_respawn_role's daemon-owned implementation. See the design doc's
@@ -303,15 +229,8 @@ export class OrgDaemon {
    *  every other stop (idle watchdog, boss-restart-exhausted, manual `org
    *  stop`). Mirrors persistCrashStateAll()'s existing closedBy: 'crash-handler'
    *  for the process-crash path, which org.ts already reads. */
-  persistState(
-    name: string,
-    status: string,
-    run: string,
-    org?: RunningOrg,
-    checkpointOverride?: OrgCheckpoint | null,
-    closedBy?: string,
-  ): void {
-    orgStateFile.persistState(this, name, status, run, org, checkpointOverride, closedBy);
+  persistState(...args: DaemonArgs<typeof orgStateFile.persistState>): void {
+    orgStateFile.persistState(this, ...args);
   }
 
   /** Mark every currently-running org as crashed in runtime.json.
@@ -346,13 +265,9 @@ export class OrgDaemon {
     return approvalOps.checkApproval(this, org, role, action, input);
   }
   async setApproval(
-    org: string,
-    role: string,
-    action: string,
-    approved: boolean,
-    opts?: approvalOps.ApprovalResolveOpts,
+    ...args: DaemonArgs<typeof approvalOps.setApproval>
   ): Promise<{ ok: true } | { ok: false; error: string }> {
-    return approvalOps.setApproval(this, org, role, action, approved, opts);
+    return approvalOps.setApproval(this, ...args);
   }
 
   // questions.ts
@@ -360,13 +275,9 @@ export class OrgDaemon {
     return questionOps.askHuman(this, org, role, question, blocking);
   }
   async answerQuestion(
-    org: string,
-    role: string,
-    questionId: string,
-    answer: string,
-    resolvedBy?: string,
+    ...args: DaemonArgs<typeof questionOps.answerQuestion>
   ): Promise<{ ok: true } | { ok: false; error: string }> {
-    return questionOps.answerQuestion(this, org, role, questionId, answer, resolvedBy);
+    return questionOps.answerQuestion(this, ...args);
   }
 
   // decisions.ts
@@ -378,58 +289,28 @@ export class OrgDaemon {
     return decisionOps.createGate(this, org, role, name, description);
   }
   async resolveGate(
-    org: string,
-    gateId: string,
-    approved: boolean,
-    resolution?: string,
-    resolvedBy?: string,
+    ...args: DaemonArgs<typeof decisionOps.resolveGate>
   ): Promise<{ ok: true } | { ok: false; error: string }> {
-    return decisionOps.resolveGate(this, org, gateId, approved, resolution, resolvedBy);
+    return decisionOps.resolveGate(this, ...args);
   }
   listGates(org: string, status?: 'pending' | 'approved' | 'rejected'): DecisionGate[] {
     return decisionOps.listGates(this, org, status);
   }
   /** @internal */
-  dagCreateTask(
-    org: string,
-    role: string,
-    title: string,
-    assignee: string,
-    deps: string[],
-    loadout?: string,
-    brief?: string,
-    pick?: TaskPick,
-  ): string {
-    return decisionOps.dagCreateTask(this, org, role, title, assignee, deps, loadout, brief, pick);
+  dagCreateTask(...args: DaemonArgs<typeof decisionOps.dagCreateTask>): string {
+    return decisionOps.dagCreateTask(this, ...args);
   }
   /** @internal */
-  dagCompleteTask(
-    org: string,
-    role: string,
-    taskId: string,
-    result?: string,
-    evidence?: TaskEvidence,
-  ): string {
-    return decisionOps.dagCompleteTask(this, org, role, taskId, result, evidence);
+  dagCompleteTask(...args: DaemonArgs<typeof decisionOps.dagCompleteTask>): string {
+    return decisionOps.dagCompleteTask(this, ...args);
   }
   /** ADR-O001 D6 — see decisions.ts's dagRequestReview. */
-  dagRequestReview(
-    org: string,
-    role: string,
-    taskId: string,
-    reviewer: string,
-    base?: string,
-  ): string {
-    return decisionOps.dagRequestReview(this, org, role, taskId, reviewer, base);
+  dagRequestReview(...args: DaemonArgs<typeof decisionOps.dagRequestReview>): string {
+    return decisionOps.dagRequestReview(this, ...args);
   }
   /** @internal */
-  dagSplitTask(
-    org: string,
-    role: string,
-    parentId: string,
-    children: { title: string; assignee: string }[],
-  ): string {
-    return decisionOps.dagSplitTask(this, org, role, parentId, children);
+  dagSplitTask(...args: DaemonArgs<typeof decisionOps.dagSplitTask>): string {
+    return decisionOps.dagSplitTask(this, ...args);
   }
   /** @internal */
   dagMergeTask(org: string, role: string, sourceId: string, targetId: string): string {
@@ -440,33 +321,15 @@ export class OrgDaemon {
     return decisionOps.dagCancelTask(this, org, role, taskId, reason);
   }
   /** @internal */
-  dagBlockTask(
-    org: string,
-    role: string,
-    taskId: string,
-    untilIso: string,
-    reason?: string,
-    recheckAfterMinutes?: number,
-  ): string {
-    return decisionOps.dagBlockTask(this, org, role, taskId, untilIso, reason, recheckAfterMinutes);
+  dagBlockTask(...args: DaemonArgs<typeof decisionOps.dagBlockTask>): string {
+    return decisionOps.dagBlockTask(this, ...args);
   }
   /** @internal */
   dagPlanGraph(org: string, role: string, specs: decisionOps.PlanTaskSpec[]): string {
     return decisionOps.dagPlanGraph(this, org, role, specs);
   }
-  recordDecision(
-    org: string,
-    role: string,
-    decision: {
-      type: 'tool' | 'handoff' | 'approval' | 'routing';
-      kind: DecisionKind;
-      context: string;
-      reasoning: string;
-      alternatives?: Array<{ choice: string; score: number; reason: string }>;
-      outcome: string;
-    },
-  ): void {
-    decisionOps.recordDecision(this, org, role, decision);
+  recordDecision(...args: DaemonArgs<typeof decisionOps.recordDecision>): void {
+    decisionOps.recordDecision(this, ...args);
   }
 
   // cross-org.ts
@@ -480,24 +343,9 @@ export class OrgDaemon {
     return crossOrg.deliver(this, fromOrg, fromRole, to, subject, body);
   }
   receiveRemote(
-    toOrg: string,
-    toRole: string,
-    fromQualified: string,
-    subject: string,
-    body: string,
-    fromCredential?: string,
-    opts?: crossOrg.ReceiveRemoteOpts,
+    ...args: DaemonArgs<typeof crossOrg.receiveRemote>
   ): Promise<{ ok: true; receipt: string } | { ok: false; error: string }> {
-    return crossOrg.receiveRemote(
-      this,
-      toOrg,
-      toRole,
-      fromQualified,
-      subject,
-      body,
-      fromCredential,
-      opts,
-    );
+    return crossOrg.receiveRemote(this, ...args);
   }
 
   // runtime-options.ts
@@ -515,25 +363,17 @@ export class OrgDaemon {
     scheduler.scheduleBossRestart(this, name);
   }
   /** @internal */
-  scheduleDeferredSpawn(
-    name: string,
-    running: RunningOrg,
-    role: OrgRole,
-    spawnRole: (role: OrgRole) => void,
-  ): void {
-    scheduler.scheduleDeferredSpawn(this, name, running, role, spawnRole);
+  scheduleDeferredSpawn(...args: DaemonArgs<typeof scheduler.scheduleDeferredSpawn>): void {
+    scheduler.scheduleDeferredSpawn(this, ...args);
   }
   /** Bug 4: mirrors scheduleDeferredSpawn, but for a role deferred because the
    *  org is already at run_config.max_concurrent_agents rather than under host
    *  resource pressure — see scheduleConcurrencyDeferredSpawn's doc comment. */
   /** @internal */
   scheduleConcurrencyDeferredSpawn(
-    name: string,
-    running: RunningOrg,
-    role: OrgRole,
-    spawnRole: (role: OrgRole) => void,
+    ...args: DaemonArgs<typeof scheduler.scheduleConcurrencyDeferredSpawn>
   ): void {
-    scheduler.scheduleConcurrencyDeferredSpawn(this, name, running, role, spawnRole);
+    scheduler.scheduleConcurrencyDeferredSpawn(this, ...args);
   }
 
   // org-memory.ts
@@ -561,23 +401,18 @@ export class OrgDaemon {
   }
   /** @internal */
   async recallOrgMemory(
-    name: string,
-    def: OrgDef,
-    query: string,
-    role?: string,
+    ...args: DaemonArgs<typeof orgMemory.recallOrgMemory>
   ): Promise<{ text: string; hits: number }> {
-    return orgMemory.recallOrgMemory(this, name, def, query, role);
+    return orgMemory.recallOrgMemory(this, ...args);
   }
   async searchProjectKnowledge(query: string): Promise<{ text: string; hits: number }> {
     return orgMemory.searchProjectKnowledge(this.root, query);
   }
   /** @internal */
   async learnOrgKnowledge(
-    name: string,
-    run: string,
-    payload: { nodes?: unknown[]; edges?: unknown[]; rules?: unknown[] },
+    ...args: DaemonArgs<typeof orgMemory.learnOrgKnowledge>
   ): Promise<string> {
-    return orgMemory.learnOrgKnowledge(this, name, run, payload);
+    return orgMemory.learnOrgKnowledge(this, ...args);
   }
   /** @internal */
   async storeRunMemory(

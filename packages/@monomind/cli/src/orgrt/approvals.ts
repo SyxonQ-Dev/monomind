@@ -27,6 +27,29 @@ export function normalizeResolver(raw: unknown): string | undefined {
   return v;
 }
 
+/** One queued tool-call approval request, per org, in OrgDaemon.approvals. */
+export interface ApprovalEntry {
+  roleId: string;
+  action: string;
+  /** Fingerprint of the tool call's actual arguments (e.g. the Bash command,
+   *  the WebFetch url) — see checkApproval. Distinguishes a
+   *  materially different call from one already approved/pending under the
+   *  same (roleId, action), so one human approval can't silently authorize
+   *  every future call to that tool. Optional only so pre-fix entries
+   *  loaded from an old approvals.json don't fail to parse. */
+  fingerprint?: string;
+  question: string;
+  ts: number;
+  approved: boolean | null;
+  /** M5: `apr-<ms>-<8 hex>` — addresses exactly this request. */
+  requestId?: string;
+  /** M5: the redacted argument summary `policy.decide` logged. */
+  input?: Record<string, unknown>;
+  /** M5: who resolved it (`human` by default). */
+  resolvedBy?: string;
+  resolvedAt?: number;
+}
+
 export interface ApprovalResolveOpts {
   /** Who resolved it — stored as resolvedBy and put on the audit event. */
   resolvedBy?: string;
