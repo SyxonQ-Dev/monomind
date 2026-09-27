@@ -53,6 +53,10 @@ those, never values remembered from an earlier run.
   on this machine. Never call a failure "environmental" without a reproduction
   that proves the cause.
 - Finish every task with `org_task_done`, putting that table in the result.
+  Keep `result` to the table and summary: `evidence` is a separate argument of
+  `org_task_done`, next to `taskId` and `result` — never text inside `result`,
+  which the gate does not read (2.16.14: docs-writer put its evidence inside
+  `result` three times and escalated).
   This org requires EVIDENCE, and a call without it wastes nothing but time —
   always pass `evidence` = { `headSha`, `worktree`, `checks` }:
   - `headSha`: the commit your checks ran on (`git -C <dir> rev-parse HEAD`);
@@ -90,8 +94,15 @@ those, never values remembered from an earlier run.
     `test -s $GATE/logs/<round>/report.md`); every FAIL you found goes in the
     `result` table and to release-captain as a finding — never as a failing
     acceptance check.
+  - A task that correctly needs no change (e.g. DOCS: "no doc commit needed")
+    still closes with evidence: `headSha` = the unchanged HEAD of the worktree
+    you checked, `worktree` = its absolute path, `checks` = the verification
+    commands you ran (e.g. `node scripts/check-doc-refs.mjs`).
   - A sha that is no longer that worktree's HEAD, or a failing check, is refused;
     after 3 such refusals the task is failed and escalated to release-captain.
+    Only refusals that report "attempt n of 3" count. A refusal of a call with
+    no evidence at all says it "did not count against your attempts" — fix the
+    call and retry; do not escalate on those.
 
 ## Destructive commands
 - `cleanup` (any variant), `init --force`, recursive deletes, `git clean`,
