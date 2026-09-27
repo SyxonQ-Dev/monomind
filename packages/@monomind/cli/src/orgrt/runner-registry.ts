@@ -39,6 +39,15 @@ export interface RunnerSpec {
    * for the checklist a new runner should follow to decide and wire this.
    */
   streamsIncrementally: boolean;
+  /**
+   * #357: how faithfully this runner's AgentMessage stream can be turned
+   * into `tool_activity` start/end pairs (doc §3.2/§9) — `"full"` (real
+   * tool_use id, input, and a matched end from a real tool_result — claude
+   * only), `"start-only"` (a lightweight `{type:'tool_use', text: toolName}`
+   * liveness signal with no id to correlate an end with), or `"none"` (no
+   * tool signal surfaces in this runner's AgentMessage stream at all today).
+   */
+  toolActivityFidelity: 'full' | 'start-only' | 'none';
 }
 
 export const RUNNER_SPECS: RunnerSpec[] = [
@@ -54,6 +63,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // events with text_delta arrive per-token, and the complete message
     // still follows with full content/usage.
     streamsIncrementally: true,
+    // #357: real tool_use id/input via ClaudeAgentRunner's own richer
+    // 'tool_use' AgentMessage, matched to a real tool_result end.
+    toolActivityFidelity: 'full',
   },
   {
     id: 'codex',
@@ -66,6 +78,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // (codex-runner.ts header) — only whole `item.completed` messages.
     // The runner already yields each one the instant it lands.
     streamsIncrementally: false,
+    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
+    // signal with no id — best-effort, start-only tool_activity mapping.
+    toolActivityFidelity: 'start-only',
   },
   {
     id: 'kimicode',
@@ -80,6 +95,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // unconfirmed reach into `--output-format stream-json`; worth
     // re-checking before ruling this out permanently.
     streamsIncrementally: false,
+    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
+    // signal with no id — best-effort, start-only tool_activity mapping.
+    toolActivityFidelity: 'start-only',
   },
   {
     id: 'opencode',
@@ -100,6 +118,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // runner: session.ts wants one AgentMessage per text part regardless
     // of which runner backs the role.
     streamsIncrementally: true,
+    // #357: opencode-runner.ts never yields a 'tool_use' AgentMessage at
+    // all today — no tool signal to map to tool_activity.
+    toolActivityFidelity: 'none',
   },
   {
     id: 'vercel',
@@ -109,6 +130,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // `result.fullStream` and yields each real `text-delta` part as it
     // arrives (verified against the installed `ai` package's own types).
     streamsIncrementally: true,
+    // #357: vercel-runner.ts never yields a 'tool_use' AgentMessage at all
+    // today — no tool signal to map to tool_activity.
+    toolActivityFidelity: 'none',
   },
   {
     id: 'antigravity',
@@ -126,6 +150,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // `claude` below: session.ts wants one complete AgentMessage per step
     // for its chat-bus/state-detector, regardless of which runner backs it.
     streamsIncrementally: true,
+    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
+    // signal with no id — best-effort, start-only tool_activity mapping.
+    toolActivityFidelity: 'start-only',
   },
   {
     id: 'grok',
@@ -140,6 +167,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // possible source of real deltas — unconfirmed, left `false` until
     // verified live.
     streamsIncrementally: false,
+    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
+    // signal with no id — best-effort, start-only tool_activity mapping.
+    toolActivityFidelity: 'start-only',
   },
   {
     id: 'qwen',
@@ -151,6 +181,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // header states directly "qwen's stream-json sends whole messages per
     // event, not per-token deltas — confirmed live, #182".
     streamsIncrementally: false,
+    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
+    // signal with no id — best-effort, start-only tool_activity mapping.
+    toolActivityFidelity: 'start-only',
   },
   {
     id: 'qwen-rpc',
@@ -174,6 +207,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // (agent-exec.ts sets it, session.ts does not) — session.ts wants one
     // AgentMessage per round regardless of which runner backs the role.
     streamsIncrementally: false,
+    // #357: qwen-rpc-runner.ts never yields a 'tool_use' AgentMessage at
+    // all today — no tool signal to map to tool_activity.
+    toolActivityFidelity: 'none',
   },
   {
     id: 'crush',
@@ -185,6 +221,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // header). The runner already streams each line the instant it
     // arrives; there is no finer granularity available to request.
     streamsIncrementally: false,
+    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
+    // signal with no id — best-effort, start-only tool_activity mapping.
+    toolActivityFidelity: 'start-only',
   },
   {
     id: 'copilot',
@@ -198,6 +237,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // than qwen/pi's live-confirmed `false`s. Worth re-checking live
     // before assuming it can never stream.
     streamsIncrementally: false,
+    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
+    // signal with no id — best-effort, start-only tool_activity mapping.
+    toolActivityFidelity: 'start-only',
   },
   {
     id: 'pi',
@@ -209,6 +251,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // accumulation needed, unlike agy", verified against a live 0.73.1
     // binary.
     streamsIncrementally: false,
+    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
+    // signal with no id — best-effort, start-only tool_activity mapping.
+    toolActivityFidelity: 'start-only',
   },
   {
     id: 'pi-rpc',
@@ -229,6 +274,9 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // Opt-in via AgentRunArgs.extras.includePartialMessages, same as every
     // other subprocess runner: session.ts never sets it.
     streamsIncrementally: true,
+    // #357: pi-rpc-runner.ts never yields a 'tool_use' AgentMessage at all
+    // today — no tool signal to map to tool_activity.
+    toolActivityFidelity: 'none',
   },
   {
     id: 'hermes',
@@ -248,6 +296,10 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // plausible path to real streaming but has no published protocol/schema
     // doc found — revisit if one surfaces. See doc/agent-exec-protocol.md §9.
     streamsIncrementally: false,
+    // #357: hermes-runner.ts's own 'tool_use' yield is a single fixed
+    // "turn started" placeholder ping, not a per-call tool name — no real
+    // tool signal to map to tool_activity.
+    toolActivityFidelity: 'none',
   },
 ];
 
@@ -295,6 +347,8 @@ export interface ScanEntry {
   login_hint: string | null;
   /** Mirrors `RunnerSpec.streamsIncrementally` — see its doc comment. */
   streams_incrementally: boolean;
+  /** Mirrors `RunnerSpec.toolActivityFidelity` (#357) — see its doc comment. */
+  tool_activity_fidelity: 'full' | 'start-only' | 'none';
 }
 
 /**
@@ -422,6 +476,7 @@ export async function scanInstalled(opts: ScanOptions = {}): Promise<{
         install: installRecipe(spec.installHint),
         login_hint: spec.loginHint ?? null,
         streams_incrementally: spec.streamsIncrementally,
+        tool_activity_fidelity: spec.toolActivityFidelity,
       };
     }),
   );

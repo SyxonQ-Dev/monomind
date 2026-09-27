@@ -4,6 +4,10 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Added
+
+- **`monomind agent exec` emits `tool_activity` start/end events for the agent's own native tool calls** ([#357](https://github.com/monoes/monomind/issues/357)), capability `agent-exec-tool-activity`. Previously only `--tools stdio` bridged calls were visible on stdout; native calls (Bash, Edit, Write, Read, …) now get matched, size-capped events correlated by the SDK's own tool_use id, in every access mode. `Edit`/`MultiEdit` carry `old_string`/`new_string`, `Write` carries `file_path`/`content`; a denied call (scoped mode) closes with `ok:false, denied:true`; a `--timeout` or `cancel` closes any still-open call with `ok:false, cancelled:true` before `done`. `parent_tool_use_id` nests subagent calls. Non-Claude runtimes map their own best-effort liveness signal to a start-only event; `agent scan --json` reports each runtime's fidelity as `tool_activity_fidelity`.
+
 ### Fixed
 
 - **A second dashboard server no longer takes over the first one's pairing token when the first is too busy to answer.** A secondary decided whether the primary recorded in `.monomind/control.json` was alive only by probing its `/api/status` (3 tries, 1.5 s each); a primary whose event loop was blocked longer than that looked dead, so the secondary overwrote `dashboard-token` — logging out the primary's clients — and never wrote its own `dashboard-token-<port>`. A live recorded pid now also keeps it a secondary.

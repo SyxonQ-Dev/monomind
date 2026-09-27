@@ -36,6 +36,7 @@ import type { AgentMessage, OrgToolDef } from './agent-runner.js';
 import { classifyStderr } from './kimicode-runner.js';
 import { loadCreateOrgSkillGuidance } from './org-design-skill.js';
 import { resolveExecRunner, runnerSpec } from './runner-registry.js';
+import { ToolActivityTracker } from './tool-activity.js';
 
 export type { ExecErrorCode } from './agent-exec-errors.js';
 export type { AgentExecOptions, ToolSpec } from './agent-exec-options.js';
@@ -260,7 +261,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
     }
     return false;
   };
-  const canUseTool = async (toolName: string, input: Record<string, unknown>) => {
+  const rawCanUseTool = async (toolName: string, input: Record<string, unknown>) => {
     if (allowedToolNames.has(toolName)) return { behavior: 'allow' as const, updatedInput: input };
     if (toolName === 'Bash' && bashPrefixes.length > 0 && typeof input.command === 'string') {
       const cmd = input.command.trimStart();
@@ -282,6 +283,11 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
           : `Tool "${toolName}" was not in the tool list this exec call was given.`,
     };
   };
+
+  // #357: tool_activity events (see tool-activity.ts) — observability only.
+  const fidelity = runnerSpec(opts.runtime)?.toolActivityFidelity;
+  const toolActivity = new ToolActivityTracker(safeEmit, fidelity);
+  const canUseTool = toolActivity.wrapCanUseTool(rawCanUseTool);
 
   // This session's own tool list has no way to reach the real
   // mastermind:createorg skill (no settingSources, no `skills` SDK option,
@@ -376,8 +382,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
             });
             break;
           }
-        }
-        // m.type === 'tool_use': native-tool liveness only — no protocol event.
+        } else if (m.type === 'tool_use' || m.type === 'tool_result') toolActivity.onMessage(m); // #357
       }
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
@@ -435,6 +440,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
     // timeout/cancelled errors are emitted here (terminate() only ladders);
     // missing-binary/budget/auth/quota/runner-error already emitted inline.
     if (state.terminal.code === 'timeout' || state.terminal.code === 'cancelled') {
+      toolActivity.closeInFlight(); // #357: no dangling "start" left for the caller
       safeEmit({
         v: 1,
         type: 'error',

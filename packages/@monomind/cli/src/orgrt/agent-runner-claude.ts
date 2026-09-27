@@ -251,8 +251,24 @@ export class ClaudeAgentRunner implements AgentRunner {
           // this is the only place the tool's name and the moment it was
           // invoked are observable.
           for (const b of m.message?.content ?? []) {
-            if (b?.type === 'tool_use' && typeof b.id === 'string')
+            if (b?.type === 'tool_use' && typeof b.id === 'string') {
               pendingToolCalls.set(b.id, { tool: String(b.name ?? ''), startedAt: Date.now() });
+              // #357: the raw call, up front, for agent-exec.ts's
+              // tool_activity events — gated behind streamPartials like
+              // every other agent-exec-only enrichment (session.ts never
+              // sets it, so the org runtime never sees this message type
+              // from this runner and is unaffected).
+              if (streamPartials) {
+                yield {
+                  type: 'tool_use',
+                  session_id,
+                  tool_use_id: b.id,
+                  tool: String(b.name ?? ''),
+                  input: (b.input ?? {}) as Record<string, unknown>,
+                  parent_tool_use_id: m.parent_tool_use_id ?? null,
+                };
+              }
+            }
           }
           const fullText = (m.message?.content ?? [])
             .filter((b: any) => b.type === 'text')

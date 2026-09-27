@@ -39,9 +39,12 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    `doctor --read-only` change no file; the payload carries `read_only` (§10)
  *  - `doctor-offline` — `doctor --offline` skips the checks that use the
  *    network and reports them as `skipped` with `skipped_reason` (§10)
+ *  - `agent-exec-tool-activity` — `tool_activity` start/end events for
+ *    NATIVE tool calls on `agent exec` stdout, in every access mode (§3.2)
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
+  'agent-exec-tool-activity',
   'agent-scan',
   'agent-scan-read-only',
   'org-json-v1',
