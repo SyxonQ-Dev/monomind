@@ -360,3 +360,63 @@ describe('ToolActivityTracker: vendor lightweight mapping (fidelity "start-only"
     expect(events).toHaveLength(0);
   });
 });
+
+describe('ToolActivityTracker.toolCallCount (#360 full-access audit)', () => {
+  it('counts one native "start" per tool_use, unaffected by its matching tool_result', () => {
+    const { emit } = collector();
+    const t = new ToolActivityTracker(emit, 'full');
+    expect(t.toolCallCount).toBe(0);
+    t.onMessage({
+      type: 'tool_use',
+      tool_use_id: 'toolu_1',
+      tool: 'Bash',
+      input: {},
+      parent_tool_use_id: null,
+    } as AgentMessage);
+    expect(t.toolCallCount).toBe(1);
+    t.onMessage({
+      type: 'tool_result',
+      tool_use_id: 'toolu_1',
+      tool: 'Bash',
+      is_error: false,
+      text: '',
+    } as AgentMessage);
+    expect(t.toolCallCount).toBe(1);
+    t.onMessage({
+      type: 'tool_use',
+      tool_use_id: 'toolu_2',
+      tool: 'Write',
+      input: {},
+      parent_tool_use_id: null,
+    } as AgentMessage);
+    expect(t.toolCallCount).toBe(2);
+  });
+
+  it('does not count a bridged (mcp__org__*) tool_use — those are §4 tool_call/tool_result, not native activity', () => {
+    const { emit } = collector();
+    const t = new ToolActivityTracker(emit, 'full');
+    t.onMessage({
+      type: 'tool_use',
+      tool_use_id: 'toolu_1',
+      tool: 'mcp__org__create_nodes',
+      input: {},
+      parent_tool_use_id: null,
+    } as AgentMessage);
+    expect(t.toolCallCount).toBe(0);
+  });
+
+  it('counts a vendor lightweight start-only signal', () => {
+    const { emit } = collector();
+    const t = new ToolActivityTracker(emit, 'start-only');
+    t.onMessage({ type: 'tool_use', text: 'shell' } as AgentMessage);
+    t.onMessage({ type: 'tool_use', text: 'edit' } as AgentMessage);
+    expect(t.toolCallCount).toBe(2);
+  });
+
+  it('never counts anything for fidelity "none"', () => {
+    const { emit } = collector();
+    const t = new ToolActivityTracker(emit, 'none');
+    t.onMessage({ type: 'tool_use', text: 'turn started' } as AgentMessage);
+    expect(t.toolCallCount).toBe(0);
+  });
+});

@@ -142,6 +142,10 @@ export class ToolActivityTracker {
    *  matching tool_result. */
   private denied = new Set<string>();
   private syntheticCounter = 0;
+  /** Count of every `tool_activity` "start" emitted (native rich-shape calls
+   *  and vendor lightweight liveness signals alike) — the "number of native
+   *  tool calls" the full-access audit log records per turn (#360). */
+  private startCount = 0;
 
   /** `fidelity` is the runtime's own `RunnerSpec.toolActivityFidelity`
    *  (runner-registry.ts) — gates the best-effort vendor-lightweight
@@ -175,6 +179,7 @@ export class ToolActivityTracker {
       // Native (rich) shape — ClaudeAgentRunner only.
       if (isBridgedToolName(m.tool)) return; // bridged: tool_call/tool_result cover it (§4)
       this.open.set(m.tool_use_id, m.tool);
+      this.startCount++;
       this.emit(
         shrinkToFit({
           v: 1,
@@ -194,6 +199,7 @@ export class ToolActivityTracker {
     // never produces a misleading event from its own placeholder ping.
     if (this.fidelity !== 'start-only' || !m.text) return;
     const id = `activity_${++this.syntheticCounter}`;
+    this.startCount++;
     this.emit({
       v: 1,
       type: 'tool_activity',
@@ -225,6 +231,12 @@ export class ToolActivityTracker {
         ...(m.duration_ms !== undefined ? { duration_ms: m.duration_ms } : {}),
       }),
     );
+  }
+
+  /** Total `tool_activity` "start" events emitted so far this turn — the
+   *  full-access audit log's `toolCalls` field (#360, full-access-audit.ts). */
+  get toolCallCount(): number {
+    return this.startCount;
   }
 
   /** Cancel/timeout: close every still-open id before `done` (§3.2). */

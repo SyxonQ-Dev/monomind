@@ -9,7 +9,7 @@
  * auth/quota classification).
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -21,6 +21,7 @@ import {
   type ToolSpec,
 } from '../orgrt/agent-exec.js';
 import type { AgentMessage, AgentRunner } from '../orgrt/agent-runner.js';
+import { fullAccessAuditLogPath } from '../orgrt/full-access-audit.js';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -596,6 +597,124 @@ describe('agent exec: --access full', () => {
     const code = await run(h, scriptedRunner([{ type: 'result', subtype: 'success' }]));
     expect(code).toBe(2);
     expect(byType(h, 'error')[0]).toMatchObject({ code: 'unsafe', fatal: true });
+  });
+});
+
+// ─── full-access audit log (#360 guardrail 3) ──────────────────────────────
+//
+// appendFullAccessAudit itself (path override, best-effort write, never
+// throws) is covered by full-access-audit.test.ts; these tests cover the
+// WIRING in orgrt/agent-exec.ts — that it fires exactly once per
+// `--access full` turn (any exit path), never for scoped, and with the
+// right fields (cwd/runtime/session/exitCode/toolCalls).
+
+describe('agent exec: full-access audit log wiring', () => {
+  let scratchDir: string;
+  let logDir: string;
+  let savedLogEnv: string | undefined;
+
+  beforeEach(() => {
+    scratchDir = mkdtempSync(join(tmpdir(), 'monomind-fa-audit-cwd-'));
+    logDir = mkdtempSync(join(tmpdir(), 'monomind-fa-audit-log-'));
+    savedLogEnv = process.env.MONOMIND_FULL_ACCESS_LOG;
+    process.env.MONOMIND_FULL_ACCESS_LOG = join(logDir, 'fa.log');
+  });
+  afterEach(() => {
+    if (savedLogEnv === undefined) delete process.env.MONOMIND_FULL_ACCESS_LOG;
+    else process.env.MONOMIND_FULL_ACCESS_LOG = savedLogEnv;
+    rmSync(scratchDir, { recursive: true, force: true });
+    rmSync(logDir, { recursive: true, force: true });
+  });
+
+  function readAuditLines(): Record<string, unknown>[] {
+    const path = fullAccessAuditLogPath();
+    if (!existsSync(path)) return [];
+    return readFileSync(path, 'utf8')
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
+  }
+
+  it('writes one audit line on a successful full-access turn, counting native tool calls', async () => {
+    const h = makeHarness({ access: 'full', cwd: scratchDir });
+    const code = await run(
+      h,
+      scriptedRunner([
+        {
+          type: 'tool_use',
+          session_id: 's1',
+          tool_use_id: 'toolu_1',
+          tool: 'Bash',
+          input: { command: 'ls' },
+          parent_tool_use_id: null,
+        } as AgentMessage,
+        { type: 'tool_result', tool_use_id: 'toolu_1', tool: 'Bash', is_error: false, text: 'ok' },
+        {
+          type: 'tool_use',
+          session_id: 's1',
+          tool_use_id: 'toolu_2',
+          tool: 'Write',
+          input: { file_path: 'x' },
+          parent_tool_use_id: null,
+        } as AgentMessage,
+        { type: 'tool_result', tool_use_id: 'toolu_2', tool: 'Write', is_error: false, text: 'ok' },
+        { type: 'result', session_id: 's1', subtype: 'success' },
+      ]),
+    );
+    expect(code).toBe(0);
+    const lines = readAuditLines();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      cwd: scratchDir,
+      runtime: 'claude',
+      sessionId: 's1',
+      exitCode: 0,
+      toolCalls: 2,
+    });
+    expect(typeof lines[0].ts).toBe('string');
+  });
+
+  it('never writes an audit line for scoped access', async () => {
+    const h = makeHarness({ access: 'scoped', cwd: scratchDir });
+    await run(h, scriptedRunner([{ type: 'result', subtype: 'success' }]));
+    expect(readAuditLines()).toEqual([]);
+  });
+
+  it('never writes an audit line for the default (unset) access', async () => {
+    const h = makeHarness({ cwd: scratchDir });
+    await run(h, scriptedRunner([{ type: 'result', subtype: 'success' }]));
+    expect(readAuditLines()).toEqual([]);
+  });
+
+  it('writes an audit line even on a failed full-access turn (non-zero exit)', async () => {
+    const h = makeHarness({ access: 'full', cwd: scratchDir });
+    const code = await run(
+      h,
+      scriptedRunner([{ type: 'result', subtype: 'error', is_error: true, text: 'boom' }]),
+    );
+    expect(code).toBe(1);
+    const lines = readAuditLines();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ exitCode: 1, toolCalls: 0 });
+  });
+
+  it('writes an audit line for a cancelled full-access turn, without a session id', async () => {
+    const h = makeHarness({ access: 'full', cwd: scratchDir, toolSpecs: [echoTool] });
+    const runner: AgentRunner = {
+      async *run() {
+        // never yields — the cancel frame below terminates the turn.
+        await new Promise(() => {});
+      },
+    };
+    const promise = run(h, runner);
+    h.stdin.write(`${JSON.stringify({ type: 'cancel' })}\n`);
+    const code = await promise;
+    expect(code).toBe(130);
+    const lines = readAuditLines();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ exitCode: 130, toolCalls: 0 });
+    expect(lines[0].sessionId).toBeUndefined();
   });
 });
 

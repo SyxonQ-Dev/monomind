@@ -37,6 +37,7 @@ import { createExecStatusHandler } from './agent-exec-settings.js';
 import { hasUnsafeShellSyntax } from './agent-exec-shell-syntax.js';
 import { mapStopReason } from './agent-exec-stop-reason.js';
 import type { AgentMessage, OrgToolDef } from './agent-runner.js';
+import { appendFullAccessAudit } from './full-access-audit.js';
 import { classifyStderr } from './kimicode-runner.js';
 import { loadCreateOrgSkillGuidance } from './org-design-skill.js';
 import { resolveExecRunner, runnerSpec } from './runner-registry.js';
@@ -386,6 +387,20 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
   }
 
   const finish = (exitCode: number): number => {
+    // #360 guardrail 3: one audit line per full-access turn, regardless of
+    // how it ended (success/error/timeout/cancelled/budget all funnel
+    // through this single chokepoint) — never for scoped access. Best
+    // effort by design (see full-access-audit.ts); never blocks `done`.
+    if (access === 'full') {
+      appendFullAccessAudit({
+        ts: new Date().toISOString(),
+        cwd: opts.cwd ?? process.cwd(),
+        runtime: opts.runtime,
+        ...(lastSession ? { sessionId: lastSession } : {}),
+        exitCode,
+        toolCalls: toolActivity.toolCallCount,
+      });
+    }
     safeEmit({ v: 1, type: 'done', exit_code: exitCode });
     finished = true;
     return exitCode;

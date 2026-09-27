@@ -65,6 +65,11 @@
 - Supports 14 runtime execution backends (`AgentRunner` implementations), including `claude`, `codex`, `kimicode`, `opencode`, `vercel`, `antigravity`, `grok`, `qwen`, `crush`, `copilot`, `pi`, and `hermes`.
 - Concept Doc: [`doc/concepts/org-runtime.md`](doc/concepts/org-runtime.md)
 
+### Coder Mode Security (`agent exec --access full`)
+- Threat model and non-negotiable guardrails for full, unrestricted native-tool access via `monomind agent exec --access full` (the Coder mode epic).
+- No transitive escalation (only a human-typed CLI invocation can request it — audited across MCP tools, the org runtime, workflow/routine nodes, UI routes, and hooks), env hygiene, and a per-turn audit log (`~/.monomind/logs/agent-exec-full-access.log`).
+- Concept Doc: [`doc/concepts/coder-mode-security.md`](doc/concepts/coder-mode-security.md)
+
 ### Monodesign Subsystem
 - Frontend design intelligence system targeting OKLCH design tokens.
 - Static analysis engine identifying 51 rules of UI/UX defects and AI-slop tells.

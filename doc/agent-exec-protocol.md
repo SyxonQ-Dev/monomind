@@ -1,8 +1,19 @@
-# Agent Exec Protocol — v1 (rev 12)
+# Agent Exec Protocol — v1 (rev 13)
 
 - **Status**: Implemented (Phase 0 of the mono-agent delegation plan — see
   `mono-agent:docs/plans/local-agent-monomind-delegation.md`)
+- **Security**: see [`doc/concepts/coder-mode-security.md`](concepts/coder-mode-security.md) for
+  the Coder mode threat model, the `--access full` guardrails (root refusal, no transitive
+  escalation, env hygiene, audit log), what callers own, and residual risks (issue #360).
 - **Revision history**:
+  - rev 13 (2026-09-28): **threat model + guardrails** (issue #360). `agent exec --access full`
+    now appends one JSON line per turn to `~/.monomind/logs/agent-exec-full-access.log`
+    (`MONOMIND_FULL_ACCESS_LOG` overrides), regardless of how the turn ended — `ts, cwd, runtime,
+    session_id?, exit_code, tool_calls` (the number of native `tool_activity` starts observed) —
+    never for `scoped` access; best-effort (a write failure never fails the turn). No protocol
+    surface (flags/events/capabilities) changed — see `doc/concepts/coder-mode-security.md` for
+    the full write-up, including the audited set of paths (MCP tools, the org runtime, workflow/
+    routine nodes, UI routes, hooks) that were confirmed unable to set `access: "full"` today.
   - rev 12 (2026-09-28): **`--settings` / coder mode** (issue #356, capability
     `agent-exec-settings`). `agent exec --settings none|<csv of
     user,project,local>` (default `none`, byte-identical to before — proven by
