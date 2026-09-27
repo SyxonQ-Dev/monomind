@@ -80,16 +80,16 @@ function counts(rel) {
 // Count computation — each function reads exactly one source of truth.
 // ---------------------------------------------------------------------------
 
-/** The WORKER_CONFIGS object body in worker-manager.ts, key positions included. */
+/** The WORKER_CONFIGS object body in worker-manager-types.ts, key positions included. */
 function workerConfigsBody() {
-  const src = read('packages/@monomind/hooks/src/workers/worker-manager.ts');
+  const src = read('packages/@monomind/hooks/src/workers/worker-manager-types.ts');
   const start = src.indexOf('export const WORKER_CONFIGS');
-  if (start === -1) throw new Error('WORKER_CONFIGS not found in worker-manager.ts');
+  if (start === -1) throw new Error('WORKER_CONFIGS not found in worker-manager-types.ts');
   const end = src.indexOf('\n};', start);
   return src.slice(start, end === -1 ? undefined : end);
 }
 
-/** WORKER_CONFIGS in packages/@monomind/hooks/src/workers/worker-manager.ts. */
+/** WORKER_CONFIGS in packages/@monomind/hooks/src/workers/worker-manager-types.ts. */
 function countWorkers() {
   const body = workerConfigsBody();
   const keys = [...body.matchAll(/^\s*'?([a-zA-Z0-9_-]+)'?:\s*\{/gm)];
@@ -119,7 +119,7 @@ function extractWorkerRows() {
     const priorityMatch = block.match(/priority:\s*WorkerPriority\.(\w+)/);
     if (!descMatch || !priorityMatch) {
       throw new Error(
-        `WORKER_CONFIGS.${name}: could not extract description/priority — worker-manager.ts's shape changed, update the extractor`,
+        `WORKER_CONFIGS.${name}: could not extract description/priority — worker-manager-types.ts's shape changed, update the extractor`,
       );
     }
     rows.push({
