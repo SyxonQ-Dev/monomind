@@ -7,12 +7,12 @@
  *
  * These are regression tripwires, not a test of a live exploit — as of this
  * issue, NOTHING in this codebase other than commands/agent-exec.ts sets
- * `AgentExecOptions.access`/`AgentRunArgs.access` (verified by direct
- * source inspection: no MCP tool module imports the agent-exec engine, no
- * UI server route does either, and the org runtime's own AgentRunArgs
- * builder — session-stream.ts's `sessionRunArgs` — never sets `access` at
- * all, so every org-runtime session runs `permissionMode: 'default'`
- * unconditionally regardless of role policy). The point of these tests is
+ * `AgentExecOptions.access` (verified by direct source inspection: no MCP
+ * tool module imports the agent-exec engine, no UI server route does
+ * either). The org runtime's AgentRunArgs builder — session-stream.ts's
+ * `sessionRunArgs` — sets `access: 'full'` only from the session's
+ * `resolvedAccess`, which only `resolveRoleAccess` (#365's signed,
+ * human-granted, drift-checked gate) produces. The point of these tests is
  * to fail loudly the moment any of that changes without an explicit,
  * reviewed guard — see doc/concepts/coder-mode-security.md's "No transitive
  * escalation" section for the full audit and the write paths (#365's org
@@ -78,17 +78,30 @@ describe('#360: no transitive escalation to --access full', () => {
     expect(offenders).toEqual([]);
   });
 
-  it("the org runtime's own AgentRunArgs builder (session-stream.ts's sessionRunArgs) never sets `access`", () => {
-    const file = join(SRC_ROOT, 'orgrt', 'session-stream.ts');
-    const text = readFileSync(file, 'utf8');
-    // Extract the sessionRunArgs function body (from its `export function`
-    // signature to the matching closing brace) rather than scanning the
-    // whole file, so an unrelated `access` identifier elsewhere in the
-    // module (there is none today) couldn't produce a false pass.
+  it("the org runtime's AgentRunArgs builder (sessionRunArgs) sets `access` only from the resolved #365 grant", () => {
+    const text = readFileSync(join(SRC_ROOT, 'orgrt', 'session-stream.ts'), 'utf8');
     const start = text.indexOf('export function sessionRunArgs');
     expect(start).toBeGreaterThan(-1);
     const body = text.slice(start);
-    expect(body).not.toMatch(/\baccess\s*:/);
+    // Exactly one `access:` in the returned args, gated on the resolved grant.
+    expect(body.match(/\baccess\s*:/g)).toHaveLength(1);
+    expect(body).toMatch(/const fullAccess = resolvedAccess\?\.access === 'full';/);
+    expect(body).toMatch(/\.\.\.\(fullAccess \? \{ access: 'full' as const \} : \{\}\)/);
+  });
+
+  it("an org session's resolvedAccess only ever comes from resolveRoleAccess (the signed-grant gate)", () => {
+    const run = readFileSync(join(SRC_ROOT, 'orgrt', 'session-run.ts'), 'utf8');
+    expect(run).toMatch(/const \{ resolvedAccess \} = fullAccessSession;/);
+    expect(run).toMatch(/beginFullAccessSession\(/);
+    const begin = readFileSync(join(SRC_ROOT, 'orgrt', 'session-full-access.ts'), 'utf8');
+    expect(begin).toMatch(/const resolvedAccess = def\s*\?\s*resolveRoleAccess\(/);
+    // No other source file constructs a full ResolvedAccess by hand.
+    const offenders = allSourceFiles().filter(
+      (f) =>
+        !f.endsWith(join('orgrt', 'access-grant.ts')) &&
+        /access:\s*'full',\s*declared/.test(readFileSync(f, 'utf8')),
+    );
+    expect(offenders).toEqual([]);
   });
 
   it('RUNNER_SPECS: only "claude" advertises supportsFullAccess (every other runtime rejects --access full)', async () => {
