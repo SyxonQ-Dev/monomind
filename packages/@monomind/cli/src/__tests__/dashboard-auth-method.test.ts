@@ -71,6 +71,17 @@ function enumerateNonGetRoutes(): Array<{ method: string; url: string; file: str
     'routes-monograph-query.mjs',
     'routes-monograph-watch.mjs',
     'routes-monoes.mjs',
+    'server-routes-pages.mjs',
+    'server-routes-data.mjs',
+    'server-routes-events.mjs',
+    'server-routes-docs.mjs',
+    'server-routes-memory-1.mjs',
+    'server-routes-memory-2.mjs',
+    'server-routes-loops.mjs',
+    'server-routes-misc.mjs',
+    'server-routes-mcp-call.mjs',
+    'server-routes-mcp-tools-1.mjs',
+    'server-routes-mcp-tools-2.mjs',
   ];
   const routes: Array<{ method: string; url: string; file: string }> = [];
   for (const file of files) {

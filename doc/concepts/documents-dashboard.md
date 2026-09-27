@@ -59,7 +59,7 @@ This dashboard has a documented history of security fixes in this project, so th
 
 1. **Loopback bind + Host-header DNS-rebinding defense.** The server binds `127.0.0.1` only,
    but that alone is **not** a boundary against a browser
-   ([`server.mjs → isAllowedHost`](packages/@monomind/cli/src/ui/server.mjs#isAllowedHost)): a page on `attacker.example` can point its own DNS at
+   ([`server-net.mjs → isAllowedHost`](packages/@monomind/cli/src/ui/server-net.mjs#isAllowedHost)): a page on `attacker.example` can point its own DNS at
    `127.0.0.1`, and the browser will treat the response as same-origin with
    `attacker.example` — letting a malicious script read the dashboard's auth token out of the
    page and drive every authenticated `/api/*` route. The real boundary is the `Host` header:
