@@ -1,0 +1,399 @@
+/**
+ * DiffClassifier — hunk parsing and change classification.
+ */
+
+import type {
+  DiffAnalysis,
+  DiffChange,
+  DiffClassification,
+  DiffClassifierConfig,
+  DiffHunk,
+  FileDiff,
+} from './diff-classifier-types.js';
+
+const DEFAULT_CONFIG: DiffClassifierConfig = {
+  maxDiffSize: 10000,
+  classifyByImpact: true,
+  detectRefactoring: true,
+  minConfidence: 0.5,
+};
+
+const CLASSIFICATION_PATTERNS: Record<string, RegExp[]> = {
+  feature: [/^feat/, /add.*feature/, /implement/, /new.*functionality/i],
+  bugfix: [/^fix/, /bug/, /patch/, /resolve.*issue/i, /hotfix/i],
+  refactor: [/^refactor/, /restructure/, /reorganize/, /cleanup/i, /rename/i],
+  docs: [/^docs?/, /documentation/, /readme/i, /comment/i, /\.md$/i],
+  test: [/^test/, /spec/, /\.test\.[jt]sx?$/, /\.spec\.[jt]sx?$/, /__tests__/],
+  config: [/^config/, /\.config\./, /package\.json/, /tsconfig/, /\.env/],
+  style: [/^style/, /format/, /lint/, /prettier/, /eslint/],
+};
+
+const IMPACT_KEYWORDS: Record<string, number> = {
+  security: 3,
+  auth: 3,
+  payment: 3,
+  database: 2,
+  api: 2,
+  core: 2,
+  util: 1,
+  helper: 1,
+  test: 0,
+  mock: 0,
+  fixture: 0,
+};
+
+export class DiffClassifier {
+  private config: DiffClassifierConfig;
+  private classificationCache: Map<string, DiffClassification> = new Map();
+  private static readonly MAX_CLASSIFICATION_CACHE = 100;
+
+  constructor(config: Partial<DiffClassifierConfig> = {}) {
+    this.config = { ...DEFAULT_CONFIG, ...config };
+  }
+
+  async initialize(): Promise<void> {
+    // No-op: JS-based classification is always used
+  }
+
+  parseDiff(diffContent: string): FileDiff[] {
+    const files: FileDiff[] = [];
+    const fileBlocks = diffContent.split(/^diff --git/m).filter(Boolean);
+    for (const block of fileBlocks) {
+      const pathMatch = block.match(/a\/(.+?)\s+b\/(.+)/);
+      if (!pathMatch) continue;
+      const path = pathMatch[2];
+      const hunks = this.parseHunks(block);
+      const additions = hunks.reduce(
+        (sum, h) => sum + h.changes.filter((c) => c.type === 'add').length,
+        0,
+      );
+      const deletions = hunks.reduce(
+        (sum, h) => sum + h.changes.filter((c) => c.type === 'remove').length,
+        0,
+      );
+      const classification = this.classifyFile(path, hunks);
+      files.push({ path, hunks, additions, deletions, classification });
+    }
+    return files;
+  }
+
+  classify(files: FileDiff[]): DiffAnalysis {
+    const overall = this.computeOverallClassification(files);
+    const stats = {
+      totalAdditions: files.reduce((sum, f) => sum + f.additions, 0),
+      totalDeletions: files.reduce((sum, f) => sum + f.deletions, 0),
+      filesChanged: files.length,
+      avgConfidence:
+        files.length > 0
+          ? files.reduce((sum, f) => sum + f.classification.confidence, 0) / files.length
+          : 0,
+    };
+    return { files, overall, stats, timestamp: Date.now() };
+  }
+
+  classifyCommitMessage(message: string): DiffClassification['primary'] {
+    const lowerMessage = message.toLowerCase();
+    for (const [type, patterns] of Object.entries(CLASSIFICATION_PATTERNS)) {
+      for (const pattern of patterns) {
+        if (pattern.test(lowerMessage)) return type as DiffClassification['primary'];
+      }
+    }
+    return 'unknown';
+  }
+
+  getStats(): Record<string, number | boolean> {
+    return { cacheSize: this.classificationCache.size };
+  }
+
+  clearCache(): void {
+    this.classificationCache.clear();
+  }
+
+  private parseHunks(block: string): DiffHunk[] {
+    const hunks: DiffHunk[] = [];
+    const hunkMatches = block.matchAll(
+      /@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@([^\n]*)\n([\s\S]*?)(?=@@|$)/g,
+    );
+    for (const match of hunkMatches) {
+      const oldStart = parseInt(match[1], 10);
+      const oldLines = parseInt(match[2] || '1', 10);
+      const newStart = parseInt(match[3], 10);
+      const newLines = parseInt(match[4] || '1', 10);
+      const content = match[6] || '';
+      const changes = this.parseChanges(content, newStart);
+      hunks.push({ oldStart, oldLines, newStart, newLines, content, changes });
+    }
+    return hunks;
+  }
+
+  private parseChanges(content: string, startLine: number): DiffChange[] {
+    const changes: DiffChange[] = [];
+    const lines = content.split('\n');
+    let lineNumber = startLine;
+    for (const line of lines) {
+      if (line.startsWith('+')) {
+        changes.push({ type: 'add', lineNumber, content: line.substring(1) });
+        lineNumber++;
+      } else if (line.startsWith('-')) {
+        changes.push({ type: 'remove', lineNumber: -1, content: line.substring(1) });
+      } else if (line.startsWith(' ') || line === '') {
+        changes.push({ type: 'context', lineNumber, content: line.substring(1) || '' });
+        lineNumber++;
+      }
+    }
+    return changes;
+  }
+
+  classifyFile(path: string, hunks: DiffHunk[]): DiffClassification {
+    const cacheKey = this.getCacheKey(path, hunks);
+    const cached = this.classificationCache.get(cacheKey);
+    if (cached) return cached;
+    const primary = this.determinePrimaryClassification(path, hunks);
+    const secondary = this.determineSecondaryClassifications(path, hunks, primary);
+    const confidence = this.calculateConfidence(path, hunks, primary);
+    const impactLevel = this.determineImpactLevel(path, hunks);
+    const suggestedReviewers = this.suggestReviewers(path, primary, impactLevel);
+    const testingStrategy = this.determineTestingStrategy(path, primary, impactLevel);
+    const riskFactors = this.identifyRiskFactors(path, hunks, impactLevel);
+    const classification: DiffClassification = {
+      primary,
+      secondary,
+      confidence,
+      impactLevel,
+      suggestedReviewers,
+      testingStrategy,
+      riskFactors,
+    };
+    if (this.classificationCache.size >= DiffClassifier.MAX_CLASSIFICATION_CACHE) {
+      const oldest = this.classificationCache.keys().next().value;
+      if (oldest !== undefined) this.classificationCache.delete(oldest);
+    }
+    this.classificationCache.set(cacheKey, classification);
+    return classification;
+  }
+
+  private getCacheKey(path: string, hunks: DiffHunk[]): string {
+    const hunkSummary = hunks.map((h) => `${h.oldStart}:${h.newStart}`).join(',');
+    return `${path}:${hunkSummary}`;
+  }
+
+  private determinePrimaryClassification(
+    path: string,
+    hunks: DiffHunk[],
+  ): DiffClassification['primary'] {
+    for (const [type, patterns] of Object.entries(CLASSIFICATION_PATTERNS)) {
+      for (const pattern of patterns) {
+        if (pattern.test(path)) return type as DiffClassification['primary'];
+      }
+    }
+    const allContent = hunks
+      .flatMap((h) => h.changes.map((c) => c.content))
+      .join('\n')
+      .toLowerCase();
+    if (
+      /function|class|interface|type\s+\w+/.test(allContent) &&
+      hunks.some((h) => h.changes.filter((c) => c.type === 'add').length > 10)
+    )
+      return 'feature';
+    if (/fix|bug|issue|error|exception/.test(allContent)) return 'bugfix';
+    if (this.config.detectRefactoring && this.isRefactoring(hunks)) return 'refactor';
+    return 'unknown';
+  }
+
+  private isRefactoring(hunks: DiffHunk[]): boolean {
+    let totalAdds = 0,
+      totalRemoves = 0;
+    for (const hunk of hunks) {
+      for (const change of hunk.changes) {
+        if (change.type === 'add') totalAdds++;
+        else if (change.type === 'remove') totalRemoves++;
+      }
+    }
+    const ratio = totalAdds > 0 ? totalRemoves / totalAdds : 0;
+    return ratio > 0.7 && ratio < 1.4 && totalAdds > 5;
+  }
+
+  private determineSecondaryClassifications(
+    path: string,
+    _hunks: DiffHunk[],
+    primary: DiffClassification['primary'],
+  ): string[] {
+    const secondary: string[] = [];
+    for (const [type, patterns] of Object.entries(CLASSIFICATION_PATTERNS)) {
+      if (type === primary) continue;
+      for (const pattern of patterns) {
+        if (pattern.test(path)) {
+          secondary.push(type);
+          break;
+        }
+      }
+    }
+    return secondary.slice(0, 3);
+  }
+
+  private calculateConfidence(
+    path: string,
+    hunks: DiffHunk[],
+    primary: DiffClassification['primary'],
+  ): number {
+    let confidence = 0.5;
+    for (const patterns of Object.values(CLASSIFICATION_PATTERNS)) {
+      for (const pattern of patterns) {
+        if (pattern.test(path)) {
+          confidence += 0.2;
+          break;
+        }
+      }
+    }
+    const totalChanges = hunks.reduce((sum, h) => sum + h.changes.length, 0);
+    if (totalChanges > 10) confidence += 0.1;
+    if (totalChanges > 50) confidence += 0.1;
+    if (primary !== 'unknown') confidence += 0.1;
+    return Math.min(1, confidence);
+  }
+
+  private determineImpactLevel(path: string, hunks: DiffHunk[]): DiffClassification['impactLevel'] {
+    let score = 0;
+    const lowerPath = path.toLowerCase();
+    for (const [keyword, weight] of Object.entries(IMPACT_KEYWORDS)) {
+      if (lowerPath.includes(keyword)) score = Math.max(score, weight);
+    }
+    const totalChanges = hunks.reduce(
+      (sum, h) => sum + h.changes.filter((c) => c.type !== 'context').length,
+      0,
+    );
+    if (totalChanges > 100) score = Math.max(score, 2);
+    if (totalChanges > 300) score = Math.max(score, 3);
+    if (score >= 3) return 'critical';
+    if (score >= 2) return 'high';
+    if (score >= 1) return 'medium';
+    return 'low';
+  }
+
+  private suggestReviewers(
+    path: string,
+    primary: DiffClassification['primary'],
+    impact: DiffClassification['impactLevel'],
+  ): string[] {
+    const reviewers: string[] = [];
+    const typeReviewers: Record<string, string[]> = {
+      feature: ['tech-lead', 'product-owner'],
+      bugfix: ['qa-engineer', 'developer'],
+      refactor: ['senior-developer', 'architect'],
+      docs: ['tech-writer', 'developer'],
+      test: ['qa-engineer', 'developer'],
+      config: ['devops', 'tech-lead'],
+      style: ['developer'],
+      unknown: ['developer'],
+    };
+    reviewers.push(...(typeReviewers[primary] || typeReviewers.unknown));
+    if (impact === 'critical' || impact === 'high') reviewers.push('security-reviewer');
+    if (/security|auth/.test(path)) reviewers.push('security-team');
+    if (/database|migration/.test(path)) reviewers.push('dba');
+    return [...new Set(reviewers)].slice(0, 4);
+  }
+
+  private determineTestingStrategy(
+    path: string,
+    primary: DiffClassification['primary'],
+    impact: DiffClassification['impactLevel'],
+  ): string[] {
+    const strategies: string[] = [];
+    if (primary !== 'test') strategies.push('unit-tests');
+    if (primary === 'feature') strategies.push('integration-tests');
+    if (impact === 'high' || impact === 'critical') {
+      strategies.push('regression-tests');
+      strategies.push('e2e-tests');
+    }
+    if (/api|endpoint|route|handler/.test(path)) strategies.push('api-contract-tests');
+    if (/security|auth|crypto/.test(path)) strategies.push('security-audit');
+    return strategies.slice(0, 5);
+  }
+
+  private identifyRiskFactors(
+    path: string,
+    hunks: DiffHunk[],
+    impact: DiffClassification['impactLevel'],
+  ): string[] {
+    const risks: string[] = [];
+    const totalChanges = hunks.reduce((sum, h) => sum + h.changes.length, 0);
+    if (totalChanges > 200) risks.push('Large change set - increased review time needed');
+    if (impact === 'critical') risks.push('Critical system component - requires careful review');
+    if (impact === 'high') risks.push('High-impact area - monitor after deployment');
+    if (/security|auth/.test(path)) risks.push('Security-sensitive code');
+    if (/database|migration/.test(path)) risks.push('Database changes - ensure backup strategy');
+    if (/config|env/.test(path)) risks.push('Configuration changes - verify all environments');
+    const allContent = hunks.flatMap((h) => h.changes.map((c) => c.content)).join('\n');
+    if (/TODO|FIXME|HACK/.test(allContent)) risks.push('Contains TODO/FIXME comments');
+    if (/password|secret|key|token/i.test(allContent)) risks.push('Potential secrets in code');
+    return risks.slice(0, 5);
+  }
+
+  computeOverallClassification(files: FileDiff[]): DiffClassification {
+    if (files.length === 0)
+      return {
+        primary: 'unknown',
+        secondary: [],
+        confidence: 0,
+        impactLevel: 'low',
+        suggestedReviewers: [],
+        testingStrategy: [],
+        riskFactors: [],
+      };
+    const primaryCounts: Record<string, number> = {};
+    for (const file of files) {
+      const p = file.classification.primary;
+      primaryCounts[p] = (primaryCounts[p] || 0) + 1;
+    }
+    let primary: DiffClassification['primary'] = 'unknown';
+    let maxCount = 0;
+    for (const [type, count] of Object.entries(primaryCounts)) {
+      if (count > maxCount) {
+        maxCount = count;
+        primary = type as DiffClassification['primary'];
+      }
+    }
+    const secondaryCounts: Record<string, number> = {};
+    for (const file of files) {
+      for (const s of file.classification.secondary) {
+        secondaryCounts[s] = (secondaryCounts[s] || 0) + 1;
+      }
+    }
+    const secondary = Object.entries(secondaryCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([type]) => type);
+    const confidence =
+      files.reduce((sum, f) => sum + f.classification.confidence, 0) / files.length;
+    const impactOrder: DiffClassification['impactLevel'][] = ['low', 'medium', 'high', 'critical'];
+    let impactLevel: DiffClassification['impactLevel'] = 'low';
+    for (const file of files) {
+      if (impactOrder.indexOf(file.classification.impactLevel) > impactOrder.indexOf(impactLevel))
+        impactLevel = file.classification.impactLevel;
+    }
+    const reviewers = [...new Set(files.flatMap((f) => f.classification.suggestedReviewers))].slice(
+      0,
+      5,
+    );
+    const testingStrategy = [
+      ...new Set(files.flatMap((f) => f.classification.testingStrategy)),
+    ].slice(0, 5);
+    const riskFactors = [...new Set(files.flatMap((f) => f.classification.riskFactors))].slice(
+      0,
+      5,
+    );
+    return {
+      primary,
+      secondary,
+      confidence,
+      impactLevel,
+      suggestedReviewers: reviewers,
+      testingStrategy,
+      riskFactors,
+    };
+  }
+}
+
+export function createDiffClassifier(config?: Partial<DiffClassifierConfig>): DiffClassifier {
+  return new DiffClassifier(config);
+}
