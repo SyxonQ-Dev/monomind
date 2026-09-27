@@ -65,6 +65,11 @@ function enumerateNonGetRoutes(): Array<{ method: string; url: string; file: str
     'routes-org-workflows.mjs',
     'routes-org-control.mjs',
     'routes-monograph.mjs',
+    'routes-monograph-html.mjs',
+    'routes-monograph-build.mjs',
+    'routes-monograph-content.mjs',
+    'routes-monograph-query.mjs',
+    'routes-monograph-watch.mjs',
     'routes-monoes.mjs',
   ];
   const routes: Array<{ method: string; url: string; file: string }> = [];
