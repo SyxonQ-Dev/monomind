@@ -988,6 +988,13 @@ describe('context.mjs update check (disabled in monomind)', () => {
     const skillScript = path.join(scratch, 'skill', 'scripts', 'context.mjs');
     fs.mkdirSync(path.dirname(skillScript), { recursive: true });
     fs.copyFileSync(SCRIPT_PATH, skillScript);
+    // context.mjs is split into cohesive sibling modules (context-*.mjs);
+    // copy them alongside it so the standalone script it runs here can
+    // resolve its own imports.
+    for (const name of fs.readdirSync(path.dirname(SCRIPT_PATH))) {
+      if (!name.startsWith('context-') || !name.endsWith('.mjs')) continue;
+      fs.copyFileSync(path.join(path.dirname(SCRIPT_PATH), name), path.join(path.dirname(skillScript), name));
+    }
     for (const dep of ['target-args.mjs', 'provider.mjs']) {
       const src = path.join(path.dirname(SCRIPT_PATH), 'lib', dep);
       const dest = path.join(path.dirname(skillScript), 'lib', dep);
