@@ -199,7 +199,7 @@ The adherence hook only observes; it never blocks a spawn. Only a real spawn set
 
 ### Ledger commands
 
-[`monomind route stats`](packages/@monomind/cli/src/commands/route.ts#statsCommand) reports accuracy, adherence and trend from `route-outcomes.jsonl` (`computeRoutingAccuracy()` / `computeAdherence()` in [`route-outcomes.ts`](packages/@monomind/cli/src/monovector/route-outcomes.ts)). `route feedback` appends a reward (−1.0 to 1.0) for a task/agent pair; `route reset` clears the ledger; `route export`/`import` move it to and from a JSON file (50 MB cap, path containment checked).
+[`monomind route stats`](packages/@monomind/cli/src/commands/route-outcome-commands.ts#statsCommand) reports accuracy, adherence and trend from `route-outcomes.jsonl` (`computeRoutingAccuracy()` / `computeAdherence()` in [`route-outcomes.ts`](packages/@monomind/cli/src/monovector/route-outcomes.ts)). `route feedback` appends a reward (−1.0 to 1.0) for a task/agent pair; `route reset` clears the ledger; `route export`/`import` move it to and from a JSON file (50 MB cap, path containment checked).
 
 ---
 
@@ -211,7 +211,7 @@ The adherence hook only observes; it never blocks a spawn. Only a real spawn set
 - **`low`**: fewer than 50 characters, or contains `simple` / `fix`. Duration: 10-30 min.
 - **`medium`**: everything else. Duration: 30-60 min.
 
-[`monomind route coverage`](packages/@monomind/cli/src/commands/route.ts#coverageRouteCommand) ranks coverage gaps (`targetCoverage - currentCoverage`), priority (1-10) and estimated effort, and assigns each gap to a registry agent.
+[`monomind route coverage`](packages/@monomind/cli/src/commands/route-coverage.ts#coverageRouteCommand) ranks coverage gaps (`targetCoverage - currentCoverage`), priority (1-10) and estimated effort, and assigns each gap to a registry agent.
 
 ---
 
