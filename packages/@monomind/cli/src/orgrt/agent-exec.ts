@@ -33,6 +33,7 @@ import {
   jsonSchemaToZodShape,
   type Terminal,
 } from './agent-exec-options.js';
+import { createExecStatusHandler } from './agent-exec-settings.js';
 import type { AgentMessage, OrgToolDef } from './agent-runner.js';
 import { classifyStderr } from './kimicode-runner.js';
 import { loadCreateOrgSkillGuidance } from './org-design-skill.js';
@@ -165,6 +166,15 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
     }
     settleTerminal(state.terminal);
   };
+
+  // Coder mode (#356): startup watchdog for `--settings` non-none turns,
+  // claude-only (other runtimes never emit `status`); a no-op otherwise.
+  const statusHandler = createExecStatusHandler({
+    enabled: opts.runtime === 'claude' && (opts.settings?.length ?? 0) > 0,
+    timeoutMs: opts.startupTimeoutMs ?? 30_000,
+    emit: safeEmit,
+    terminate,
+  });
 
   bridge =
     toolSpecs && toolSpecs.length > 0
@@ -329,6 +339,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
         envAuthoritative: false,
         maxTurns: opts.maxTurns,
         resume: opts.resume,
+        settingSources: opts.settings, // coder mode (#356); other runners ignore it
         canUseTool: effectiveCanUseTool,
         access,
         signal: abort.signal,
@@ -348,6 +359,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
 
       for await (const m of stream) {
         if (state.terminal) break;
+        statusHandler.onMessage(m); // coder mode (#356): emits `status`, clears the watchdog
 
         if (m.session_id && m.session_id !== lastSession) {
           lastSession = m.session_id;
@@ -427,6 +439,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
   } finally {
     if (timeoutTimer) clearTimeout(timeoutTimer);
     bridge?.stop();
+    statusHandler.dispose();
     process.removeListener('SIGINT', onSignal);
     process.removeListener('SIGTERM', onSignal);
   }

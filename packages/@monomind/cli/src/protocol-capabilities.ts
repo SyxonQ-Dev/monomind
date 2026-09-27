@@ -42,10 +42,15 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *  - `agent-exec-full-access` — `agent exec --access full` (claude runtime):
  *    unrestricted native tool access, `start.access`, `agent scan --json`'s
  *    `full_access` field (§3.1/§3.2/§3.4)
+ *  - `agent-exec-settings` — `agent exec --settings none|<csv of
+ *    user,project,local>` (coder mode, claude runtime): loads CLAUDE.md,
+ *    skills, hooks, and project+user MCP servers; the `status` event and its
+ *    startup watchdog (§3.1, §3.2)
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
   'agent-exec-full-access',
+  'agent-exec-settings',
   'agent-scan',
   'agent-scan-read-only',
   'org-json-v1',

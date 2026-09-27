@@ -57,6 +57,13 @@ export interface AgentExecOptions {
    * undefined/[] = no Bash allowance, matching prior behavior exactly.
    */
   allowBashPrefixes?: string[];
+  /** Coder mode (#356): parsed `--settings` value. `undefined`/`[]` = `none`
+   *  (today's default, byte-identical). Forwarded to AgentRunArgs.settingSources
+   *  — only ClaudeAgentRunner acts on it. */
+  settings?: Array<'user' | 'project' | 'local'>;
+  /** Coder mode (#356): startup watchdog timeout (ms) for `--settings`
+   *  non-none turns — see agent-exec-settings.ts's createExecStatusHandler. */
+  startupTimeoutMs?: number;
 }
 
 export interface Terminal {

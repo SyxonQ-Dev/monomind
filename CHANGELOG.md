@@ -7,6 +7,7 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 ### Added
 
 - **`monomind agent exec --access full`** ([#355](https://github.com/monoes/monomind/issues/355)), part of the Coder mode epic ([#364](https://github.com/monoes/monomind/issues/364)). The `claude` runtime can now run a turn with unrestricted native tool access (`canUseTool` allows everything, `permissionMode: "bypassPermissions"`) instead of the default `scoped` allow-list — guarded against root, unsupported runtimes, and a missing/invalid `--cwd`. New capability `agent-exec-full-access` and `agent scan --json`'s `full_access` field.
+- **`monomind agent exec --settings none|<csv of user,project,local>`** ([#356](https://github.com/monoes/monomind/issues/356)). A non-`none` value (claude runtime only) loads the normal Claude Code setup for the turn — CLAUDE.md, skills, hooks, and project/user MCP servers — and appends the caller's system prompt to Claude Code's own preset instead of replacing it; `--settings none` (default) stays byte-identical to before. New `status` NDJSON event reports SDK startup progress, and a `--startup-timeout` watchdog (default 30s) reports a clear error instead of hanging if the SDK never reports ready. Capability `agent-exec-settings`.
 
 ### Fixed
 

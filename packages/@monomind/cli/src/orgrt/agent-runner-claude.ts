@@ -1,6 +1,7 @@
 // packages/@monomind/cli/src/orgrt/agent-runner-claude.ts
 import { spawn } from 'node:child_process';
 import { createSdkMcpServer, query, tool } from '@anthropic-ai/claude-agent-sdk';
+import { resolveClaudeSettingsOverrides } from './agent-runner-claude-settings.js';
 import type { AgentMessage, AgentRunArgs, AgentRunner } from './agent-runner-types.js';
 import { killOnAbort } from './agent-runner-types.js';
 import { maskedCommand } from './authority-mask.js';
@@ -88,10 +89,23 @@ export class ClaudeAgentRunner implements AgentRunner {
     // canUseTool alone misses every call the CLI allows itself (policy-hook.ts).
     const gate = args.canUseTool ? coverEveryToolCall(args.canUseTool) : undefined;
 
+    // Coder mode (#356): non-empty only when the caller passed `--settings`
+    // (agent-exec.ts) — session.ts (org runtime) never sets this, so every
+    // existing caller gets settingSources.length === 0 and the branch below
+    // reproduces today's options object byte-for-byte. See
+    // agent-runner-claude-settings.ts for what each list turns into.
+    const settingSources = args.settingSources ?? [];
+    const settingsOverrides = resolveClaudeSettingsOverrides(settingSources, {
+      systemPrompt: args.systemPrompt,
+      orgServer,
+      hasCallerTools: args.tools.length > 0,
+    });
+    if (settingSources.length > 0) yield { type: 'status', phase: 'initializing' };
+
     const stream = this.queryFn({
       prompt: args.prompt,
       options: {
-        systemPrompt: args.systemPrompt,
+        systemPrompt: settingsOverrides.systemPrompt,
         model: args.model,
         // ADR-O001 D8: the Claude half of the cost tier's effort axis. The
         // SDK's own EffortLevel is 'low'|'medium'|'high'|'xhigh'|'max', which
@@ -148,9 +162,24 @@ export class ClaudeAgentRunner implements AgentRunner {
         // this runner's `mcpServers` the complete, exclusive tool surface and
         // skip settings/hook discovery entirely, matching the intent that this
         // is a scripted org-runtime turn, not an interactive user session.
-        settingSources: [],
-        strictMcpConfig: true,
-        mcpServers: { org: orgServer },
+        //
+        // #356 (coder mode) re-verified this live: 8 trials of
+        // settingSources:['user','project','local'] against a real
+        // authenticated account (query()+abortController, no CLI subprocess)
+        // — sequential, repeated, and 3 concurrent SDK sessions sharing one
+        // HOME — all with 3+ interactive `claude` sessions already running on
+        // this machine the whole time (the exact condition the paragraph
+        // above names). `system/init` arrived in 0.7-2.5s every time and
+        // every turn completed; the hang did not reproduce with this SDK/CLI
+        // version, so no settingSources:[] fallback and no env override were
+        // added. The startup watchdog below (agent-exec-settings.ts's
+        // createExecStatusHandler) stays as a defense-in-depth backstop
+        // regardless, per #356's own acceptance criteria. `settingSources`
+        // empty (no caller opted in via `--settings`) still takes this exact
+        // branch, unchanged from before this issue.
+        settingSources: settingsOverrides.settingSources,
+        strictMcpConfig: settingsOverrides.strictMcpConfig,
+        ...(settingsOverrides.mcpServers ? { mcpServers: settingsOverrides.mcpServers } : {}),
         maxTurns: args.maxTurns,
         // #355: `full` access needs both the permission-mode switch AND the
         // SDK's explicit opt-in (`allowDangerouslySkipPermissions`) it
@@ -322,8 +351,14 @@ export class ClaudeAgentRunner implements AgentRunner {
               ...(started ? { duration_ms: Date.now() - started.startedAt } : {}),
             };
           }
+        } else if (m.type === 'system' && m.subtype === 'init' && settingSources.length > 0) {
+          // #356: only when a caller opted into coder mode (settingSources
+          // non-empty) — session.ts (org runtime) never sets it, so this
+          // branch never fires there, matching "org runtime unchanged".
+          yield { type: 'status', session_id, phase: 'ready', mcp_servers: m.mcp_servers };
         }
-        // Other message kinds (system, …) carry no signal session.ts acts on.
+        // Other message kinds (system when settingSources is empty, …)
+        // carry no signal session.ts acts on.
       }
     } finally {
       unsubscribe();

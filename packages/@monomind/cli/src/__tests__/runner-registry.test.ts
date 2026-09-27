@@ -46,6 +46,7 @@ describe('version handshake (§2)', () => {
       capabilities: [
         'agent-exec',
         'agent-exec-full-access',
+        'agent-exec-settings',
         'agent-scan',
         'agent-scan-read-only',
         'org-json-v1',

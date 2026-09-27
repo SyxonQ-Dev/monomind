@@ -888,6 +888,98 @@ describe('agent exec: cancellation & limits', () => {
   });
 });
 
+// ─── coder mode: --settings (#356) ─────────────────────────────────────────
+
+describe('agent exec: --settings (#356)', () => {
+  it('forwards opts.settings to AgentRunArgs.settingSources', async () => {
+    const h = makeHarness({ runtime: 'claude', settings: ['user', 'project', 'local'] });
+    let seen: unknown;
+    const runner: AgentRunner = {
+      async *run(a) {
+        seen = a.settingSources;
+        yield { type: 'result', subtype: 'success' };
+      },
+    };
+    await run(h, runner);
+    expect(seen).toEqual(['user', 'project', 'local']);
+  });
+
+  it('emits a status NDJSON event for each status AgentMessage the runner yields', async () => {
+    const h = makeHarness({ runtime: 'claude', settings: ['project'] });
+    const code = await run(
+      h,
+      scriptedRunner([
+        { type: 'status', phase: 'initializing' },
+        {
+          type: 'status',
+          phase: 'ready',
+          mcp_servers: [{ name: 'monomind', status: 'connected' }],
+        },
+        { type: 'result', subtype: 'success' },
+      ]),
+    );
+    expect(code).toBe(0);
+    const statuses = byType(h, 'status');
+    expect(statuses).toEqual([
+      { v: 1, type: 'status', phase: 'initializing' },
+      {
+        v: 1,
+        type: 'status',
+        phase: 'ready',
+        mcp_servers: [{ name: 'monomind', status: 'connected' }],
+      },
+    ]);
+  });
+
+  it('startup watchdog: no status "ready" within --startup-timeout terminates with runner-error, exit 1', async () => {
+    const h = makeHarness({
+      runtime: 'claude',
+      settings: ['project'],
+      startupTimeoutMs: 20,
+      returnGraceMs: 20,
+    });
+    const runner: AgentRunner = {
+      async *run() {
+        yield { type: 'status', phase: 'initializing' };
+        await new Promise((r) => setTimeout(r, 10_000)); // wedged — never reports ready
+        yield { type: 'result', subtype: 'success' };
+      },
+    };
+    const code = await run(h, runner);
+    expect(code).toBe(1);
+    expect(
+      byType(h, 'error').some(
+        (e) =>
+          (e as { code?: string }).code === 'runner-error' &&
+          String((e as { message?: string }).message).includes('did not initialize'),
+      ),
+    ).toBe(true);
+    expect(byType(h, 'done')[0]).toMatchObject({ exit_code: 1 });
+  });
+
+  it('watchdog is disabled for a non-claude runtime even with --settings set (never spuriously fires)', async () => {
+    const h = makeHarness({ runtime: 'codex', settings: ['project'], startupTimeoutMs: 20 });
+    const runner: AgentRunner = {
+      async *run() {
+        // codex never emits `status`; if the watchdog were mistakenly
+        // enabled for a non-claude runtime, this would time out at 20ms.
+        await new Promise((r) => setTimeout(r, 60));
+        yield { type: 'result', subtype: 'success' };
+      },
+    };
+    const code = await run(h, runner);
+    expect(code).toBe(0);
+    expect(byType(h, 'error')).toHaveLength(0);
+  });
+
+  it('--settings none (default): no status events, no watchdog — unaffected', async () => {
+    const h = makeHarness({ runtime: 'claude' });
+    const code = await run(h, scriptedRunner([{ type: 'result', subtype: 'success' }]));
+    expect(code).toBe(0);
+    expect(byType(h, 'status')).toHaveLength(0);
+  });
+});
+
 // ─── JSON Schema → zod ──────────────────────────────────────────────────────
 
 describe('agent exec: jsonSchemaToZodShape', () => {
