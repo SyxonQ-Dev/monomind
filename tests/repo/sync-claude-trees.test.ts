@@ -166,6 +166,27 @@ describe('sync-claude-trees', () => {
     expect(syncTrees({ root, mirrors, check: true }).pairs[0].missing).toEqual([]);
   });
 
+  // `.agents/skills` and `.gemini/skills` hold whole copies of each skill: a
+  // file missing inside a skill they already hold is created (a split skill
+  // script's new module), a skill they do not hold is still never created.
+  it('a copyMissingInExistingDirs mirror gains files only inside directories it holds', () => {
+    const { root } = makeFixture();
+    write(root, 'src/skills/diverged/lib-part.mjs', 'export const part = 1;\n');
+    const mirrors = [
+      { source: 'src/skills', mirror: 'mirror/skills', copyMissingInExistingDirs: true },
+    ];
+
+    const check = syncTrees({ root, mirrors, check: true });
+    expect(check.pairs[0].missing).toEqual(['diverged/lib-part.mjs']);
+
+    const report = syncTrees({ root, mirrors });
+    expect(report.written).toContain('mirror/skills/diverged/lib-part.mjs');
+    expect(read(root, 'mirror/skills/diverged/lib-part.mjs')).toBe('export const part = 1;\n');
+    expect(() => read(root, 'mirror/skills/root-only/SKILL.md')).toThrow();
+    expect(read(root, 'mirror/skills/shipped-only/SKILL.md')).toBe('ships to npm users only\n');
+    expect(syncTrees({ root, mirrors, check: true }).pairs[0].missing).toEqual([]);
+  });
+
   it('the live repo is in its canonical form — this is what makes --check a usable guard', () => {
     expect(() =>
       execFileSync('node', [SCRIPT, '--check'], { encoding: 'utf8', cwd: REPO_ROOT }),

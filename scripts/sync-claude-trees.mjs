@@ -36,9 +36,12 @@
  *      never ship (`settings.local.json`, `mcp.json`, `worktrees/`). Its
  *      predecessor `sync-claude-assets.sh` had `rsync --delete` semantics,
  *      had to be hard-disabled in 2026-07 for exactly that reason, and is now
- *      deleted. The one exception is a mirror marked `copyMissing`
- *      (`.gemini/helpers`, a full install copy of `.claude/helpers`): a file
- *      missing from it is created. Nothing is ever deleted from any mirror.
+ *      deleted. The exceptions are a mirror marked `copyMissing`
+ *      (`.gemini/helpers`, a full install copy of `.claude/helpers`), where a
+ *      file missing from it is created, and one marked
+ *      `copyMissingInExistingDirs` (`.agents/skills`, `.gemini/skills`), where
+ *      a file missing inside a skill directory the mirror already holds is
+ *      created. Nothing is ever deleted from any mirror.
  *
  * WHEN TO RUN IT
  * --------------
@@ -86,8 +89,12 @@ const IGNORED_DIRS = new Set(['worktrees', 'checkpoints', 'node_modules', '.git'
  */
 const MIRRORS = [
   { source: '.claude', mirror: 'packages/@monomind/cli/.claude' },
-  { source: '.claude/skills', mirror: '.agents/skills' },
-  { source: '.claude/skills', mirror: '.gemini/skills' },
+  // Full copies of each skill they hold: a file missing inside a skill
+  // directory the mirror already has is created (a split skill script's new
+  // module would otherwise be missing there and break the copy at runtime).
+  // Skills the mirror does not hold are still never created.
+  { source: '.claude/skills', mirror: '.agents/skills', copyMissingInExistingDirs: true },
+  { source: '.claude/skills', mirror: '.gemini/skills', copyMissingInExistingDirs: true },
   { source: '.claude/skills', mirror: '.kimi-code/skills' },
   // init copies the whole helper tree into `.gemini/helpers` too (writeHelpers
   // in src/init/write-claude.ts), so this copy is a full mirror: files missing
@@ -135,7 +142,14 @@ function collectFiles(dir, base = dir, out = []) {
  * Compare one source/mirror pair on the intersection of their paths.
  * `diverged` lists mirror paths that do not hold the source content.
  */
-export function comparePair({ root, source, mirror, exceptions = [], copyMissing = false }) {
+export function comparePair({
+  root,
+  source,
+  mirror,
+  exceptions = [],
+  copyMissing = false,
+  copyMissingInExistingDirs = false,
+}) {
   const sourceDir = join(root, source);
   const mirrorDir = join(root, mirror);
   const excluded = new Set(exceptions);
@@ -143,11 +157,16 @@ export function comparePair({ root, source, mirror, exceptions = [], copyMissing
   const sourceFiles = new Set(collectFiles(sourceDir));
   const mirrorFiles = collectFiles(mirrorDir);
   const shared = mirrorFiles.filter((rel) => sourceFiles.has(rel));
-  // Only a copyMissing mirror is expected to hold every source file.
+  // A copyMissing mirror is expected to hold every source file; a
+  // copyMissingInExistingDirs mirror every source file under a top-level
+  // directory it already has.
   const inMirror = new Set(mirrorFiles);
-  const missing = copyMissing
-    ? [...sourceFiles].filter((rel) => !inMirror.has(rel) && !excluded.has(rel)).sort()
-    : [];
+  const heldDirs = new Set(mirrorFiles.map((rel) => rel.split('/')[0]));
+  const expected = (rel) =>
+    copyMissing || (copyMissingInExistingDirs && heldDirs.has(rel.split('/')[0]));
+  const missing = [...sourceFiles]
+    .filter((rel) => expected(rel) && !inMirror.has(rel) && !excluded.has(rel))
+    .sort();
 
   const diverged = [];
   for (const rel of shared) {
