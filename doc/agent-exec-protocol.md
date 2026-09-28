@@ -1,4 +1,4 @@
-# Agent Exec Protocol — v1 (rev 13)
+# Agent Exec Protocol — v1 (rev 14)
 
 - **Status**: Implemented (Phase 0 of the mono-agent delegation plan — see
   `mono-agent:docs/plans/local-agent-monomind-delegation.md`)
@@ -6,6 +6,10 @@
   the Coder mode threat model, the `--access full` guardrails (root refusal, no transitive
   escalation, env hygiene, audit log), what callers own, and residual risks (issue #360).
 - **Revision history**:
+  - rev 14 (2026-09-28): **runtime model lists** (issue #369) — new capability `agent-models`:
+    `monomind agent models --runtime <id> --json` (§12) prints the runtime's own model list —
+    Claude Code's `/model` picker via the Agent SDK's `supportedModels()` (no prompt sent),
+    `codex debug models`, `agy models`, `opencode models`. Additive only.
   - rev 13 (2026-09-28): **threat model + guardrails** (issue #360). `agent exec --access full`
     now appends one JSON line per turn to `~/.monomind/logs/agent-exec-full-access.log`
     (`MONOMIND_FULL_ACCESS_LOG` overrides), regardless of how the turn ended — `ts, cwd, runtime,
@@ -271,6 +275,7 @@
 | Org observe | `monomind org <cmd> --json` (§7) |
 | Org live tail | `monomind org events --ndjson` (§7.3) |
 | Workspace init | `monomind init --json` (§11) |
+| Runtime model list | `monomind agent models --runtime <id> --json` (§12) |
 
 `agent exec`, `agent scan`, and `agent test` join the **existing** `monomind agent` namespace
 (swarm lifecycle: `spawn/list/status/stop/metrics/pool/health`). The name `agent list` is taken
@@ -281,7 +286,7 @@ by swarm management and is NOT reused by this protocol — the installed-only vi
 
 ```
 $ monomind --version --json
-{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-exec-background-pids","agent-scan","agent-scan-read-only","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","org-role-full-access","doctor-json","doctor-read-only","doctor-offline","init-json"]}
+{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-exec-background-pids","agent-scan","agent-scan-read-only","agent-models","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","org-role-full-access","doctor-json","doctor-read-only","doctor-offline","init-json"]}
 ```
 
 Callers MUST handshake before use and fail with an actionable message (install/upgrade hint)
@@ -843,3 +848,36 @@ for or forcing a real turn. It never writes to `~/.claude.json`. `claude_project
 the JSON result reflects the filesystem truthfully either way — it is `true` exactly when that
 directory exists, regardless of how it got there (a prior real session, a prior
 `--register-claude-project` call, or this run's own).
+
+## 12. `monomind agent models --json` (capability `agent-models`, rev 14)
+
+`monomind agent models --runtime <id> --json` prints the models the runtime itself offers, so a
+caller does not keep a hand-written list that goes stale (issue #369). It spawns the runtime but
+never sends a prompt, so it costs no model call; it is separate from `agent scan` (§6), which
+stays read-only.
+
+```json
+{"v":1,"runtime":"claude","supported":true,"models":[
+  {"id":"default","resolved_id":"claude-opus-5-5","label":"Default (recommended)",
+   "description":"Opus 5.5 · Best for everyday, complex tasks","default":true,
+   "effort_levels":["low","medium","high","xhigh","max"]},
+  {"id":"sonnet","resolved_id":"claude-sonnet-5","label":"Sonnet","effort_levels":["low","medium","high"]}
+]}
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | What to pass as the runtime's model option (`agent exec --model`, a role's `model`) |
+| `resolved_id` | The concrete model an alias resolves to today (claude only; omitted when equal to `id`) |
+| `label`, `description` | Display text from the runtime |
+| `default` | `true` on the runtime's own default choice (claude's `default` entry) |
+| `effort_levels` | Supported reasoning-effort values, when the runtime reports them |
+
+Sources: `claude` — the Agent SDK's `query().supportedModels()`, the list Claude Code's `/model`
+picker shows for the signed-in account (it varies by account and plan); `codex` —
+`codex debug models`, only entries with `visibility: "list"`; `antigravity` — `agy models`;
+`opencode` — `opencode models`. Every other runtime has no listing command:
+`"supported": false, "models": []`, exit 0 — pass a model id its CLI accepts.
+
+Errors keep the same shape with `models: []` and an `error: {code, message}`: `unknown-runtime`
+(exit 2), `missing-binary` or `list-failed` (the command failed or timed out after 30s; exit 1).

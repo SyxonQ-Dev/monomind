@@ -7,6 +7,7 @@ import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { execCommand, scanCommand, testCommand } from './agent-exec.js';
 import { listCommand, spawnCommand, statusCommand, stopCommand } from './agent-lifecycle.js';
+import { modelsCommand } from './agent-models.js';
 import { healthCommand, metricsCommand, poolCommand } from './agent-ops.js';
 
 export const agentCommand: Command = {
@@ -22,6 +23,7 @@ export const agentCommand: Command = {
     healthCommand,
     execCommand,
     scanCommand,
+    modelsCommand,
     testCommand,
   ],
   options: [],
@@ -52,6 +54,7 @@ export const agentCommand: Command = {
       `${output.highlight('health')}        - Show agent health`,
       `${output.highlight('exec')}          - Run one agent turn via a local runner (NDJSON protocol)`,
       `${output.highlight('scan')}          - Detect installed agent runtimes`,
+      `${output.highlight('models')}        - List a runtime's available models`,
       `${output.highlight('test')}          - Smoke-test a runtime`,
     ]);
     output.writeln();

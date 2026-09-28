@@ -7,6 +7,7 @@ import {
   statusCommand,
   stopCommand,
 } from '../commands/agent-lifecycle.js';
+import { modelsCommand } from '../commands/agent-models.js';
 import { healthCommand, metricsCommand, poolCommand } from '../commands/agent-ops.js';
 import type { CommandContext } from '../types.js';
 
@@ -21,7 +22,7 @@ function makeCtx(overrides: Partial<CommandContext> = {}): CommandContext {
 }
 
 describe('agentCommand registration', () => {
-  it('registers all 10 documented subcommands, in the documented order', () => {
+  it('registers all 11 documented subcommands, in the documented order', () => {
     expect(agentCommand.name).toBe('agent');
     expect(agentCommand.subcommands?.map((c) => c.name)).toEqual([
       'spawn',
@@ -33,6 +34,7 @@ describe('agentCommand registration', () => {
       'health',
       'exec',
       'scan',
+      'models',
       'test',
     ]);
   });
@@ -51,7 +53,8 @@ describe('agentCommand registration', () => {
     expect(subs[6]).toBe(healthCommand);
     expect(subs[7]).toBe(execCommand);
     expect(subs[8]).toBe(scanCommand);
-    expect(subs[9]).toBe(testCommand);
+    expect(subs[9]).toBe(modelsCommand);
+    expect(subs[10]).toBe(testCommand);
   });
 
   it('has no top-level options and includes usage examples', () => {

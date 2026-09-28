@@ -41,7 +41,7 @@ function getVersion() {
   for (const p of walkCandidates) {
     try {
       const pkg = JSON.parse(fs.readFileSync(p, 'utf-8'));
-      if (pkg.version && (pkg.name === 'monomind' || pkg.name === '@monomind/cli' || (pkg.name || '').startsWith('@monomind'))) {
+      if (pkg.version && (pkg.name === 'monomind' || pkg.name === '@monomind/cli' || pkg.name === '@monoes/monomindcli' || (pkg.name || '').startsWith('@monomind'))) {
         return `v${pkg.version}`;
       }
     } catch { /* ignore */ }
@@ -55,10 +55,16 @@ function getVersion() {
   try {
     const { execSync } = require('child_process');
     const prefix = execSync('npm config get prefix', { encoding: 'utf-8', timeout: 2000 }).trim();
-    const prefixCandidates = [
-      path.join(prefix, 'node_modules', 'monomind', 'package.json'),      // Windows
-      path.join(prefix, 'lib', 'node_modules', 'monomind', 'package.json'), // macOS/Linux
-    ];
+    // #368: the CLI also ships as @monoes/monomindcli (installed on its own,
+    // or nested under the monomind umbrella).
+    const prefixCandidates = [];
+    for (const root of [path.join(prefix, 'node_modules'), path.join(prefix, 'lib', 'node_modules')]) { // Windows, macOS/Linux
+      prefixCandidates.push(
+        path.join(root, 'monomind', 'package.json'),
+        path.join(root, '@monoes', 'monomindcli', 'package.json'),
+        path.join(root, 'monomind', 'node_modules', '@monoes', 'monomindcli', 'package.json'),
+      );
+    }
     for (const p of prefixCandidates) {
       try {
         const pkg = JSON.parse(fs.readFileSync(p, 'utf-8'));
@@ -66,7 +72,14 @@ function getVersion() {
       } catch { /* try next candidate */ }
     }
   } catch { /* ignore */ }
-  return 'v1.0.6';
+  // 3. Ask the CLI itself (nvm/volta/pnpm layouts the paths above miss).
+  try {
+    const out = execSync('monomind --version', { encoding: 'utf-8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] });
+    const m = out.match(/v?(\d+\.\d+\.\d+[\w.-]*)/);
+    if (m) return `v${m[1]}`;
+  } catch { /* not on PATH */ }
+  // Unknown — show no version rather than a made-up one (#368).
+  return '';
 }
 const VERSION = getVersion();
 
@@ -1293,7 +1306,7 @@ function generateDashboard() {
   const monoswarmDot = monoswarm.coordinationActive ? `${x.green}● LIVE${x.reset}` : `${x.slate}○ IDLE${x.reset}`;
   const projName = getProjectName();
   const cwdName = path.basename(CWD);
-  let hdr = `${x.bold}${x.purple}▊Monomind ${VERSION}${x.reset} ${monoswarmDot} ${x.teal}${x.bold}${projName}${x.reset} ${DIV} ${x.dim}◎${cwdName}${x.reset} ${DIV} ${x.violet}⬡${git.name}${x.reset}`;
+  let hdr = `${x.bold}${x.purple}▊Monomind${VERSION ? ` ${VERSION}` : ''}${x.reset} ${monoswarmDot} ${x.teal}${x.bold}${projName}${x.reset} ${DIV} ${x.dim}◎${cwdName}${x.reset} ${DIV} ${x.violet}⬡${git.name}${x.reset}`;
 
   if (git.gitBranch) {
     hdr += ` ${DIV} ${x.sky}⎇${x.bold}${git.gitBranch}${x.reset}`;

@@ -22,6 +22,8 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *  - `agent-scan-read-only` — `agent scan` runs no runtime binary unless it is
  *    known to be side-effect free or `--probe` is given; entries carry
  *    `version_source` (§6, rev 11)
+ *  - `agent-models` — `monomind agent models --runtime <id> --json`: the
+ *    runtime's own model list (§12, issue #369)
  *  - `org-json-v1`  — `--json`/`--format json` output on org observe commands (§7)
  *  - `org-tool-providers` — role `tool_providers` (stdio MCP), `policy.approvalTools`,
  *    operator-authenticated `/api/xdeliver` and live `org inbox --format json`
@@ -74,6 +76,7 @@ export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec-background-pids',
   'agent-scan',
   'agent-scan-read-only',
+  'agent-models',
   'org-json-v1',
   'org-tool-providers',
   'org-decision-attribution',

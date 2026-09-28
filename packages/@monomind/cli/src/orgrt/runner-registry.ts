@@ -381,14 +381,14 @@ import { type InstallRecipe, installRecipe } from './runner-install-recipe.js';
 export { type InstallRecipe, installRecipe };
 
 /** Resolve a binary honoring the runner's `<X>_CLI_BIN` override. */
-function resolveBinary(spec: RunnerSpec, env: NodeJS.ProcessEnv): string | null {
+export function resolveBinary(spec: RunnerSpec, env: NodeJS.ProcessEnv): string | null {
   if (!spec.binary) return null;
   const overridden = spec.binEnv ? env[spec.binEnv] : undefined;
   return overridden?.trim() ? overridden : spec.binary;
 }
 
 /** Absolute binary path if findable on PATH (or the override if it exists). */
-function locateBinary(bin: string, env: NodeJS.ProcessEnv): string | null {
+export function locateBinary(bin: string, env: NodeJS.ProcessEnv): string | null {
   if (bin.includes('/')) {
     // Explicit path (env override or absolute) — must exist and be executable.
     try {

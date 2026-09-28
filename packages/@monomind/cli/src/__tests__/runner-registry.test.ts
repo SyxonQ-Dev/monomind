@@ -51,6 +51,7 @@ describe('version handshake (§2)', () => {
         'agent-exec-background-pids',
         'agent-scan',
         'agent-scan-read-only',
+        'agent-models',
         'org-json-v1',
         'org-tool-providers',
         'org-decision-attribution',

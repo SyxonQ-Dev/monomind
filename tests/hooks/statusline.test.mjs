@@ -4,6 +4,7 @@
  * controlled CWD into the module before each test group.
  */
 
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { createRequire } from 'node:module';
 import * as os from 'node:os';
@@ -57,11 +58,64 @@ describe('getVersion', () => {
   // source instead: both platform path shapes must be checked.
   it('checks both the Windows and macOS/Linux npm global package layouts in the prefix fallback', () => {
     const src = fs.readFileSync(SL_PATH, 'utf-8');
-    expect(src).toMatch(/path\.join\(prefix,\s*'node_modules',\s*'monomind',\s*'package\.json'\)/);
-    expect(src).toMatch(
-      /path\.join\(prefix,\s*'lib',\s*'node_modules',\s*'monomind',\s*'package\.json'\)/,
-    );
+    expect(src).toMatch(/path\.join\(root,\s*'monomind',\s*'package\.json'\)/);
+    expect(src).toMatch(/path\.join\(prefix,\s*'node_modules'\)/);
+    expect(src).toMatch(/path\.join\(prefix,\s*'lib',\s*'node_modules'\)/);
   });
+
+  // #368: a helper copied into a project (walk-up finds nothing) with only
+  // @monoes/monomindcli installed globally showed the 'v1.0.6' placeholder.
+  describe.skipIf(process.platform === 'win32')(
+    'in a project copy, resolved from the npm prefix',
+    () => {
+      function versionWith(layout) {
+        const helpers = path.join(tmpDir, 'proj', '.claude', 'helpers');
+        fs.mkdirSync(helpers, { recursive: true });
+        fs.copyFileSync(SL_PATH, path.join(helpers, 'statusline.cjs'));
+        fs.cpSync(path.join(path.dirname(SL_PATH), 'utils'), path.join(helpers, 'utils'), {
+          recursive: true,
+        });
+        const prefix = path.join(tmpDir, 'prefix');
+        if (layout) {
+          const pkgDir = path.join(prefix, 'lib', 'node_modules', ...layout);
+          fs.mkdirSync(pkgDir, { recursive: true });
+          fs.writeFileSync(
+            path.join(pkgDir, 'package.json'),
+            JSON.stringify({ name: layout.join('/'), version: '9.8.7' }),
+          );
+        }
+        // PATH holds only a fake npm (no monomind), so strategy 3 can't answer.
+        const bin = path.join(tmpDir, 'bin');
+        fs.mkdirSync(bin, { recursive: true });
+        fs.writeFileSync(path.join(bin, 'npm'), `#!/bin/sh\necho ${prefix}\n`, { mode: 0o755 });
+        const out = execFileSync(
+          process.execPath,
+          [
+            '-e',
+            'console.log(require(process.argv[1]).getVersion())',
+            path.join(helpers, 'statusline.cjs'),
+          ],
+          {
+            encoding: 'utf8',
+            env: { ...process.env, PATH: bin, CLAUDE_PROJECT_DIR: path.join(tmpDir, 'proj') },
+          },
+        );
+        return out.trim();
+      }
+
+      it('finds @monoes/monomindcli installed on its own', () => {
+        expect(versionWith(['@monoes', 'monomindcli'])).toBe('v9.8.7');
+      });
+
+      it('finds the CLI nested under the monomind umbrella', () => {
+        expect(versionWith(['monomind', 'node_modules', '@monoes', 'monomindcli'])).toBe('v9.8.7');
+      });
+
+      it('shows no version rather than a made-up one when nothing is found', () => {
+        expect(versionWith(null)).toBe('');
+      });
+    },
+  );
 });
 
 // ── readJSON ──────────────────────────────────────────────────────────────────

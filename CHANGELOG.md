@@ -4,8 +4,13 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Added
+
+- **`monomind agent models --runtime <id> --json`** ([#369](https://github.com/monoes/monomind/issues/369)) — a runtime's own model list, so callers stop keeping hand-written lists that go stale. `claude` comes from the Agent SDK's `supportedModels()` (Claude Code's `/model` picker for the signed-in account; no prompt is sent), `codex` from `codex debug models`, `antigravity` from `agy models`, `opencode` from `opencode models`; other runtimes report `supported: false`. Each entry has `id`, `label`, and where known `resolved_id`, `description`, `default` and `effort_levels`. New capability `agent-models` (protocol §12, rev 14).
+
 ### Fixed
 
+- **The statusline shows the installed version for a global `@monoes/monomindcli`** ([#368](https://github.com/monoes/monomind/issues/368)). A helper copied into a project only looked for a global `monomind` package and fell back to a made-up `v1.0.6`. It now also finds `@monoes/monomindcli` (on its own or nested under `monomind`), then asks `monomind --version`, and shows no version rather than a wrong one.
 - **A session in a set-up folder no longer starts another dashboard server every turn** ([#366](https://github.com/monoes/monomind/issues/366)). When another project's dashboard held the default port, the server `control-start` spawned for the project came up as a secondary and wrote `dashboard-token-<port>`, so the next session could not authenticate to it, judged it stale, and spawned another — one more `monomind ui` per turn. A server `control-start` spawns now always takes the project's primary pairing file, `control-start` also accepts a port's own token, and it finds a globally installed `monomind` instead of falling back to a slow `npx monomind@latest`.
 - **`agent exec --access full` no longer reports or kills monomind's own session-hook daemons** ([#366](https://github.com/monoes/monomind/issues/366)). The dashboard, helper self-heal, token tracker and monograph refresh spawns set `MONOMIND_EXEC_TREE` empty; a process carrying any other value than the turn's own has left its tree and is left out of `done.background_pids` and the cancel/timeout/budget kill.
 - **No `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warning on full-access turns** ([#366](https://github.com/monoes/monomind/issues/366)). Under `bypassPermissions` the SDK never calls `canUseTool`, so full access no longer passes one; the PreToolUse hook and the message stream still observe every call. A SIGTERM to monomind closes open `tool_activity` ids with `cancelled:true` before `done`, same as `cancel` (now covered by a test).
