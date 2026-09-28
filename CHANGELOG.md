@@ -4,6 +4,8 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+## [2.18.0] — 2026-09-28
+
 ### Added
 
 - **`monomind agent models --runtime <id> --json`** ([#369](https://github.com/monoes/monomind/issues/369)) — a runtime's own model list, so callers stop keeping hand-written lists that go stale. `claude` comes from the Agent SDK's `supportedModels()` (Claude Code's `/model` picker for the signed-in account; no prompt is sent), `codex` from `codex debug models`, `antigravity` from `agy models`, `opencode` from `opencode models`; other runtimes report `supported: false`. Each entry has `id`, `label`, and where known `resolved_id`, `description`, `default` and `effort_levels`. New capability `agent-models` (protocol §12, rev 14).
