@@ -1263,6 +1263,34 @@ describe('agent exec: tool_activity', () => {
       cancelled: true,
     });
   });
+
+  it('SIGTERM to monomind closes in-flight tool_activity before done too (#366)', async () => {
+    const h = makeHarness({ returnGraceMs: 50 });
+    const runner: AgentRunner = {
+      async *run() {
+        yield {
+          type: 'tool_use',
+          tool_use_id: 'toolu_term',
+          tool: 'Bash',
+          input: { command: 'sleep 100' },
+          parent_tool_use_id: null,
+        } as AgentMessage;
+        await new Promise((r) => setTimeout(r, 10_000));
+      },
+    };
+    const execDone = run(h, runner);
+    await new Promise((r) => setTimeout(r, 30));
+    process.emit('SIGTERM', 'SIGTERM');
+    expect(await execDone).toBe(130);
+    const types = h.events.map((e) => e.type);
+    expect(types.lastIndexOf('tool_activity')).toBeLessThan(types.indexOf('done'));
+    expect(byType(h, 'tool_activity')[1]).toMatchObject({
+      id: 'toolu_term',
+      phase: 'end',
+      ok: false,
+      cancelled: true,
+    });
+  });
 });
 
 // ─── #365: MONOMIND_AGENT_EXEC marker ──────────────────────────────────────

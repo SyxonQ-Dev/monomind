@@ -621,7 +621,7 @@ function _spawnQuickRefresh() {
   try {
     var child = require('child_process').spawn(
       process.execPath, [__filename, 'refresh-summary'],
-      { detached: true, stdio: 'ignore' },
+      { detached: true, stdio: 'ignore', env: Object.assign({}, process.env, { MONOMIND_EXEC_TREE: '' }) }, // #366: leave any agent exec tree
     );
     child.unref(); // must not hold the caller's event loop open
   } catch (_) { /* best effort */ }

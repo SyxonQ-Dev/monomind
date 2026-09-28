@@ -63,7 +63,7 @@
 
 import { type SpawnSyncReturns, spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
-import { pidsWithMarker } from './process-tree-marker.js';
+import { type MarkerScan, scanMarkers } from './process-tree-marker.js';
 
 export interface GroupMembersResult {
   /** Live pids in the leader's extended process tree (PPID descendants and
@@ -265,9 +265,9 @@ function trackedMembers(
   seenPids: ReadonlySet<number>,
   seenPgids: ReadonlySet<number>,
   table: ProcEntry[],
-  markerPids: number[],
+  markers: MarkerScan,
 ): number[] {
-  const result = new Set<number>([...groupClosure(leaderPid, table), ...markerPids]);
+  const result = new Set<number>([...groupClosure(leaderPid, table), ...markers.marked]);
   const byPgid = groupByPgid(table);
   for (const pgid of seenPgids) {
     const members = byPgid.get(pgid) ?? [];
@@ -275,7 +275,9 @@ function trackedMembers(
     for (const m of members) result.add(m.pid);
   }
   result.delete(leaderPid);
-  return [...result];
+  // #366: a process that carries another MONOMIND_EXEC_TREE value (a session
+  // hook's setup daemon sets it to '') has left this turn's tree.
+  return [...result].filter((pid) => !markers.foreign.has(pid));
 }
 
 /** One-shot signal to the tracked tree: the current closure (individually,
@@ -289,9 +291,10 @@ function signalTracked(
   seenPgids: ReadonlySet<number>,
   signal: NodeJS.Signals,
   table: ProcEntry[],
-  markerPids: number[],
+  markers: MarkerScan,
 ): void {
-  for (const pid of new Set([...groupClosure(leaderPid, table), ...markerPids])) {
+  for (const pid of new Set([...groupClosure(leaderPid, table), ...markers.marked])) {
+    if (markers.foreign.has(pid)) continue; // #366: left the tree
     try {
       process.kill(pid, signal);
     } catch {
@@ -307,12 +310,17 @@ function signalTracked(
   for (const pgid of seenPgids) {
     const members = byPgid.get(pgid) ?? [];
     if (!isTrustedPgid(pgid, leaderPid, seenPids, members)) continue;
-    try {
-      process.kill(-pgid, signal);
-    } catch {
-      /* group already gone */
+    // #366: never group-signal a group that holds a process which left the tree.
+    const mixed = members.some((m) => markers.foreign.has(m.pid));
+    if (!mixed) {
+      try {
+        process.kill(-pgid, signal);
+      } catch {
+        /* group already gone */
+      }
     }
     for (const m of members) {
+      if (markers.foreign.has(m.pid)) continue;
       try {
         process.kill(m.pid, signal);
       } catch {
@@ -371,7 +379,8 @@ export function trackDescendants(
   const plat = opts.plat ?? process.platform;
   const supported = plat !== 'win32';
   const intervalMs = opts.intervalMs ?? (plat === 'linux' ? 50 : 250);
-  const markerPids = () => (opts.marker ? pidsWithMarker(opts.marker, plat) : []);
+  const markers = (): MarkerScan =>
+    opts.marker ? scanMarkers(opts.marker, plat) : { marked: [], foreign: new Set() };
   const seenPids = new Set<number>([leaderPid]);
   const seenPgids = new Set<number>([leaderPid]);
   let timer: NodeJS.Timeout | undefined;
@@ -399,7 +408,7 @@ export function trackDescendants(
       if (!supported) return { pids: [], supported: false };
       const table = readTable(plat);
       return {
-        pids: trackedMembers(leaderPid, seenPids, seenPgids, table, markerPids()),
+        pids: trackedMembers(leaderPid, seenPids, seenPgids, table, markers()),
         supported: true,
       };
     },
@@ -409,7 +418,7 @@ export function trackDescendants(
         return;
       }
       const table = readTable(plat);
-      signalTracked(leaderPid, seenPids, seenPgids, signal, table, markerPids());
+      signalTracked(leaderPid, seenPids, seenPgids, signal, table, markers());
     },
     sampleNow(): void {
       if (supported) sampleOnce();

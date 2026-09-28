@@ -445,6 +445,18 @@ describe('ClaudeAgentRunner: --access full SDK options', () => {
     expect({ ...fullRest, permissionMode: scoped.permissionMode }).toEqual(scoped);
   });
 
+  it('full passes no canUseTool to the SDK (shadowed under bypass, #366) but keeps the PreToolUse gate', async () => {
+    const canUseTool = async (_t: string, input: Record<string, unknown>) => ({
+      behavior: 'allow' as const,
+      updatedInput: input,
+    });
+    const full = await captureOptions({ access: 'full', canUseTool });
+    expect(full.canUseTool).toBeUndefined();
+    expect(full.hooks?.PreToolUse?.length).toBeGreaterThan(0);
+    const scoped = await captureOptions({ access: 'scoped', canUseTool });
+    expect(typeof scoped.canUseTool).toBe('function');
+  });
+
   it('scoped mode never gets spawnClaudeCodeProcess when no authorityMask is set', async () => {
     const scoped = await captureOptions({ access: 'scoped' });
     expect('spawnClaudeCodeProcess' in scoped).toBe(false);

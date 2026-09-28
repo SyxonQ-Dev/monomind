@@ -226,10 +226,14 @@ export class ClaudeAgentRunner implements AgentRunner {
         // #289: the SDK hands the permission gate this call's own tool_use id;
         // forward it so the invocation event can be correlated with the
         // tool_result event that later reports how the call ended.
-        canUseTool: gate
-          ? (toolName: string, input: Record<string, unknown>, opts?: { toolUseID?: string }) =>
-              gate.canUseTool(toolName, input, { toolUseId: opts?.toolUseID })
-          : undefined,
+        // #366: under bypassPermissions the SDK never calls canUseTool (it
+        // only warns that it is shadowed); the PreToolUse hook below still
+        // sees every call, so full access passes none.
+        canUseTool:
+          gate && args.access !== 'full'
+            ? (toolName: string, input: Record<string, unknown>, opts?: { toolUseID?: string }) =>
+                gate.canUseTool(toolName, input, { toolUseId: opts?.toolUseID })
+            : undefined,
         abortController,
         ...(args.claudeRestrictions?.sandbox ? { sandbox: args.claudeRestrictions.sandbox } : {}),
         ...(args.claudeRestrictions?.disallowedTools?.length

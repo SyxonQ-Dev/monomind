@@ -204,7 +204,9 @@ are never mistaken for oversights:
 - **Background jobs that hide from the process-tree kill** (#359): cancel/`--timeout`/budget kill
   every process that inherited the turn's `MONOMIND_EXEC_TREE` env marker or was sampled under
   the `claude` process, and a normal end reports survivors in `done.background_pids`. A job that
-  clears its own environment and whose launching shell exited between samples can escape both;
+  clears its own environment and whose launching shell exited between samples can escape both,
+  as can one that sets `MONOMIND_EXEC_TREE` to another value (how monomind's own hook daemons
+  opt out, #366);
   so can one that deliberately detaches under another user or service manager. Full access is
   not a sandbox.
 - **Agent-context detection for `org role set-access … full` is a speed bump** (#365): an agent

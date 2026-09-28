@@ -23,43 +23,64 @@ import { readdirSync, readFileSync } from 'node:fs';
 
 export const EXEC_TREE_ENV = 'MONOMIND_EXEC_TREE';
 
-/** Pids whose environment carries `EXEC_TREE_ENV=<token>`, excluding this
- *  process. Best effort: unreadable entries are skipped, never fatal. */
-export function pidsWithMarker(token: string, plat: NodeJS.Platform = process.platform): number[] {
-  if (plat === 'win32' || !token) return [];
+export interface MarkerScan {
+  /** Pids whose environment carries `EXEC_TREE_ENV=<token>`. */
+  marked: number[];
+  /** Pids that carry `EXEC_TREE_ENV` with any OTHER value (`''` included):
+   *  setup daemons a session hook started (#366) or another turn's tree.
+   *  They have left this turn's tree — never killed or reported by it. */
+  foreign: Set<number>;
+}
+
+/** One pass over the process table for `token`, excluding this process.
+ *  Best effort: unreadable entries are skipped, never fatal. */
+export function scanMarkers(token: string, plat: NodeJS.Platform = process.platform): MarkerScan {
+  const scan: MarkerScan = { marked: [], foreign: new Set() };
+  if (plat === 'win32' || !token) return scan;
   const needle = `${EXEC_TREE_ENV}=${token}`;
-  const pids: number[] = [];
+  const classify = (pid: number, vars: string[]) => {
+    const own = vars.find((v) => v.startsWith(`${EXEC_TREE_ENV}=`));
+    if (own === undefined) return;
+    if (own === needle) scan.marked.push(pid);
+    else scan.foreign.add(pid);
+  };
   if (plat === 'linux') {
     let entries: string[];
     try {
       entries = readdirSync('/proc');
     } catch {
-      return pids;
+      return scan;
     }
     for (const name of entries) {
       if (!/^\d+$/.test(name)) continue;
       const pid = Number(name);
       if (pid === process.pid) continue;
       try {
-        const env = readFileSync(`/proc/${pid}/environ`, 'latin1');
-        if (env.split('\0').includes(needle)) pids.push(pid);
+        classify(pid, readFileSync(`/proc/${pid}/environ`, 'latin1').split('\0'));
       } catch {
         /* other user's process, or exited mid-scan */
       }
     }
-    return pids;
+    return scan;
   }
   // macOS/BSD: `ps -E` appends each own process's environment to its command.
   try {
     const res = spawnSync('ps', ['-E', '-ww', '-axo', 'pid=,command='], { encoding: 'utf8' });
-    if (res.status !== 0 || !res.stdout) return pids;
+    if (res.status !== 0 || !res.stdout) return scan;
     for (const line of res.stdout.split('\n')) {
-      if (!line.includes(needle)) continue;
+      if (!line.includes(`${EXEC_TREE_ENV}=`)) continue;
       const pid = Number(line.trim().split(/\s+/)[0]);
-      if (Number.isInteger(pid) && pid > 1 && pid !== process.pid) pids.push(pid);
+      if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) continue;
+      classify(pid, line.split(/\s+/));
     }
   } catch {
     /* ps missing — nothing found */
   }
-  return pids;
+  return scan;
+}
+
+/** Pids whose environment carries `EXEC_TREE_ENV=<token>`, excluding this
+ *  process. */
+export function pidsWithMarker(token: string, plat: NodeJS.Platform = process.platform): number[] {
+  return scanMarkers(token, plat).marked;
 }

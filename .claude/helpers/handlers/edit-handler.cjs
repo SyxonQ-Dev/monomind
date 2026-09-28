@@ -121,7 +121,7 @@ module.exports = {
           var uaEnrichScript = path.join(CWD, 'scripts', 'ua-enrich.mjs');
           if (fs.existsSync(uaEnrichScript)) {
             var uaChild = spawnRebuild(process.execPath, [uaEnrichScript, '--dir', CWD, '--file', editedFile2, '--db', path.join(CWD, '.monomind', 'monograph.db')], {
-              detached: true, stdio: 'ignore', cwd: CWD,
+              detached: true, stdio: 'ignore', cwd: CWD, env: Object.assign({}, process.env, { MONOMIND_EXEC_TREE: '' }), // #366
             });
             uaChild.unref();
           }

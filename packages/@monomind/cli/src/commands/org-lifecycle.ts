@@ -162,9 +162,17 @@ export const statusAction = async (ctx: CommandContext): Promise<CommandResult> 
       : existsSync(orgDir)
         ? listOrgConfigFiles(orgDir).map((f) => f.replace(/\.json$/, ''))
         : [];
+    // #365 (capability `org-role-full-access`): every policy.access 'full'
+    // role's resolved access/access_state, from config — present whether or
+    // not the org has run (#367: a stopped org is when a human reviews and
+    // grants). Omitted (not an empty array) when the org declares none.
+    const rolesAccess = (t: string) => {
+      const accessRoles = fullAccessRoles(ctx.cwd, t);
+      return accessRoles.length ? { roles_access: accessRoles } : {};
+    };
     const readState = (t: string) => {
       const rt = join(orgDir, t, 'runtime.json');
-      if (!existsSync(rt)) return { name: t, status: 'never run' };
+      if (!existsSync(rt)) return { name: t, status: 'never run', ...rolesAccess(t) };
       try {
         const st = JSON.parse(readFileSync(rt, 'utf8')) as {
           status?: string;
@@ -181,7 +189,6 @@ export const statusAction = async (ctx: CommandContext): Promise<CommandResult> 
         if (status === 'running' || status === 'crashed') {
           if (classifyRun(ctx.cwd, t, st).state === 'crashed') status = 'crashed';
         }
-        const accessRoles = fullAccessRoles(ctx.cwd, t);
         return {
           name: t,
           status,
@@ -195,14 +202,10 @@ export const statusAction = async (ctx: CommandContext): Promise<CommandResult> 
           memory_error: st.memoryError,
           // #296: when the idle watchdog will stop a running org, or why it won't.
           ...(status === 'running' ? readIdleStatus(ctx.cwd, t, st.run) : {}),
-          // #365 (capability `org-role-full-access`): every policy.access
-          // 'full' role's resolved access/access_state. Omitted (not an
-          // empty array) when the org declares none, so this adds nothing
-          // to the payload for the common case.
-          ...(accessRoles.length ? { roles_access: accessRoles } : {}),
+          ...rolesAccess(t),
         };
       } catch {
-        return { name: t, status: 'unreadable-runtime' };
+        return { name: t, status: 'unreadable-runtime', ...rolesAccess(t) };
       }
     };
     const items = targets.map(readState);

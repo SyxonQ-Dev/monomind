@@ -573,6 +573,7 @@ function _maybeRebuildMonograph() {
             detached: true,
             stdio: 'ignore',
             cwd: CWD,
+            env: Object.assign({}, process.env, { MONOMIND_EXEC_TREE: '' }), // #366: leave any agent exec tree
           });
           child.unref();
         }

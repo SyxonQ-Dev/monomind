@@ -340,10 +340,11 @@ function startRebuild(projectDir, opts) {
   if (resolved) {
     child = spawn(process.execPath,
       ['--input-type=module', '--eval', _childScript(projectDir, resolved, cleanup, opts.vacuum)],
-      { detached: true, stdio: ['ignore', logFd, logFd], cwd: projectDir });
+      { detached: true, stdio: ['ignore', logFd, logFd], cwd: projectDir, env: Object.assign({}, process.env, { MONOMIND_EXEC_TREE: '' }) });
   } else {
     child = spawn(bin, ['monograph', 'build', '--path', projectDir], {
       detached: true, stdio: ['ignore', logFd, logFd], cwd: projectDir,
+      env: Object.assign({}, process.env, { MONOMIND_EXEC_TREE: '' }), // #366: leave any agent exec tree
       shell: process.platform === 'win32',
     });
   }

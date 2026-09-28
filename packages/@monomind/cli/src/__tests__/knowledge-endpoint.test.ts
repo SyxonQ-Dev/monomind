@@ -53,6 +53,7 @@ let globalBrainDir = '';
 let serverA: ChildProcess | null = null;
 let serverB: ChildProcess | null = null;
 let serverC: ChildProcess | null = null;
+let serverD: ChildProcess | null = null;
 
 /** Mirror of memory-bridge projectDataDir() so afterAll can remove the
  *  temp project's isolated store. Keep in sync with memory-bridge.ts. */
@@ -83,11 +84,11 @@ function childEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-function spawnServer(port: number): ChildProcess {
+function spawnServer(port: number, extraEnv: Record<string, string> = {}): ChildProcess {
   // The server self-reports its ACTUAL bound port here (identity-proof:
   // bindServer silently falls back to port+1..+10 on EADDRINUSE, and an HTTP
   // probe can't tell our server from a foreign occupant of the fixed port).
-  const env = childEnv();
+  const env = { ...childEnv(), ...extraEnv };
   env.MONOMIND_BOUND_REPORT = path.join(tmpDir, `bound-${port}.json`);
   // stderr goes to a per-port log — when a pairing file never lands the log
   // is the only way to tell a slow start from a crashed server.
@@ -224,7 +225,7 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(() => {
-  for (const c of [serverA, serverB, serverC]) {
+  for (const c of [serverA, serverB, serverC, serverD]) {
     try {
       c?.kill('SIGKILL');
     } catch {
@@ -360,5 +361,36 @@ describe('dashboard-token pairing guard (secondary instances)', () => {
 
     expect(readPairing()).toBe(primaryBefore);
     expect(readPairing(`dashboard-token-${PORT_C}`)).toMatch(/^[0-9a-f]{32,}$/);
+  }, 60_000);
+
+  // #366: control-start's optimistic control.json names the default port,
+  // which another project's server may answer — the server control-start
+  // spawned for THIS project must still take the primary pairing file, or
+  // every session judges it stale and spawns another. Runs last: it
+  // deliberately replaces the primary pairing.
+  it('a server control-start spawned as the primary writes dashboard-token even when control.json names a live server', async () => {
+    const PORT_D = await freePort();
+    fs.writeFileSync(
+      path.join(tmpDir, '.monomind', 'control.json'),
+      JSON.stringify({
+        pid: serverA?.pid,
+        port: PORT_A,
+        url: `http://localhost:${PORT_A}`,
+        startedAt: new Date().toISOString(),
+      }),
+    );
+    const primaryBefore = readPairing();
+    serverD = spawnServer(PORT_D, { MONOMIND_CONTROL_PRIMARY: '1' });
+    await waitForBind(PORT_D);
+    await waitForServer(PORT_D);
+    const deadline = Date.now() + 20000;
+    while (readPairing() === primaryBefore && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const pairing = readPairing();
+    expect(pairing).not.toBe(primaryBefore);
+    expect(fs.existsSync(path.join(tmpDir, '.monomind', `dashboard-token-${PORT_D}`))).toBe(false);
+    const res = await search(PORT_D, pairing, { query: 'sanity check on the new primary' });
+    expect(res.status).toBe(200);
   }, 60_000);
 });

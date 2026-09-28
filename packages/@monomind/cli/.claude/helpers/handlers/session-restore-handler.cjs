@@ -207,7 +207,8 @@ module.exports = {
                 cwd: CWD,
                 detached: true,
                 stdio: 'ignore',
-                env: process.env,
+                // #366: setup, not agent work — leave any agent exec turn's tree.
+                env: Object.assign({}, process.env, { MONOMIND_EXEC_TREE: '' }),
                 shell: process.platform === 'win32',
                 windowsHide: true,
               });

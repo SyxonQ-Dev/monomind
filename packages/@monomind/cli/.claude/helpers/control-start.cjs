@@ -75,6 +75,9 @@ function findCliPath() {
       globalCandidates.push(
         path.join(npmRoot, 'monomind', 'packages', '@monomind', 'cli', 'dist', 'src', 'ui', 'server.mjs'),
         path.join(npmRoot, '@monoes', 'monomindcli', 'dist', 'src', 'ui', 'server.mjs'),
+        // `npm i -g monomind` nests the CLI package under monomind itself (#366:
+        // without this every project fell back to a slow `npx monomind@latest`).
+        path.join(npmRoot, 'monomind', 'node_modules', '@monoes', 'monomindcli', 'dist', 'src', 'ui', 'server.mjs'),
         path.join(npmRoot, 'monomind', 'packages', '@monomind', 'cli', 'bin', 'cli.js'),
         path.join(npmRoot, '@monoes', 'monomindcli', 'bin', 'cli.js'),
       );
@@ -93,10 +96,18 @@ function findCliPath() {
   return { cmd: npxCmd, args: ['monomind@latest'], usePort: false };
 }
 
-function readAuthCredential() {
-  try {
-    return fs.readFileSync(path.join(CWD, '.monomind', 'dashboard-token'), 'utf-8').trim();
-  } catch { return ''; }
+function readAuthCredential(port) {
+  // #366: a server that came up as a secondary writes dashboard-token-<port>.
+  // Prefer that port's own token so a session recognizes the server it
+  // recorded instead of treating it as stale and spawning another.
+  const names = port ? [`dashboard-token-${port}`, 'dashboard-token'] : ['dashboard-token'];
+  for (const name of names) {
+    try {
+      const v = fs.readFileSync(path.join(CWD, '.monomind', name), 'utf-8').trim();
+      if (v) return v;
+    } catch { /* try the next one */ }
+  }
+  return '';
 }
 
 // Resolves to the parsed /api/status body, 'unauthorized' if a server answered
@@ -112,7 +123,7 @@ function readAuthCredential() {
 // the pairing.
 function probeStatus(p) {
   const http = require('http');
-  const cred = readAuthCredential();
+  const cred = readAuthCredential(p);
   return new Promise((resolve) => {
     const req = http.get({
       hostname: 'localhost', port: p, path: '/api/status', timeout: 1000,
@@ -465,7 +476,18 @@ async function main() {
     detached: true,
     stdio: 'ignore',
     cwd: CWD,
-    env: { ...process.env, CLAUDE_PROJECT_DIR: CWD, MONOMIND_BOUND_REPORT: BOUND_REPORT },
+    // #366: MONOMIND_CONTROL_PRIMARY — this is the project's own server, so it
+    // writes dashboard-token even when another project answers on the default
+    // port. MONOMIND_EXEC_TREE='' — the dashboard is shared setup, not work an
+    // `agent exec` turn started, so it leaves that turn's tree (never reported
+    // in done.background_pids or killed on cancel).
+    env: {
+      ...process.env,
+      CLAUDE_PROJECT_DIR: CWD,
+      MONOMIND_BOUND_REPORT: BOUND_REPORT,
+      MONOMIND_CONTROL_PRIMARY: '1',
+      MONOMIND_EXEC_TREE: '',
+    },
     // Windows cannot exec a .cmd/.bat file directly — without shell:true,
     // spawning the npx.cmd fallback throws EINVAL synchronously.
     shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(cmd),
@@ -502,6 +524,7 @@ async function main() {
       MONOMIND_CONTROL_CONFIRM_PORT: String(DEFAULT_PORT),
       MONOMIND_CONTROL_CONFIRM_REPORT: BOUND_REPORT,
       MONOMIND_CONTROL_CONFIRM_NPX: isNpxFallback ? '1' : '0',
+      MONOMIND_EXEC_TREE: '',
     },
   });
   confirmChild.unref();

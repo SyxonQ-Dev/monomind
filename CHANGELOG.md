@@ -4,6 +4,13 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A session in a set-up folder no longer starts another dashboard server every turn** ([#366](https://github.com/monoes/monomind/issues/366)). When another project's dashboard held the default port, the server `control-start` spawned for the project came up as a secondary and wrote `dashboard-token-<port>`, so the next session could not authenticate to it, judged it stale, and spawned another — one more `monomind ui` per turn. A server `control-start` spawns now always takes the project's primary pairing file, `control-start` also accepts a port's own token, and it finds a globally installed `monomind` instead of falling back to a slow `npx monomind@latest`.
+- **`agent exec --access full` no longer reports or kills monomind's own session-hook daemons** ([#366](https://github.com/monoes/monomind/issues/366)). The dashboard, helper self-heal, token tracker and monograph refresh spawns set `MONOMIND_EXEC_TREE` empty; a process carrying any other value than the turn's own has left its tree and is left out of `done.background_pids` and the cancel/timeout/budget kill.
+- **No `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warning on full-access turns** ([#366](https://github.com/monoes/monomind/issues/366)). Under `bypassPermissions` the SDK never calls `canUseTool`, so full access no longer passes one; the PreToolUse hook and the message stream still observe every call. A SIGTERM to monomind closes open `tool_activity` ids with `cancelled:true` before `done`, same as `cancel` (now covered by a test).
+- **`org status --format json` reports `roles_access` for an org that has never run** ([#367](https://github.com/monoes/monomind/issues/367)), so a stopped org's full-access grants (active, never acknowledged, suspended, unattended-blocked) can be reviewed before it starts.
+
 ## [2.17.0] — 2026-09-28
 
 ### Added

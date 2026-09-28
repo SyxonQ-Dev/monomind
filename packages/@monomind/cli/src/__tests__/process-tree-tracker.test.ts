@@ -195,4 +195,50 @@ describe('trackDescendants: continuous sampling reaches a job whose launching sh
     },
     10_000,
   );
+
+  it.skipIf(process.platform === 'win32')(
+    '(e) a process that left the tree (MONOMIND_EXEC_TREE set to another value, #366) is never reported or killed',
+    async () => {
+      const token = randomUUID();
+      const findByArg = (arg: string): number[] =>
+        spawnSync('pgrep', ['-f', `^sleep ${arg}$`], { encoding: 'utf8' })
+          .stdout.split('\n')
+          .filter(Boolean)
+          .map(Number);
+      // A hook-style setup daemon (env marker cleared) and a real background
+      // job, both started from nested setsid shells that stay long enough for
+      // the sampler to record them.
+      const leader = spawn(
+        'sh',
+        [
+          '-c',
+          "MONOMIND_EXEC_TREE= setsid sh -c 'sleep 1366 & sleep 0.3' & setsid sh -c 'sleep 1367 & sleep 0.3' & sleep 0.4",
+        ],
+        { detached: true, stdio: 'ignore', env: { ...process.env, [EXEC_TREE_ENV]: token } },
+      );
+      const leaderPid = leader.pid as number;
+      leader.unref();
+      const tracker = trackDescendants(leaderPid, { intervalMs: 20, marker: token });
+      try {
+        await waitFor(
+          () => findByArg('1366').length === 1 && findByArg('1367').length === 1,
+          5_000,
+        );
+        const [daemon] = findByArg('1366');
+        const [job] = findByArg('1367');
+        spawnedPids = [daemon, job];
+        await waitFor(() => !isAlive(leaderPid), 5_000);
+        await new Promise((r) => setTimeout(r, 400)); // nested shells exit too
+        const { pids } = tracker.liveMembers();
+        expect(pids).toContain(job);
+        expect(pids).not.toContain(daemon);
+        tracker.signal('SIGKILL');
+        await waitFor(() => !isAlive(job), 5_000);
+        expect(isAlive(daemon)).toBe(true);
+      } finally {
+        tracker.stop();
+      }
+    },
+    10_000,
+  );
 });

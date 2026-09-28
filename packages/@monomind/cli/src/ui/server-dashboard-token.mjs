@@ -7,6 +7,14 @@ import path from 'node:path';
 // after this moved out of startServer's own closure.
 function createDashboardTokenManager({ projectDir, dashboardAuthValue }) {
   const tokenState = { path: null };
+  // #366: control-start spawns a server only as THIS project's primary (it
+  // passes MONOMIND_CONTROL_PRIMARY=1). Its own optimistic control.json names
+  // the default port, which another project's server may answer, so the check
+  // below would wrongly make it a secondary — the project's dashboard-token
+  // then never matched and every session spawned another. Read once and drop
+  // it, so nothing this server starts inherits it.
+  const spawnedAsPrimary = process.env.MONOMIND_CONTROL_PRIMARY === '1';
+  delete process.env.MONOMIND_CONTROL_PRIMARY;
   async function writeDashboardToken(actualPort) {
     try {
       actualPort = Number(actualPort);
@@ -23,6 +31,7 @@ function createDashboardTokenManager({ projectDir, dashboardAuthValue }) {
         const ctl = JSON.parse(fs.readFileSync(path.join(authFileDir, 'control.json'), 'utf8'));
         const ctlPort = Number(ctl.port || (String(ctl.url || '').match(/:(\d+)/) || [])[1]);
         if (
+          !spawnedAsPrimary &&
           ctlPort &&
           ctlPort !== actualPort &&
           !(Number.isInteger(ctl.pid) && ctl.pid === process.pid)
