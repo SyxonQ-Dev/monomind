@@ -4,6 +4,11 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`monograph watch` no longer waits on a dead build that only looked alive** ([#370](https://github.com/monoes/monomind/issues/370)). The build lock held just a pid, and a pid only means something inside its own pid namespace: sandboxed tools give every command a fresh namespace with small, reused pids, so a killed sandboxed build left "pid 47" and the next sandbox found an unrelated pid 47 alive — every rebuild was deferred for up to 30 minutes. The lock now records its pid namespace and boot id: a lock from another boot is taken over at once, and one from another namespace once its 30-second heartbeat has been silent for 2 minutes.
+- **`monograph` no longer prints git's own errors in a repo with no commits** ([#371](https://github.com/monoes/monomind/issues/371)). `git rev-parse HEAD` (and the `git log`/`git status`/`git diff` probes) inherited the terminal's stderr, so `fatal: ambiguous argument 'HEAD'` showed up during `monograph watch` even though the failure was already handled as "freshness unknown".
+
 ## [2.18.0] — 2026-09-28
 
 ### Added

@@ -63,7 +63,7 @@ export function computeHotspots(
     try {
       gitOutput = execSync(
         `git log --since="${windowDays} days ago" --name-only --pretty=format:"%ci" -- .`,
-        { cwd: projectDir, maxBuffer: 10 * 1024 * 1024 },
+        { cwd: projectDir, maxBuffer: 10 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }, // #371
       ).toString();
       gitLogCache.set(cacheKey, { output: gitOutput, ts: now });
     } catch {

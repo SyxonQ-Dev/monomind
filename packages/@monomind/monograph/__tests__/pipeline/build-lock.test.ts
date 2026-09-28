@@ -5,7 +5,16 @@
  * exits or is killed mid-build must not block the next build.
  */
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { uptime } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -139,3 +148,39 @@ describe('acquireBuildLock (#340)', () => {
     }, 20000);
   }
 });
+
+// #370: sandboxed tools give each command its own pid namespace with small,
+// reused pids — a lock left by a killed sandboxed build named "pid 47", and in
+// the next sandbox an unrelated process was pid 47, so the lock looked live.
+describe.skipIf(process.platform !== 'linux')('acquireBuildLock across pid namespaces and boots (#370)', () => {
+  const ownNs = readlinkSync('/proc/self/ns/pid');
+  const ownBoot = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+  const foreignNs = 'pid:[4026599999]';
+  const ago = (ms: number) => new Date(Date.now() - ms);
+
+  it('records its pid namespace and boot id', () => {
+    const lock = acquireBuildLock(dbPath);
+    expect(readFileSync(lockPath, 'utf8').split('\n').slice(2, 4)).toEqual([ownNs, ownBoot]);
+    if (lock.acquired) lock.release();
+  });
+
+  it('takes over a lock from another namespace once its heartbeat is silent, even if that pid is alive here', () => {
+    const child = liveChild(); // the "pid 47" that is alive in OUR namespace
+    writeFileSync(lockPath, `${child.pid}\n${Date.now() - 600_000}\n${foreignNs}\n${ownBoot}\n`);
+    utimesSync(lockPath, ago(3 * 60_000), ago(3 * 60_000));
+    expect(acquireBuildLock(dbPath).acquired).toBe(true);
+  });
+
+  it('respects a lock from another namespace while its heartbeat is fresh', () => {
+    writeFileSync(lockPath, `${deadPid()}\n${Date.now()}\n${foreignNs}\n${ownBoot}\n`);
+    const lock = acquireBuildLock(dbPath);
+    expect(lock.acquired).toBe(false);
+  });
+
+  it('takes over a lock written in another boot even when its pid is alive', () => {
+    const child = liveChild();
+    writeFileSync(lockPath, `${child.pid}\n${Date.now()}\n${ownNs}\n00000000-0000-0000-0000-000000000000\n`);
+    expect(acquireBuildLock(dbPath).acquired).toBe(true);
+  });
+});
+

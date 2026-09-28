@@ -132,7 +132,9 @@ export async function analyzeChurn(
   pruneChurnCache(cacheDir);
   let treeHash = '';
   try {
-    treeHash = execSync('git rev-parse HEAD', { cwd: root }).toString().trim();
+    treeHash = execSync('git rev-parse HEAD', { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim();
     const cacheFile = join(cacheDir, `churn-${treeHash}-${sinceDuration.days}-${dateBucket}.json`);
     if (existsSync(cacheFile)) {
       try {
@@ -156,6 +158,7 @@ export async function analyzeChurn(
     logOutput = execSync(`git log --after="${sinceDateStr}" --name-only --format="%ae|%ai"`, {
       cwd: root,
       maxBuffer: 50 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'], // #371: git's own error (no commits yet) stays off the console
     }).toString();
   } catch {
     return { files: [], authorPool: [], since: sinceDuration };

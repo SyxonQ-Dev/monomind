@@ -1,4 +1,12 @@
-import { mkdirSync, readFileSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  statSync,
+  unlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { uptime } from 'node:os';
 import { dirname } from 'node:path';
 
@@ -13,8 +21,27 @@ import { dirname } from 'node:path';
 // nobody has refreshed it for STALE_AFTER_MS (#340). The holder touches it
 // every HEARTBEAT_MS whenever the build yields the event loop, so a long build
 // is not taken over for its age alone.
+//
+// #370: lines 3 and 4 hold the holder's pid namespace and boot id. A pid only
+// means something inside its own pid namespace — sandboxed tools (bwrap
+// --unshare-pid) give every command a fresh one with tiny, reused pids, so a
+// killed sandboxed build left "pid 47", and in the next sandbox some other
+// process was pid 47. A lock from another boot is stale; one from another
+// namespace can't be checked by pid, so it is stale once its heartbeat has
+// been silent for FOREIGN_STALE_AFTER_MS.
 const HEARTBEAT_MS = 30_000;
 const STALE_AFTER_MS = 30 * 60_000;
+const FOREIGN_STALE_AFTER_MS = 4 * HEARTBEAT_MS;
+
+function readIdentity(file: string, link: boolean): string {
+  try {
+    return (link ? readlinkSync(file) : readFileSync(file, 'utf8')).trim();
+  } catch {
+    return ''; // no /proc (macOS, Windows): unknown, compared as equal
+  }
+}
+const ownPidNamespace = readIdentity('/proc/self/ns/pid', true);
+const ownBootId = readIdentity('/proc/sys/kernel/random/boot_id', false);
 
 export interface BuildLockHolder {
   pid: number;
@@ -33,13 +60,16 @@ interface LockFile {
   raw: string;
   mtimeMs: number;
   holder: BuildLockHolder;
+  /** '' when the writer could not tell, or predates #370. */
+  pidNamespace: string;
+  bootId: string;
 }
 
 function readLockFile(lockPath: string): LockFile | null {
   try {
     const raw = readFileSync(lockPath, 'utf8');
     const { mtimeMs } = statSync(lockPath);
-    const [pidLine = '', startedLine = ''] = raw.split('\n');
+    const [pidLine = '', startedLine = '', nsLine = '', bootLine = ''] = raw.split('\n');
     const startedAt = Number.parseInt(startedLine, 10);
     return {
       raw,
@@ -49,6 +79,8 @@ function readLockFile(lockPath: string): LockFile | null {
         startedAt: Number.isFinite(startedAt) ? startedAt : mtimeMs,
         lockPath,
       },
+      pidNamespace: nsLine.trim(),
+      bootId: bootLine.trim(),
     };
   } catch {
     return null;
@@ -67,6 +99,10 @@ function isPidAlive(pid: number): boolean {
 }
 
 function isStale(lock: LockFile): boolean {
+  if (lock.bootId && ownBootId && lock.bootId !== ownBootId) return true;
+  if (lock.pidNamespace && ownPidNamespace && lock.pidNamespace !== ownPidNamespace) {
+    return Date.now() - lock.mtimeMs > FOREIGN_STALE_AFTER_MS;
+  }
   if (!isPidAlive(lock.holder.pid)) return true;
   const bootedAt = Date.now() - uptime() * 1000;
   return lock.mtimeMs < bootedAt || Date.now() - lock.mtimeMs > STALE_AFTER_MS;
@@ -93,7 +129,7 @@ export function describeBuildLockHolder(holder: BuildLockHolder): string {
 export function acquireBuildLock(dbPath: string): BuildLock {
   const lockPath = buildLockPath(dbPath);
   mkdirSync(dirname(lockPath), { recursive: true });
-  const content = `${process.pid}\n${Date.now()}\n`;
+  const content = `${process.pid}\n${Date.now()}\n${ownPidNamespace}\n${ownBootId}\n`;
   const tryCreate = (): boolean => {
     try {
       writeFileSync(lockPath, content, { flag: 'wx' });

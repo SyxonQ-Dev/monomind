@@ -38,7 +38,12 @@ import { DEFAULT_OPTIONS } from './types.js';
 
 function getCurrentCommitHash(repoPath: string): string | null {
   try {
-    return execSync('git rev-parse HEAD', { cwd: repoPath, encoding: 'utf8' }).trim();
+    // #371: an unborn HEAD (no commits yet) is expected — keep git's error off the console.
+    return execSync('git rev-parse HEAD', {
+      cwd: repoPath,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
   } catch {
     return null;
   }

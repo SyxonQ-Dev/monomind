@@ -11,7 +11,11 @@ export function validateGitRef(ref: string): void {
 
 export function resolveGitToplevel(cwd: string): string {
   try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8' }).trim();
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
   } catch {
     return cwd;
   }
@@ -31,7 +35,11 @@ export function collectGitPaths(root: string, since?: string): string[] {
     } else {
       args = ['ls-files'];
     }
-    const output = execFileSync('git', args, { cwd: root, encoding: 'utf8' });
+    const output = execFileSync('git', args, {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }); // #371
     return output
       .split('\n')
       .map((l) => l.trim())

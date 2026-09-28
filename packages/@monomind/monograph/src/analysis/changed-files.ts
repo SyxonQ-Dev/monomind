@@ -37,6 +37,7 @@ export async function getChangedFiles(root: string, sinceRef: string): Promise<S
     output = execFileSync('git', ['diff', '--name-only', '-z', sinceRef, 'HEAD'], {
       cwd: root,
       encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'], // #371: stderr lands in the error message below, not the console
     });
   } catch (err) {
     throw new ChangedFilesError(

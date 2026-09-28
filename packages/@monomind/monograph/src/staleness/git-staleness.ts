@@ -121,6 +121,7 @@ function checkDirtyWorktree(repoPath: string): DirtyWorktree {
       cwd: repoPath,
       encoding: 'utf8',
       maxBuffer: 8 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'], // #371
     });
     // Porcelain v1 lines are `XY <path>`; ignored files are excluded by default.
     const paths = out
@@ -216,7 +217,12 @@ export function checkStaleness(db: MonographDb, repoPath: string): StalenessRepo
   // 1. Current HEAD (full SHA — `--short` output length varies by repo size)
   let currentCommit: string | null = null;
   try {
-    currentCommit = execSync('git rev-parse HEAD', { cwd: repoPath, encoding: 'utf8' }).trim();
+    // #371: keep git's own error (unborn HEAD, not a repo) off the console.
+    currentCommit = execSync('git rev-parse HEAD', {
+      cwd: repoPath,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
   } catch {
     // Not a git repo, no git binary, or a broken checkout. Nothing is known
     // about freshness here — `unknown`, never `fresh`.
