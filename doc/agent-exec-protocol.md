@@ -299,7 +299,10 @@ as the leader of a SEPARATE process group and kills that whole group on `cancel`
 not just the CLI process, so callers should NOT assume a group-kill of monomind alone is
 sufficient for those; background jobs are explicitly in scope of this guidance, and a survivor
 left running after a normal `end_turn` is reported via `done.background_pids` (§3.2), not
-silently leaked.
+silently leaked. To stop a full-access turn, send a `cancel` frame (with `--tools stdio`, even
+when no tools are declared) or SIGTERM/SIGINT to monomind, and allow at least 6s before any
+SIGKILL: monomind kills the agent's tree itself (SIGTERM, then SIGKILL after 5s). A SIGKILL sent
+straight to monomind or its group never reaches the agent CLI, which is in its own group.
 
 stdout is reserved **exclusively** for NDJSON events (§3.2). All diagnostics, warnings, and
 progress go to stderr. A caller must be able to `JSON.parse` every stdout line.
@@ -434,6 +437,7 @@ Rules:
   runners are bounded by `--max-turns` instead. Hitting either cap yields
   `result.stop_reason="tool_round_cap"` / `"max_turns"` (machine-readable, §3.2).
 - Caller may send `{"v":1,"type":"cancel"}` on stdin at any time to request cancellation
+  (`--tools stdio` is enough; no tools need to be declared)
   (best-effort; monomind SIGTERMs the agent child, emits `error {code:"cancelled"}` + `done`,
   exit 130). A `cancel` does not need a pending `tool_call`.
 - **stdin EOF**: if the caller closes stdin while `tool_call`s are pending, each pending call is

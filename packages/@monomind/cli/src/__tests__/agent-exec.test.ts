@@ -892,6 +892,22 @@ describe('agent exec: cancellation & limits', () => {
     expect(byType(h, 'done')[0]).toMatchObject({ exit_code: 130 });
   });
 
+  it('--tools stdio with no tools declared still honors a cancel frame', async () => {
+    const h = makeHarness({ stdioFrames: true, returnGraceMs: 50 });
+    const runner: AgentRunner = {
+      async *run() {
+        yield { type: 'assistant', text: 'working' };
+        await new Promise((r) => setTimeout(r, 10_000)); // a long native tool call
+        yield { type: 'result', subtype: 'success' };
+      },
+    };
+    const execDone = run(h, runner);
+    await new Promise((r) => setTimeout(r, 30));
+    h.stdin.write(`${JSON.stringify({ v: 1, type: 'cancel' })}\n`);
+    expect(await execDone).toBe(130);
+    expect(byType(h, 'done')[0]).toMatchObject({ exit_code: 130 });
+  });
+
   it('overall timeout terminates the turn: error timeout + exit 124', async () => {
     const h = makeHarness({ timeoutMs: 80, returnGraceMs: 50 });
     const runner: AgentRunner = {

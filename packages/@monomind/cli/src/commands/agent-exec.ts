@@ -218,6 +218,7 @@ export async function runExec(
     budgetUsd: ctx.flags['budget-usd'] !== undefined ? Number(ctx.flags['budget-usd']) : undefined,
     env,
     toolSpecs: toolSpecs.length ? toolSpecs : null,
+    stdioFrames: toolsMode === 'stdio',
     allowBashPrefixes: parseBashPrefixesFlag(ctx.flags['allow-bash-prefix']),
     settings: parsedSettings.sources,
     startupTimeoutMs,

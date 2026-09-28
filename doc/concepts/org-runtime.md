@@ -430,7 +430,12 @@ design:**
    chat turn with no org role of its own). Any one of these refuses the grant — exit non-zero, "run
    this yourself in a terminal" — regardless of `--yes-i-understand` or a TTY. Outside an agent
    context, a `full` grant still needs an interactive confirmation or `--yes-i-understand`. `scoped`
-   is exempt from this check (a downgrade is always safe).
+   is exempt from this check (a downgrade is always safe). This check stops a well-behaved or
+   prefix-limited agent; it is not the security boundary — an agent with unrestricted Bash can
+   unset env vars (`env -u …`). The boundary is step 3: a role's sandbox or authority mask
+   overlays the operator directory with an empty tmpfs, so a grant written from inside a role is
+   signed with a throwaway key and never verifies. An agent with unrestricted, unsandboxed Bash
+   already has the user's own power and needs no grant.
 3. **The grant is signed, not just hashed — `hash` alone is public and recomputable.** Anything
    that can write the org JSON (a mono-agent chat org-design tool, an agent with file access to
    `.monomind/orgs`, a hand-crafted import) could recompute the SAME `access_ack.hash` — it is a
@@ -486,7 +491,10 @@ design:**
    ingest untrusted input reaching the full-access role via `reports_to` is an error too, unless
    the org names the path in `run_config.accept_full_access_taint` (`["scraper→builder"]` or the
    full arrow-joined path), which downgrades it to a visible warning — and that acceptance list is
-   itself covered by the ack hash, so editing it also requires re-acknowledging.
+   itself covered by the ack hash, so editing it also requires re-acknowledging. The same errors
+   are checked again at every session start: a tainted role runs **scoped**, `'suspended'`
+   ("tainted"), even if nobody ran `org validate` — another role gaining untrusted input after
+   the grant doesn't change this role's ack hash.
 8. **Visibility**: `org status`/`org status --json` (`roles_access`, capability
    `org-role-full-access` — see `doc/agent-exec-protocol.md` §7.2) show `access` and
    `access_state` for every role that declares `access: 'full'`.

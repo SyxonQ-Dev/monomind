@@ -12,6 +12,7 @@
 
 import { computeAccessAckHash } from './access-ack.js';
 import { readFullAccessGrantKey, verifyAccessAckSignature } from './access-grant-key.js';
+import { fullAccessTaintFindings } from './access-taint.js';
 import { runnerSpec } from './runner-registry.js';
 import type { OrgDef, OrgRole } from './types.js';
 
@@ -113,6 +114,20 @@ export function resolveRoleAccess(
       state: 'suspended',
       reason:
         'role or org config changed since the access grant (config-changed) — re-acknowledge with `monomind org role set-access <org> <role> full`',
+    };
+  }
+
+  // #365 "enforced by org validate / at start": a taint error (this role
+  // reads untrusted input, or is reachable from a role that does without an
+  // accepted path) also blocks it at runtime — another role's config can
+  // change after the grant without touching this role's ack hash.
+  const taint = fullAccessTaintFindings(def).errors.find((e) => e.startsWith(`role ${role.id}:`));
+  if (taint) {
+    return {
+      access: 'scoped',
+      declared: 'full',
+      state: 'suspended',
+      reason: `untrusted-input path into this role (tainted) — ${taint.slice(`role ${role.id}: `.length)}`,
     };
   }
 

@@ -35,6 +35,9 @@ export interface AgentExecOptions {
   env?: Record<string, string>;
   /** null/[] = no caller-side tools. Non-empty enables the stdio bridge. */
   toolSpecs?: ToolSpec[] | null;
+  /** `--tools stdio`: read caller frames (`cancel`) on stdin even when no
+   *  tools are declared. */
+  stdioFrames?: boolean;
   /** Injectable runner for tests; production resolves via resolveExecRunner. */
   runnerOverride?: AgentRunner;
   /** Event sink — the command layer writes each object as one NDJSON line. */

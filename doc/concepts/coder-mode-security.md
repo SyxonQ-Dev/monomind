@@ -207,6 +207,16 @@ are never mistaken for oversights:
   clears its own environment and whose launching shell exited between samples can escape both;
   so can one that deliberately detaches under another user or service manager. Full access is
   not a sandbox.
+- **Agent-context detection for `org role set-access … full` is a speed bump** (#365): an agent
+  with unrestricted Bash can unset the env markers. The boundary is the operator directory: a
+  role's SDK sandbox (`denyRead`) or authority mask (`--tmpfs`) overlays it with an empty tmpfs,
+  so the grant key can be neither read nor replaced from inside a role (verified live: writes
+  "succeed" into the overlay and never reach disk), and a grant signed there never verifies. If
+  bubblewrap is unavailable, the mask fails open with an `authority-mask-unavailable` audit event.
+- **`init --project --if-missing` follows a symlinked directory inside the project** (e.g. a
+  cloned repo's `.claude` pointing elsewhere): new files can land where the link points. It never
+  overwrites an existing file and runs with the user's own permissions; symlinked `.claude`
+  directories are a common, legitimate setup, so this is accepted.
 
 ## 5. Security review of this diff (#360 acceptance criterion)
 

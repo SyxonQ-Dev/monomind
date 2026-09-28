@@ -175,7 +175,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
   });
 
   bridge =
-    toolSpecs && toolSpecs.length > 0
+    (toolSpecs && toolSpecs.length > 0) || opts.stdioFrames
       ? new StdioToolBridge(opts.stdin ?? process.stdin, opts.toolTimeoutMs, safeEmit, () =>
           terminate('cancelled', 130),
         )

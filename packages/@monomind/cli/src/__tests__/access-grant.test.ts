@@ -153,6 +153,23 @@ describe('resolveRoleAccess', () => {
     expect(r).toEqual({ access: 'full', declared: 'full', state: 'active' });
   });
 
+  it('another role gaining untrusted input after the grant suspends it at runtime (tainted)', () => {
+    const d = ackedDef({
+      roles: [
+        { id: 'builder', runtime: 'claude', policy: { access: 'full' } },
+        { id: 'scout', runtime: 'claude', reports_to: 'builder' },
+      ],
+    });
+    expect(resolve(d, d.roles[0]).access).toBe('full');
+    // Edits only scout, so builder's own ack hash still matches.
+    d.roles[1].policy = { ...d.roles[1].policy, webAllow: ['example.com'] } as OrgRole['policy'];
+    const r = resolve(d, d.roles[0]);
+    expect(r.access).toBe('scoped');
+    expect(r.state).toBe('suspended');
+    expect(r.reason).toMatch(/tainted/);
+    expect(r.reason).toMatch(/scout/);
+  });
+
   it('isUnattendedRun: false with no schedule, true with one', () => {
     expect(isUnattendedRun(OrgDefSchema.parse({ name: 'o', roles: [{ id: 'a' }] }))).toBe(false);
     expect(

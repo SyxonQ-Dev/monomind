@@ -40,7 +40,7 @@ export function appendFullAccessAudit(
 ): void {
   try {
     const file = fullAccessAuditLogPath(env);
-    mkdirSync(dirname(file), { recursive: true });
+    mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
     appendFileSync(file, `${JSON.stringify(record)}\n`, { mode: 0o600 });
   } catch {
     /* best effort — never fail the turn over the audit line */
