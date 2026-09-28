@@ -139,20 +139,28 @@ describe('a fresh profile store, through the real bridge', () => {
     expect(own[0].provenance?.title).toBe('video title');
     expect(own[0].provenance?.capturedAt).toBe('2026-09-28T15:00:13.563Z');
 
-    // Isolation: A's capture is invisible from B, global and the project…
+    // Isolation: nothing from A's capture comes back from B, global or the
+    // project, and the reverse. Asserted per hit rather than as "no results":
+    // with an embedding model loaded and minScore 0, a store's OWN documents
+    // come back as weak neighbours of any query, which is not a leak.
+    const leaks = async (query: string, scope: string, foreignDir: string) => {
+      const found = await hits(query, scope);
+      for (const h of found) expect(h.scope, scope).toBe(scope);
+      return found.filter((h) => h.filePath.startsWith(foreignDir));
+    };
     for (const scope of [`profile:${B}`, 'global', 'shared']) {
-      expect(await hits('quokkatron', scope), scope).toHaveLength(0);
+      expect(await leaks('quokkatron', scope, VIDEO), scope).toEqual([]);
     }
-    // …and B's from A, global and the project.
     expect((await hits('zebrafrond', `profile:${B}`)).length).toBeGreaterThan(0);
     for (const scope of [`profile:${A}`, 'global', 'shared']) {
-      expect(await hits('zebrafrond', scope), scope).toHaveLength(0);
+      expect(await leaks('zebrafrond', scope, ZEBRA), scope).toEqual([]);
     }
 
     const viaMcp = await mcp('knowledge_search', { query: 'quokkatron', scope: `profile:${A}` });
     expect(viaMcp.count).toBeGreaterThan(0);
-    const leaked = await mcp('knowledge_search', { query: 'zebrafrond', scope: `profile:${A}` });
-    expect(leaked.count).toBe(0);
+    const fromA = await mcp('knowledge_search', { query: 'zebrafrond', scope: `profile:${A}` });
+    const results = (fromA.results ?? []) as Array<{ filePath?: string }>;
+    expect(results.filter((r) => r.filePath?.startsWith(ZEBRA))).toEqual([]);
   });
 
   it('cite, lookup and related resolve against the profile store given the project root', async () => {
