@@ -7,7 +7,7 @@ import type { AgentMessage, AgentRunArgs, AgentRunner } from './agent-runner-typ
 import { killOnAbort } from './agent-runner-types.js';
 import { maskedCommand } from './authority-mask.js';
 import { coverEveryToolCall, POLICY_HOOK_TIMEOUT_S } from './policy-hook.js';
-import { signalGroup } from './process-tree.js';
+import { type DescendantTracker, trackDescendants } from './process-tree.js';
 import { omitAnthropicManagedKeys } from './provider.js';
 import { toolInputSchema } from './tool-fence.js';
 import { toolResultSpillHook } from './tool-spill.js';
@@ -73,20 +73,24 @@ export class ClaudeAgentRunner implements AgentRunner {
     });
     // #359: the ladder above only stops the SDK's in-process loop from
     // issuing further turns — it never touches an already-running child
-    // process. Full access additionally needs the whole process GROUP
+    // process. Full access additionally needs the whole process TREE
     // killed on cancel/timeout/budget (agent-exec.ts's terminate(), or
     // session.ts's silent-stream abort for a future full-access org role,
     // #365): reuses killOnAbort's own SIGTERM-then-SIGKILL-after-5s ladder,
-    // targeted at the group (`fullAccessPid`, set once `fullAccessClaudeSpawn`
-    // spawns the child below) instead of a single process. No-op for scoped
-    // mode: `fullAccessPid` is never set there.
-    let fullAccessPid: number | undefined;
+    // targeted at `tracker` (set once `fullAccessClaudeSpawn` spawns the
+    // child below) instead of a single process. `tracker` has been
+    // continuously sampling the tree since spawn (process-tree.ts's
+    // `trackDescendants`) — a single point-in-time closure isn't enough
+    // against the real Claude Code CLI: it was live-verified to spawn each
+    // Bash-tool shell call as the leader of its OWN process group, whose
+    // job a background command started can outlive by minutes, long after
+    // that shell (and the PPID edge to it) is gone. No-op for scoped mode:
+    // `tracker` is never set there.
+    let tracker: DescendantTracker | undefined;
     const unsubscribeGroup =
       args.access === 'full'
         ? killOnAbort(args.signal, {
-            kill: (signal) => {
-              if (fullAccessPid !== undefined) signalGroup(fullAccessPid, signal ?? 'SIGTERM');
-            },
+            kill: (signal) => tracker?.signal(signal ?? 'SIGTERM'),
           })
         : () => {};
 
@@ -229,8 +233,11 @@ export class ClaudeAgentRunner implements AgentRunner {
         ...(args.access === 'full'
           ? {
               spawnClaudeCodeProcess: fullAccessClaudeSpawn(args.authorityMask ?? [], (pid) => {
-                fullAccessPid = pid;
-                args.onProcessSpawned?.({ pid });
+                tracker = trackDescendants(pid);
+                args.onProcessSpawned?.({
+                  pid,
+                  getBackgroundSurvivors: () => tracker!.liveMembers(),
+                });
               }),
             }
           : args.authorityMask?.length
@@ -319,6 +326,17 @@ export class ClaudeAgentRunner implements AgentRunner {
           // invoked are observable.
           for (const b of m.message?.content ?? []) {
             if (b?.type === 'tool_use' && typeof b.id === 'string') {
+              // #359: a native tool call (Bash included) can spawn and its
+              // shell exit again well inside a relaxed sampling interval —
+              // an immediate sample right as the call starts, PLUS
+              // switching the tracker into its fast burst cadence for as
+              // long as any call is in flight (dropped back to the base
+              // rate once pendingToolCalls empties out again, in the
+              // tool_result branch below), gives it the best chance of
+              // still catching a shell that lives only a few ms. No-op for
+              // scoped mode (`tracker` unset there).
+              tracker?.sampleNow();
+              if (pendingToolCalls.size === 0) tracker?.setBurstMode(true);
               pendingToolCalls.set(b.id, { tool: String(b.name ?? ''), startedAt: Date.now() });
               // #357: the raw call, up front, for agent-exec.ts's
               // tool_activity events — gated behind streamPartials like
@@ -385,9 +403,13 @@ export class ClaudeAgentRunner implements AgentRunner {
           // agent's later prose about it at face value.
           for (const b of m.message?.content ?? []) {
             if (b?.type !== 'tool_result') continue;
+            tracker?.sampleNow(); // #359: bracket the call on its result too — see the tool_use side above
             const id = typeof b.tool_use_id === 'string' ? b.tool_use_id : undefined;
             const started = id ? pendingToolCalls.get(id) : undefined;
             if (id) pendingToolCalls.delete(id);
+            // #359: back to the relaxed base rate once nothing is in
+            // flight — a long-lived survivor doesn't need fast sampling.
+            if (pendingToolCalls.size === 0) tracker?.setBurstMode(false);
             yield {
               type: 'tool_result',
               session_id,
@@ -410,6 +432,11 @@ export class ClaudeAgentRunner implements AgentRunner {
     } finally {
       unsubscribe();
       unsubscribeGroup();
+      // #359: stop sampling once the turn ends (normally or via abort) —
+      // `signal()`/`liveMembers()` keep working against whatever was
+      // already recorded, so a delayed SIGKILL from the ladder above still
+      // reaches everything the tracker saw before this ran.
+      tracker?.stop();
     }
   }
 }

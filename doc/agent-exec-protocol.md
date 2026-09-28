@@ -183,36 +183,52 @@
     processes via its Bash tool (a dev server, `sleep 600 &`, a watcher); `agent exec` now
     spawns the `claude` CLI as the leader of its OWN process group instead of joining
     monomind's, so `cancel`, `--timeout`, and `--budget-usd` SIGTERM the WHOLE tree (not just
-    the CLI process) and SIGKILL it after a 5s grace if anything survives. A plain group
-    signal alone was live-verified INSUFFICIENT against the real, installed Claude Code CLI: it
-    spawns each Bash-tool shell invocation as the leader of its OWN, separate process group
-    (not a member of the top `claude` process's group), so `orgrt/process-tree.ts` computes a
-    fixed-point closure over PPID **and** PGID edges instead — this reaches a nested group
-    (the Bash tool's own shell and everything it starts) while it's still live, and a plain
-    reparented orphan (immediate parent already exited; a group, unlike a PPID chain, survives
-    that) via a single algorithm (`groupClosure`, see its module doc for the live-verified
-    process tree that motivated it). The closure is computed BEFORE any signal is sent — kill-
-    then-read would sever the very PPID edge needed to find a nested group once the leader
-    dies. On a NORMAL `end_turn`, survivors are left running (the common "start the dev
-    server, test it next turn" flow) but now reported: `done` gains
-    `background_pids: number[]`, the closure's live members at that moment. **Known v1
-    limitation** (live-verified, not merely theoretical): if the Bash tool's own shell for a
-    given call has ALREADY exited by the time a normal end_turn is checked — the common case
-    for "background it and return immediately" — the PPID edge to its nested group is gone and
-    that group's id was never recorded, so a survivor can go unreported; a fully robust fix
-    needs polling the tree throughout the turn (deferred, not attempted here). The KILL path is
-    not affected by this gap: cancel/timeout/budget react promptly, while the CLI's own shell
-    for the in-flight call is still alive and its PPID edge intact. Implemented in the RUNNER
-    layer (`ClaudeAgentRunner`/`agent-runner-claude-fullaccess.ts`), so a future full-access org
-    role (#365) inherits the same protection automatically — nothing org-runtime-specific was
-    added. Scoped mode's SDK options are unaffected (proven by an updated SDK-options
-    snapshot test in `agent-runner.test.ts`). Windows: process-GROUP semantics don't exist
-    there; the kill side falls back to `taskkill /T` (best-effort, tree- not group-based) and
-    `background_pids` discovery is unsupported for v1 (the field is omitted, never fabricated
-    as an empty list) — a documented gap, not a crash. §3's caller guidance is extended: a
-    caller SHOULD also run monomind in its own process group and kill the group on Stop, and
-    background jobs (§3.2's `background_pids`) are explicitly in scope of that guidance, not
-    just the agent-CLI grandchild.
+    the CLI process) and SIGKILL it after a 5s grace if anything survives.
+    A single point-in-time group/closure check was live-verified INSUFFICIENT against the
+    real, installed Claude Code CLI, in two ways: (1) it spawns each Bash-tool shell
+    invocation as the leader of its OWN, separate process group, not a member of the top
+    `claude` process's group; (2) that shell, and a background job's own launching chain
+    generally, frequently exits within milliseconds of starting the job — by the time
+    anything checks, the PPID edge to it is gone and its process-group id was never recorded
+    anywhere. `orgrt/process-tree.ts`'s `trackDescendants` fixes both: for the whole lifetime
+    of a full-access turn it SAMPLES the process tree — a relaxed 50ms base rate, switching to
+    a 4ms burst rate for as long as any native tool call is in flight (`agent-runner-
+    claude.ts` drives this off the SDK's own tool_use/tool_result events) — and accumulates
+    every pid and process-group id ever seen under the leader into a running set. A recorded
+    process-group id remains signalable/discoverable via `kill(-pgid, …)` long after its own
+    leader has exited, so `signal()`/`liveMembers()` can still reach a job whose entire
+    launching chain is gone, PROVIDED at least one sample caught it (or its chain) while still
+    connected. Samples are always taken BEFORE any signal is sent — kill-then-read would sever
+    the very PPID edge needed to discover a nested group once the leader dies. On a NORMAL
+    `end_turn`, survivors are left running (the common "start the dev server, test it next
+    turn" flow) but now reported: `done` gains `background_pids: number[]`, the tracker's live
+    members at that moment — a job discovered while its shell was live and then reparented
+    away is still included, unlike a plain snapshot.
+    **Residual v1 limitation** (live-verified against the installed CLI, not merely
+    theoretical): a background job whose ENTIRE launching chain — potentially several
+    forked hops deep — completes and exits within a few milliseconds, faster than even the
+    4ms burst rate reliably samples, can still go undiscovered on both the kill and the
+    report paths; this was observed in practice for some `nohup cmd &`-style one-shot Bash
+    calls completing in as little as ~40-50ms end to end. It was NOT observed for a job whose
+    chain stays connected for even a few hundred ms (the common case for anything that isn't
+    an artificially fast round trip), nor once discovered while connected — reparenting and
+    process-group changes afterward do not lose it (live-verified: a job caught during a
+    ~2s-connected window was still found and killed by a `--timeout` firing 6+ seconds later,
+    well after its launching shell had exited and it had been reparented to init). Polling
+    faster still narrows but cannot close this gap outright — it is an inherent limit of
+    userspace sampling against OS scheduling speed, not a bug in the sampling logic itself; a
+    fully deterministic fix would need an event-based mechanism (e.g. eBPF/ptrace process-
+    creation hooks) outside this change's scope. Implemented in the RUNNER layer
+    (`ClaudeAgentRunner`/`agent-runner-claude-fullaccess.ts`/`process-tree.ts`), so a future
+    full-access org role (#365) inherits the same protection automatically. Scoped mode's SDK
+    options are unaffected (proven by an updated SDK-options snapshot test in
+    `agent-runner.test.ts`). Windows: process-GROUP semantics don't exist there; the kill side
+    falls back to `taskkill /T` (best-effort, tree- not group-based) and `background_pids`
+    discovery is unsupported for v1 (the field is omitted, never fabricated as an empty list)
+    — a documented gap, not a crash. §3's caller guidance is extended: a caller SHOULD also run
+    monomind in its own process group and kill the group on Stop, and background jobs (§3.2's
+    `background_pids`) are explicitly in scope of that guidance, not just the agent-CLI
+    grandchild.
 - **Stability**: Versioned. Frames and events carry `"v": 1`. Breaking changes bump `v` and are
   announced via the capability handshake (§2).
 - **Purpose**: Expose monomind's `AgentRunner` engine (14 local agent CLI runners) and org
@@ -312,7 +328,7 @@ done`. On failure: `start → … → error → done`.
 | `usage` | `v, input_tokens, output_tokens, cost_usd` | Per-round delta (cumulative→delta conversion handled inside monomind) |
 | `result` | `v, subtype ("success"\|"error"), is_error, text, stop_reason, input_tokens, output_tokens, cost_usd` | Aggregate final result; **rev 7**: `text` is the complete final assistant text — the joined `assistant` texts for a `streams_incrementally` runtime, the last `assistant` message otherwise (omitted only if the turn produced none); `stop_reason`: `end_turn` \| `max_turns` \| `tool_round_cap` \| `cancelled` \| `timeout`. **rev 4**: `tool_round_cap` is detected best-effort — it matches the runner's tool-round-cap assistant note; a fence runner that stops without the note yields `end_turn` |
 | `error` | `v, code, message, fatal (bool)` | Codes in §3.4. `fatal:true` = auth/quota class — callers must not retry |
-| `done` | `v, exit_code, background_pids?` | Terminal event. Always emitted exactly once, even on error. **rev 13**, capability `agent-exec-background-pids`: `background_pids` (only for `--access full`, only after a NORMAL `end_turn` — never on `cancel`/`--timeout`/`--budget-usd`, which already kill the whole tree, §3) lists pids still alive in the agent-CLI's extended process tree (PPID descendants and nested process groups, see `orgrt/process-tree.ts`) at that moment — e.g. a `sleep 600 &` the turn started and left running on purpose. A survivor whose launching shell has ALREADY exited by check time can go unreported (known v1 limitation, §3's rev 13 note — the kill path is unaffected). Omitted (not an empty array) when access is `scoped`, or on a platform where discovery isn't supported (win32, v1) |
+| `done` | `v, exit_code, background_pids?` | Terminal event. Always emitted exactly once, even on error. **rev 13**, capability `agent-exec-background-pids`: `background_pids` (only for `--access full`, only after a NORMAL `end_turn` — never on `cancel`/`--timeout`/`--budget-usd`, which already kill the whole tree, §3) lists pids the turn's process-tree tracker (`orgrt/process-tree.ts`'s `trackDescendants`, sampling continuously since spawn) found still alive at that moment — e.g. a `sleep 600 &` the turn started and left running on purpose, including one reparented after its launching shell exited. A survivor whose ENTIRE launching chain completed and exited within a few milliseconds (faster than even the fast burst sampling rate) can still go unreported (residual v1 limitation, §3's rev 13 note — the kill path is far less exposed to this, since it fires promptly while a call is typically still in flight). Omitted (not an empty array) when access is `scoped`, or on a platform where discovery isn't supported (win32, v1) |
 
 Exit codes: `0` success (result.subtype=success) · `1` agent/runner error · `2` usage/protocol
 error (bad flags, unknown runtime, missing binary) · `124` `--timeout` expired · `130` cancelled

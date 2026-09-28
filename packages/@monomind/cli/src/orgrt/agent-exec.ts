@@ -39,7 +39,6 @@ import { mapStopReason } from './agent-exec-stop-reason.js';
 import type { AgentMessage, OrgToolDef } from './agent-runner.js';
 import { classifyStderr } from './kimicode-runner.js';
 import { loadCreateOrgSkillGuidance } from './org-design-skill.js';
-import { listGroupMembers } from './process-tree.js';
 import { resolveExecRunner, runnerSpec } from './runner-registry.js';
 import { ToolActivityTracker } from './tool-activity.js';
 
@@ -99,10 +98,12 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
   let lastSession: string | undefined;
   let totals = { in: 0, out: 0, usd: 0 };
   let lastResult: AgentMessage | undefined;
-  // #359: pid of the runner's spawned agent-CLI process, when it reports
-  // one (full access only — see AgentRunArgs.onProcessSpawned). Used on a
-  // normal end_turn to list background survivors for `done.background_pids`.
-  let spawnedPid: number | undefined;
+  // #359: set once the runner reports its spawned agent-CLI process (full
+  // access only — see AgentRunArgs.onProcessSpawned). `getBackgroundSurvivors`
+  // reads the runner's continuously-sampled process tracker (process-tree.ts's
+  // trackDescendants), not just a point-in-time snapshot — used on a normal
+  // end_turn to list background survivors for `done.background_pids`.
+  let getBackgroundSurvivors: (() => { pids: number[]; supported: boolean }) | undefined;
   // Holder object: `terminal` is assigned inside the terminate() closure and
   // read after the loop — TS flow analysis would otherwise keep the `null`
   // narrowing across closure calls and type the post-loop reads as `never`.
@@ -291,7 +292,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
         access,
         signal: abort.signal,
         onProcessSpawned: (info) => {
-          spawnedPid = info.pid;
+          getBackgroundSurvivors = info.getBackgroundSurvivors;
         }, // #359
         // Opts every runner that supports it (each subprocess runner's own
         // `streamPartials`/equivalent gate — claude, antigravity, qwen-rpc,
@@ -400,14 +401,16 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
   };
 
   // #359: only for a turn that ends NORMALLY (not killed via terminate()) —
-  // cancel/timeout/budget already kill the whole process group above, so
-  // there's nothing left to report there. `listGroupMembers` returns
-  // `supported:false` on win32 (no POSIX process groups, v1 gap — see
-  // process-tree.ts), in which case the field is omitted entirely rather
-  // than falsely reporting "none".
+  // cancel/timeout/budget already kill the whole process tree above, so
+  // there's nothing left to report there. `getBackgroundSurvivors` reads
+  // the runner's tree tracker, which has been sampling continuously since
+  // spawn — not just a point-in-time snapshot — so it also reports a job
+  // whose launching shell has since exited (process-tree.ts's module doc).
+  // `supported:false` on win32 (no POSIX process groups, v1 gap), in which
+  // case the field is omitted entirely rather than falsely reporting "none".
   const backgroundPids = (): number[] | undefined => {
-    if (access !== 'full' || spawnedPid === undefined) return undefined;
-    const { pids, supported } = listGroupMembers(spawnedPid);
+    if (access !== 'full' || !getBackgroundSurvivors) return undefined;
+    const { pids, supported } = getBackgroundSurvivors();
     return supported ? pids : undefined;
   };
 
