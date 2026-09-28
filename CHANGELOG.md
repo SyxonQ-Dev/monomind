@@ -4,6 +4,8 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+## [2.17.0] — 2026-09-28
+
 ### Added
 
 - **`monomind agent exec --access full`** ([#355](https://github.com/monoes/monomind/issues/355)), part of the Coder mode epic ([#364](https://github.com/monoes/monomind/issues/364)). The `claude` runtime can now run a turn with unrestricted native tool access (`canUseTool` allows everything, `permissionMode: "bypassPermissions"`) instead of the default `scoped` allow-list — guarded against root, unsupported runtimes, and a missing/invalid `--cwd`. New capability `agent-exec-full-access` and `agent scan --json`'s `full_access` field.
