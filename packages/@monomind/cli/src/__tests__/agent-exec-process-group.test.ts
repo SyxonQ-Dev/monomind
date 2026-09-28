@@ -78,6 +78,17 @@ function makeMockQueryFn(
         message: { content: [{ type: 'text', text: 'starting' }] },
       };
       if (opts.resolveImmediately) {
+        // The real Claude CLI only reports its tool_result (and eventually
+        // end_turn) once the Bash tool's shell has actually returned — by
+        // which point a `cmd &` it ran has already forked (this is exactly
+        // why the OTHER test below waits for `pids.length >= 2` before
+        // acting: forking is not instantaneous with spawn()). This mock
+        // skips the real SDK's IPC round-trip entirely, so without an
+        // equivalent wait here it can (and on a loaded/sandboxed box,
+        // reliably does) yield `result` before the backgrounded `sleep`s
+        // exist in the process table — a mock-fidelity gap, not the
+        // `done.background_pids` discovery it's meant to exercise.
+        await waitFor(() => listGroupMembers(child.pid as number).pids.length >= 2, 3000);
         yield { type: 'result', session_id: 's1', subtype: 'success', is_error: false };
         return;
       }
