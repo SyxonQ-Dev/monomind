@@ -32,8 +32,10 @@ and releases the lock; Ctrl+C between rebuilds prints `Watch stopped.` A build
 that exits through `process.exit()` — an MCP server shutting down mid-rebuild,
 for example — also releases a lock it still holds. If a previous `watch` was
 killed while holding the lock, the next `watch`/`build` takes over a stale lock
-automatically: one that predates the last boot (a recycled pid) or one whose
-holder has not refreshed it for 30 minutes. While it waits, it prints
+automatically: one from a previous boot, one from a different pid namespace
+(sandboxed tools give each command its own, with small reused pids — that lock is
+stale once its heartbeat has gone silent for 2 minutes), or one in the same pid
+namespace whose holder has not refreshed it for 30 minutes. While it waits, it prints
 `Rebuild deferred — another build is in progress` naming the holder (e.g.
 `pid 1234, running 2m`); after 10 minutes of deferral it stops retrying and
 reports which pid and lock file block it. Files changed during the deferral are
