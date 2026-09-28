@@ -4,9 +4,11 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+## [2.18.2] — 2026-09-28
+
 ### Fixed
 
-- **`monomind init --target claude` adds only Claude Code's files** ([#372](https://github.com/monoes/monomind/issues/372)). It still created `.gemini/` (skills and rules) and `.agents/` (skills and `shared_instructions.md`), which only Antigravity/Gemini and the other agents read — noise in a user's own repo, where mono-agent's coder mode runs it. They are now created only when a platform that reads them is selected; the default all-targets init is unchanged, and a Claude-only init keeps its project memory seeds.
+- **`monomind init --target claude` adds only Claude Code's files** ([#372](https://github.com/monoes/monomind/issues/372)). It still created `.gemini/` (skills and rules) and `.agents/` (skills and `shared_instructions.md`), which only Antigravity/Gemini and the other agents read — noise in a user's own repo, where mono-agent's coder mode runs it. They are now created only when a platform that reads them is selected; the default all-targets init is unchanged, and a Claude-only init keeps its project memory seeds. The CLI reference's init row is corrected to match.
 
 ## [2.18.1] — 2026-09-28
 
