@@ -53,6 +53,8 @@ const IGNORE_DIRS = new Set([
   'vendor',
 ]);
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+/** Mirrors `SqlBackend.MAX_TAG_LEN` in @monomind/memory: a longer tag fails the whole store. */
+const MAX_TAG_LENGTH = 512;
 
 /** @internal — shared with okf-bundle, which extracts text the same way. */
 export function toFileEntry(filePath: string): FileEntry {
@@ -239,7 +241,18 @@ export async function ingestDocument(
   const chunks = enrichChunks(rawChunks, fullContent, resolved);
   const bridge = await getBridge();
   let indexed = 0;
+  // The first reason a store gave for refusing a chunk. Without it a refusal
+  // reached the caller as a bare "all chunk stores failed", and the actual
+  // cause (a rejected tag) was only visible with MONOMIND_DEBUG set.
+  let storeError: string | undefined;
   let highlights: IngestResult['highlights'];
+  // The backend refuses a whole entry over one tag longer than 512 chars, so
+  // a very long page URL would fail every chunk. The URL is still recorded in
+  // the version's metadata; only the redundant per-chunk tag is dropped.
+  const urlTag =
+    canonicalUrl && `url:${canonicalUrl}`.length <= MAX_TAG_LENGTH
+      ? `url:${canonicalUrl}`
+      : undefined;
 
   for (const chunk of chunks) {
     const key = `doc:${hash}:${chunk.chunkIndex}`;
@@ -258,13 +271,15 @@ export async function ingestDocument(
             // RCL-10: the chunk's span against the extracted text, so a search
             // hit can cite a passage without re-reading the document.
             spanTag(chunk.startChar, chunk.endChar),
-            ...(canonicalUrl ? [`url:${canonicalUrl}`] : []),
+            ...(urlTag ? [urlTag] : []),
           ],
           upsert: true,
           dbPath: storeDbPath(scope),
         });
         if (storeResult?.success) indexed++;
+        else storeError ??= storeResult?.error;
       } catch (e) {
+        storeError ??= String(e);
         if (process.env.DEBUG || process.env.MONOMIND_DEBUG)
           console.error(
             `[ingestDocument] failed to store chunk ${chunk.chunkIndex} of ${resolved}:`,
@@ -375,7 +390,7 @@ export async function ingestDocument(
           }
         : {
             error: bridge
-              ? 'all chunk stores failed'
+              ? `all chunk stores failed${storeError ? `: ${storeError}` : ''}`
               : 'memory bridge unavailable — nothing indexed',
           }),
   };

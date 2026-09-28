@@ -151,10 +151,20 @@ export function createMetadataCache(): MetadataCache {
       const samePath = byKey.get(key(filePath, scope));
       if (samePath) return samePath;
       // RCL-06: identity is the PAGE, not the path — a re-capture lands in a
-      // new timestamped directory.
+      // new timestamped directory. But the same MEMBER of it: an envelope may
+      // carry more than one document of that page (mono-agent's video capture
+      // adds transcript.md and summary.md beside readable.md), and matching on
+      // the URL alone made each member supersede the previous one — only the
+      // last survived, and every sweep re-indexed all of them again.
       if (!canonicalUrl) return undefined;
+      const member = path.basename(filePath);
       for (const m of byKey.values()) {
-        if (m.scope === scope && m.canonicalUrl === canonicalUrl) return m;
+        if (
+          m.scope === scope &&
+          m.canonicalUrl === canonicalUrl &&
+          path.basename(m.filePath) === member
+        )
+          return m;
       }
       return undefined;
     },

@@ -158,7 +158,10 @@ export async function relatedDocuments(
   try {
     const pipeline = await import('./document-pipeline.js');
     const scope = opts.scope;
-    const rootDir = opts.rootDir ?? pipeline.getKnowledgeRoot(scope ?? 'shared');
+    // Through the scope's routing even when a root is given, as `lookupUrl`
+    // does: a `profile:<id>` or `global` scope lives in its own store, and the
+    // caller's root is the project's. Idempotent for every other scope.
+    const rootDir = pipeline.getKnowledgeRoot(scope ?? 'shared', opts.rootDir);
     const limit = opts.limit ?? DEFAULT_LIMIT;
 
     const self = pipeline.findDocumentRecord(rootDir, target, scope);
