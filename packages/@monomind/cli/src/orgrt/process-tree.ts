@@ -47,14 +47,12 @@
  * recorded pgid still lets a later `kill()`/`liveMembers()` call reach a
  * job whose launching shell is long gone, PROVIDED at least one sample
  * caught that shell (or the job itself) while it was still connected to
- * the tree. This is fundamentally a race against real OS scheduling speed,
- * not a guarantee: #359's own live-check found a background job whose
- * ENTIRE launching chain completes in a handful of milliseconds can still
- * be missed even at a 4ms sampling rate (see `trackDescendants`'s doc for
- * the measured numbers) — documented as a residual limitation, not
- * silently assumed away. It was NOT observed for a job that stays
- * connected for even a couple hundred ms, which covers the common,
- * intentional "leave a server running" case this issue is about.
+ * the tree. Sampling alone is a race against OS scheduling (a background
+ * job's whole launching chain can finish in a few milliseconds), so the
+ * tracker also takes an env `marker` (process-tree-marker.ts): every
+ * process that inherited the turn's `MONOMIND_EXEC_TREE` token is found at
+ * kill/report time regardless of timing. Only a job that both clears its
+ * own environment AND whose launching shell no sample caught can escape.
  *
  * Windows has no POSIX process groups; v1 leaves both discovery and the
  * kill's precise semantics unsupported there per the issue's own item 4
@@ -65,6 +63,7 @@
 
 import { type SpawnSyncReturns, spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
+import { pidsWithMarker } from './process-tree-marker.js';
 
 export interface GroupMembersResult {
   /** Live pids in the leader's extended process tree (PPID descendants and
@@ -266,8 +265,9 @@ function trackedMembers(
   seenPids: ReadonlySet<number>,
   seenPgids: ReadonlySet<number>,
   table: ProcEntry[],
+  markerPids: number[],
 ): number[] {
-  const result = new Set<number>(groupClosure(leaderPid, table));
+  const result = new Set<number>([...groupClosure(leaderPid, table), ...markerPids]);
   const byPgid = groupByPgid(table);
   for (const pgid of seenPgids) {
     const members = byPgid.get(pgid) ?? [];
@@ -289,8 +289,9 @@ function signalTracked(
   seenPgids: ReadonlySet<number>,
   signal: NodeJS.Signals,
   table: ProcEntry[],
+  markerPids: number[],
 ): void {
-  for (const pid of groupClosure(leaderPid, table)) {
+  for (const pid of new Set([...groupClosure(leaderPid, table), ...markerPids])) {
     try {
       process.kill(pid, signal);
     } catch {
@@ -335,28 +336,11 @@ export interface DescendantTracker {
    *  `killOnAbort`, agent-runner-types.ts). Safe to call after `stop()`,
    *  and safe to call more than once. */
   signal(signal: NodeJS.Signals): void;
-  /** Sample RIGHT NOW, outside the regular interval — a native tool call
-   *  can start and its shell exit again well inside one interval period
-   *  (live-verified: a `nohup cmd &` round-trip completing in ~50ms is
-   *  common), so `agent-runner-claude.ts` calls this at the SDK's own
-   *  `tool_use`/`tool_result` event boundaries to bracket each call with
-   *  an extra chance to catch it, on top of the timer. Idempotent-safe
-   *  (just folds in whatever's found), and safe to call after `stop()`
-   *  (it does not restart the interval). */
+  /** Sample RIGHT NOW, outside the regular interval — `agent-runner-
+   *  claude.ts` calls this at the SDK's `tool_use`/`tool_result` boundaries
+   *  to bracket each native tool call with an extra chance to catch its
+   *  shell. Safe to call after `stop()` (it does not restart the interval). */
   sampleNow(): void;
-  /** Switch sampling cadence: `true` while at least one native tool call
-   *  is in flight (a much faster interval — the actual fork/exec/exit of a
-   *  Bash-tool shell can complete in low single-digit milliseconds, live-
-   *  verified during #359 — a background job's WHOLE round trip, shell
-   *  included, sometimes finishing in ~40-50ms end to end, faster than
-   *  `sampleNow()`'s two bracketing calls reliably straddle given IPC
-   *  latency on each side), `false` to fall back to the relaxed base rate
-   *  once nothing is in flight (long-lived survivors like a dev server
-   *  don't need fast sampling — they're not going anywhere). Idempotent:
-   *  redundant calls with the same value are a no-op, no timer is
-   *  restarted needlessly. `agent-runner-claude.ts` drives this off its
-   *  own `pendingToolCalls` map size (#289) crossing 0. */
-  setBurstMode(active: boolean): void;
   /** Stop periodic sampling. Idempotent, and safe to call at any time —
    *  `liveMembers()`/`signal()` keep working afterward against whatever
    *  was recorded up to that point. Call this once the turn ends so the
@@ -367,32 +351,14 @@ export interface DescendantTracker {
 
 /**
  * Samples `leaderPid`'s process-tree closure every `intervalMs` (default
- * 50ms — see below) for as long as this turn runs, accumulating every pid
- * and pgid ever observed under it. See the module doc for why a single
- * point-in-time closure isn't enough: a background job's launching shell
- * typically exits within milliseconds of starting it, and only a sample
- * taken WHILE it was still connected can ever record its pgid for later
- * use. The very first sample runs synchronously and immediately (not after
- * waiting a full interval) specifically to catch a fast-exiting shell on
- * turns that themselves end quickly.
- *
- * Two sampling cadences (see `setBurstMode`): a relaxed base rate
- * (`intervalMs`, default 50ms) for the turn's idle time — plenty for a
- * long-lived survivor like a dev server, which stays connected for
- * seconds to minutes — and a much faster burst rate (`burstIntervalMs`,
- * default 4ms) while a native tool call is actually in flight. #359's own
- * live-check against the real, installed Claude Code CLI found that
- * matters: a `nohup sleep 600 & echo started` Bash tool round trip —
- * spawn the shell, fork `nohup`+`sleep`, the shell exits, the CLI reports
- * back — sometimes completed in as little as ~40-50ms end to end, with
- * the shell's OWN live window inside that likely only a few ms once IPC
- * latency on either side is accounted for. A once-per-500ms timer missed
- * it outright in that check; even the 50ms base rate alone still missed
- * it on repeated live runs (confirmed empirically, not just estimated) —
- * only concentrating fast samples specifically DURING the in-flight
- * window closed the gap. Table reads are cheap (a handful of ms for a
- * typical process count), so a few-ms burst rate for the bounded duration
- * of one tool call is not a meaningful CPU cost.
+ * 50ms on Linux, where a sample is a ~2ms /proc read; 250ms elsewhere,
+ * where it is a `ps` spawn) for as long as this turn runs, accumulating
+ * every pid and pgid ever observed under it — see the module doc for why a
+ * single point-in-time closure isn't enough. The first sample runs
+ * synchronously. `marker` is the turn's `MONOMIND_EXEC_TREE` token
+ * (process-tree-marker.ts); when set, `liveMembers()`/`signal()` also
+ * include every process that inherited it, which covers a job whose
+ * launching shell exited between samples.
  *
  * The interval timer is `unref()`'d: this tracker must never be the reason
  * the process stays alive, even if a caller forgets to call `stop()`.
@@ -400,16 +366,15 @@ export interface DescendantTracker {
  */
 export function trackDescendants(
   leaderPid: number,
-  opts: { intervalMs?: number; burstIntervalMs?: number; plat?: NodeJS.Platform } = {},
+  opts: { intervalMs?: number; marker?: string; plat?: NodeJS.Platform } = {},
 ): DescendantTracker {
   const plat = opts.plat ?? process.platform;
   const supported = plat !== 'win32';
-  const baseIntervalMs = opts.intervalMs ?? 50;
-  const burstIntervalMs = opts.burstIntervalMs ?? 4;
+  const intervalMs = opts.intervalMs ?? (plat === 'linux' ? 50 : 250);
+  const markerPids = () => (opts.marker ? pidsWithMarker(opts.marker, plat) : []);
   const seenPids = new Set<number>([leaderPid]);
   const seenPgids = new Set<number>([leaderPid]);
   let timer: NodeJS.Timeout | undefined;
-  let bursting = false;
 
   /** One sample: recompute the CURRENT closure and fold every pid found
    *  (plus its pgid) into the accumulated sets. */
@@ -423,22 +388,20 @@ export function trackDescendants(
     }
   };
 
-  const restartTimer = (ms: number) => {
-    if (timer) clearInterval(timer);
-    timer = setInterval(sampleOnce, ms);
-    timer.unref?.();
-  };
-
   if (supported) {
     sampleOnce();
-    restartTimer(baseIntervalMs);
+    timer = setInterval(sampleOnce, intervalMs);
+    timer.unref?.();
   }
 
   return {
     liveMembers(): GroupMembersResult {
       if (!supported) return { pids: [], supported: false };
       const table = readTable(plat);
-      return { pids: trackedMembers(leaderPid, seenPids, seenPgids, table), supported: true };
+      return {
+        pids: trackedMembers(leaderPid, seenPids, seenPgids, table, markerPids()),
+        supported: true,
+      };
     },
     signal(signal: NodeJS.Signals): void {
       if (!supported) {
@@ -446,16 +409,10 @@ export function trackDescendants(
         return;
       }
       const table = readTable(plat);
-      signalTracked(leaderPid, seenPids, seenPgids, signal, table);
+      signalTracked(leaderPid, seenPids, seenPgids, signal, table, markerPids());
     },
     sampleNow(): void {
       if (supported) sampleOnce();
-    },
-    setBurstMode(active: boolean): void {
-      if (!supported || active === bursting) return; // no-op: unsupported, or already in that mode
-      bursting = active;
-      sampleOnce(); // catch the transition instant itself, don't wait for the new interval's first tick
-      restartTimer(active ? burstIntervalMs : baseIntervalMs);
     },
     stop(): void {
       if (timer) clearInterval(timer);

@@ -17,11 +17,13 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { trackDescendants } from '../orgrt/process-tree.js';
+import { EXEC_TREE_ENV, pidsWithMarker } from '../orgrt/process-tree-marker.js';
 
 function isAlive(pid: number): boolean {
   try {
@@ -135,21 +137,18 @@ describe('trackDescendants: continuous sampling reaches a job whose launching sh
     }
   }, 10_000);
 
-  it("(c) the sampler interval is unref'd — it never keeps a process alive on its own, including after setBurstMode() restarts it", () => {
+  it("(c) the sampler interval is unref'd — it never keeps a process alive on its own", () => {
     const scratch = mkdtempSync(join(tmpdir(), 'monomind-359-tracker-'));
     try {
       const modulePath = join(__dirname, '..', 'orgrt', 'process-tree.ts').replace(/\\/g, '/');
       const scriptPath = join(scratch, 'script.cjs');
-      // No stop() call, no other work: if either the base or the burst
-      // interval holds the event loop open, this process hangs until
-      // spawnSync's own timeout kills it; if both are properly unref'd, it
-      // exits on its own.
+      // No stop() call, no other work: if the interval holds the event loop
+      // open, this process hangs until spawnSync's own timeout kills it.
       writeFileSync(
         scriptPath,
         `const { trackDescendants } = require(${JSON.stringify(modulePath)});\n` +
-          `const t = trackDescendants(process.pid, { intervalMs: 20, burstIntervalMs: 5 });\n` +
-          `t.setBurstMode(true);\n` +
-          `t.setBurstMode(false);\n`,
+          `const t = trackDescendants(process.pid, { intervalMs: 20 });\n` +
+          `t.sampleNow();\n`,
       );
       const tsxCjs = require.resolve('tsx/cjs');
       const res = spawnSync(process.execPath, ['-r', tsxCjs, scriptPath], {
@@ -165,22 +164,35 @@ describe('trackDescendants: continuous sampling reaches a job whose launching sh
     }
   }, 8_000);
 
-  it('(d) setBurstMode(true) samples immediately on the transition, independent of any timer tick', async () => {
-    // Deliberately huge intervals — the ONLY way this test can observe the
-    // job is the synchronous sample setBurstMode(true) takes right on the
-    // transition, before scheduling anything.
-    const leaderPid = spawnLeaderWithFleetingNestedJob();
-    const tracker = trackDescendants(leaderPid, { intervalMs: 60_000, burstIntervalMs: 60_000 });
-    try {
-      // Give the nested job a moment to exist, then catch it via the
-      // transition sample alone.
-      await new Promise((r) => setTimeout(r, 30));
-      tracker.setBurstMode(true);
-      const { pids } = tracker.liveMembers();
-      spawnedPids = [leaderPid, ...pids];
-      expect(pids.length).toBeGreaterThanOrEqual(1);
-    } finally {
-      tracker.stop();
-    }
-  }, 10_000);
+  it.skipIf(process.platform === 'win32')(
+    '(d) the env marker reaches a job whose whole launching chain exited before any sample ran',
+    async () => {
+      const token = randomUUID();
+      // The nested shell backgrounds the job and exits at once; the tracker
+      // is only created after the whole chain is gone, with no timer tick,
+      // so the sampled closure can never have seen it — only the marker can.
+      const leader = spawn('sh', ['-c', "setsid sh -c 'sleep 1000 & exit' & exit"], {
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env, [EXEC_TREE_ENV]: token },
+      });
+      const leaderPid = leader.pid as number;
+      leader.unref();
+      await waitFor(() => !isAlive(leaderPid) && pidsWithMarker(token).length === 1, 5_000);
+      const [jobPid] = pidsWithMarker(token);
+      spawnedPids = [jobPid];
+      expect(pidsWithMarker(randomUUID())).toEqual([]);
+
+      const tracker = trackDescendants(leaderPid, { intervalMs: 60_000, marker: token });
+      try {
+        expect(tracker.liveMembers().pids).toContain(jobPid);
+        tracker.signal('SIGKILL');
+        await waitFor(() => !isAlive(jobPid), 5_000);
+        expect(tracker.liveMembers().pids).toEqual([]);
+      } finally {
+        tracker.stop();
+      }
+    },
+    10_000,
+  );
 });

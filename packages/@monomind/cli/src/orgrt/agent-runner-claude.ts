@@ -1,5 +1,6 @@
 // packages/@monomind/cli/src/orgrt/agent-runner-claude.ts
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { createSdkMcpServer, query, tool } from '@anthropic-ai/claude-agent-sdk';
 import { fullAccessClaudeSpawn } from './agent-runner-claude-fullaccess.js';
 import { resolveClaudeSettingsOverrides } from './agent-runner-claude-settings.js';
@@ -87,6 +88,8 @@ export class ClaudeAgentRunner implements AgentRunner {
     // that shell (and the PPID edge to it) is gone. No-op for scoped mode:
     // `tracker` is never set there.
     let tracker: DescendantTracker | undefined;
+    // #359: inherited by every process the turn starts (process-tree-marker.ts).
+    const treeToken = randomUUID();
     const unsubscribeGroup =
       args.access === 'full'
         ? killOnAbort(args.signal, {
@@ -232,13 +235,17 @@ export class ClaudeAgentRunner implements AgentRunner {
         // plain masked spawn, untouched.
         ...(args.access === 'full'
           ? {
-              spawnClaudeCodeProcess: fullAccessClaudeSpawn(args.authorityMask ?? [], (pid) => {
-                tracker = trackDescendants(pid);
-                args.onProcessSpawned?.({
-                  pid,
-                  getBackgroundSurvivors: () => tracker!.liveMembers(),
-                });
-              }),
+              spawnClaudeCodeProcess: fullAccessClaudeSpawn(
+                args.authorityMask ?? [],
+                treeToken,
+                (pid) => {
+                  tracker = trackDescendants(pid, { marker: treeToken });
+                  args.onProcessSpawned?.({
+                    pid,
+                    getBackgroundSurvivors: () => tracker!.liveMembers(),
+                  });
+                },
+              ),
             }
           : args.authorityMask?.length
             ? { spawnClaudeCodeProcess: maskedClaudeSpawn(args.authorityMask) }
@@ -326,17 +333,10 @@ export class ClaudeAgentRunner implements AgentRunner {
           // invoked are observable.
           for (const b of m.message?.content ?? []) {
             if (b?.type === 'tool_use' && typeof b.id === 'string') {
-              // #359: a native tool call (Bash included) can spawn and its
-              // shell exit again well inside a relaxed sampling interval —
-              // an immediate sample right as the call starts, PLUS
-              // switching the tracker into its fast burst cadence for as
-              // long as any call is in flight (dropped back to the base
-              // rate once pendingToolCalls empties out again, in the
-              // tool_result branch below), gives it the best chance of
-              // still catching a shell that lives only a few ms. No-op for
-              // scoped mode (`tracker` unset there).
+              // #359: an extra sample as the call starts (and on its
+              // result, below) — a Bash-tool shell can exit well inside the
+              // sampling interval. No-op for scoped mode (`tracker` unset).
               tracker?.sampleNow();
-              if (pendingToolCalls.size === 0) tracker?.setBurstMode(true);
               pendingToolCalls.set(b.id, { tool: String(b.name ?? ''), startedAt: Date.now() });
               // #357: the raw call, up front, for agent-exec.ts's
               // tool_activity events — gated behind streamPartials like
@@ -407,9 +407,6 @@ export class ClaudeAgentRunner implements AgentRunner {
             const id = typeof b.tool_use_id === 'string' ? b.tool_use_id : undefined;
             const started = id ? pendingToolCalls.get(id) : undefined;
             if (id) pendingToolCalls.delete(id);
-            // #359: back to the relaxed base rate once nothing is in
-            // flight — a long-lived survivor doesn't need fast sampling.
-            if (pendingToolCalls.size === 0) tracker?.setBurstMode(false);
             yield {
               type: 'tool_result',
               session_id,

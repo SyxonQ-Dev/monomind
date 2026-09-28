@@ -12,6 +12,7 @@
 
 import { type ChildProcess, spawn } from 'node:child_process';
 import { maskedCommand } from './authority-mask.js';
+import { EXEC_TREE_ENV } from './process-tree-marker.js';
 
 interface ClaudeSpawnOptions {
   command: string;
@@ -37,13 +38,15 @@ interface ClaudeSpawnOptions {
  *  non-detached spawn stays byte-identical for every other caller. */
 export function fullAccessClaudeSpawn(
   mask: string[],
+  treeToken: string,
   onSpawn: (pid: number) => void,
 ): (o: ClaudeSpawnOptions) => ChildProcess {
   return (o) => {
     const [cmd, argv] = maskedCommand(mask, o.command, o.args);
     const child = spawn(cmd, argv, {
       cwd: o.cwd,
-      env: o.env as NodeJS.ProcessEnv,
+      // #359: the tree marker every descendant inherits (process-tree-marker.ts).
+      env: { ...(o.env as NodeJS.ProcessEnv), [EXEC_TREE_ENV]: treeToken },
       // Deliberately NOT `signal: o.signal` here (unlike maskedClaudeSpawn):
       // that signal fires only after the SDK's own stdin-EOF + ~2s grace
       // window and would kill just THIS process — racing ahead of, and

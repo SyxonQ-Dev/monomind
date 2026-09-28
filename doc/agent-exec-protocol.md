@@ -190,35 +190,22 @@
     `claude` process's group; (2) that shell, and a background job's own launching chain
     generally, frequently exits within milliseconds of starting the job — by the time
     anything checks, the PPID edge to it is gone and its process-group id was never recorded
-    anywhere. `orgrt/process-tree.ts`'s `trackDescendants` fixes both: for the whole lifetime
-    of a full-access turn it SAMPLES the process tree — a relaxed 50ms base rate, switching to
-    a 4ms burst rate for as long as any native tool call is in flight (`agent-runner-
-    claude.ts` drives this off the SDK's own tool_use/tool_result events) — and accumulates
-    every pid and process-group id ever seen under the leader into a running set. A recorded
-    process-group id remains signalable/discoverable via `kill(-pgid, …)` long after its own
-    leader has exited, so `signal()`/`liveMembers()` can still reach a job whose entire
-    launching chain is gone, PROVIDED at least one sample caught it (or its chain) while still
-    connected. Samples are always taken BEFORE any signal is sent — kill-then-read would sever
-    the very PPID edge needed to discover a nested group once the leader dies. On a NORMAL
-    `end_turn`, survivors are left running (the common "start the dev server, test it next
-    turn" flow) but now reported: `done` gains `background_pids: number[]`, the tracker's live
-    members at that moment — a job discovered while its shell was live and then reparented
-    away is still included, unlike a plain snapshot.
-    **Residual v1 limitation** (live-verified against the installed CLI, not merely
-    theoretical): a background job whose ENTIRE launching chain — potentially several
-    forked hops deep — completes and exits within a few milliseconds, faster than even the
-    4ms burst rate reliably samples, can still go undiscovered on both the kill and the
-    report paths; this was observed in practice for some `nohup cmd &`-style one-shot Bash
-    calls completing in as little as ~40-50ms end to end. It was NOT observed for a job whose
-    chain stays connected for even a few hundred ms (the common case for anything that isn't
-    an artificially fast round trip), nor once discovered while connected — reparenting and
-    process-group changes afterward do not lose it (live-verified: a job caught during a
-    ~2s-connected window was still found and killed by a `--timeout` firing 6+ seconds later,
-    well after its launching shell had exited and it had been reparented to init). Polling
-    faster still narrows but cannot close this gap outright — it is an inherent limit of
-    userspace sampling against OS scheduling speed, not a bug in the sampling logic itself; a
-    fully deterministic fix would need an event-based mechanism (e.g. eBPF/ptrace process-
-    creation hooks) outside this change's scope. Implemented in the RUNNER layer
+    anywhere. `orgrt/process-tree.ts`'s `trackDescendants` fixes both, two ways:
+    (1) the `claude` child's env carries a per-turn `MONOMIND_EXEC_TREE=<random uuid>`
+    marker that every descendant inherits — including a `nohup cmd &` job reparented to
+    init after its shell exited (live-verified) — and every kill and report also scans for
+    processes carrying it (`/proc/<pid>/environ` on Linux, `ps -E` elsewhere), so timing
+    doesn't matter; (2) for jobs that clear their own environment, it samples the process
+    tree every 50ms (250ms off Linux) plus at each native tool call's start and result, and
+    remembers every process-group id seen under the leader — a recorded group stays
+    signalable via `kill(-pgid, …)` after its leader exits. Everything is read BEFORE any
+    signal is sent (kill-then-read would sever the PPID edge a nested group needs). On a
+    NORMAL `end_turn`, survivors are left running (the common "start the dev server, test it
+    next turn" flow) but reported: `done` gains `background_pids: number[]`.
+    **Residual v1 limitation**: a job that both clears or replaces its environment (`env -i`,
+    some daemons) AND whose launching chain exited between samples can still go
+    undiscovered on both the kill and the report paths. A fully deterministic fix would
+    need cgroups or an event-based mechanism (eBPF/ptrace) outside this change's scope. Implemented in the RUNNER layer
     (`ClaudeAgentRunner`/`agent-runner-claude-fullaccess.ts`/`process-tree.ts`), so a future
     full-access org role (#365) inherits the same protection automatically. Scoped mode's SDK
     options are unaffected (proven by an updated SDK-options snapshot test in
@@ -328,7 +315,7 @@ done`. On failure: `start → … → error → done`.
 | `usage` | `v, input_tokens, output_tokens, cost_usd` | Per-round delta (cumulative→delta conversion handled inside monomind) |
 | `result` | `v, subtype ("success"\|"error"), is_error, text, stop_reason, input_tokens, output_tokens, cost_usd` | Aggregate final result; **rev 7**: `text` is the complete final assistant text — the joined `assistant` texts for a `streams_incrementally` runtime, the last `assistant` message otherwise (omitted only if the turn produced none); `stop_reason`: `end_turn` \| `max_turns` \| `tool_round_cap` \| `cancelled` \| `timeout`. **rev 4**: `tool_round_cap` is detected best-effort — it matches the runner's tool-round-cap assistant note; a fence runner that stops without the note yields `end_turn` |
 | `error` | `v, code, message, fatal (bool)` | Codes in §3.4. `fatal:true` = auth/quota class — callers must not retry |
-| `done` | `v, exit_code, background_pids?` | Terminal event. Always emitted exactly once, even on error. **rev 13**, capability `agent-exec-background-pids`: `background_pids` (only for `--access full`, only after a NORMAL `end_turn` — never on `cancel`/`--timeout`/`--budget-usd`, which already kill the whole tree, §3) lists pids the turn's process-tree tracker (`orgrt/process-tree.ts`'s `trackDescendants`, sampling continuously since spawn) found still alive at that moment — e.g. a `sleep 600 &` the turn started and left running on purpose, including one reparented after its launching shell exited. A survivor whose ENTIRE launching chain completed and exited within a few milliseconds (faster than even the fast burst sampling rate) can still go unreported (residual v1 limitation, §3's rev 13 note — the kill path is far less exposed to this, since it fires promptly while a call is typically still in flight). Omitted (not an empty array) when access is `scoped`, or on a platform where discovery isn't supported (win32, v1) |
+| `done` | `v, exit_code, background_pids?` | Terminal event. Always emitted exactly once, even on error. **rev 13**, capability `agent-exec-background-pids`: `background_pids` (only for `--access full`, only after a NORMAL `end_turn` — never on `cancel`/`--timeout`/`--budget-usd`, which already kill the whole tree, §3) lists pids the turn's process-tree tracker (`orgrt/process-tree.ts`'s `trackDescendants`: the inherited `MONOMIND_EXEC_TREE` env marker plus continuous sampling) found still alive at that moment — e.g. a `sleep 600 &` the turn started and left running on purpose, including one reparented after its launching shell exited. A survivor that cleared its own environment and whose launching chain exited between samples can go unreported (residual v1 limitation, §3's rev 13 note). Omitted (not an empty array) when access is `scoped`, or on a platform where discovery isn't supported (win32, v1) |
 
 Exit codes: `0` success (result.subtype=success) · `1` agent/runner error · `2` usage/protocol
 error (bad flags, unknown runtime, missing binary) · `124` `--timeout` expired · `130` cancelled
