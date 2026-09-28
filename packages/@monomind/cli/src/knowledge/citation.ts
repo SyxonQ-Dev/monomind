@@ -255,7 +255,10 @@ export async function resolveCitation(
 ): Promise<Citation> {
   const pipeline = await import('./document-pipeline.js');
   const { extractText } = await import('../capabilities/cap-documents.js');
-  const rootDir = opts.rootDir ?? pipeline.getKnowledgeRoot(opts.scope);
+  // Through the scope's routing even when a root is given, as `lookupUrl`
+  // does: a `profile:<id>` scope's records live in that profile's store, not
+  // under the project root a command hands in. Idempotent for other scopes.
+  const rootDir = pipeline.getKnowledgeRoot(opts.scope, opts.rootDir);
   const scope = opts.scope;
 
   const record = pipeline.findDocumentRecord(rootDir, target, scope);

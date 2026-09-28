@@ -317,9 +317,12 @@ export class SqlBackend extends EventEmitter implements IMemoryBackend {
   // Every tag write is parameterized, so this is shape sanity rather than
   // injection defense. `src:<absolute path>` provenance tags are first-class in
   // the knowledge pipeline and legitimately contain spaces, parentheses and
-  // unicode, so they only exclude control characters.
+  // unicode, so they only exclude control characters. The same holds for
+  // `url:<canonical url>` (a query string carries `?`, `=`, `&`, `%`) and
+  // `parent:<scope>:<path>` — refusing those failed every chunk of any capture
+  // whose page URL has a query string, e.g. every YouTube video.
   private static readonly TAG_RE = /^[a-zA-Z0-9_\-.:/~ ]+$/;
-  private static readonly SRC_TAG_RE = /^src:[^\x00-\x1f\x7f]+$/;
+  private static readonly PROVENANCE_TAG_RE = /^(?:src|url|parent):[^\x00-\x1f\x7f]+$/;
   private static readonly MAX_TAG_LEN = 512;
 
   protected validateTags(tags: string[]): void {
@@ -327,7 +330,7 @@ export class SqlBackend extends EventEmitter implements IMemoryBackend {
       const ok =
         typeof tag === 'string' &&
         tag.length <= SqlBackend.MAX_TAG_LEN &&
-        (tag.startsWith('src:') ? SqlBackend.SRC_TAG_RE.test(tag) : SqlBackend.TAG_RE.test(tag));
+        (SqlBackend.PROVENANCE_TAG_RE.test(tag) || SqlBackend.TAG_RE.test(tag));
       if (!ok) throw new Error(`Invalid tag format: "${String(tag).slice(0, 80)}"`);
     }
   }

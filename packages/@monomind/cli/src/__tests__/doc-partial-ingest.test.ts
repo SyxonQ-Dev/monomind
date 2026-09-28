@@ -97,7 +97,7 @@ describe('ingestDocument commits a version only when every chunk stores', () => 
     const result = await ingest();
 
     expect(result.chunksIndexed).toBe(0);
-    expect(result.error).toBe('all chunk stores failed');
+    expect(result.error).toBe('all chunk stores failed: disk full (simulated)');
     expect(await liveDocs()).toHaveLength(0);
   });
 
