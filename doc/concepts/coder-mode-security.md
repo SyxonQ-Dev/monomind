@@ -201,10 +201,12 @@ are never mistaken for oversights:
   permissions (there is no narrower policy to hand a subagent in this mode) and are only visible
   as `tool_activity` events with `parent_tool_use_id` set — there is no separate approval or
   scoping layer between a top-level turn and its own subagents.
-- **No mid-turn kill of a wedged process tree** — tracked separately as #359 (out of this issue's
-  scope): `--timeout`/cancel/budget terminate the immediate child and race a grace window, but a
-  full-access turn that spawned its own long-lived background processes (e.g. `nohup`'d a server)
-  is #359's problem to solve, not #360's.
+- **Background jobs that hide from the process-tree kill** (#359): cancel/`--timeout`/budget kill
+  every process that inherited the turn's `MONOMIND_EXEC_TREE` env marker or was sampled under
+  the `claude` process, and a normal end reports survivors in `done.background_pids`. A job that
+  clears its own environment and whose launching shell exited between samples can escape both;
+  so can one that deliberately detaches under another user or service manager. Full access is
+  not a sandbox.
 
 ## 5. Security review of this diff (#360 acceptance criterion)
 

@@ -1,11 +1,14 @@
 // packages/@monomind/cli/src/orgrt/agent-runner-claude.ts
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { createSdkMcpServer, query, tool } from '@anthropic-ai/claude-agent-sdk';
+import { fullAccessClaudeSpawn } from './agent-runner-claude-fullaccess.js';
 import { resolveClaudeSettingsOverrides } from './agent-runner-claude-settings.js';
 import type { AgentMessage, AgentRunArgs, AgentRunner } from './agent-runner-types.js';
 import { killOnAbort } from './agent-runner-types.js';
 import { maskedCommand } from './authority-mask.js';
 import { coverEveryToolCall, POLICY_HOOK_TIMEOUT_S } from './policy-hook.js';
+import { type DescendantTracker, trackDescendants } from './process-tree.js';
 import { omitAnthropicManagedKeys } from './provider.js';
 import { toolInputSchema } from './tool-fence.js';
 import { toolResultSpillHook } from './tool-spill.js';
@@ -69,6 +72,30 @@ export class ClaudeAgentRunner implements AgentRunner {
     const unsubscribe = killOnAbort(args.signal, {
       kill: () => abortController.abort(),
     });
+    // #359: the ladder above only stops the SDK's in-process loop from
+    // issuing further turns — it never touches an already-running child
+    // process. Full access additionally needs the whole process TREE
+    // killed on cancel/timeout/budget (agent-exec.ts's terminate(), or
+    // session.ts's silent-stream abort for a future full-access org role,
+    // #365): reuses killOnAbort's own SIGTERM-then-SIGKILL-after-5s ladder,
+    // targeted at `tracker` (set once `fullAccessClaudeSpawn` spawns the
+    // child below) instead of a single process. `tracker` has been
+    // continuously sampling the tree since spawn (process-tree.ts's
+    // `trackDescendants`) — a single point-in-time closure isn't enough
+    // against the real Claude Code CLI: it was live-verified to spawn each
+    // Bash-tool shell call as the leader of its OWN process group, whose
+    // job a background command started can outlive by minutes, long after
+    // that shell (and the PPID edge to it) is gone. No-op for scoped mode:
+    // `tracker` is never set there.
+    let tracker: DescendantTracker | undefined;
+    // #359: inherited by every process the turn starts (process-tree-marker.ts).
+    const treeToken = randomUUID();
+    const unsubscribeGroup =
+      args.access === 'full'
+        ? killOnAbort(args.signal, {
+            kill: (signal) => tracker?.signal(signal ?? 'SIGTERM'),
+          })
+        : () => {};
 
     // Incremental text streaming is opt-in via extras, not unconditional:
     // this runner has two independent consumers. agent-exec.ts (the Agent
@@ -208,9 +235,27 @@ export class ClaudeAgentRunner implements AgentRunner {
         ...(args.claudeRestrictions?.disallowedTools?.length
           ? { disallowedTools: args.claudeRestrictions.disallowedTools }
           : {}),
-        ...(args.authorityMask?.length
-          ? { spawnClaudeCodeProcess: maskedClaudeSpawn(args.authorityMask) }
-          : {}),
+        // #359: full access always installs the group-leader spawn (with or
+        // without an authorityMask — `fullAccessClaudeSpawn` treats an empty
+        // mask as a no-op, see maskedCommand); scoped mode keeps today's
+        // plain masked spawn, untouched.
+        ...(args.access === 'full'
+          ? {
+              spawnClaudeCodeProcess: fullAccessClaudeSpawn(
+                args.authorityMask ?? [],
+                treeToken,
+                (pid) => {
+                  tracker = trackDescendants(pid, { marker: treeToken });
+                  args.onProcessSpawned?.({
+                    pid,
+                    getBackgroundSurvivors: () => tracker!.liveMembers(),
+                  });
+                },
+              ),
+            }
+          : args.authorityMask?.length
+            ? { spawnClaudeCodeProcess: maskedClaudeSpawn(args.authorityMask) }
+            : {}),
         // ADR-O001 D2. A PROGRAMMATIC hook, not a filesystem one: these are
         // registered over the SDK's control protocol at initialize() time and
         // so are unaffected by `settingSources: []` above (which only stops
@@ -294,6 +339,10 @@ export class ClaudeAgentRunner implements AgentRunner {
           // invoked are observable.
           for (const b of m.message?.content ?? []) {
             if (b?.type === 'tool_use' && typeof b.id === 'string') {
+              // #359: an extra sample as the call starts (and on its
+              // result, below) — a Bash-tool shell can exit well inside the
+              // sampling interval. No-op for scoped mode (`tracker` unset).
+              tracker?.sampleNow();
               pendingToolCalls.set(b.id, { tool: String(b.name ?? ''), startedAt: Date.now() });
               // #357: the raw call, up front, for agent-exec.ts's
               // tool_activity events — gated behind streamPartials like
@@ -360,6 +409,7 @@ export class ClaudeAgentRunner implements AgentRunner {
           // agent's later prose about it at face value.
           for (const b of m.message?.content ?? []) {
             if (b?.type !== 'tool_result') continue;
+            tracker?.sampleNow(); // #359: bracket the call on its result too — see the tool_use side above
             const id = typeof b.tool_use_id === 'string' ? b.tool_use_id : undefined;
             const started = id ? pendingToolCalls.get(id) : undefined;
             if (id) pendingToolCalls.delete(id);
@@ -384,6 +434,12 @@ export class ClaudeAgentRunner implements AgentRunner {
       }
     } finally {
       unsubscribe();
+      unsubscribeGroup();
+      // #359: stop sampling once the turn ends (normally or via abort) —
+      // `signal()`/`liveMembers()` keep working against whatever was
+      // already recorded, so a delayed SIGKILL from the ladder above still
+      // reaches everything the tracker saw before this ran.
+      tracker?.stop();
     }
   }
 }

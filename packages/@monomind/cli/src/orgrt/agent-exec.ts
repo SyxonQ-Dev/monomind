@@ -99,6 +99,12 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
   let lastSession: string | undefined;
   let totals = { in: 0, out: 0, usd: 0 };
   let lastResult: AgentMessage | undefined;
+  // #359: set once the runner reports its spawned agent-CLI process (full
+  // access only — see AgentRunArgs.onProcessSpawned). `getBackgroundSurvivors`
+  // reads the runner's continuously-sampled process tracker (process-tree.ts's
+  // trackDescendants), not just a point-in-time snapshot — used on a normal
+  // end_turn to list background survivors for `done.background_pids`.
+  let getBackgroundSurvivors: (() => { pids: number[]; supported: boolean }) | undefined;
   // Holder object: `terminal` is assigned inside the terminate() closure and
   // read after the loop — TS flow analysis would otherwise keep the `null`
   // narrowing across closure calls and type the post-loop reads as `never`.
@@ -289,6 +295,9 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
         canUseTool: effectiveCanUseTool,
         access,
         signal: abort.signal,
+        onProcessSpawned: (info) => {
+          getBackgroundSurvivors = info.getBackgroundSurvivors;
+        }, // #359
         // Opts every runner that supports it (each subprocess runner's own
         // `streamPartials`/equivalent gate — claude, antigravity, qwen-rpc,
         // opencode, pi-rpc) into per-token/per-chunk incremental `assistant`
@@ -389,7 +398,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
     process.removeListener('SIGTERM', onSignal);
   }
 
-  const finish = (exitCode: number): number => {
+  const finish = (exitCode: number, extra?: Record<string, unknown>): number => {
     // #360 guardrail 3: one audit line per full-access turn, regardless of
     // how it ended (success/error/timeout/cancelled/budget all funnel
     // through this single chokepoint) — never for scoped access. Best
@@ -404,9 +413,23 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
         toolCalls: toolActivity.toolCallCount,
       });
     }
-    safeEmit({ v: 1, type: 'done', exit_code: exitCode });
+    safeEmit({ v: 1, type: 'done', exit_code: exitCode, ...extra });
     finished = true;
     return exitCode;
+  };
+
+  // #359: only for a turn that ends NORMALLY (not killed via terminate()) —
+  // cancel/timeout/budget already kill the whole process tree above, so
+  // there's nothing left to report there. `getBackgroundSurvivors` reads
+  // the runner's tree tracker, which has been sampling continuously since
+  // spawn — not just a point-in-time snapshot — so it also reports a job
+  // whose launching shell has since exited (process-tree.ts's module doc).
+  // `supported:false` on win32 (no POSIX process groups, v1 gap), in which
+  // case the field is omitted entirely rather than falsely reporting "none".
+  const backgroundPids = (): number[] | undefined => {
+    if (access !== 'full' || !getBackgroundSurvivors) return undefined;
+    const { pids, supported } = getBackgroundSurvivors();
+    return supported ? pids : undefined;
   };
 
   if (state.terminal) {
@@ -468,5 +491,6 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
     output_tokens: totals.out,
     cost_usd: totals.usd,
   });
-  return finish(isError ? 1 : 0);
+  const bg = backgroundPids();
+  return finish(isError ? 1 : 0, bg ? { background_pids: bg } : undefined);
 }

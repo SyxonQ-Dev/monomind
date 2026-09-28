@@ -54,6 +54,7 @@ describe('agent exec golden fixtures (§8.4)', () => {
     'cancel',
     'bad-frame',
     'full-access',
+    'full-access-background',
     'tool-activity',
   ];
 
@@ -87,6 +88,7 @@ describe('agent exec golden fixtures (§8.4)', () => {
     expect(load('timeout').at(-1)).toMatchObject({ exit_code: 124 });
     expect(load('cancel').at(-1)).toMatchObject({ exit_code: 130 });
     expect(load('full-access').at(-1)).toMatchObject({ exit_code: 0 });
+    expect(load('full-access-background').at(-1)).toMatchObject({ exit_code: 0 });
   });
 
   // #355: start.access records which mode the turn ran in.
@@ -183,5 +185,23 @@ describe('agent exec golden fixtures (§8.4)', () => {
       (e) => e.type === 'tool_activity' && e.phase === 'end' && e.denied === true,
     )!;
     expect(denied).toMatchObject({ ok: false, denied: true });
+  });
+
+  // #359
+  it('full-access-background: a normal end_turn reports a survivor via done.background_pids, not a killed turn', () => {
+    const evs = load('full-access-background');
+    const result = evs.find((e) => e.type === 'result')!;
+    expect(result).toMatchObject({ subtype: 'success', is_error: false, stop_reason: 'end_turn' });
+    expect(evs.some((e) => e.type === 'error')).toBe(false);
+    const done = evs.at(-1)!;
+    expect(done).toMatchObject({ exit_code: 0 });
+    expect(Array.isArray(done.background_pids)).toBe(true);
+    expect((done.background_pids as number[]).length).toBeGreaterThan(0);
+  });
+
+  it('full-access (killed via cancel/timeout) never carries background_pids — see the timeout/cancel fixtures', () => {
+    for (const f of ['timeout', 'cancel']) {
+      expect('background_pids' in load(f).at(-1)!, f).toBe(false);
+    }
   });
 });
