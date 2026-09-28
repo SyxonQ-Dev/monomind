@@ -149,6 +149,31 @@ for (const backendCase of BACKENDS) {
         });
         await expect(backend.store(entry)).resolves.not.toThrow();
       });
+
+      // Refusing these failed every chunk of any web capture whose URL has a
+      // query string (every YouTube video) with "all chunk stores failed".
+      it('accepts url: and parent: provenance tags carrying a query string', async () => {
+        const entry = createDefaultEntry({
+          key: 'url-tag',
+          content: 'x',
+          namespace: 'conformance',
+          tags: [
+            'url:https://www.youtube.com/watch?v=Pk7W7BKMwqo&t=1s%20x',
+            'parent:profile:work:/home/me/inbox/2026 capture (1)/readable.md',
+          ],
+        });
+        await expect(backend.store(entry)).resolves.not.toThrow();
+      });
+
+      it('still rejects a query character outside a provenance tag', async () => {
+        const entry = createDefaultEntry({
+          key: 'bad-query-tag',
+          content: 'x',
+          namespace: 'conformance',
+          tags: ['plain?v=1'],
+        });
+        await expect(backend.store(entry)).rejects.toThrow(/Invalid tag format/);
+      });
     });
 
     // ---- Core CRUD parity -------------------------------------------------
