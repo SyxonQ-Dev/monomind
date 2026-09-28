@@ -91,7 +91,7 @@ Fallback when picking returns nothing — real core agents:
 | Command | Subcommands | Description |
 |---------|-------------|-------------|
 | `init` | 6 | Project initialization |
-| `agent` | 10 | Agent lifecycle management |
+| `agent` | 11 | Agent lifecycle management |
 | `monoswarm` | 5 | Multi-agent coordination |
 | `memory` | 12 | SQLite with ANN vector search |
 | `mcp` | 11 | MCP server management |

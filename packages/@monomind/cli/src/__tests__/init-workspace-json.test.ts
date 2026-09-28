@@ -157,6 +157,15 @@ describe('monomind init --json (workspace init, #358)', () => {
     expect(readFileSync(join(cwd, 'CLAUDE.md'), 'utf-8')).toMatch(/monomind|Monomind/);
   });
 
+  it('--target claude adds only Claude Code files — no .gemini/ or .agents/ (#372)', () => {
+    const { status, json } = runInit(cwd, home, ['--if-missing', '--json', '--yes']);
+    expect(status).toBe(0);
+    expect(existsSync(join(cwd, '.claude'))).toBe(true);
+    expect(existsSync(join(cwd, '.gemini'))).toBe(false);
+    expect(existsSync(join(cwd, '.agents'))).toBe(false);
+    expect((json.created as string[]).filter((f) => /^\.(gemini|agents)\b/.test(f))).toEqual([]);
+  });
+
   it('--project rejects a directory that does not exist', () => {
     const missing = join(cwd, 'does-not-exist');
     const { status, json, stdout } = runInit(home, home, ['--project', missing, '--json', '--yes']);

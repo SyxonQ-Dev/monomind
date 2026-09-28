@@ -15,6 +15,7 @@ import {
 import { guardFor } from './file-guard.js';
 import { countFiles, listFilesRecursive } from './fs-helpers.js';
 import { previouslyGenerated, recordGenerated, retireGeneratedEntry } from './init-manifest.js';
+import { wantsAgentsDirs, wantsGeminiDirs } from './platform-dirs.js';
 import { findSourceDir } from './shared.js';
 import type { InitOptions, InitResult } from './types.js';
 
@@ -150,10 +151,11 @@ export async function copySkills(
   );
   recordGenerated(targetDir, 'skills', [...writtenSkills, ...retainedSkills]);
 
-  // Mirror written skills to .gemini/skills/ and .agents/skills/ (#100)
+  // Mirror written skills to .gemini/skills/ and .agents/skills/ (#100) —
+  // only for the platforms that read them (#372).
   const mirrorDirs = [
-    path.join(targetDir, '.gemini', 'skills'),
-    path.join(targetDir, '.agents', 'skills'),
+    ...(wantsGeminiDirs(options) ? [path.join(targetDir, '.gemini', 'skills')] : []),
+    ...(wantsAgentsDirs(options) ? [path.join(targetDir, '.agents', 'skills')] : []),
   ];
   for (const mirrorDir of mirrorDirs) {
     fs.mkdirSync(mirrorDir, { recursive: true });

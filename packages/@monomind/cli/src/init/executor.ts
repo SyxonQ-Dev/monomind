@@ -28,6 +28,7 @@ import { copyAgents, copyCommands, copySkills } from './copy-assets.js';
 import { finalizeGuard, guardFor, pruneBackups } from './file-guard.js';
 import { initProjectMemory, seedProjectMemory } from './init-memory.js';
 import { initKnowledgeGraph, runDoctorFix } from './init-post-steps.js';
+import { wantsAgentsDirs, wantsGeminiDirs } from './platform-dirs.js';
 import { buildProjectIndexes } from './project-indexes.js';
 import {
   _registerMonomindProject,
@@ -35,7 +36,20 @@ import {
   shouldRegisterMonomindProject,
 } from './project-registry.js';
 import { findSourceHelpersDir } from './shared.js';
-import { writeSharedInstructions } from './shared-instructions-generator.js';
+import {
+  detectProjectProfile,
+  generateMemorySeeds,
+  writeSharedInstructions,
+} from './shared-instructions-generator.js';
+
+function claudeOnlyMemorySeeds(targetDir: string): ReturnType<typeof generateMemorySeeds> {
+  try {
+    return generateMemorySeeds(detectProjectProfile(targetDir));
+  } catch {
+    return []; // best-effort, like writeSharedInstructions
+  }
+}
+
 import type { InitOptions, InitResult } from './types.js';
 import { detectPlatform } from './types.js';
 import { writeGeminiFiles } from './write-antigravity.js';
@@ -319,8 +333,11 @@ export async function executeInit(options: InitOptions): Promise<InitResult> {
     }
 
     // Generate .agents/shared_instructions.md; its memory seeds are stored
-    // once the database exists (below).
-    const memorySeeds = writeSharedInstructions(targetDir, options.force, result);
+    // once the database exists (below). #372: a Claude-only init writes no
+    // .agents/ file but keeps the seeds.
+    const memorySeeds = wantsAgentsDirs(options)
+      ? writeSharedInstructions(targetDir, options.force, result)
+      : claudeOnlyMemorySeeds(targetDir);
 
     // Every agent and skill is on disk now: index them (project + user-level)
     // so the prompt hook and `monomind pick` route to them from the start.
@@ -394,7 +411,15 @@ async function createDirectories(
   options: InitOptions,
   result: InitResult,
 ): Promise<void> {
-  const dirs = [...DIRECTORIES.claude, ...(options.components.runtime ? DIRECTORIES.runtime : [])];
+  const dirs = [
+    // #372: .gemini/ and .agents/ only for the platforms that read them.
+    ...DIRECTORIES.claude.filter(
+      (d) =>
+        (wantsGeminiDirs(options) || !d.startsWith('.gemini')) &&
+        (wantsAgentsDirs(options) || !d.startsWith('.agents')),
+    ),
+    ...(options.components.runtime ? DIRECTORIES.runtime : []),
+  ];
 
   for (const dir of dirs) {
     const fullPath = path.join(targetDir, dir);
