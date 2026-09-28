@@ -18,6 +18,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { MCPToolResult } from '../mcp-tools/types.js';
 
 const ORIGINAL_CWD = process.cwd();
 const ORIGINAL_GLOBAL = process.env.MONOMIND_GLOBAL_BRAIN_DIR;
@@ -84,8 +85,8 @@ async function mcp(name: string, input: Record<string, unknown>) {
   const { knowledgeTools } = await import('../mcp-tools/knowledge-tools.js');
   const tool = knowledgeTools.find((t) => t.name === name);
   if (!tool) throw new Error(`no tool ${name}`);
-  const res = await tool.handler(input);
-  return JSON.parse((res.content[0] as { text: string }).text);
+  const res = (await tool.handler(input)) as MCPToolResult;
+  return JSON.parse(String(res.content[0].text));
 }
 
 async function hits(query: string, scope: string) {
