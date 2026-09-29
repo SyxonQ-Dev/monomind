@@ -308,7 +308,7 @@ npx monomind@latest hooks session-restore --session-id "[id]"
 npx monomind@latest hooks route --task "[task]"
 npx monomind@latest hooks explain --topic "[topic]"
 
-# Scan hook activity into consolidated JSON state (no model is trained)
+# Scan the repository (file types, import lines) into the memory store and local pattern log (no model is trained)
 npx monomind@latest hooks pretrain --path . --depth medium
 
 # Background workers
