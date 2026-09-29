@@ -8,7 +8,7 @@ import type {
   SearchResult,
 } from './types.js';
 
-const ACTIVATION_THRESHOLD = 0.1;
+export const ACTIVATION_THRESHOLD = 0.1;
 const CROSS_CUTTING: Set<CapabilityName> = new Set(['graph', 'timeline']);
 const CONTENT_CAPS: Set<CapabilityName> = new Set(['code', 'documents', 'media', 'data']);
 
