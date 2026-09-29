@@ -3,6 +3,7 @@
  * Advanced output formatting with tables, progress bars, and colors
  */
 
+import { Writable } from 'node:stream';
 import { Progress } from './output-progress.js';
 import { Spinner } from './output-spinner.js';
 import { renderTable, stripAnsi } from './output-table.js';
@@ -165,6 +166,29 @@ export class OutputFormatter {
     const previous = this.outputStream;
     this.outputStream = stream;
     return previous;
+  }
+
+  /**
+   * Run `fn` with stdout reserved for a machine-readable document
+   * (`-o json|sarif`, `--json`): regular output goes to stderr meanwhile, or
+   * nowhere under --quiet. Print the document itself with printDocument().
+   */
+  async reserveStdout<T>(reserve: boolean, fn: () => Promise<T>): Promise<T> {
+    if (!reserve) return fn();
+    const sink = this.isQuiet()
+      ? (new Writable({ write: (_c, _e, done) => done() }) as unknown as NodeJS.WriteStream)
+      : process.stderr;
+    const previous = this.setOutputStream(sink);
+    try {
+      return await fn();
+    } finally {
+      this.setOutputStream(previous);
+    }
+  }
+
+  /** Print a machine-readable document on stdout, even inside reserveStdout(). */
+  printDocument(data: unknown): void {
+    process.stdout.write(`${this.json(data)}\n`);
   }
 
   write(text: string): void {
