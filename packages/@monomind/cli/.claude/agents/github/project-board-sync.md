@@ -11,61 +11,60 @@ category: github
 ## Overview
 Synchronize AI swarms with GitHub Projects for visual task management, progress tracking, and team coordination.
 
+All board work goes through `gh project` (and `gh api graphql` where `gh project` has no subcommand). The `project` token scope is required: `gh auth refresh -s project`. There is no monomind board command; this agent reads swarm tasks (`monomind task list`) and mirrors them onto the board.
+
 ## Core Features
 
 ### 1. Board Initialization
 ```bash
-# Connect swarm to GitHub Project using gh CLI
-# Get project details
-PROJECT_ID=$(gh project list --owner @me --format json | \
-  jq -r '.projects[] | select(.title == "Development Board") | .id')
-
-# Initialize swarm with project
-npx monomind github board-init \
-  --project-id "$PROJECT_ID" \
-  --sync-mode "bidirectional" \
-  --create-views "swarm-status,agent-workload,priority"
+# Find the project number and node ID
+OWNER=my-org
+PROJECT_NUMBER=$(gh project list --owner $OWNER --format json \
+  --jq '.projects[] | select(.title == "Development Board") | .number')
+PROJECT_ID=$(gh project view $PROJECT_NUMBER --owner $OWNER --format json --jq .id)
 
 # Create project fields for swarm tracking
-gh project field-create $PROJECT_ID --owner @me \
+gh project field-create $PROJECT_NUMBER --owner $OWNER \
   --name "Swarm Status" \
   --data-type "SINGLE_SELECT" \
   --single-select-options "pending,in_progress,completed"
+gh project field-create $PROJECT_NUMBER --owner $OWNER --name "Agent" --data-type TEXT
+
+# Field and option IDs, needed by item-edit
+gh project field-list $PROJECT_NUMBER --owner $OWNER --format json > /tmp/fields.json
 ```
+
+Views (board, table, roadmap) are created in the GitHub UI; `gh project` cannot create them.
 
 ### 2. Task Synchronization
 ```bash
-# Sync swarm tasks with project cards
-npx monomind github board-sync \
-  --map-status '{
-    "todo": "To Do",
-    "in_progress": "In Progress",
-    "review": "Review",
-    "done": "Done"
-  }' \
-  --auto-move-cards \
-  --update-metadata
+# Swarm tasks on the local side
+npx monomind task list --all
+
+# Map a task status to the board's Status option and set it on an item
+STATUS_FIELD=$(jq -r '.fields[] | select(.name == "Status") | .id' /tmp/fields.json)
+option_id() { jq -r --arg n "$1" '.fields[] | select(.name == "Status") | .options[] | select(.name == $n) | .id' /tmp/fields.json; }
+
+ITEM_ID=$(gh project item-add $PROJECT_NUMBER --owner $OWNER \
+  --url "https://github.com/$OWNER/repo/issues/456" --format json --jq .id)
+
+gh project item-edit --id "$ITEM_ID" --project-id "$PROJECT_ID" \
+  --field-id "$STATUS_FIELD" --single-select-option-id "$(option_id 'In Progress')"
 ```
 
 ### 3. Real-time Updates
-```bash
-# Enable real-time board updates
-npx monomind github board-realtime \
-  --webhook-endpoint "https://api.example.com/github-sync" \
-  --update-frequency "immediate" \
-  --batch-updates false
-```
+GitHub Projects has built-in workflows (Project → Workflows in the UI) that move items when an issue is closed or a PR is merged. Turn those on for status transitions and use this agent for the fields GitHub does not set, such as Agent and Swarm Status.
 
 ## Configuration
 
 ### Board Mapping Configuration
 ```yaml
-# .github/board-sync.yml
+# .github/board-sync.yml — read by this agent when mapping tasks to fields
 version: 1
 project:
   name: "AI Development Board"
   number: 1
-  
+
 mapping:
   # Map swarm task status to board columns
   status:
@@ -75,7 +74,7 @@ mapping:
     review: "Review"
     completed: "Done"
     blocked: "Blocked"
-    
+
   # Map agent types to labels
   agents:
     coder: "🔧 Development"
@@ -83,14 +82,14 @@ mapping:
     analyst: "📊 Analysis"
     designer: "🎨 Design"
     architect: "🏗️ Architecture"
-    
+
   # Map priority to project fields
   priority:
     critical: "🔴 Critical"
     high: "🟡 High"
     medium: "🟢 Medium"
     low: "⚪ Low"
-    
+
   # Custom fields
   fields:
     - name: "Agent Count"
@@ -106,7 +105,7 @@ mapping:
 
 ### View Configuration
 ```javascript
-// Custom board views
+// Suggested board views (create them in the GitHub UI)
 {
   "views": [
     {
@@ -137,234 +136,133 @@ mapping:
 
 ### 1. Auto-Assignment
 ```bash
-# Automatically assign cards to agents
-npx monomind github board-auto-assign \
-  --strategy "load-balanced" \
-  --consider "expertise,workload,availability" \
-  --update-cards
+# Set the Agent text field on an item
+AGENT_FIELD=$(jq -r '.fields[] | select(.name == "Agent") | .id' /tmp/fields.json)
+gh project item-edit --id "$ITEM_ID" --project-id "$PROJECT_ID" \
+  --field-id "$AGENT_FIELD" --text "coder"
+
+# Or assign the underlying issue to a person
+gh issue edit 456 --add-assignee octocat
 ```
 
 ### 2. Progress Tracking
 ```bash
-# Track and visualize progress
-npx monomind github board-progress \
-  --show "burndown,velocity,cycle-time" \
-  --time-period "sprint" \
-  --export-metrics
+# Count items per Status
+gh project item-list $PROJECT_NUMBER --owner $OWNER --limit 500 --format json \
+  --jq '.items | group_by(.status) | map({status: (.[0].status // "No status"), count: length})'
 ```
 
 ### 3. Smart Card Movement
 ```bash
-# Intelligent card state transitions
-npx monomind github board-smart-move \
-  --rules '{
-    "auto-progress": "when:all-subtasks-done",
-    "auto-review": "when:tests-pass",
-    "auto-done": "when:pr-merged"
-  }'
+# Move items whose issue is closed to Done
+gh project item-list $PROJECT_NUMBER --owner $OWNER --limit 500 --format json \
+  --jq '.items[] | select(.content.type == "Issue" and .status != "Done") | [.id, .content.url] | @tsv' |
+while IFS=$'\t' read -r id url; do
+  if [ "$(gh issue view "$url" --json state -q .state)" = "CLOSED" ]; then
+    gh project item-edit --id "$id" --project-id "$PROJECT_ID" \
+      --field-id "$STATUS_FIELD" --single-select-option-id "$(option_id Done)"
+  fi
+done
 ```
 
 ## Board Commands
 
 ### Create Cards from Issues
 ```bash
-# Convert issues to project cards using gh CLI
 # List issues with label
-ISSUES=$(gh issue list --label "enhancement" --json number,title,body)
+ISSUES=$(gh issue list --label "enhancement" --json url)
 
 # Add issues to project
-echo "$ISSUES" | jq -r '.[].number' | while read -r issue; do
-  gh project item-add $PROJECT_ID --owner @me --url "https://github.com/$GITHUB_REPOSITORY/issues/$issue"
+echo "$ISSUES" | jq -r '.[].url' | while read -r url; do
+  gh project item-add $PROJECT_NUMBER --owner $OWNER --url "$url"
 done
+```
 
-# Process with swarm
-npx monomind github board-import-issues \
-  --issues "$ISSUES" \
-  --add-to-column "Backlog" \
-  --parse-checklist \
-  --assign-agents
+### Draft Cards
+```bash
+# A card for a swarm task that has no issue yet
+gh project item-create $PROJECT_NUMBER --owner $OWNER \
+  --title "Implement user authentication" --body "Agents: architect, coder, tester"
 ```
 
 ### Bulk Operations
 ```bash
-# Bulk card operations
-npx monomind github board-bulk \
-  --filter "status:blocked" \
-  --action "add-label:needs-attention" \
-  --notify-assignees
-```
+# Label every blocked item's issue
+gh project item-list $PROJECT_NUMBER --owner $OWNER --limit 500 --format json \
+  --jq '.items[] | select(.status == "Blocked" and .content.type == "Issue") | .content.url' |
+  while read -r url; do gh issue edit "$url" --add-label "needs-attention"; done
 
-### Card Templates
-```bash
-# Create cards from templates
-npx monomind github board-template \
-  --template "feature-development" \
-  --variables '{
-    "feature": "User Authentication",
-    "priority": "high",
-    "agents": ["architect", "coder", "tester"]
-  }' \
-  --create-subtasks
+# Archive finished items
+gh project item-list $PROJECT_NUMBER --owner $OWNER --limit 500 --format json \
+  --jq '.items[] | select(.status == "Done") | .id' |
+  while read -r id; do gh project item-archive $PROJECT_NUMBER --owner $OWNER --id "$id"; done
 ```
 
 ## Advanced Synchronization
 
 ### 1. Multi-Board Sync
 ```bash
-# Sync across multiple boards
-npx monomind github multi-board-sync \
-  --boards "Development,QA,Release" \
-  --sync-rules '{
-    "Development->QA": "when:ready-for-test",
-    "QA->Release": "when:tests-pass"
-  }'
+# An issue can sit on several boards; add it to the next board when it is ready
+gh project item-add 2 --owner $OWNER --url "https://github.com/$OWNER/repo/issues/456"
 ```
 
 ### 2. Cross-Organization Sync
 ```bash
-# Sync boards across organizations
-npx monomind github cross-org-sync \
-  --source "org1/Project-A" \
-  --target "org2/Project-B" \
-  --field-mapping "custom" \
-  --conflict-resolution "source-wins"
-```
-
-### 3. External Tool Integration
-```bash
-# Sync with external tools
-npx monomind github board-integrate \
-  --tool "jira" \
-  --mapping "bidirectional" \
-  --sync-frequency "5m" \
-  --transform-rules "custom"
+# Read one board, add the same issues to a board owned by another org
+gh project item-list 1 --owner org1 --format json --jq '.items[].content.url' |
+  while read -r url; do gh project item-add 7 --owner org2 --url "$url"; done
 ```
 
 ## Visualization & Reporting
 
 ### Board Analytics
 ```bash
-# Generate board analytics using gh CLI data
 # Fetch project data
-PROJECT_DATA=$(gh project item-list $PROJECT_ID --owner @me --format json)
+PROJECT_DATA=$(gh project item-list $PROJECT_NUMBER --owner $OWNER --limit 500 --format json)
 
-# Get issue metrics
-ISSUE_METRICS=$(echo "$PROJECT_DATA" | jq -r '.items[] | select(.content.type == "Issue")' | \
-  while read -r item; do
-    ISSUE_NUM=$(echo "$item" | jq -r '.content.number')
-    gh issue view $ISSUE_NUM --json createdAt,closedAt,labels,assignees
-  done)
-
-# Generate analytics with swarm
-npx monomind github board-analytics \
-  --project-data "$PROJECT_DATA" \
-  --issue-metrics "$ISSUE_METRICS" \
-  --metrics "throughput,cycle-time,wip" \
-  --group-by "agent,priority,type" \
-  --time-range "30d" \
-  --export "dashboard"
-```
-
-### Custom Dashboards
-```javascript
-// Dashboard configuration
-{
-  "dashboard": {
-    "widgets": [
-      {
-        "type": "chart",
-        "title": "Task Completion Rate",
-        "data": "completed-per-day",
-        "visualization": "line"
-      },
-      {
-        "type": "gauge",
-        "title": "Sprint Progress",
-        "data": "sprint-completion",
-        "target": 100
-      },
-      {
-        "type": "heatmap",
-        "title": "Agent Activity",
-        "data": "agent-tasks-per-day"
-      }
-    ]
-  }
-}
+# Cycle time of closed issues on the board
+echo "$PROJECT_DATA" | jq -r '.items[] | select(.content.type == "Issue") | .content.url' |
+  while read -r url; do
+    gh issue view "$url" --json number,createdAt,closedAt,labels,assignees
+  done | jq -s 'map(select(.closedAt)) |
+    map({number, hours: (((.closedAt | fromdate) - (.createdAt | fromdate)) / 3600)})'
 ```
 
 ### Reports
 ```bash
-# Generate reports
-npx monomind github board-report \
-  --type "sprint-summary" \
-  --format "markdown" \
-  --include "velocity,burndown,blockers" \
-  --distribute "slack,email"
+# Markdown sprint summary: items per status
+gh project item-list $PROJECT_NUMBER --owner $OWNER --limit 500 --format json --jq '
+  "## Sprint summary\n" +
+  (.items | group_by(.status) | map("- **\(.[0].status // "No status")**: \(length)") | join("\n"))'
 ```
 
 ## Workflow Integration
 
 ### Sprint Management
-```bash
-# Manage sprints with swarms
-npx monomind github sprint-manage \
-  --sprint "Sprint 23" \
-  --auto-populate \
-  --capacity-planning \
-  --track-velocity
-```
+Use an Iteration field for sprints. `gh project field-create` cannot create one (it only supports TEXT, SINGLE_SELECT, DATE and NUMBER), so create the Sprint iteration field in the Projects UI, then set it per item with `gh project item-edit --id ... --project-id ... --field-id ... --iteration-id ...` (iteration IDs are in `gh project field-list --format json`).
 
 ### Milestone Tracking
 ```bash
-# Track milestone progress
-npx monomind github milestone-track \
-  --milestone "v2.0 Release" \
-  --update-board \
-  --show-dependencies \
-  --predict-completion
-```
-
-### Release Planning
-```bash
-# Plan releases using board data
-npx monomind github release-plan-board \
-  --analyze-velocity \
-  --estimate-completion \
-  --identify-risks \
-  --optimize-scope
+# Milestone progress from the issues side
+gh api "repos/{owner}/{repo}/milestones" \
+  --jq '.[] | "\(.title): \(.closed_issues)/\(.open_issues + .closed_issues) closed"'
 ```
 
 ## Team Collaboration
 
-### Work Distribution
-```bash
-# Distribute work among team
-npx monomind github board-distribute \
-  --strategy "skills-based" \
-  --balance-workload \
-  --respect-preferences \
-  --notify-assignments
-```
-
 ### Standup Automation
 ```bash
-# Generate standup reports
-npx monomind github standup-report \
-  --team "frontend" \
-  --include "yesterday,today,blockers" \
-  --format "slack" \
-  --schedule "daily-9am"
+# What changed on the board since yesterday (by the underlying issues' update time)
+SINCE=$(date -d yesterday --iso-8601)
+gh issue list --search "updated:>=$SINCE" --json number,title,state,assignees \
+  --jq '.[] | "- #\(.number) \(.title) [\(.state)]"'
 ```
 
 ### Review Coordination
 ```bash
-# Coordinate reviews via board
-npx monomind github review-coordinate \
-  --board "Code Review" \
-  --assign-reviewers \
-  --track-feedback \
-  --ensure-coverage
+# PRs on the board still waiting on review
+gh project item-list $PROJECT_NUMBER --owner $OWNER --limit 500 --format json \
+  --jq '.items[] | select(.content.type == "PullRequest" and .status == "Review") | .content.url'
 ```
 
 ## Best Practices
@@ -376,10 +274,9 @@ npx monomind github review-coordinate \
 - Automation rules
 
 ### 2. Data Integrity
-- Bidirectional sync validation
-- Conflict resolution strategies
-- Audit trails
-- Regular backups
+- Treat the issue as the source of truth and the board as a view of it
+- Resolve conflicts in favor of the most recent issue update
+- Keep an audit trail in issue comments
 
 ### 3. Team Adoption
 - Training materials
@@ -391,89 +288,51 @@ npx monomind github review-coordinate \
 
 ### Sync Issues
 ```bash
-# Diagnose sync problems
-npx monomind github board-diagnose \
-  --check "permissions,webhooks,rate-limits" \
-  --test-sync \
-  --show-conflicts
+# Missing scope is the most common failure
+gh auth status
+gh auth refresh -s project
+
+# Rate limits
+gh api rate_limit --jq '.resources.graphql'
 ```
 
 ### Performance
-```bash
-# Optimize board performance
-npx monomind github board-optimize \
-  --analyze-size \
-  --archive-completed \
-  --index-fields \
-  --cache-views
-```
-
-### Data Recovery
-```bash
-# Recover board data
-npx monomind github board-recover \
-  --backup-id "2024-01-15" \
-  --restore-cards \
-  --preserve-current \
-  --merge-conflicts
-```
+Archive finished items (`gh project item-archive`) to keep `item-list` fast, and pass `--limit` explicitly: `gh project item-list` returns 30 items by default.
 
 ## Examples
 
 ### Agile Development Board
 ```bash
-# Setup agile board
-npx monomind github agile-board \
-  --methodology "scrum" \
-  --sprint-length "2w" \
-  --ceremonies "planning,review,retro" \
-  --metrics "velocity,burndown"
+gh project create --owner $OWNER --title "Sprint Board"
+# Add the Sprint iteration field in the Projects UI (gh cannot create iteration fields)
+gh project field-create <number> --owner $OWNER --name "Story Points" --data-type NUMBER
 ```
 
 ### Kanban Flow Board
 ```bash
-# Setup kanban board
-npx monomind github kanban-board \
-  --wip-limits '{
-    "In Progress": 5,
-    "Review": 3
-  }' \
-  --cycle-time-tracking \
-  --continuous-flow
+gh project create --owner $OWNER --title "Kanban"
+# WIP limits are shown per column in the board view settings (GitHub UI)
+gh project item-list <number> --owner $OWNER --format json \
+  --jq '[.items[] | select(.status == "In Progress")] | length'
 ```
 
 ### Research Project Board
 ```bash
-# Setup research board
-npx monomind github research-board \
-  --phases "ideation,research,experiment,analysis,publish" \
-  --track-citations \
-  --collaborate-external
+gh project create --owner $OWNER --title "Research"
+gh project field-create <number> --owner $OWNER --name Phase --data-type SINGLE_SELECT \
+  --single-select-options "ideation,research,experiment,analysis,publish"
 ```
 
 ## Metrics & KPIs
 
 ### Performance Metrics
 ```bash
-# Track board performance
-npx monomind github board-kpis \
-  --metrics '[
-    "average-cycle-time",
-    "throughput-per-sprint",
-    "blocked-time-percentage",
-    "first-time-pass-rate"
-  ]' \
-  --dashboard-url
+# Throughput: issues on the board closed in the last 14 days
+SINCE=$(date -d '14 days ago' +%s)
+gh project item-list $PROJECT_NUMBER --owner $OWNER --limit 500 --format json \
+  --jq '.items[] | select(.content.type == "Issue") | .content.url' |
+  while read -r url; do gh issue view "$url" --json closedAt; done |
+  jq -s --argjson since "$SINCE" 'map(select(.closedAt and ((.closedAt | fromdate) >= $since))) | length'
 ```
 
-### Team Metrics
-```bash
-# Track team performance
-npx monomind github team-metrics \
-  --board "Development" \
-  --per-member \
-  --include "velocity,quality,collaboration" \
-  --anonymous-option
-```
-
-See also: [swarm-issue.md](./swarm-issue.md), [multi-repo-swarm.md](./multi-repo-swarm.md)
+See also: [monoswarm-issue.md](./monoswarm-issue.md), [monoswarm-multi-repo.md](./monoswarm-multi-repo.md)
