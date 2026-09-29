@@ -36,6 +36,9 @@ const POLL_INTERVAL = 200;
  *  behavior). */
 const LAUNCH_PORT_SCAN_TRIES = 10;
 
+/** Chrome's process exited before its CDP endpoint opened. */
+class ChromeExitedEarlyError extends Error {}
+
 export async function launchBrowser(config: BrowserConfig = {}): Promise<number> {
   const rawPort = config.port ?? DEFAULT_PORT;
   // Port 0 means "let Chrome bind a free port and tell us which" — see
@@ -82,6 +85,9 @@ export async function launchBrowser(config: BrowserConfig = {}): Promise<number>
   for (let i = 0; i < LAUNCH_PORT_SCAN_TRIES && rawPort + i <= 65535; i++)
     candidates.push(rawPort + i);
 
+  // See the catch below: one early Chrome exit on a candidate nobody holds
+  // afterwards is read as a lost port race, not a broken Chrome.
+  let toleratedEarlyExit: ChromeExitedEarlyError | null = null;
   for (const candidate of candidates) {
     // TCP-level check for "is anything at all listening" — isPortOpen()
     // does a full CDP /json fetch, which returns false BOTH for a genuinely
@@ -118,10 +124,25 @@ export async function launchBrowser(config: BrowserConfig = {}): Promise<number>
       // was not a moment ago — a losing race, not a broken Chrome install —
       // so try the next candidate exactly like an already-occupied one,
       // instead of failing the whole launch outright. A candidate that
-      // fails with nothing now listening (a real launch failure — bad
-      // executable, sandbox refusal, etc.) is not a race: retrying the
-      // next candidate would only fail the same way, so surface it as-is.
+      // fails with nothing now listening is usually a real launch failure
+      // (bad executable, sandbox refusal, etc.) that the next candidate would
+      // only repeat, so it is surfaced as-is.
       if (!isLastCandidate && (await isTcpPortOpen(candidate))) continue;
+      // Usually, but not always (#491): two launches that call listen() on
+      // the same port at the same instant can BOTH lose it on Linux — each
+      // socket is marked LISTEN before the kernel checks the port for
+      // conflicts, so each sees the other and gets EADDRINUSE. Both Chromes
+      // exit early and the port is free again, which is indistinguishable
+      // from a Chrome that cannot start. Move on once; a Chrome that really
+      // cannot start exits the same way on the next candidate, and the first
+      // of the two identical failures is surfaced.
+      if (err instanceof ChromeExitedEarlyError) {
+        if (!isLastCandidate && !toleratedEarlyExit) {
+          toleratedEarlyExit = err;
+          continue;
+        }
+        throw toleratedEarlyExit ?? err;
+      }
       throw err;
     }
   }
@@ -255,7 +276,7 @@ async function launchOnFreePort(config: BrowserConfig, port: number): Promise<nu
     earlyFailure ??= new Error(`Chrome failed to start on port ${port}: ${err.message}`);
   });
   child.on('exit', (code, signal) => {
-    earlyFailure ??= new Error(
+    earlyFailure ??= new ChromeExitedEarlyError(
       `Chrome exited before the CDP endpoint opened on port ${port} ` +
         `(code=${code ?? 'null'}, signal=${signal ?? 'null'})`,
     );
