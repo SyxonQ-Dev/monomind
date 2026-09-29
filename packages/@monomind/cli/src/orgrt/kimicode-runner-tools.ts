@@ -19,24 +19,15 @@
  *     code. `text` stays the tool name, so the org runtime's StateDetector
  *     liveness is unchanged.
  *
- * `kind` rides on the message as an extra field (AgentMessage has none yet;
- * the tracker's own name→kind table is the fallback).
+ * The start message sets `AgentMessage.kind`, which tool-activity.ts prefers
+ * over its own name table (tool-kind.ts) — this table knows the CLIs' own
+ * names (agy's run_command, grok's search_replace, ...).
  */
 
 import type { AgentMessage } from './agent-runner.js';
+import type { ToolKind } from './tool-kind.js';
 
-export type ToolKind =
-  | 'shell'
-  | 'edit'
-  | 'write'
-  | 'read'
-  | 'search'
-  | 'web'
-  | 'mcp'
-  | 'task'
-  | 'todo'
-  | 'patch'
-  | 'other';
+export type { ToolKind };
 
 /** Native tool names of the CLIs this module serves (agy, kimi, grok, qwen,
  *  copilot, pi), lowercased. The names do not collide in meaning across
@@ -289,7 +280,7 @@ export class NativeToolCalls {
       input,
       parent_tool_use_id: null,
       kind,
-    } as AgentMessage;
+    };
   }
 
   /** End message(s) for a call; `fallback` names a call whose start never
