@@ -57,7 +57,8 @@ export interface MonoswarmState {
   initialized: boolean;
   topology: string;
   maxAgents: number;
-  status: 'initializing' | 'running' | 'paused' | 'shutting_down' | 'terminated';
+  /** `initialized` = recorded by monoswarm_init; no agent process is ever started (#418). */
+  status: 'initializing' | 'initialized' | 'running' | 'paused' | 'shutting_down' | 'terminated';
   /** Agent roster — hive "workers" and swarm "agents" are the same list here. */
   agents: string[];
   /** Optional elected coordinator, carried over from hive-mind's "queen" concept. */

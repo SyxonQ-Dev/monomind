@@ -552,7 +552,7 @@ describe('MCP Tools Deep Test Suite', () => {
       expect(result.monoswarmId).toBeDefined();
     });
 
-    it('monoswarm_status returns running status after init', async () => {
+    it('monoswarm_status returns initialized (not running) status after init', async () => {
       // Init first so status has something to report. monoswarm_init always
       // replaces the single global state record, so this is a fresh start
       // regardless of what earlier tests in this file left behind.
@@ -560,7 +560,7 @@ describe('MCP Tools Deep Test Suite', () => {
       await initTool.handler({ topology: 'mesh' });
       const tool = monoswarmTools.find(t => t.name === 'monoswarm_status')!;
       const result: any = await tool.handler({});
-      expect(result.status).toBe('running');
+      expect(result.status).toBe('initialized');
     });
 
     it('monoswarm_shutdown returns success after init', async () => {
