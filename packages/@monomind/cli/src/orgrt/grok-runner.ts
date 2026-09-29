@@ -20,11 +20,11 @@
  *   message is yielded the instant the subprocess spawns (deterministically
  *   winning the watchdog's first-pull race regardless of model latency), and
  *   each parsed assistant event is yielded as its line lands rather than
- *   accumulated until process exit. Unlike codex/agy, grok's guessed wire
- *   shapes (see below) carry no distinct "tool execution" event of their
- *   own — org tools only ever arrive via the ```tool_call fence protocol —
- *   so there is nothing else to forward as tool_use liveness besides the
- *   spawn-time yield. Fatal provider errors (auth/quota) are classified via
+ *   accumulated until process exit. grok's own tool calls arrive as
+ *   `tool_use` blocks in assistant frames and their results as
+ *   `tool_result` blocks in user frames (`streaming-messages-json`, below);
+ *   both are forwarded as rich tool_use/tool_result pairs matched by grok's
+ *   call id. Fatal provider errors (auth/quota) are classified via
  *   the shared classifyStderr helper (same as kimi/codex/antigravity) and
  *   tagged non-retryable. The STARTUP_GRACE_MS first-run-prompt hang
  *   detection below is unrelated to #204 (it guards a different failure
@@ -65,9 +65,12 @@
  * tighten this parser if the real shape differs — a wrong guess here fails
  * closed (no text extracted, not a crash), which is what the "no known
  * shape matched" path is for.
- *   - Invocation: `grok -p "<prompt>" --output-format json [--model X] [--cwd Y]
- *                 [--always-approve] [--sandbox workspace] [-r <sessionId> | -c]`
- *     (the sandbox profile follows the role's policy.git level — cli-sandbox.ts)
+ *   - Invocation: `grok -p "<prompt>" --output-format streaming-messages-json
+ *                 --always-approve [--sandbox workspace] [--model X]
+ *                 [--reasoning-effort L] [--max-turns N] --cwd Y [--resume <id>]`
+ *     (the sandbox profile follows the role's policy.git level — cli-sandbox.ts;
+ *     `--access full` drops it). SUPERSEDES the `json` notes below: the
+ *     format switch is documented in grok-runner-stream.ts.
  *   - Session continuity: `-r/--resume [<id>]` resumes a specific session,
  *     `-c/--continue` resumes the most recent one. Session id is captured
  *     from any event carrying `session_id` / `sessionId` / `thread_id`.
@@ -81,6 +84,7 @@
 import type { AgentMessage, AgentRunArgs, AgentRunner } from './agent-runner.js';
 import type { TurnOutcome } from './grok-runner-stream.js';
 import { streamTurn, turnError } from './grok-runner-stream.js';
+import { NativeToolCalls } from './kimicode-runner-tools.js';
 import {
   buildToolProtocol,
   formatToolResults,
@@ -97,6 +101,11 @@ export class GrokAgentRunner implements AgentRunner {
   async *run(args: AgentRunArgs): AsyncIterable<AgentMessage> {
     const bin = this.grokBin || process.env.GROK_CLI_BIN || 'grok';
     let sessionId: string | undefined = args.resume;
+    const tools = new NativeToolCalls();
+    // grok's total_cost_usd is per invocation (one `grok -p` process); the
+    // result carries this run's running sum, the cumulative-per-session
+    // figure every consumer of `cost_usd` expects.
+    let runCostUsd: number | undefined;
 
     try {
       for await (const p of args.prompt) {
@@ -104,6 +113,7 @@ export class GrokAgentRunner implements AgentRunner {
         let nextPrompt = text;
         let turnInputTokens = 0;
         let turnOutputTokens = 0;
+        let maxTurnsHit = false;
 
         // runToolRound ends this loop past the round cap (#326).
         for (let round = 0; ; round++) {
@@ -141,20 +151,39 @@ export class GrokAgentRunner implements AgentRunner {
               // after process exit): a grok turn can run many minutes, and
               // session.ts's watchdog must see messages DURING the turn.
               if (ev.text) yield { type: 'assistant', session_id: sessionId, text: ev.text };
-            } else if (ev.kind === 'tool') {
+            }
+            // grok's own tool_use/tool_result blocks, paired by their ids.
+            for (const u of ev.toolUses ?? []) {
+              const m = tools.start(u.id, u.name, u.input, sessionId);
+              if (m) yield m;
+            }
+            for (const r of ev.toolResults ?? []) {
+              yield* tools.end(r.id, r.output, r.isError, sessionId);
+            }
+            if (ev.kind === 'tool') {
               // Liveness only (see header) — session.ts never renders
               // tool_use as chat, it only feeds the StateDetector
-              // ('tool-call' state) and refreshes last-activity.
-              yield { type: 'tool_use', session_id: sessionId, text: ev.toolName };
+              // ('tool-call' state) and refreshes last-activity. No label:
+              // a bare ping never becomes a tool_activity event.
+              yield { type: 'tool_use', session_id: sessionId };
             }
           }
           if (outcome.sessionId) sessionId = outcome.sessionId;
 
-          if (outcome.hangSuspected || outcome.exitCode !== 0 || outcome.error) {
+          if (
+            outcome.hangSuspected ||
+            (outcome.exitCode !== 0 && !outcome.maxTurnsHit) ||
+            outcome.error
+          ) {
             throw turnError(outcome, round);
           }
           turnInputTokens += outcome.inputTokens;
           turnOutputTokens += outcome.outputTokens;
+          if (outcome.costUsd !== undefined) runCostUsd = (runCostUsd ?? 0) + outcome.costUsd;
+          if (outcome.maxTurnsHit) {
+            maxTurnsHit = true;
+            break;
+          }
 
           const malformed: string[] = [];
           const calls = parseToolCalls(rawTexts, (raw, err) =>
@@ -175,9 +204,10 @@ export class GrokAgentRunner implements AgentRunner {
         yield {
           type: 'result',
           session_id: sessionId,
-          subtype: 'success',
+          subtype: maxTurnsHit ? 'error_max_turns' : 'success',
           input_tokens: turnInputTokens,
           output_tokens: turnOutputTokens,
+          ...(runCostUsd !== undefined ? { cost_usd: runCostUsd } : {}),
         };
       }
     } catch (err) {

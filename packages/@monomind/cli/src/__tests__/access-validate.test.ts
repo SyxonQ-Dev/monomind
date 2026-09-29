@@ -12,11 +12,11 @@ describe('accessValidationFindings', () => {
   it('errors when the resolved runtime does not support full access', () => {
     const def = OrgDefSchema.parse({
       name: 'o',
-      roles: [{ id: 'a', runtime: 'codex', policy: { access: 'full' } }],
+      roles: [{ id: 'a', runtime: 'hermes', policy: { access: 'full' } }],
     });
     const { errors } = accessValidationFindings(def);
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatch(/not supported by runtime "codex"/);
+    expect(errors[0]).toMatch(/not supported by runtime "hermes"/);
   });
 
   it('errors when policy.git is explicitly authored below push alongside access: full', () => {

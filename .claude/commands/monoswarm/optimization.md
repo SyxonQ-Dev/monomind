@@ -24,15 +24,15 @@ Then describe the optimization target:
 
 ```javascript
 // Initialize optimization swarm
-mcp__monomind__swarm_init({
+mcp__monomind__monoswarm_init({
   topology: "mesh",
   maxAgents: 6,
   strategy: "adaptive"
 })
 
 // Coordinate optimization
-mcp__monomind__coordination_orchestrate({
-  task: "optimize performance",
+mcp__monomind__task_create({
+  description: "optimize performance",
   strategy: "parallel"
 })
 ```
@@ -72,7 +72,7 @@ mcp__monomind__performance_benchmark({ suite: "performance" })
 
 ```javascript
 // Balance work across optimization agents
-mcp__monomind__coordination_load_balance({
+mcp__monomind__claims_rebalance({
   tasks: ["profile", "analyze", "optimize", "benchmark"]
 })
 ```
@@ -80,6 +80,6 @@ mcp__monomind__coordination_load_balance({
 ## Monitoring
 
 ```javascript
-mcp__monomind__swarm_status({ swarmId: "current" })
+mcp__monomind__monoswarm_status({ swarmId: "current" })
 mcp__monomind__system_metrics({})
 ```

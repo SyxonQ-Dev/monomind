@@ -197,7 +197,7 @@ describe('route-handler [PICK] delivery', () => {
     hCtx.router = { ...legacyRouter, matchSkills };
     await loadRH().handle(hCtx);
     expect(logs).toEqual([
-      '[PICK] skill: mcp__monomind__org_skill_show {"name":"zorbling-tuning"} (or: npx -y monomind org skills show zorbling-tuning)',
+      '[PICK] skill: mcp__monomind__org_skill_show {"name":"zorbling-tuning"}',
     ]);
     expect(matchSkills).not.toHaveBeenCalled();
     expect(outcomes().at(-1)).toMatchObject({
@@ -269,6 +269,26 @@ describe('route-handler [PICK] delivery', () => {
         fs.readFileSync(path.join(tmpDir, '.monomind', 'routes', 'sess-1.json'), 'utf-8'),
       );
       expect(own.agent).toBe('DevOps Automator');
+    },
+  );
+
+  it.each(['ok', 'yes', 'continue', 'thanks', 'fix tests'])(
+    'skips all routing work for the short prompt %j, even without MONOMIND_HOOK_QUIET (#415)',
+    async (prompt) => {
+      delete process.env.MONOMIND_HOOK_QUIET;
+      const hCtx = makeHCtx(prompt);
+      const getContext = vi.fn(() => 'ctx');
+      hCtx.intelligence = { getContext };
+      hCtx._openMonographDb = vi.fn(() => null);
+      hCtx._buildKnowledgeSearchFn = vi.fn(() => () => []);
+      hCtx._getBudgetStatus = vi.fn(() => ({ alert: true, spike: true, todayCost: 1 }));
+      await loadRH().handle(hCtx);
+      expect(logs).toEqual([]);
+      expect(outcomes()).toEqual([]);
+      expect(getContext).not.toHaveBeenCalled();
+      expect(hCtx._openMonographDb).not.toHaveBeenCalled();
+      expect(hCtx._buildKnowledgeSearchFn).not.toHaveBeenCalled();
+      expect(hCtx._getBudgetStatus).not.toHaveBeenCalled();
     },
   );
 

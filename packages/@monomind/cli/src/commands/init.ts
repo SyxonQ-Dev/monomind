@@ -109,9 +109,20 @@ export const initCommand: Command = {
     {
       name: 'target',
       short: 't',
-      description: 'Coding system to initialize (default: all)',
+      description:
+        'Coding system to initialize (default: all). `agents` writes only AGENTS.md (not part of all)',
       type: 'string',
-      choices: ['all', 'claude', 'antigravity', 'opencode', 'kimicode', 'codex'],
+      choices: [
+        'all',
+        'claude',
+        'antigravity',
+        'opencode',
+        'kimicode',
+        'codex',
+        'cline',
+        'aider',
+        'agents',
+      ],
     },
     {
       name: 'platform',
@@ -125,15 +136,20 @@ export const initCommand: Command = {
       default: false,
     },
     {
-      // Opt-in on purpose (#312): a pin written without being asked for would
-      // silently freeze the project on whichever version happened to run
-      // `init`, and upgrading monomind would stop changing the MCP server it
-      // starts. Projects whose policy forbids `@latest` ask for it explicitly.
+      // Pinned by default (#419): a floating @latest re-resolves on every MCP
+      // start (3–4 s), can hang on a cold npx cache and drifts mid-session.
+      // `monomind init --force` re-pins after an upgrade.
       name: 'pin',
       description:
-        'Pin the generated MCP entry to an exact version instead of monomind@latest ' +
-        '(bare --pin uses the running version; --pin <version> uses that one)',
+        'Version the generated MCP entry runs (default: this version; ' +
+        '--pin <version> for another, --pin latest for monomind@latest)',
       type: 'string',
+    },
+    {
+      name: 'no-pin',
+      description: 'Launch the MCP server from monomind@latest (same as --pin latest)',
+      type: 'boolean',
+      default: false,
     },
     {
       name: 'opencode',

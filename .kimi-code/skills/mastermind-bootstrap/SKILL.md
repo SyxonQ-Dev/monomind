@@ -7,7 +7,7 @@ default_mode: confirm
 
 # Mastermind Bootstrap
 
-This skill is invoked by `mastermind:bootstrap` or directly via `/mastermind-bootstrap`.
+This skill is invoked directly via `/mastermind-bootstrap`.
 
 ---
 

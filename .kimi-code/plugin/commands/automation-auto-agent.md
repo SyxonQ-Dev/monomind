@@ -72,7 +72,7 @@ mcp__monomind__agent_spawn({
 })
 
 // For multi-agent coordination, initialize a swarm first
-mcp__monomind__swarm_init({
+mcp__monomind__monoswarm_init({
   topology: "hierarchical",
   maxAgents: 6,
   strategy: "specialized"

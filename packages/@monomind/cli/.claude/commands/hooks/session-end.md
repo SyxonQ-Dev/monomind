@@ -71,7 +71,7 @@ Typically wired to run at conversation end:
 ## MCP Tool
 
 ```javascript
-mcp__monomind__hooks_session_end({
+mcp__monomind__hooks_session-end({
   saveState: true,
   timestamp: Date.now()
 })
