@@ -182,6 +182,13 @@ export const initCommand: Command = {
       // and only auto-start for an interactive user (#50).
     },
     {
+      name: 'dashboard',
+      description:
+        'Start the dashboard (Control Room, :4242) at every Claude Code session start (writes .monomind/dashboard.json)',
+      type: 'boolean',
+      default: false,
+    },
+    {
       name: 'with-embeddings',
       description:
         'Write the embeddings config and download the local embedding model memory search uses (one-time, needs network; degrades to keyword search offline)',
@@ -227,6 +234,10 @@ export const initCommand: Command = {
     {
       command: 'monomind init --no-watch',
       description: 'Initialize without starting the background graph watcher',
+    },
+    {
+      command: 'monomind init --dashboard',
+      description: 'Auto-start the dashboard at every session start',
     },
     { command: 'monomind init --with-embeddings', description: 'Initialize with ONNX embeddings' },
     {

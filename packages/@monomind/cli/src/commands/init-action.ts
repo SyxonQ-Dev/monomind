@@ -125,6 +125,17 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
         console.error('[init] sample org emit failed:', e);
     }
 
+    // #423: the SessionStart hook starts the dashboard only when opted in.
+    if (ctx.flags.dashboard === true) {
+      const monomindDir = path.join(options.targetDir, '.monomind');
+      fs.mkdirSync(monomindDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(monomindDir, 'dashboard.json'),
+        `${JSON.stringify({ autostart: true }, null, 2)}\n`,
+      );
+      output.printInfo('Dashboard auto-start enabled (.monomind/dashboard.json)');
+    }
+
     reportProjectMemory(result.memory);
 
     const indexLine = formatIndexSummary(result.indexes);

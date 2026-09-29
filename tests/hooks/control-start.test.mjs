@@ -19,6 +19,7 @@ function run({ cwd, env } = {}) {
   const cleanEnv = { ...process.env };
   delete cleanEnv.MONOMIND_SDK_AGENT;
   delete cleanEnv.MONOMIND_HOOK_QUIET;
+  delete cleanEnv.MONOMIND_DASHBOARD_AUTOSTART;
 
   return spawnSync(process.execPath, [SCRIPT], {
     cwd: cwd || os.tmpdir(),
@@ -33,6 +34,9 @@ function run({ cwd, env } = {}) {
       CLAUDE_PROJECT_DIR: cwd || os.tmpdir(),
       MONOMIND_CONTROL_NO_SPAWN: '1',
       MONOMIND_HOOK_QUIET: '',
+      // #423: auto-start is opt-in. Most tests below exercise the start flow,
+      // so they opt in; the opt-in tests override this.
+      MONOMIND_DASHBOARD_AUTOSTART: '1',
       ...env,
     },
   });
@@ -82,6 +86,66 @@ afterEach(() => {
   // runner with SIGTERM. Tests that explicitly create mock/sentinel children
   // clean those exact ChildProcess instances in their own finally blocks.
   fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+// ── opt-in (#423) ────────────────────────────────────────────────────────────
+
+describe('control-start: auto-start is opt-in (#423)', () => {
+  function writeDashboardConfig(dir, conf) {
+    fs.mkdirSync(path.join(dir, '.monomind'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.monomind', 'dashboard.json'), JSON.stringify(conf));
+  }
+  const statusFile = () => path.join(tmpDir, '.monomind', 'control.json');
+
+  it('does not start the server and prints nothing without an opt-in', () => {
+    const r = run({
+      cwd: tmpDir,
+      env: { MONOMIND_DASHBOARD_AUTOSTART: '', MONOMIND_CONTROL_PORT: String(isolatedPort()) },
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('');
+    expect(r.stderr).toBe('');
+    expect(fs.existsSync(statusFile())).toBe(false);
+  });
+
+  it('leaves a recorded server alone without an opt-in', () => {
+    const port = isolatedPort();
+    writeControlJson(tmpDir, process.pid, port);
+    const before = fs.readFileSync(statusFile(), 'utf-8');
+    const r = run({ cwd: tmpDir, env: { MONOMIND_DASHBOARD_AUTOSTART: '' } });
+    expect(r.stdout).toBe('');
+    expect(fs.readFileSync(statusFile(), 'utf-8')).toBe(before);
+  });
+
+  it('starts the server when MONOMIND_DASHBOARD_AUTOSTART=1', () => {
+    const port = isolatedPort();
+    const r = run({
+      cwd: tmpDir,
+      env: { MONOMIND_DASHBOARD_AUTOSTART: '1', MONOMIND_CONTROL_PORT: String(port) },
+    });
+    expect(r.stdout).toContain('[control] started Neural Control Room');
+    expect(readControlJson(tmpDir).port).toBe(port);
+  });
+
+  it('starts the server when .monomind/dashboard.json sets autostart', () => {
+    writeDashboardConfig(tmpDir, { autostart: true });
+    const r = run({
+      cwd: tmpDir,
+      env: { MONOMIND_DASHBOARD_AUTOSTART: '', MONOMIND_CONTROL_PORT: String(isolatedPort()) },
+    });
+    expect(r.stdout).toContain('[control] started Neural Control Room');
+    expect(fs.existsSync(statusFile())).toBe(true);
+  });
+
+  it('MONOMIND_DASHBOARD_AUTOSTART=0 overrides the project opt-in', () => {
+    writeDashboardConfig(tmpDir, { autostart: true });
+    const r = run({
+      cwd: tmpDir,
+      env: { MONOMIND_DASHBOARD_AUTOSTART: '0', MONOMIND_CONTROL_PORT: String(isolatedPort()) },
+    });
+    expect(r.stdout).toBe('');
+    expect(fs.existsSync(statusFile())).toBe(false);
+  });
 });
 
 // ── already running ──────────────────────────────────────────────────────────

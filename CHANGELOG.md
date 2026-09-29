@@ -36,6 +36,10 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 - **`hooks_pre-command` no longer rates destructive compound commands as safe** ([#399](https://github.com/monoes/monomind/issues/399)). The MCP tool capped any command starting with `echo`/`ls`/`cat` at low risk and `git` at 0.2, so `echo hi && rm -rf ~/` and `git push --force origin main` returned `shouldProceed: true` while the PreToolUse Bash gate blocked them. It now splits the command on `&&`, `||`, `;`, `|`, `&` and newlines (quotes respected), checks every segment with no prefix caps, and applies the Bash gate's destructive patterns (mirrored, parity pinned by a test). Force-push to main/master, recursive `rm` of `~`, `$HOME` or `/`, piping into a shell (`curl … | sh`, `cat x | sh`), `dd of=/dev/…`, `mkfs` and fork bombs are critical and `shouldProceed: false`; `ls -la`, `git status` and `echo hi` stay low.
 
+### Changed
+
+- **The dashboard no longer starts at every session start unless you opt in** ([#423](https://github.com/monoes/monomind/issues/423)). The SessionStart hook `control-start.cjs` started the Control Room server (:4242) for every initialised project, and the servers stayed resident: one machine had 8, two at 0.7–0.9 GB RSS. The hook now does nothing, and prints nothing, unless `MONOMIND_DASHBOARD_AUTOSTART=1` is set or `.monomind/dashboard.json` has `{"autostart": true}` (written by the new `monomind init --dashboard`); `MONOMIND_DASHBOARD_AUTOSTART=0` turns it off for a project that opted in. A server that is already running is left alone. `monomind ui` starts it by hand and `monomind org run` still starts it unless `MONOMIND_DASHBOARD_AUTOSTART=0`. **Existing projects:** the hook ships with the package helpers, so updating turns auto-start off there too; run `monomind init --dashboard` in a project to keep it. Without a running dashboard the per-prompt Second Brain lookup uses its keyword fallback.
+
 ## [2.18.5] — 2026-09-29
 
 ### Added
