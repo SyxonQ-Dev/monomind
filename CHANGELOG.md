@@ -2,6 +2,12 @@
 
 All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
+## [Unreleased]
+
+### Fixed
+
+- **The pre-bash hook no longer prints git's "not a git repository" error in a project without git** ([#506](https://github.com/monoes/monomind/issues/506)). A `grep`/`find` command reached the monograph lookup, which runs `git rev-parse` to find the repo root with git's stderr passed through, so a project outside a git repository (or across a filesystem boundary) got `fatal: not a git repository …` on the hook's stderr. The helper's git calls in `utils/monograph.cjs` now discard git's stderr; the result was already ignored on failure. `tests/hooks/security-gates.test.mjs` also stops inheriting `MONOMIND_HOOK_QUIET` from a live session (it skipped the code path the fail-open test crashes) and sets `GIT_CEILING_DIRECTORIES`, so it passes the same on tmpfs and disk-backed `TMPDIR`.
+
 ## [2.20.0] — 2026-09-29
 
 ### Added
