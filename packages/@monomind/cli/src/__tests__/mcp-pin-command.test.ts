@@ -153,8 +153,10 @@ describe('the `claude mcp add` hints all come from one builder', () => {
     expect(source).toContain('mcpAddHint');
   });
 
+  // Quick Setup ships only in the opt-in full/security/performance templates
+  // since GH #412 trimmed it from the default one.
   it('CLAUDE.md quick-setup shows the same command the hints do', () => {
-    const md = generateClaudeMd({ ...DEFAULT_INIT_OPTIONS, targetDir: SRC });
+    const md = generateClaudeMd({ ...DEFAULT_INIT_OPTIONS, targetDir: SRC }, 'full');
     expect(md).toContain(mcpAddHint());
   });
 });
