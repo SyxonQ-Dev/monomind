@@ -91,6 +91,8 @@ export function roleAuthorityMask(args: {
   inProcess: boolean;
   cwd: string;
   orgRoot?: string;
+  /** The role's `policy.fileWrite`: dirs it names under an org dir are created. */
+  fileWrite?: string[];
   home?: string;
   env?: NodeJS.ProcessEnv;
   availability?: { available: boolean; reason?: string };
@@ -112,6 +114,8 @@ export function roleAuthorityMask(args: {
     env: args.env ?? process.env,
     roots: [args.cwd, args.orgRoot],
     orgRoot: args.orgRoot,
+    cwd: args.cwd,
+    fileWrite: args.fileWrite,
   });
 }
 
@@ -126,6 +130,8 @@ export function resolveRoleGitEnforcement(args: {
   cwd: string;
   orgRoot?: string;
   orgDir?: string;
+  /** The current run, whose event log the SDK sandbox makes read-only. */
+  run?: string;
   bus: OrgBus;
   claudeRuntime: boolean;
   runtime?: string;
@@ -241,7 +247,12 @@ export function resolveRoleGitEnforcement(args: {
     claudeRestrictions: buildClaudeRestrictions(
       guard,
       cfg,
-      { cwd: args.cwd, orgRoot: args.orgRoot, holdStubs: args.holdStubs },
+      {
+        cwd: args.cwd,
+        orgRoot: args.orgRoot,
+        current: { org: args.org, run: args.run },
+        holdStubs: args.holdStubs,
+      },
       sandboxEnabled,
     ),
   };
