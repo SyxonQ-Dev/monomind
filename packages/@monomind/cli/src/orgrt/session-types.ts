@@ -127,6 +127,12 @@ export interface SessionOpts {
   /** Override how long a session's first stream pull may stay silent before
    *  the attempt is aborted and retried (tests only; default 4 minutes). */
   silentSessionMs?: number;
+  /** #480: this session's private TMPDIR (role-tmpdir.ts), set by the
+   *  session loop; exported as TMPDIR/TMP/TEMP. */
+  roleTmpdir?: string;
+  /** #480: whether task `taskId` is closed, so the session loop can remove
+   *  that task session's TMPDIR. Absent = only removed when the role ends. */
+  isTaskClosed?: (taskId: string) => boolean;
   /** ID of the last message received by this agent (for threading responses). Function to ensure live reading. */
   lastMessageId?: () => string | undefined;
   /** Callback for each output line — feeds ScrollbackBuffer. */

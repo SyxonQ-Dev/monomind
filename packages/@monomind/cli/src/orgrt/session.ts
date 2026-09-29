@@ -5,6 +5,7 @@ import { CumulativeMeter } from './cumulative-meter.js';
 import type { StreamOptions } from './mailbox.js';
 import { Mailbox } from './mailbox.js';
 import type { TokenUsage } from './policy.js';
+import { createRoleTmpdir, removeRoleTmpdir, roleTmpBase } from './role-tmpdir.js';
 import { FaultRestarts, ProcessFaultError } from './sandbox-fault.js';
 import type { SessionStartReason } from './session-ledger.js';
 import {
@@ -42,14 +43,50 @@ export async function runAgentSession(opts: SessionOpts): Promise<void> {
   // stop its daemon, or remove an isolated workspace.  Do not let queued bus
   // writes outlive that boundary (which could otherwise lose terminal events
   // or race cleanup of the run directory).
+  // #480: one private TMPDIR per session key (the role's, or each task's),
+  // removed when its task closes and, for whatever is left, when this ends.
+  const tmp = new SessionTmpdirs(opts);
   try {
-    await runAgentSessionLoop(opts);
+    await runAgentSessionLoop(opts, tmp);
   } finally {
+    tmp.removeAll();
     await opts.bus.flush();
   }
 }
 
-async function runAgentSessionLoop(opts: SessionOpts): Promise<void> {
+/** The private TMPDIRs of one runAgentSession (role-tmpdir.ts, #480). */
+class SessionTmpdirs {
+  private readonly dirs = new Map<string, string>();
+  private readonly base = roleTmpBase();
+  constructor(private readonly opts: SessionOpts) {}
+  /** The TMPDIR for `sessionKey`, created on first use; undefined = not
+   *  creatable, the session keeps the shared base. */
+  for(sessionKey: string): string | undefined {
+    let dir = this.dirs.get(sessionKey);
+    if (!dir) {
+      dir = createRoleTmpdir({
+        org: this.opts.org,
+        role: this.opts.role.id,
+        run: this.opts.run,
+        root: this.opts.orgRoot ?? this.opts.cwd,
+        base: this.base,
+      });
+      if (dir) this.dirs.set(sessionKey, dir);
+    }
+    return dir;
+  }
+  remove(sessionKey: string): void {
+    const dir = this.dirs.get(sessionKey);
+    if (!dir) return;
+    this.dirs.delete(sessionKey);
+    removeRoleTmpdir(dir, { org: this.opts.org, role: this.opts.role.id, base: this.base });
+  }
+  removeAll(): void {
+    for (const key of [...this.dirs.keys()]) this.remove(key);
+  }
+}
+
+async function runAgentSessionLoop(opts: SessionOpts, tmp: SessionTmpdirs): Promise<void> {
   const { mailbox } = opts;
   // Carries the SDK's own session_id across a maxTurns restart so the next
   // query() call resumes the prior conversation instead of starting cold -
@@ -173,6 +210,8 @@ async function runAgentSessionLoop(opts: SessionOpts): Promise<void> {
       startReason = resumeSessionId ? 'resumed' : 'fresh-no-record';
     }
     const sessionKey = taskKey;
+    const roleTmpdir = tmp.for(sessionKey);
+    if (roleTmpdir) sessionOpts = { ...sessionOpts, roleTmpdir };
     const streamOpts: StreamOptions | undefined =
       scope === 'cold'
         ? { stopBefore: () => true, idleExitMs }
@@ -350,6 +389,9 @@ async function runAgentSessionLoop(opts: SessionOpts): Promise<void> {
       }
     } finally {
       tracked?.release();
+      // #480: a closed task's session is over — its scratch goes with it.
+      if (sessionKey !== ROLE_SESSION_KEY && opts.isTaskClosed?.(sessionKey))
+        tmp.remove(sessionKey);
     }
     // The dead session's generator may still hold the waker - drop it so a
     // push() before the next stream() starts only queues instead of being
