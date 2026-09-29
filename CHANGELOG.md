@@ -4,6 +4,12 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`mastermind-budgets` now sets caps the org runtime enforces** ([#400](https://github.com/monoes/monomind/issues/400)). Its `set` wrote `.monomind/orgs/<org>-budgets.json`, which nothing in the runtime reads, so a budget set through the skill capped nothing. It now edits `roles[].budget_usd`, `roles[].budget_tokens` and `run_config.budget_tokens` in the org definition, validates it and runs `monomind org reload` (the caps hot-reload with spend kept). `show` and `alert` read spend from `monomind org costs --format json` and the run's budget events. There is no org-wide USD cap, and the skill now says so and refuses to fake one. `reset` is replaced by `clear`, which removes a role's own caps.
+- **`mastermind-routines` maps onto the org `schedule`** ([#400](https://github.com/monoes/monomind/issues/400)). It wrote per-agent cron routines to `<org>-routines.json`, which the runtime never runs. It now sets or clears the org's `schedule` interval (applied by `monomind org serve` at start), pauses and resumes with `org pause`/`org resume`, and triggers a run with `org run`. `list` flags any entries left in the old file as not enforced.
+- **The dashboard's Budgets data shows the enforced limits.** `GET /api/org/:name/budgets` takes `org_budget` and `agent_budgets` from the org definition (`run_config.budget_tokens`, each role's `budget_usd`/`budget_tokens` or its `policy.maxUsd`/`maxTokens`) instead of `<org>-budgets.json`.
+
 ## [2.18.5] — 2026-09-29
 
 ### Added
