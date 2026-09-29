@@ -152,3 +152,19 @@ describe('hook-handler.cjs route — slash commands', () => {
     expect(last.routeId).toBeTruthy();
   });
 });
+
+// #430: the prompt hook's pick is the only agent selector; the hooks no longer
+// load router.cjs (its agent table is gone and matchSkills predates the catalogs).
+describe('hook-handler.cjs does not load router.cjs', () => {
+  it('neither the dispatcher nor any handler requires router.cjs or reads hCtx.router', () => {
+    const helpers = path.dirname(HANDLER);
+    const handlers = path.join(helpers, 'handlers');
+    const files = [HANDLER, ...fs.readdirSync(handlers).map((f) => path.join(handlers, f))];
+    for (const f of files.filter((p) => p.endsWith('.cjs'))) {
+      const src = fs.readFileSync(f, 'utf-8');
+      expect(src, f).not.toMatch(/require\([^)]*router\.cjs/);
+      expect(src, f).not.toMatch(/hCtx\.router\b/);
+      expect(src, f).not.toMatch(/^\s*router: router/m);
+    }
+  });
+});

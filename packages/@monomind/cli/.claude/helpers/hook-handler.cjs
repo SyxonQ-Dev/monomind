@@ -56,7 +56,7 @@ const {
   getMonographSuggestions, getMonographNeighbors,
   _recordGraphTelemetry, _injectCompactGraphMap,
   _findAffectedTests, _maybeRebuildMonograph,
-  _graphGateShouldBlock, _graphGateMarkQueried, _getNodeCount,
+  _graphGateShouldNudge, _isSourceSearchCommand, _isSourceSearchPaths, _graphGateMarkQueried, _getNodeCount,
 } = monograph;
 
 // #447: hint lookups prefer non-test definitions (same heuristic as the
@@ -71,39 +71,6 @@ const {
   _buildKnowledgeSearchFn, _autoIndexKnowledge,
 } = microAgents;
 
-// ── LearningService module-level singleton ─────────────────────────────────────
-// Singleton contract: one LearningService instance is created per hook-handler
-// process. initialize() opens the SQLite DB; consolidate() is called at
-// session-end. Hoisting to module scope ensures the DB is not reopened on every
-// session-end invocation (which would create a fresh in-memory-only instance
-// each time, discarding any state accumulated during the session).
-//
-// We cache the Promise (not the resolved value) so that concurrent callers all
-// await the same initialization. Caching only the resolved value allowed two
-// concurrent callers to both enter the `if (!_learningService)` branch and
-// construct separate LearningService instances, leaving an orphaned DB handle.
-var _learningServicePromise = null;
-async function getLearningService() {
-  if (!_learningServicePromise) {
-    _learningServicePromise = (async function() {
-      try {
-        var lsMod = await import('file://' + path.join(__dirname, 'learning-service.mjs'));
-        var LearningService = lsMod.LearningService || (lsMod.default && lsMod.default.LearningService);
-        if (!LearningService) return null;
-        var svc = new LearningService();
-        if (typeof svc.initialize === 'function') await svc.initialize();
-        return svc;
-      } catch (e) {
-        _learningServicePromise = null; // allow retry on error
-        return null;
-      }
-    })();
-  }
-  return _learningServicePromise;
-}
-
-
-const router = safeRequire(path.join(helpersDir, 'router.cjs'));
 const session = safeRequire(path.join(helpersDir, 'session.cjs'));
 const memory = safeRequire(path.join(helpersDir, 'memory.cjs'));
 const intelligence = safeRequire(path.join(helpersDir, 'intelligence.cjs'));
@@ -350,6 +317,11 @@ function _emitHookContext() {
   }) + '\n');
 }
 
+// #413: the graph gate's one-time nudge (never a block).
+function _graphNudgeText() {
+  return '[MONOGRAPH_REMINDER] This project has a fresh code graph (' + _getNodeCount() + ' indexed nodes). For symbol and file lookups, mcp__monomind__monograph_query / monograph_suggest return file:line directly. Shown once per session.';
+}
+
 // Build shared hook context — passed to extracted handler modules so they
 // don't need to capture main()-scoped or module-scoped variables via closure.
 var hCtx = {
@@ -360,9 +332,7 @@ var hCtx = {
   args: args,
   CWD: CWD,
   session: session,
-  router: router,
   intelligence: intelligence,
-  getLearningService: getLearningService,
   isSimpleCommand: isSimpleCommand,
   // Module-level singleton (populated by session-restore handler, or lazily
   // via _ensureHooksModule() — required since each hook event is a fresh process).
@@ -484,17 +454,8 @@ const handlers = {
     var isFind = /\b(?:find|fd)\b/.test(cmd) && !isGrep;
     if (isGrep || isFind) {
       var sessIdGate = String((hCtx.hookInput && (hCtx.hookInput.sessionId || hCtx.hookInput.session_id)) || '');
-      var gateResult = _graphGateShouldBlock(sessIdGate);
-      if (gateResult === 'block') {
-        process.stderr.write(JSON.stringify({
-          decision: 'block',
-          reason: '[graph-gate] Call mcp__monomind__monograph_query or monograph_suggest before grep/rg/find for code exploration (CLAUDE.md). Blocks only this first attempt this session — if the MCP tool is not available yet (e.g. server still connecting), just retry the same command: every later grep/find this session only prints a reminder, it never blocks again.',
-        }) + '\n');
-        process.exitCode = 2;
-        return;
-      }
-      if (gateResult === 'warn') {
-        if (String(process.env.MONOMIND_HOOK_QUIET || '') !== '1') _hookContext.push('[MONOGRAPH_REMINDER] monograph_query/suggest not yet called this session — graph has ' + (_getNodeCount() || '20k+') + ' indexed nodes. Try monograph first for faster, more precise results.');
+      if (String(process.env.MONOMIND_HOOK_QUIET || '') !== '1' && _isSourceSearchCommand(cmd) && _graphGateShouldNudge(sessIdGate)) {
+        _hookContext.push(_graphNudgeText());
       }
       var graphAssisted = false;
       if (_isGraphFresh()) {
@@ -750,17 +711,10 @@ const handlers = {
   'pre-search': () => {
     var tool = hCtx.toolName || '';
     var sessIdGate = String((hCtx.hookInput && (hCtx.hookInput.sessionId || hCtx.hookInput.session_id)) || '');
-    var gateResult = _graphGateShouldBlock(sessIdGate);
-    if (gateResult === 'block') {
-      process.stderr.write(JSON.stringify({
-        decision: 'block',
-        reason: '[graph-gate] Call mcp__monomind__monograph_query or monograph_suggest before ' + (tool || 'Grep/Glob') + ' for code exploration (CLAUDE.md). Blocks only this first attempt this session — if the MCP tool is not available yet (e.g. server still connecting), just retry: every later search-tool call this session only prints a reminder, it never blocks again.',
-      }) + '\n');
-      process.exitCode = 2;
-      return;
-    }
-    if (gateResult === 'warn') {
-      if (String(process.env.MONOMIND_HOOK_QUIET || '') !== '1') _hookContext.push('[MONOGRAPH_REMINDER] monograph_query/suggest not yet called this session — try monograph first for faster results.');
+    var searchIn = (typeof toolInput === 'object' && toolInput !== null) ? toolInput : {};
+    var searchPaths = [searchIn.path, searchIn.glob, tool === 'Glob' ? searchIn.pattern : ''];
+    if (String(process.env.MONOMIND_HOOK_QUIET || '') !== '1' && _isSourceSearchPaths(searchPaths) && _graphGateShouldNudge(sessIdGate)) {
+      _hookContext.push(_graphNudgeText());
     }
     var graphResolved = false;
     try {

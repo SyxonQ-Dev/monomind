@@ -42,7 +42,7 @@ function getVersion() {
   } catch (err) { if (process.env.MONOMIND_DEBUG) console.error('[statusline]', err); /* ignore */ }
   return 'v?';
 }
-const VERSION = getVersion();
+const VERSION = cached('version', TTL.slow, getVersion);
 
 // ANSI colors
 const c = {
@@ -111,7 +111,7 @@ function getSettings() {
 // Project identifier — github owner/repo from git remote, else folder name
 function getProjectName() {
   try {
-    const remote = safeExec('git remote get-url origin 2>/dev/null', 2000).trim();
+    const remote = cached('gitRemote', TTL.slow, () => safeExec('git remote get-url origin 2>/dev/null', 2000)).trim();
     if (remote) {
       const m = remote.match(/[/:]([\\w.-]+)\\/([\\w.-]+?)(?:\\.git)?$/);
       if (m) return \`\${m[1]}/\${m[2]}\`;
@@ -122,8 +122,12 @@ function getProjectName() {
 
 // ─── Data Collection (all pure-Node.js or single-exec) ──────────
 
-// Get all git info in ONE shell call
+// Get all git info in ONE shell call (cached for TTL.git)
 function getGitInfo() {
+  return cached('git', TTL.git, readGitInfo);
+}
+
+function readGitInfo() {
   const result = {
     name: 'user', gitBranch: '', modified: 0, untracked: 0,
     staged: 0, ahead: 0, behind: 0,

@@ -164,7 +164,7 @@ export function syncHelperTree(
   // rather than a hardcoded list here — see that file's comment for why.
   const criticalHelpers = FORCE_SYNC_HELPERS;
   // Generated fallback for any critical helper missing from the source dir itself
-  // (e.g. the published npm template lacking auto-memory-hook.mjs).
+  // (e.g. an incomplete published npm template).
   const criticalGenerators: Record<string, () => string> = FORCE_SYNC_GENERATORS;
   for (const helperName of criticalHelpers) {
     const targetPath = path.join(destHelpersDir, helperName);

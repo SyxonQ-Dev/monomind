@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { watchTree } from './server-net.mjs';
 
 // ── Second Brain live ingestion setup — extracted from startServer(). Called
 // once at startup; runs the watcher + polling-sweep bootstrap for document
@@ -40,42 +41,49 @@ function setupKnowledgeBridgeWarmup({
           /(^|\/)(node_modules|\.git|dist|\.monomind|\.claude|\.next|__pycache__|\.venv|vendor)(\/|$)/;
         const _sbPending = new Map(); // file -> debounce timer
         const _sbRoot = path.resolve(projectDir || process.cwd());
+        // watchTree, not fs.watch({ recursive }) — on Linux the latter opens a
+        // watch per FILE under the whole project, node_modules included (#477).
+        // `skip` prunes the excluded directories from watching, not just events.
         const _sbWatcher = watchSafely(
-          fs.watch(_sbRoot, { recursive: true }, (_evt, rel) => {
-            try {
-              if (!rel) return;
-              const relStr = String(rel);
-              // Skip macOS AppleDouble resource forks (`._name`) at any depth.
-              // The old `relStr.startsWith('.')` only caught dotfiles at the ROOT;
-              // `._` forks in subdirectories sailed through. We match `._` per path
-              // segment rather than all dotfiles — `.monodesign/` critique snapshots
-              // are legitimate indexable documents.
-              if (_sbSkip.test(relStr) || /(^|\/)\._./.test(relStr)) return;
-              if (!_sbDocExts.has(path.extname(relStr).toLowerCase())) return;
-              const full = path.join(_sbRoot, relStr);
-              clearTimeout(_sbPending.get(full));
-              _sbPending.set(
-                full,
-                setTimeout(async () => {
-                  _sbPending.delete(full);
-                  try {
-                    if (!fs.existsSync(full)) return; // deleted — session-start reindex handles removal
-                    const pipeline = await import('../knowledge/document-pipeline.js');
-                    const r = await pipeline.ingestDocument(full, 'shared', _sbRoot);
-                    if (r.chunksIndexed > 0 && !r.skipped) {
-                      console.log(
-                        `[knowledge] live-ingested ${path.basename(full)} (${r.chunksIndexed} chunks)`,
-                      );
+          watchTree(
+            _sbRoot,
+            (_evt, rel) => {
+              try {
+                if (!rel) return;
+                const relStr = String(rel);
+                // Skip macOS AppleDouble resource forks (`._name`) at any depth.
+                // The old `relStr.startsWith('.')` only caught dotfiles at the ROOT;
+                // `._` forks in subdirectories sailed through. We match `._` per path
+                // segment rather than all dotfiles — `.monodesign/` critique snapshots
+                // are legitimate indexable documents.
+                if (_sbSkip.test(relStr) || /(^|\/)\._./.test(relStr)) return;
+                if (!_sbDocExts.has(path.extname(relStr).toLowerCase())) return;
+                const full = path.join(_sbRoot, relStr);
+                clearTimeout(_sbPending.get(full));
+                _sbPending.set(
+                  full,
+                  setTimeout(async () => {
+                    _sbPending.delete(full);
+                    try {
+                      if (!fs.existsSync(full)) return; // deleted — session-start reindex handles removal
+                      const pipeline = await import('../knowledge/document-pipeline.js');
+                      const r = await pipeline.ingestDocument(full, 'shared', _sbRoot);
+                      if (r.chunksIndexed > 0 && !r.skipped) {
+                        console.log(
+                          `[knowledge] live-ingested ${path.basename(full)} (${r.chunksIndexed} chunks)`,
+                        );
+                      }
+                    } catch (_) {
+                      /* single-file ingest failure never matters here */
                     }
-                  } catch (_) {
-                    /* single-file ingest failure never matters here */
-                  }
-                }, 5000),
-              );
-            } catch (_) {
-              /* watcher callback must never throw */
-            }
-          }),
+                  }, 5000),
+                );
+              } catch (_) {
+                /* watcher callback must never throw */
+              }
+            },
+            { skip: (rel) => _sbSkip.test(String(rel).replace(/\\/g, '/')) },
+          ),
         );
         activeWatchers.push(_sbWatcher);
       } catch (_) {

@@ -46,8 +46,10 @@ function getDocStats() {
   } catch (err) { if (process.env.MONOMIND_DEBUG) console.error('[statusline]', err); /* ignore */ }
   try {
     if (fs.existsSync(memDbPath)) {
-      const result = spawnSync('sqlite3', [memDbPath, 'SELECT COUNT(*) FROM memory_entries;'], { encoding: 'utf-8', timeout: 1000 });
-      const n = parseInt((result.stdout || '').trim(), 10) || 0;
+      const n = cached('memoryCount', TTL.counts, () => {
+        const result = spawnSync('sqlite3', [memDbPath, 'SELECT COUNT(*) FROM memory_entries;'], { encoding: 'utf-8', timeout: 1000 });
+        return parseInt((result.stdout || '').trim(), 10) || 0;
+      });
       if (n > 0) { memories = n; exists = true; }
     }
   } catch (err) { if (process.env.MONOMIND_DEBUG) console.error('[statusline]', err); /* ignore */ }
@@ -152,7 +154,7 @@ function getGraphFreshness() {
   } catch (err) { if (process.env.MONOMIND_DEBUG) console.error('[statusline]', err); /* ignore */ }
   if (!buildMs) return { commitsBehind: -1, stale: true, fresh: false };
   const buildIso = new Date(buildMs).toISOString();
-  const out = safeExec(\`git rev-list --count --since='\${buildIso}' HEAD 2>/dev/null\`, 1500);
+  const out = cached('graphCommitsSince', TTL.counts, () => safeExec(\`git rev-list --count --since='\${buildIso}' HEAD 2>/dev/null\`, 1500));
   const commitsBehind = parseInt(out, 10) || 0;
   return { commitsBehind, stale: commitsBehind > 5, fresh: commitsBehind === 0 };
 }
@@ -222,7 +224,7 @@ function getMonographStats() {
 
   try {
     if (fs.existsSync(dbPath)) {
-      const out = safeExec(\`sqlite3 "\${dbPath}" "SELECT (SELECT COUNT(*) FROM nodes), (SELECT COUNT(*) FROM edges);"\`, 1000);
+      const out = cached('monographCounts', TTL.counts, () => safeExec(\`sqlite3 "\${dbPath}" "SELECT (SELECT COUNT(*) FROM nodes), (SELECT COUNT(*) FROM edges);"\`, 1000));
       if (out) {
         const [n, e] = out.split('|').map(v => parseInt(v, 10) || 0);
         if (n > 0) return { nodes: n, edges: e, exists: true };
@@ -249,6 +251,11 @@ function getMonographStats() {
 function getGraphStaleness() {
   const dbPath = path.join(CWD, '.monomind', 'monograph.db');
   if (!fs.existsSync(dbPath)) return null;
+  return cached('graphStaleness', TTL.counts, readGraphStaleness);
+}
+
+function readGraphStaleness() {
+  const dbPath = path.join(CWD, '.monomind', 'monograph.db');
   try {
     // Pull the last indexed commit out of index_meta via sqlite3 (same
     // shell-out convention getMonographStats uses for node/edge counts).
