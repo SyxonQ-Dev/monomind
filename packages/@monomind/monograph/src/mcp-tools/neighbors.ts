@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { rowToNode } from '../storage/node-store.js';
 import type { MonographNode } from '../types.js';
+import { resolveNodeByName, type SymbolCandidate } from './resolve-node.js';
 
 export interface NeighborEntry {
   node: MonographNode;
@@ -11,13 +12,7 @@ export interface NeighborEntry {
 }
 
 /** A node a name could have referred to — enough to re-query unambiguously. */
-export interface NeighborCandidate {
-  id: string;
-  name: string;
-  label: string;
-  filePath: string | null;
-  startLine: number | null;
-}
+export type NeighborCandidate = SymbolCandidate;
 
 export interface MonographNeighborsResult {
   node: MonographNode | null;
@@ -49,8 +44,6 @@ export interface MonographNeighborsInput {
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 500;
-/** Candidate lists exist to be read by a human or an agent; a long one is noise. */
-const CANDIDATE_CAP = 25;
 
 // ── Shared edge query helper ──────────────────────────────────────────────────
 
@@ -101,22 +94,6 @@ function queryEdges(
 
 // ── Node resolution ───────────────────────────────────────────────────────────
 
-function toCandidate(row: Record<string, unknown>): NeighborCandidate {
-  return {
-    id: row.id as string,
-    name: row.name as string,
-    label: row.label as string,
-    filePath: (row.file_path as string | null) ?? null,
-    startLine: (row.start_line as number | null) ?? null,
-  };
-}
-
-/** Exact path match, else a trailing-fragment match so `user.ts` narrows `/app/user.ts`. */
-function matchesFilePath(row: Record<string, unknown>, filePath: string): boolean {
-  const rowPath = (row.file_path as string | null) ?? '';
-  return rowPath === filePath || rowPath.endsWith(filePath);
-}
-
 function emptyResult(
   limit: number,
   candidates: NeighborCandidate[] = [],
@@ -146,19 +123,10 @@ export function getMonographNeighbors(
       | undefined;
     if (!nodeRow) return emptyResult(limit);
   } else if (input.name) {
-    const rows = db
-      .prepare('SELECT * FROM nodes WHERE name = ? LIMIT ?')
-      .all(input.name, CANDIDATE_CAP + 1) as Record<string, unknown>[];
-    const matches = input.filePath
-      ? rows.filter((r) => matchesFilePath(r, input.filePath as string))
-      : rows;
-
-    if (matches.length === 0) return emptyResult(limit);
-    if (matches.length > 1) {
-      // A confident answer about the wrong node is worse than asking which one.
-      return emptyResult(limit, matches.slice(0, CANDIDATE_CAP).map(toCandidate));
-    }
-    nodeRow = matches[0];
+    // A confident answer about the wrong node is worse than asking which one.
+    const resolved = resolveNodeByName(db, input.name, input.filePath);
+    if (!resolved.row) return emptyResult(limit, resolved.candidates);
+    nodeRow = resolved.row;
   } else {
     return emptyResult(limit);
   }

@@ -11,6 +11,7 @@ import * as path from 'node:path';
 import { cosineSimilarity as cosineSim } from '../utils/cosine-similarity.js';
 import { generateEmbedding } from './embedding-operations.js';
 import { safeParseEmbedding } from './memory-bridge.js';
+import { DEFAULT_SEARCH_THRESHOLD } from './memory-bridge-core.js';
 import { ensureSchemaColumns } from './memory-migrations.js';
 import { getBridge, MAX_DB_FILE_BYTES } from './memory-read-bridge.js';
 
@@ -59,7 +60,13 @@ export async function searchEntries(options: {
   }
 
   // Fallback: raw sql.js
-  const { query, namespace, limit = 10, threshold = 0.3, dbPath: customPath } = options;
+  const {
+    query,
+    namespace,
+    limit = 10,
+    threshold = DEFAULT_SEARCH_THRESHOLD,
+    dbPath: customPath,
+  } = options;
   const effectiveNamespace = namespace || 'all';
 
   const swarmDir = path.resolve(process.cwd(), '.swarm');

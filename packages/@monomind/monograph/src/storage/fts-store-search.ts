@@ -1,6 +1,7 @@
 // File-size sweep: split out of fts-store.ts.
 
 import type Database from 'better-sqlite3';
+import { NOT_ANONYMOUS_CLOSURE_SQL } from './anonymous-closure.js';
 import { extractSearchTerms } from './fts-store-terms.js';
 
 export interface FtsResult {
@@ -69,7 +70,7 @@ export function ftsSearch(
            n.start_line, n.end_line, nodes_fts.rank
     FROM nodes_fts
     JOIN nodes n ON n.rowid = nodes_fts.rowid
-    WHERE nodes_fts MATCH ?
+    WHERE nodes_fts MATCH ? AND ${NOT_ANONYMOUS_CLOSURE_SQL}
   `;
   const matchParams: unknown[] = [ftsQuery];
   if (label) {
@@ -101,7 +102,7 @@ export function ftsSearch(
                n.start_line, n.end_line, nodes_fts.rank
         FROM nodes_fts
         JOIN nodes n ON n.rowid = nodes_fts.rowid
-        WHERE nodes_fts MATCH ?
+        WHERE nodes_fts MATCH ? AND ${NOT_ANONYMOUS_CLOSURE_SQL}
       `;
       const termParams: unknown[] = [termFtsQuery];
       if (label) {
@@ -131,6 +132,7 @@ export function ftsSearch(
                    n.start_line, n.end_line, 0 AS rank
             FROM nodes n
             WHERE (n.name LIKE ? ESCAPE '\\' OR n.norm_label LIKE ? ESCAPE '\\')
+              AND ${NOT_ANONYMOUS_CLOSURE_SQL}
           `;
           const termLikeParams: unknown[] = [pat, pat];
           if (label) {
@@ -179,7 +181,7 @@ export function ftsSearch(
       likeSql += ` OR n.name LIKE ? ESCAPE '\\'`;
       likeParams.push(strippedLikePattern);
     }
-    likeSql += ')';
+    likeSql += `) AND ${NOT_ANONYMOUS_CLOSURE_SQL}`;
     if (label) {
       likeSql += ' AND n.label = ?';
       likeParams.push(label);
