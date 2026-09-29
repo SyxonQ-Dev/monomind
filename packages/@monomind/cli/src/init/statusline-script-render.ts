@@ -195,14 +195,13 @@ function generateDashboard() {
     loopStr = \`\${x.slate}🔄 no active loops\${x.reset}\`;
   }
 
-  // Graph usage ratio + $ saved — show only when there's data
+  // Graph usage ratio + hook hint count — show only when there's data
   const usage = getGraphUsage();
   let usageStr = '';
   if (usage) {
     const col = usage.pct >= 40 ? x.green : usage.pct >= 15 ? x.gold : x.coral;
-    const savedCol = usage.dollarsSaved >= 0.10 ? x.green : x.slate;
-    const savedStr = \`   \${savedCol}💰 $\${usage.dollarsSaved.toFixed(2)}\${x.reset}\`;
-    usageStr = \`   \${DIV}   \${col}📊 graph \${usage.pct}%\${x.reset}\${x.slate} · grep \${100 - usage.pct}%\${x.reset}\${savedStr}\`;
+    const hintStr = \`   \${x.slate}💡 \${usage.hints} hints\${x.reset}\`;
+    usageStr = \`   \${DIV}   \${col}📊 graph \${usage.pct}%\${x.reset}\${x.slate} · grep \${100 - usage.pct}%\${x.reset}\${hintStr}\`;
   }
 
   // Hook latency — surface when slow (>500ms per prompt)
