@@ -125,7 +125,11 @@ vi.mock('../output.js', () => ({
     printWarning: vi.fn(),
     printTable: vi.fn(),
     printJson: vi.fn(),
+    printDocument: vi.fn(),
     printList: vi.fn(),
+    writeErrorln: vi.fn(),
+    isQuiet: () => false,
+    reserveStdout: (_reserve: boolean, fn: () => Promise<unknown>) => fn(),
     printBox: vi.fn(),
     createSpinner: vi.fn(() => ({
       start: vi.fn(),

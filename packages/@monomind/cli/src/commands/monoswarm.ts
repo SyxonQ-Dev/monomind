@@ -3,6 +3,7 @@
  * Monoswarm coordination and management commands
  */
 
+import { MONOSWARM_DEPRECATION, withDeprecationNotice } from '../deprecations.js';
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { initCommand } from './monoswarm-init.js';
@@ -26,7 +27,10 @@ export const monoswarmCommand: Command = {
   name: 'monoswarm',
   description:
     'Monoswarm coordination commands (deprecated: records topology/roster/votes in a state file; starts no agents)',
-  subcommands: [initCommand, startCommand, statusCommand, stopCommand, scaleCommand],
+  // Each subcommand prints the deprecation notice on stderr first (#418).
+  subcommands: [initCommand, startCommand, statusCommand, stopCommand, scaleCommand].map((sub) =>
+    withDeprecationNotice(sub, MONOSWARM_DEPRECATION),
+  ),
   options: [],
   examples: [
     { command: 'monomind monoswarm init --v1-mode', description: 'Initialize monoswarm' },

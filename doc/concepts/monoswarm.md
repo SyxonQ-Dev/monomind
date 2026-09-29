@@ -8,8 +8,12 @@
 > there are none). To run agents, use Claude Code's Task tool,
 > `monomind agent exec`, or `monomind org run`. The `autopilot` command is
 > deprecated too — nothing in monomind writes its `swarm-tasks` source. Both
-> are scheduled for removal in a later release
-> ([#418](https://github.com/monoes/monomind/issues/418)).
+> are removed in 2.21.0, the next minor release
+> ([#418](https://github.com/monoes/monomind/issues/418)). Until then every
+> `monoswarm` and `autopilot` subcommand prints a one-line deprecation notice
+> on stderr (`-Q` drops it; `--format json` / `--json` stdout stays clean), and
+> the `monoswarm_*` and `autopilot_*` MCP tools carry a `deprecated` note in
+> their descriptions and results.
 
 Monoswarm is monomind's multi-agent coordination layer: topology bookkeeping, agent
 roster management, vote-based decisions, and shared state for a group of agents

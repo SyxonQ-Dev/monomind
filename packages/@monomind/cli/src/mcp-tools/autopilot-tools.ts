@@ -19,6 +19,8 @@ import {
   validateNumber,
   validateTaskSources,
 } from '../autopilot-state.js';
+import { AUTOPILOT_DEPRECATION } from '../deprecations.js';
+import { deprecateTools } from './deprecated-tools.js';
 import type { MCPTool } from './types.js';
 
 function ok(data: unknown) {
@@ -47,7 +49,7 @@ const autopilotStatus: MCPTool = {
       tasks: {
         completed,
         total: tasks.length,
-        percent: tasks.length === 0 ? 100 : Math.round((completed / tasks.length) * 100),
+        percent: tasks.length === 0 ? 0 : Math.round((completed / tasks.length) * 100),
       },
       taskSources: state.taskSources,
     });
@@ -186,7 +188,7 @@ const autopilotProgress: MCPTool = {
       overall: {
         completed,
         total: tasks.length,
-        percent: tasks.length === 0 ? 100 : Math.round((completed / tasks.length) * 100),
+        percent: tasks.length === 0 ? 0 : Math.round((completed / tasks.length) * 100),
       },
       bySource,
     });
@@ -217,13 +219,17 @@ const autopilotPredict: MCPTool = {
 
 // ── Export ─────────────────────────────────────────────────────
 
-export const autopilotTools: MCPTool[] = [
-  autopilotStatus,
-  autopilotEnable,
-  autopilotDisable,
-  autopilotConfig,
-  autopilotReset,
-  autopilotLog,
-  autopilotProgress,
-  autopilotPredict,
-];
+// Deprecated (#418): each description and result carries the removal note.
+export const autopilotTools: MCPTool[] = deprecateTools(
+  [
+    autopilotStatus,
+    autopilotEnable,
+    autopilotDisable,
+    autopilotConfig,
+    autopilotReset,
+    autopilotLog,
+    autopilotProgress,
+    autopilotPredict,
+  ],
+  AUTOPILOT_DEPRECATION,
+);

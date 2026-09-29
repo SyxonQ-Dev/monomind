@@ -6,7 +6,7 @@ import type { Command, CommandContext, CommandResult } from '../types.js';
 // Stop swarm
 export const stopCommand: Command = {
   name: 'stop',
-  description: 'Stop swarm execution',
+  description: 'Mark the recorded swarm state terminated (there is no running process to stop)',
   options: [
     {
       name: 'force',
@@ -43,7 +43,7 @@ export const stopCommand: Command = {
       }
     }
 
-    output.printInfo(`Stopping swarm ${swarmId}...`);
+    output.printInfo(`Marking swarm ${swarmId} terminated...`);
 
     // monoswarm_shutdown marks the canonical state file terminated and clears
     // the roster itself — no further local write is needed here.
@@ -55,7 +55,7 @@ export const stopCommand: Command = {
       return { success: false, message: `MCP stop failed: ${String(err)}`, exitCode: 1 };
     }
 
-    output.printSuccess(`Monoswarm ${swarmId} stopped`);
+    output.printSuccess(`Monoswarm ${swarmId} marked terminated`);
 
     return { success: true, data: { swarmId, stopped: true, force } };
   },
@@ -64,7 +64,7 @@ export const stopCommand: Command = {
 // Scale swarm
 export const scaleCommand: Command = {
   name: 'scale',
-  description: 'Scale swarm agent count',
+  description: 'Resize the recorded agent roster (starts or stops no processes)',
   options: [
     {
       name: 'agents',
@@ -97,7 +97,7 @@ export const scaleCommand: Command = {
       return { success: false, exitCode: 1 };
     }
 
-    output.printInfo(`Scaling swarm ${swarmId} to ${targetAgents} agents...`);
+    output.printInfo(`Resizing swarm ${swarmId} roster to ${targetAgents} entries...`);
 
     try {
       const result = await callMCPTool<{
@@ -121,15 +121,17 @@ export const scaleCommand: Command = {
 
       if (result.spawned.length > 0) {
         output.printSuccess(
-          `Spawned ${result.spawned.length} agent(s): ${result.spawned.join(', ')}`,
+          `Recorded ${result.spawned.length} roster entr${result.spawned.length === 1 ? 'y' : 'ies'} (no process started): ${result.spawned.join(', ')}`,
         );
       }
       if (result.terminated.length > 0) {
         output.printSuccess(
-          `Terminated ${result.terminated.length} agent(s): ${result.terminated.join(', ')}`,
+          `Removed ${result.terminated.length} roster entr${result.terminated.length === 1 ? 'y' : 'ies'}: ${result.terminated.join(', ')}`,
         );
       }
-      output.writeln(output.dim(`  ${result.previousCount} → ${result.currentCount} agents`));
+      output.writeln(
+        output.dim(`  ${result.previousCount} → ${result.currentCount} roster entries`),
+      );
 
       return { success: true, data: result };
     } catch (error) {

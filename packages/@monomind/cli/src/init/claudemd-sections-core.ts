@@ -3,6 +3,7 @@
  * architecture and swarm/concurrency/execution rules.
  */
 
+import { MONOSWARM_AUTOPILOT_REMOVAL_VERSION } from '../deprecations.js';
 import { detectStackConventions } from './claudemd-detect.js';
 import type { InitOptions } from './types.js';
 
@@ -14,6 +15,11 @@ import type { InitOptions } from './types.js';
 // packages/@monomind/cli/CLAUDE.md's `adaptive`/`hybrid` topology annotation.
 export const HONEST_MONOSWARM_SENTENCE =
   "Monoswarm records topology, roster and votes in a state file; it starts no process, and Claude Code's Task-tool agents do the work.";
+
+// #418: monoswarm and autopilot are deprecated and removed in the next minor
+// release. Headings stay as they are (renaming one needs a
+// RETIRED_GENERATED_HEADINGS entry); each monoswarm section carries this line.
+export const MONOSWARM_DEPRECATED_LINE = `DEPRECATED: the \`monoswarm\` and \`autopilot\` CLI commands and \`monoswarm_*\`/\`autopilot_*\` MCP tools are removed in ${MONOSWARM_AUTOPILOT_REMOVAL_VERSION}. Don't initialize a monoswarm; spawn agents with Claude Code's Task tool, or run an org with \`monomind org run\`.`;
 
 // --- Section Generators (each returns enforceable markdown) ---
 
@@ -91,6 +97,7 @@ export function concurrencyRules(): string {
 export function swarmOrchestration(): string {
   return `## Monoswarm Orchestration
 
+- ${MONOSWARM_DEPRECATED_LINE}
 - MUST spawn concurrent agents using Claude Code's Task tool
 - ${HONEST_MONOSWARM_SENTENCE}`;
 }
@@ -98,6 +105,7 @@ export function swarmOrchestration(): string {
 export function antiDriftConfig(): string {
   return `## Monoswarm Configuration & Anti-Drift
 
+- ${MONOSWARM_DEPRECATED_LINE} Topology and consensus settings are recorded only and change no behaviour.
 - ALWAYS use hierarchical topology for coding swarms
 - Keep maxAgents at 6-8 for tight coordination
 - Use specialized strategy for clear role boundaries
@@ -108,6 +116,8 @@ export function antiDriftConfig(): string {
 
 export function autoStartProtocol(): string {
   return `## Monoswarm Protocols & Routing
+
+- ${MONOSWARM_DEPRECATED_LINE}
 
 ### Auto-Start Monoswarm Protocol
 
@@ -139,6 +149,7 @@ neither answers, these real agents are safe defaults:
 export function executionRules(): string {
   return `## Monoswarm Execution Rules
 
+- ${MONOSWARM_DEPRECATED_LINE}
 - ALWAYS use \`run_in_background: true\` for all agent Task calls
 - ALWAYS put ALL agent Task calls in ONE message for parallel execution
 - After spawning, STOP — do NOT add more tool calls or check status

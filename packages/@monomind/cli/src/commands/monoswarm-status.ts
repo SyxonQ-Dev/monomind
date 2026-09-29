@@ -23,7 +23,7 @@ export const statusCommand: Command = {
     if (!status.hasActiveSwarm) {
       output.writeln(output.warning('No active swarm'));
       output.writeln();
-      output.writeln(output.dim('Start a swarm with:'));
+      output.writeln(output.dim('Record a monoswarm state with (starts no agents):'));
       output.writeln(output.dim('  npx monomind@latest monoswarm init'));
       output.writeln(output.dim('  npx monomind@latest monoswarm start'));
       output.writeln();
