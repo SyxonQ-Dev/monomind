@@ -8,6 +8,7 @@
  * - No recursive test file content reading
  * - Shared settings cache
  * - Strict 2s timeouts on all shell calls
+ * - git/sqlite3/curl/npm results cached per project (#429)
  */
 
 import { STATUSLINE_DATA_SECTION } from './statusline-script-data.js';
@@ -41,12 +42,13 @@ export function generateStatuslineScript(options: InitOptions): string {
  * - No ps aux calls (uses process.memoryUsage() + file-based metrics)
  * - Strict 2s timeout on all execSync calls
  * - Shared settings cache across functions
+ * - git/sqlite3/curl/npm results cached in .monomind/cache/statusline.json (#429)
  */
 
 /* eslint-disable @typescript-eslint/no-var-requires */
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
 const os = require('os');
 
 // Configuration
@@ -55,6 +57,34 @@ const CONFIG = {
 };
 
 const CWD = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+
+// Segments that spawn a process (git, sqlite3, curl, npm) are cached per
+// project with these TTLs, so a warm render is file reads + formatting (#429).
+// An expired segment is recomputed by the render that finds it expired.
+const CACHE_FILE = path.join(CWD, '.monomind', 'cache', 'statusline.json');
+const TTL = { git: 5000, counts: 30000, slow: 10 * 60 * 1000 };
+let _segments = null;
+function cached(key, ttlMs, compute) {
+  if (!_segments) {
+    try { _segments = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf-8')); } catch { _segments = {}; }
+    if (!_segments || typeof _segments !== 'object' || Array.isArray(_segments)) _segments = {};
+  }
+  const entry = _segments[key];
+  const now = Date.now();
+  if (entry && typeof entry.at === 'number' && now >= entry.at && now - entry.at < ttlMs) return entry.v;
+  const v = compute();
+  _segments[key] = { at: now, v };
+  // Only projects that already have .monomind/ get a cache; never create it.
+  if (fs.existsSync(path.dirname(path.dirname(CACHE_FILE)))) {
+    try {
+      fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
+      const tmp = CACHE_FILE + '.' + process.pid + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(_segments));
+      fs.renameSync(tmp, CACHE_FILE);
+    } catch (err) { if (process.env.MONOMIND_DEBUG) console.error('[statusline]', err); }
+  }
+  return v;
+}
 
 ${STATUSLINE_DATA_SECTION}${STATUSLINE_METRICS_SECTION}${STATUSLINE_STATS_SECTION}${STATUSLINE_RENDER_SECTION}`;
 }

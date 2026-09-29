@@ -11,7 +11,7 @@ import {
   generateSessionManager,
 } from './helpers-core-scripts.js';
 import { generateHookHandler } from './helpers-hook-handler.js';
-import { generateAutoMemoryHook, generateIntelligenceStub } from './helpers-intelligence.js';
+import { generateIntelligenceStub } from './helpers-intelligence.js';
 import {
   generateCrossPlatformSessionManager,
   generateWindowsBatchWrapper,
@@ -22,7 +22,6 @@ import type { InitOptions } from './types.js';
 
 export {
   generateAgentRouter,
-  generateAutoMemoryHook,
   generateCrossPlatformSessionManager,
   generateHookHandler,
   generateIntelligenceStub,
@@ -55,7 +54,6 @@ export interface HelperFileSpec {
 export const HELPER_FILES: Record<string, HelperFileSpec> = {
   'hook-handler.cjs': { forceSync: true, doctorTracked: true, generate: generateHookHandler },
   'intelligence.cjs': { forceSync: true, generate: generateIntelligenceStub },
-  'auto-memory-hook.mjs': { forceSync: true, generate: generateAutoMemoryHook },
   'statusline.cjs': { forceSync: true, doctorTracked: true },
   'monograph-freshen.cjs': { forceSync: true, doctorTracked: true },
   'control-start.cjs': { forceSync: true, doctorTracked: true },
@@ -122,6 +120,7 @@ export const DOCTOR_TRACKED_HELPERS: string[] = Object.keys(HELPER_FILES).filter
 // regenerated to stop referencing it.
 export const OBSOLETE_HELPER_NAMES: string[] = [
   'graphify-freshen.cjs', // renamed to monograph-freshen.cjs (2026-09-16)
+  'auto-memory-hook.mjs', // a no-op since AutoMemoryBridge was removed; hooks dropped (#417)
 ];
 
 // Fallback generators for force-synced helpers (used when source is missing

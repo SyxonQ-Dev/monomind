@@ -48,7 +48,6 @@ function makeHCtx(overrides = {}) {
     router: null,
     intelligence: null,
     isSimpleCommand: () => false,
-    getLearningService: async () => null,
     _recordRecentEdit: () => {},
     _findAffectedTests: () => [],
     _recordHookLatency: () => {},
@@ -193,29 +192,25 @@ describe('route-handler routing path', () => {
     expect(output).not.toContain('Primary Recommendation');
   });
 
-  it('calls intelligence.getContext when available', async () => {
-    const rh = loadRH();
-    const mockGetCtx = vi.fn().mockReturnValue(null);
-    const hCtx = makeHCtx({
-      prompt: 'implement auth module',
-      intelligence: { getContext: mockGetCtx },
-    });
-    await rh.handle(hCtx);
-    expect(mockGetCtx).toHaveBeenCalledWith('implement auth module');
-  });
-
-  it('prints intelligence context when returned', async () => {
+  // #417: the per-prompt [INTELLIGENCE] lookup matched nothing in practice
+  // and rewrote ranked-context.json on every prompt.
+  it('does not run the intelligence lookup or rewrite ranked-context.json', async () => {
     const rh = loadRH();
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const hCtx = makeHCtx({
-      prompt: 'implement auth module',
-      intelligence: {
-        getContext: vi.fn().mockReturnValue('[INTELLIGENCE] Relevant patterns: auth pattern'),
-      },
-    });
-    await rh.handle(hCtx);
+    const intelligence = {
+      init: vi.fn(),
+      bootstrapFromDb: vi.fn(),
+      getContext: vi.fn().mockReturnValue('[INTELLIGENCE] Relevant patterns: auth pattern'),
+    };
+    await rh.handle(makeHCtx({ prompt: 'implement auth module', intelligence }));
+    expect(intelligence.init).not.toHaveBeenCalled();
+    expect(intelligence.bootstrapFromDb).not.toHaveBeenCalled();
+    expect(intelligence.getContext).not.toHaveBeenCalled();
     const output = logSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(output).toContain('[INTELLIGENCE]');
+    expect(output).not.toContain('[INTELLIGENCE]');
+    expect(fs.existsSync(path.join(tmpDir, '.monomind', 'data', 'ranked-context.json'))).toBe(
+      false,
+    );
   });
 
   it('handles missing router gracefully (no throw)', async () => {

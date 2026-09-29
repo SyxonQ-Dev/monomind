@@ -169,7 +169,7 @@ Scans `.monomind/orgs/<name>/runs/*.jsonl` — or the equivalent path under the 
 | `.monomind/trigger-index.json`          | Task 32 (MicroagentTriggers, 1h TTL)       | SWARM               |
 | `.monomind/metrics/learning.json`       | Intelligence consolidation at session-end  | INTEL               |
 | `.monomind/metrics/ddd-progress.json`   | `ddd` worker (@monoes/hooks)             | INTEL, CONTEXT      |
-| `.monomind/data/auto-memory-store.json` | `auto-memory-hook.mjs` (session-start import / Stop sync) + intelligence consolidation | MEMORY              |
+| `.monomind/data/auto-memory-store.json` | Intelligence consolidation at session-end  | MEMORY              |
 | `.monomind/data/ranked-context.json`    | PageRank consolidation at session-end      | MEMORY              |
 | `.monomind/security/audit-status.json`  | `monomind security scan`                  | ARCH                |
 | `.monomind/monoswarm/state.json`        | Monoswarm init / coordinator               | Header, SWARM       |

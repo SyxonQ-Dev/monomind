@@ -9,7 +9,7 @@ import { generateHooksPlugin } from '../init/opencode-generator.js';
 /**
  * Graph-first gate platform coverage (kimi + opencode).
  *
- * The graph-gate blocks grep/search tools once per session until a monograph
+ * The graph-gate nudges once per session (never blocks) until a monograph
  * tool is called (hook-handler.cjs pre-search). Claude Code wires this via
  * settings.json; kimi and opencode need their bridges/plugins to forward
  * search tool calls to pre-search — these tests guard that mapping.
@@ -170,7 +170,7 @@ describe('graph-gate persistent opt-out', () => {
       path.resolve(__dirname, '../../../../../.claude/helpers/utils/monograph.cjs'),
       'utf-8',
     );
-    const fn = src.match(/function _graphGateShouldBlock[\s\S]*?\n}/);
+    const fn = src.match(/function _graphGateShouldNudge[\s\S]*?\n}/);
     expect(fn).toBeTruthy();
     expect(fn![0]).toContain('active-gates.json');
     expect(fn![0]).toContain('graphGate');
