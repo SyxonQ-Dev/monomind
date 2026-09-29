@@ -3,17 +3,13 @@
 // Behavioral equivalence verified: 133 routing tests pass post-extraction.
 // hCtx (hook context) contains all shared state and utility functions:
 //   hCtx.hookInput, hCtx.toolInput, hCtx.toolName, hCtx.prompt, hCtx.args, hCtx.CWD
-//   hCtx.session, hCtx.router, hCtx.intelligence
+//   hCtx.session, hCtx.router
 //   hCtx.isSimpleCommand — function defined in main(), passed via hCtx
-//   hCtx.getLearningService — async factory for LearningService singleton
 //   Utility fns: _recordRecentEdit, _findAffectedTests, _recordHookLatency,
 //     _getBudgetStatus, _injectCompactGraphMap, _maybeRebuildMonograph,
 //     _buildKnowledgeSearchFn, getMonographSuggestions, getMonographNeighbors,
 //     runWithTimeout, safeRequire, scanMicroAgentTriggers, _recordGraphTelemetry,
 //     _recordDecisionMarkers, _recordToolCall, _openMonographDb, fs, path
-//
-// NOTE: The 'route' handler has a local variable named 'ctx' (from intelligence.getContext).
-// The dispatcher passes the hook context as 'hCtx' to avoid collision.
 
 const path = require('path');
 const fs = require('fs');
@@ -193,7 +189,6 @@ module.exports = {
     var hookStart = Date.now();
     var prompt = hCtx.prompt;
     var hookInput = hCtx.hookInput;
-    var intelligence = hCtx.intelligence;
     var CWD = hCtx.CWD;
 
     // For slash commands and single-action invocations: no pick. The command
@@ -216,30 +211,6 @@ module.exports = {
     // slash-command expansions) carry no user intent: no pick, no record.
     if (pickCore.isSystemPrompt(prompt)) return;
 
-    if (intelligence && intelligence.getContext) {
-      try {
-        // Each hook event runs as a fresh node process, so the module-level
-        // _entries cache is always empty here — without init() getContext()
-        // returns null on every prompt and stored patterns are never recalled.
-        // init() reads one small JSON file (auto-memory-store.json), so the
-        // per-prompt cost is negligible.
-        if (intelligence.init) {
-          try { intelligence.init(); } catch (e) { /* non-fatal */ }
-        }
-        // Bootstrap intelligence from monograph on first prompt if store is sparse
-        if (intelligence.bootstrapFromDb) {
-          try {
-            var bDb = hCtx._openMonographDb();
-            if (bDb) {
-              var bootstrapped = intelligence.bootstrapFromDb(bDb);
-              if (bootstrapped > 0) advisoryLog('[INTELLIGENCE] Bootstrapped ' + bootstrapped + ' hub nodes from knowledge graph');
-            }
-          } catch (e) { /* non-fatal */ }
-        }
-        const ctx = intelligence.getContext(prompt);
-        if (ctx) advisoryLog(ctx);
-      } catch (e) { /* non-fatal */ }
-    }
     {
       // ── The pick, in BOTH modes: Jev over the agent registry, else a strong
       //    keyword match over the same registry (bounded by

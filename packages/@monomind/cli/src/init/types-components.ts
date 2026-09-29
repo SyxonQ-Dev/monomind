@@ -58,11 +58,11 @@ export interface HooksConfig {
   userPromptSubmit: boolean;
   /** Enable SessionStart hooks */
   sessionStart: boolean;
-  /** Enable Stop hooks */
+  /** No longer generates a hook (#417); kept so existing option objects stay valid */
   stop: boolean;
   /** Enable PreCompact hooks (context preservation before compaction) */
   preCompact: boolean;
-  /** Enable Notification hooks */
+  /** No longer generates a hook (#417); kept so existing option objects stay valid */
   notification: boolean;
   /** Enable TeammateIdle hooks (agent teams auto-assign) */
   teammateIdle: boolean;

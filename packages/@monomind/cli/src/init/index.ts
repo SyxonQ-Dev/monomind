@@ -26,7 +26,6 @@ export {
 
 export {
   generateAgentRouter,
-  generateAutoMemoryHook,
   generateHookHandler,
   generateIntelligenceStub,
   generateMemoryHelper,

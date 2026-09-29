@@ -66,38 +66,6 @@ const {
   _buildKnowledgeSearchFn, _autoIndexKnowledge,
 } = microAgents;
 
-// ── LearningService module-level singleton ─────────────────────────────────────
-// Singleton contract: one LearningService instance is created per hook-handler
-// process. initialize() opens the SQLite DB; consolidate() is called at
-// session-end. Hoisting to module scope ensures the DB is not reopened on every
-// session-end invocation (which would create a fresh in-memory-only instance
-// each time, discarding any state accumulated during the session).
-//
-// We cache the Promise (not the resolved value) so that concurrent callers all
-// await the same initialization. Caching only the resolved value allowed two
-// concurrent callers to both enter the `if (!_learningService)` branch and
-// construct separate LearningService instances, leaving an orphaned DB handle.
-var _learningServicePromise = null;
-async function getLearningService() {
-  if (!_learningServicePromise) {
-    _learningServicePromise = (async function() {
-      try {
-        var lsMod = await import('file://' + path.join(__dirname, 'learning-service.mjs'));
-        var LearningService = lsMod.LearningService || (lsMod.default && lsMod.default.LearningService);
-        if (!LearningService) return null;
-        var svc = new LearningService();
-        if (typeof svc.initialize === 'function') await svc.initialize();
-        return svc;
-      } catch (e) {
-        _learningServicePromise = null; // allow retry on error
-        return null;
-      }
-    })();
-  }
-  return _learningServicePromise;
-}
-
-
 const router = safeRequire(path.join(helpersDir, 'router.cjs'));
 const session = safeRequire(path.join(helpersDir, 'session.cjs'));
 const memory = safeRequire(path.join(helpersDir, 'memory.cjs'));
@@ -357,7 +325,6 @@ var hCtx = {
   session: session,
   router: router,
   intelligence: intelligence,
-  getLearningService: getLearningService,
   isSimpleCommand: isSimpleCommand,
   // Module-level singleton (populated by session-restore handler, or lazily
   // via _ensureHooksModule() — required since each hook event is a fresh process).

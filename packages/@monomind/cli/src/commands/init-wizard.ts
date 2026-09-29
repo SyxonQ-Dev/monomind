@@ -167,13 +167,6 @@ export const wizardCommand: Command = {
                 hint: 'Session initialization',
                 selected: true,
               },
-              { value: 'stop', label: 'Stop', hint: 'Task completion evaluation', selected: true },
-              {
-                value: 'notification',
-                label: 'Notification',
-                hint: 'Swarm notifications',
-                selected: true,
-              },
               {
                 value: 'permissionRequest',
                 label: 'PermissionRequest',
@@ -187,8 +180,6 @@ export const wizardCommand: Command = {
           options.hooks.postToolUse = hooks.includes('postToolUse');
           options.hooks.userPromptSubmit = hooks.includes('userPromptSubmit');
           options.hooks.sessionStart = hooks.includes('sessionStart');
-          options.hooks.stop = hooks.includes('stop');
-          options.hooks.notification = hooks.includes('notification');
         }
       }
 

@@ -4,6 +4,10 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Removed
+
+- **Hooks and helpers that ran every session, turn or prompt and did nothing** ([#417](https://github.com/monoes/monomind/issues/417)). `monomind init` no longer registers the SessionStart `auto-memory-hook.mjs import` and Stop `auto-memory-hook.mjs sync` hooks (both only printed "skipped — AutoMemoryBridge removed"), the SubagentStart `hook-handler.cjs status` hook or the Notification `hook-handler.cjs notify` hook (both only printed `[OK] Hook: …`). With no hooks left, it writes no `Stop` or `Notification` event, and the init wizard no longer offers them. The helpers `auto-memory-hook.mjs`, `learning-service.mjs` (nothing called `record()`) and `memory-palace.cjs` (nothing wrote its drawers, so its session-start `wakeUp` injection was always empty) are no longer installed. The UserPromptSubmit `route` hook no longer runs the `[INTELLIGENCE]` lookup, which rewrote `.monomind/data/ranked-context.json` (~870 KB) on every prompt and matched nothing; `intelligence.cjs` drops `getContext()` and `bootstrapFromDb()`. `init upgrade` leaves the old hooks and files of an existing install in place (they stay harmless no-ops); `init --force` removes `auto-memory-hook.mjs` and its settings hooks. `intelligence-outcomes.jsonl` is still written: session-end success detection, `doctor`'s route-outcome correlation and `hooks intelligence train` read it.
+
 ### Fixed
 
 - **The per-prompt Second Brain lookup only sends the prompt to a loopback server** ([#402](https://github.com/monoes/monomind/issues/402)). The route hook POSTed every substantive prompt to the `url` in `.monomind/control.json` without checking where it pointed, so a tampered or committed control.json could send prompts to any host. The POST now happens only when that url is http(s) to `127.0.0.1`, `localhost` or `::1` (no credentials in the url); otherwise the hook skips it and uses the local keyword fallback.
