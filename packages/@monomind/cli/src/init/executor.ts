@@ -52,8 +52,10 @@ function claudeOnlyMemorySeeds(targetDir: string): ReturnType<typeof generateMem
 
 import type { InitOptions, InitResult } from './types.js';
 import { detectPlatform } from './types.js';
+import { writeAiderConf } from './write-aider.js';
 import { writeGeminiFiles } from './write-antigravity.js';
 import { writeClaudeMd, writeHelpers, writeMCPConfig, writeStatusline } from './write-claude.js';
+import { writeClineFiles } from './write-cline.js';
 import { writeCodexFiles } from './write-codex.js';
 import { writeKimiFiles } from './write-kimicode.js';
 import { writeOpencodeFiles } from './write-opencode.js';
@@ -330,6 +332,15 @@ export async function executeInit(options: InitOptions): Promise<InitResult> {
       result.updated.push(...applied.changed.map((file) => `platform ${platform}: ${file}`));
       result.skipped.push(...applied.skipped.map((file) => `platform ${platform}: ${file}`));
       result.skipped.push(...applied.diagnostics.map((line) => `platform ${platform}: ${line}`));
+    }
+
+    // aider loads CONVENTIONS.md (written by the aider adapter above) only
+    // through a `read:` entry; cline gets a rule file (rev 16).
+    if (options.selectedPlatforms?.includes('aider')) {
+      await writeAiderConf(targetDir, options, result);
+    }
+    if (options.components.cline) {
+      await writeClineFiles(targetDir, options, result);
     }
 
     // Generate .agents/shared_instructions.md; its memory seeds are stored

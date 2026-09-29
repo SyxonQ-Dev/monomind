@@ -111,7 +111,7 @@ export const initCommand: Command = {
       short: 't',
       description: 'Coding system to initialize (default: all)',
       type: 'string',
-      choices: ['all', 'claude', 'antigravity', 'opencode', 'kimicode', 'codex'],
+      choices: ['all', 'claude', 'antigravity', 'opencode', 'kimicode', 'codex', 'cline', 'aider'],
     },
     {
       name: 'platform',
