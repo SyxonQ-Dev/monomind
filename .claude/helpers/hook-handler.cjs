@@ -333,6 +333,18 @@ async function main() {
 // fail open: they carry no security signal and must never stop the user.
 var _securityGateCompleted = false;
 
+// pre-bash / pre-search [MONOGRAPH_HINT]/[MONOGRAPH_REMINDER] lines (#409).
+// Claude Code only hands PreToolUse stdout to the model as JSON
+// hookSpecificOutput.additionalContext, so they are collected here and
+// printed as ONE JSON document — never on a block (exit 2 reads stderr).
+var _hookContext = [];
+function _emitHookContext() {
+  if (_hookContext.length === 0 || process.exitCode === 2) return;
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: _hookContext.join('\n') },
+  }) + '\n');
+}
+
 // Build shared hook context — passed to extracted handler modules so they
 // don't need to capture main()-scoped or module-scoped variables via closure.
 var hCtx = {
@@ -477,7 +489,7 @@ const handlers = {
         return;
       }
       if (gateResult === 'warn') {
-        if (String(process.env.MONOMIND_HOOK_QUIET || '') !== '1') console.log('[MONOGRAPH_REMINDER] monograph_query/suggest not yet called this session — graph has ' + (_getNodeCount() || '20k+') + ' indexed nodes. Try monograph first for faster, more precise results.');
+        if (String(process.env.MONOMIND_HOOK_QUIET || '') !== '1') _hookContext.push('[MONOGRAPH_REMINDER] monograph_query/suggest not yet called this session — graph has ' + (_getNodeCount() || '20k+') + ' indexed nodes. Try monograph first for faster, more precise results.');
       }
       var graphAssisted = false;
       if (_isGraphFresh()) {
@@ -515,7 +527,7 @@ const handlers = {
                   if (row) {
                     graphAssisted = true;
                     var hint = row.file_path + (row.start_line != null ? ':' + row.start_line : '');
-                    console.log('[MONOGRAPH_HINT] ' + pattern + ' → ' + hint);
+                    _hookContext.push('[MONOGRAPH_HINT] ' + pattern + ' → ' + hint);
                   }
                 }
 
@@ -528,7 +540,7 @@ const handlers = {
                   if (row) {
                     graphAssisted = true;
                     var hint = row.file_path + (row.start_line != null ? ':' + row.start_line : '');
-                    console.log('[MONOGRAPH_HINT] ' + row.name + ' → ' + hint);
+                    _hookContext.push('[MONOGRAPH_HINT] ' + row.name + ' → ' + hint);
                   }
                 }
 
@@ -539,7 +551,7 @@ const handlers = {
                   ).get(pattern);
                   if (row) {
                     graphAssisted = true;
-                    console.log('[MONOGRAPH_HINT] file ' + pattern + ' → ' + row.file_path);
+                    _hookContext.push('[MONOGRAPH_HINT] file ' + pattern + ' → ' + row.file_path);
                   }
                 }
 
@@ -552,7 +564,7 @@ const handlers = {
                   ).get(pathLike);
                   if (row) {
                     graphAssisted = true;
-                    console.log('[MONOGRAPH_HINT] file ' + pattern + ' → ' + row.file_path);
+                    _hookContext.push('[MONOGRAPH_HINT] file ' + pattern + ' → ' + row.file_path);
                   }
                 }
 
@@ -570,7 +582,7 @@ const handlers = {
                     if (row2) {
                       graphAssisted = true;
                       var hint2 = row2.file_path + (row2.start_line != null ? ':' + row2.start_line : '');
-                      console.log('[MONOGRAPH_HINT] ' + row2.name + ' → ' + hint2);
+                      _hookContext.push('[MONOGRAPH_HINT] ' + row2.name + ' → ' + hint2);
                     }
                   }
                 }
@@ -589,7 +601,7 @@ const handlers = {
                     if (ftsRow) {
                       graphAssisted = true;
                       var ftsHint = ftsRow.file_path + (ftsRow.start_line != null ? ':' + ftsRow.start_line : '');
-                      console.log('[MONOGRAPH_HINT] ' + ftsRow.name + ' → ' + ftsHint);
+                      _hookContext.push('[MONOGRAPH_HINT] ' + ftsRow.name + ' → ' + ftsHint);
                     }
                   } catch (e) { /* FTS table may not exist */ }
                 }
@@ -606,7 +618,7 @@ const handlers = {
                     if (drow) {
                       graphAssisted = true;
                       var dhint = drow.file_path + (drow.start_line != null ? ':' + drow.start_line : '');
-                      console.log('[MONOGRAPH_HINT] ' + drow.name + ' → ' + dhint);
+                      _hookContext.push('[MONOGRAPH_HINT] ' + drow.name + ' → ' + dhint);
                     }
                   }
                 }
@@ -621,7 +633,7 @@ const handlers = {
                     if (crow) {
                       graphAssisted = true;
                       var chint = crow.file_path + (crow.start_line != null ? ':' + crow.start_line : '');
-                      console.log('[MONOGRAPH_HINT] ' + crow.name + ' → ' + chint);
+                      _hookContext.push('[MONOGRAPH_HINT] ' + crow.name + ' → ' + chint);
                     }
                   }
                 }
@@ -640,7 +652,7 @@ const handlers = {
                     if (arow) {
                       graphAssisted = true;
                       var ahint = arow.file_path + (arow.start_line != null ? ':' + arow.start_line : '');
-                      console.log('[MONOGRAPH_HINT] ' + arow.name + ' → ' + ahint);
+                      _hookContext.push('[MONOGRAPH_HINT] ' + arow.name + ' → ' + ahint);
                     }
                   }
                 }
@@ -660,7 +672,7 @@ const handlers = {
                   ).get('%' + dirPath10 + '/%');
                   if (drow10 && drow10.c > 0) {
                     graphAssisted = true;
-                    console.log('[MONOGRAPH_HINT] grep scope ' + dirPath10 + ' has ' + drow10.c + ' indexed files');
+                    _hookContext.push('[MONOGRAPH_HINT] grep scope ' + dirPath10 + ' has ' + drow10.c + ' indexed files');
                   }
                 }
               }
@@ -676,7 +688,7 @@ const handlers = {
                 ).get(fm[1]);
                 if (row) {
                   graphAssisted = true;
-                  console.log('[MONOGRAPH_HINT] file ' + fm[1] + ' → ' + row.file_path);
+                  _hookContext.push('[MONOGRAPH_HINT] file ' + fm[1] + ' → ' + row.file_path);
                 }
               }
             }
@@ -691,7 +703,7 @@ const handlers = {
                   ).get('%' + wm[1] + '%');
                   if (wrow) {
                     graphAssisted = true;
-                    console.log('[MONOGRAPH_HINT] file *' + wm[1] + '* → ' + wrow.file_path);
+                    _hookContext.push('[MONOGRAPH_HINT] file *' + wm[1] + '* → ' + wrow.file_path);
                   }
                 }
               }
@@ -707,7 +719,7 @@ const handlers = {
                   ).get(fdm[1].replace(/\/$/, '') + '/%');
                   if (fdrow && fdrow.c > 0) {
                     graphAssisted = true;
-                    console.log('[MONOGRAPH_HINT] find scope ' + fdm[1] + ' has ' + fdrow.c + ' indexed files');
+                    _hookContext.push('[MONOGRAPH_HINT] find scope ' + fdm[1] + ' has ' + fdrow.c + ' indexed files');
                   }
                 }
               }
@@ -718,6 +730,7 @@ const handlers = {
       if (graphAssisted) _recordGraphTelemetry('graph_assist_search');
       else if (isGrep) _recordGraphTelemetry('bash_grep_call');
       else _recordGraphTelemetry('bash_find_call');
+      _emitHookContext();
     }
   },
 
@@ -742,7 +755,7 @@ const handlers = {
       return;
     }
     if (gateResult === 'warn') {
-      if (String(process.env.MONOMIND_HOOK_QUIET || '') !== '1') console.log('[MONOGRAPH_REMINDER] monograph_query/suggest not yet called this session — try monograph first for faster results.');
+      if (String(process.env.MONOMIND_HOOK_QUIET || '') !== '1') _hookContext.push('[MONOGRAPH_REMINDER] monograph_query/suggest not yet called this session — try monograph first for faster results.');
     }
     var graphResolved = false;
     try {
@@ -768,7 +781,7 @@ const handlers = {
               if (row) {
                 graphResolved = true;
                 var hint = row.file_path + (row.start_line != null ? ':' + row.start_line : '');
-                console.log('[MONOGRAPH_HINT] ' + grepPattern + ' found at ' + hint);
+                _hookContext.push('[MONOGRAPH_HINT] ' + grepPattern + ' found at ' + hint);
               }
             }
 
@@ -782,7 +795,7 @@ const handlers = {
               if (row) {
                 graphResolved = true;
                 var hint = row.file_path + (row.start_line != null ? ':' + row.start_line : '');
-                console.log('[MONOGRAPH_HINT] ' + row.name + ' found at ' + hint);
+                _hookContext.push('[MONOGRAPH_HINT] ' + row.name + ' found at ' + hint);
               }
             }
 
@@ -793,7 +806,7 @@ const handlers = {
               ).get(grepPattern);
               if (row) {
                 graphResolved = true;
-                console.log('[MONOGRAPH_HINT] file ' + grepPattern + ' found at ' + row.file_path);
+                _hookContext.push('[MONOGRAPH_HINT] file ' + grepPattern + ' found at ' + row.file_path);
               }
             }
 
@@ -806,7 +819,7 @@ const handlers = {
               ).get(pathLike);
               if (row) {
                 graphResolved = true;
-                console.log('[MONOGRAPH_HINT] file ' + grepPattern + ' found at ' + row.file_path);
+                _hookContext.push('[MONOGRAPH_HINT] file ' + grepPattern + ' found at ' + row.file_path);
               }
             }
 
@@ -826,7 +839,7 @@ const handlers = {
                 if (row2) {
                   graphResolved = true;
                   var hint2 = row2.file_path + (row2.start_line != null ? ':' + row2.start_line : '');
-                  console.log('[MONOGRAPH_HINT] ' + row2.name + ' found at ' + hint2);
+                  _hookContext.push('[MONOGRAPH_HINT] ' + row2.name + ' found at ' + hint2);
                 }
               }
             }
@@ -845,7 +858,7 @@ const handlers = {
                 if (ftsRow) {
                   graphResolved = true;
                   var ftsHint = ftsRow.file_path + (ftsRow.start_line != null ? ':' + ftsRow.start_line : '');
-                  console.log('[MONOGRAPH_HINT] ' + ftsRow.name + ' found at ' + ftsHint);
+                  _hookContext.push('[MONOGRAPH_HINT] ' + ftsRow.name + ' found at ' + ftsHint);
                 }
               } catch (e) { /* FTS table may not exist */ }
             }
@@ -864,7 +877,7 @@ const handlers = {
                 if (drow) {
                   graphResolved = true;
                   var dhint = drow.file_path + (drow.start_line != null ? ':' + drow.start_line : '');
-                  console.log('[MONOGRAPH_HINT] ' + drow.name + ' found at ' + dhint);
+                  _hookContext.push('[MONOGRAPH_HINT] ' + drow.name + ' found at ' + dhint);
                 }
               }
             }
@@ -881,7 +894,7 @@ const handlers = {
                 if (crow) {
                   graphResolved = true;
                   var chint = crow.file_path + (crow.start_line != null ? ':' + crow.start_line : '');
-                  console.log('[MONOGRAPH_HINT] ' + crow.name + ' found at ' + chint);
+                  _hookContext.push('[MONOGRAPH_HINT] ' + crow.name + ' found at ' + chint);
                 }
               }
             }
@@ -897,6 +910,7 @@ const handlers = {
     } else if (tool === 'Glob') {
       _recordGraphTelemetry('glob_call');
     }
+    _emitHookContext();
   },
 
   'post-graph-tool': () => {

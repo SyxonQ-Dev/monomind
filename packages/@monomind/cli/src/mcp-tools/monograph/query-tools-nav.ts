@@ -4,6 +4,7 @@
  */
 
 import type { MCPTool } from '../types.js';
+import { ambiguityResult } from './impact-tools-shared.js';
 import { getDbPath, text } from './shared.js';
 
 // ── monograph_context ─────────────────────────────────────────────────────────
@@ -11,12 +12,19 @@ import { getDbPath, text } from './shared.js';
 export const monographContextTool: MCPTool = {
   name: 'monograph_context',
   description:
-    '360° symbol view: callers, callees, imports, importedBy, community, and containing processes for a symbol.',
+    '360° symbol view: callers, callees, imports, importedBy, community, and containing processes for a symbol. When a name matches several definitions the candidates are listed instead of one being picked; re-query with nodeId or filePath.',
   inputSchema: {
     type: 'object',
     properties: {
       name: { type: 'string', description: 'Symbol name to look up' },
-      filePath: { type: 'string', description: 'Optional file path to disambiguate' },
+      nodeId: {
+        type: 'string',
+        description: 'Canonical node id — unambiguous, preferred when known',
+      },
+      filePath: {
+        type: 'string',
+        description: 'Disambiguate a name by file path (exact, or a trailing fragment)',
+      },
     },
     required: ['name'],
   },
@@ -42,7 +50,9 @@ export const monographContextTool: MCPTool = {
       const result = getMonographContext(db, {
         name: ctxName,
         filePath: ctxPath,
+        nodeId: input.nodeId as string | undefined,
       });
+      if (result?.ambiguous) return ambiguityResult(ctxName, result.candidates ?? []);
       if (!result?.node) return text(`No symbol found: ${ctxName}`);
 
       // Format context as structured text for direct LLM consumption

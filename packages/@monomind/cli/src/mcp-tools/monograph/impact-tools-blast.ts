@@ -1,6 +1,6 @@
 import type { MonographImpactResult, MonographNode } from '@monoes/monograph';
 import type { MCPTool } from '../types.js';
-import { nodeLocation, textWithData } from './impact-tools-shared.js';
+import { ambiguityResult, nodeLocation, textWithData } from './impact-tools-shared.js';
 import { getDbPath, text } from './shared.js';
 
 // ── monograph_impact ──────────────────────────────────────────────────────────
@@ -10,12 +10,19 @@ import { getDbPath, text } from './shared.js';
 export const monographImpactTool: MCPTool = {
   name: 'monograph_impact',
   description:
-    'Blast radius analysis: finds all direct and transitive callers of a symbol and computes a risk score.',
+    'Blast radius analysis: finds all direct and transitive callers of a symbol and computes a risk score. When a name matches several definitions the candidates are listed instead of one being picked; re-query with nodeId or filePath.',
   inputSchema: {
     type: 'object',
     properties: {
       name: { type: 'string', description: 'Symbol name to analyze' },
-      filePath: { type: 'string', description: 'Optional file path to disambiguate' },
+      nodeId: {
+        type: 'string',
+        description: 'Canonical node id — unambiguous, preferred when known',
+      },
+      filePath: {
+        type: 'string',
+        description: 'Disambiguate a name by file path (exact, or a trailing fragment)',
+      },
       depth: { type: 'number', description: 'Max BFS depth (default 3, max 6)' },
     },
     required: ['name'],
@@ -48,8 +55,10 @@ export const monographImpactTool: MCPTool = {
       const result: MonographImpactResult = getMonographImpact(db, {
         name: impactName,
         filePath: impactPath,
+        nodeId: input.nodeId as string | undefined,
         depth,
       });
+      if (result.ambiguous) return ambiguityResult(impactName, result.candidates ?? []);
       const root = result.node;
       if (!root) return text(`No symbol found: ${impactName}`);
 
