@@ -921,6 +921,9 @@ describe('doctor-project-checks', () => {
         'data/mastermind-*.jsonl',
         '**/.claude-flow/',
         '.monomind/monoswarm/',
+        'monomind.config.json',
+        '.swarm/',
+        '.claude/memory.db',
         // i-052: every MONOMIND_NEVER_COMMIT entry is now also required —
         // read from the export, not retyped, so this test can't silently
         // drift from the list it's meant to be checking.
