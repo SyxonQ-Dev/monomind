@@ -10,7 +10,10 @@
     runtimes need no new capability: a caller discovers them through `agent scan --json` (§6),
     whose entry set grows.
     - `cline` (Cline CLI; `--json` for a fresh session, ACP `session/load` for resume; kills the
-      hub daemon a turn starts; `init_target: "cline"`).
+      hub daemon a turn starts; `init_target: "cline"`). Scoped cline refuses every tool call
+      that needs approval (commands, edits, subagents, MCP tools) instead of approving it, and
+      never waits for an answer: the refused call's `tool_activity` ends `ok:false,
+      denied:true` and the turn continues.
     - `aider` (Aider through a Python shim run with aider's own interpreter, plain-CLI fallback
       when aider cannot be imported; `init_target: "aider"`; no MCP).
     - `dsh` (DeepSeek Harness developer preview, `dsh --profile headless --json`; free models
@@ -26,8 +29,10 @@
     (clamped to the levels the model supports). `monomind init --target` accepts `cline`
     (`.clinerules/monomind.md`; MCP is user-scope in cline, so init names `cline mcp install
     monomind --yes -- npx -y monomind@latest mcp start` instead of editing `~/.cline`) and `aider`
-    (`CONVENTIONS.md` plus `read: [CONVENTIONS.md]` merged into `.aider.conf.yml`); neither is
-    part of `--target all`. pi and dsh read `AGENTS.md` natively (`init_target: null`).
+    (`CONVENTIONS.md` plus `read: [CONVENTIONS.md]` merged into `.aider.conf.yml`) and `agents`
+    (`AGENTS.md` only — no Claude files, no `.monomind/` state; an existing `AGENTS.md` is kept);
+    none of the three is part of `--target all`. `init_target: "agents"` for the runtimes that
+    read `AGENTS.md` natively: pi, pi-rpc, dsh, grok, copilot, qwen, qwen-rpc and crush.
     `agent models --runtime dsh` (§12) returns dsh's curated list with `curated: true`.
     **Rate limits** (capability `agent-exec-rate-limit-retry`): a transient provider rate limit
     (HTTP 429, "too many requests", a per-minute cap) is no longer `quota`: `agent exec` retries
@@ -609,7 +614,8 @@ pass back), `effort` (maps `--effort`), `max_turns` (enforces `--max-turns` on t
 loop), `reports_cost` (`result.cost_usd` is a real figure — a runtime without it never trips
 `--budget-usd`), and `init_target` (the `monomind init --target` value that writes this
 runtime's setup files: `claude`, `codex`, `opencode`, `kimicode`, `antigravity`, and since
-rev 20 `cline`, `aider`; `null` for the rest — pi and dsh read `AGENTS.md` natively). **rev 20**:
+rev 20 `cline`, `aider`, and `agents` (AGENTS.md only) for pi, pi-rpc, dsh, grok, copilot,
+qwen, qwen-rpc and crush; `null` for vercel and hermes). **rev 20**:
 entries for `cline`, `aider` and `dsh`; `full_access` is `true` for every runtime except vercel,
 hermes and qwen-rpc.
 

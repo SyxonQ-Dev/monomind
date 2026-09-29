@@ -200,8 +200,16 @@ asked for `full` (they'd believe they had full access and didn't) or vice versa.
   finds the one a turn started (by its per-turn marker or a new hub-lock pid, confirmed by its
   command line) and kills it at turn end and on abort, and never touches a daemon that was
   running before the turn — but when the user already runs one, cline may execute the turn inside
-  it, outside the turn's process-group tracker. cline auto-approves in scoped mode too; scoped
-  only isolates its config (`--config`/`--data-dir`, an empty MCP list). aider has no sandbox:
+  it, outside the turn's process-group tracker. Scoped cline isolates its config
+  (`--config`/`--data-dir`, an empty MCP list) and refuses every tool call that needs approval
+  instead of approving it: it runs with `--auto-approve false` plus a monomind plugin in that
+  config dir that re-approves only cline's own safe tools (read, search, web fetch, questions,
+  skills) and skips commands, file edits, patches, subagents, teams and MCP tools; a resumed (ACP)
+  turn also rejects such permission requests. Nothing waits for an answer (a non-TTY cline refuses
+  an unanswered approval at once, and desktop approval IPC is switched off); the refused call ends
+  `ok:false, denied:true` and the turn goes on. Without the plugin the turn fails closed (every
+  tool refused). A workspace's own `.cline/plugins` still load, as in the user's terminal.
+  aider has no sandbox:
   scoped mode declines model-suggested shell commands (reported as failed shell calls), slash
   commands and file writes outside the turn's cwd or into `.git`, full mode runs them; aider always writes its repo-map cache
   (`.aider.tags.cache.v4/`) into the repo. dsh scoped stays at `workspace-write`. pi and cline
