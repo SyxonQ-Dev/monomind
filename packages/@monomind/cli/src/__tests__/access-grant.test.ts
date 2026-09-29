@@ -65,7 +65,7 @@ describe('resolveRoleAccess', () => {
   });
 
   it('declared full on a runtime without full-access support runs scoped, suspended', () => {
-    const d = def({ roles: [{ id: 'builder', runtime: 'codex', policy: { access: 'full' } }] });
+    const d = def({ roles: [{ id: 'builder', runtime: 'hermes', policy: { access: 'full' } }] });
     const r = resolve(d, d.roles[0]);
     expect(r.access).toBe('scoped');
     expect(r.state).toBe('suspended');

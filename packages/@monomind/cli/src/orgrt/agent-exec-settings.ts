@@ -44,8 +44,9 @@ export function parseSettingsFlag(raw: unknown): { sources: SettingSource[] } | 
  * within `timeoutMs`, `terminate` fires and a `runner-error` is emitted
  * instead of hanging until `--timeout`. Disabled (`enabled: false`) is a
  * no-op so runtimes other than `claude`, or `--settings none`, are
- * unaffected — matching AgentRunArgs.settingSources's own "other runners
- * ignore it" contract.
+ * unaffected: only ClaudeAgentRunner reports `phase:"ready"`, so the
+ * watchdog cannot apply to a runtime that never would (those get
+ * `runtimeStartupNotices` below instead).
  */
 export interface ExecStatusHandler {
   onMessage(m: { type: string; phase?: string; mcp_servers?: unknown }): void;
@@ -92,4 +93,38 @@ export function createExecStatusHandler(opts: {
       if (timer) clearTimeout(timer);
     },
   };
+}
+
+/** What each non-claude runtime loads when `--settings` leaves its own
+ *  config un-isolated. The CLI decides; this names it for the caller. The
+ *  source subset (user/project/local) is all-or-nothing outside claude. */
+const RUNTIME_LOADS: Record<string, string> = {
+  codex: 'user config (~/.codex/config.toml, incl. its MCP servers) + project AGENTS.md',
+  opencode: 'user config (~/.config/opencode) + project opencode.json, AGENTS.md and MCP servers',
+  antigravity: 'user settings (~/.gemini) + project GEMINI.md and .gemini/',
+  kimicode: 'user config (~/.kimi) + project AGENTS.md and .kimi-code/',
+};
+
+/**
+ * `status` notices a non-claude turn gets right after `start` (rev 15):
+ * what `--settings` makes the CLI load, and an `--effort` the runtime does
+ * not honor. `phase:"notice"` + `message`; claude's own
+ * `initializing`/`ready` pair is unchanged and never produced here.
+ */
+export function runtimeStartupNotices(opts: {
+  runtime: string;
+  settings?: readonly string[];
+  effort?: string;
+  effortSupported: boolean;
+}): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  const note = (message: string) => out.push({ v: 1, type: 'status', phase: 'notice', message });
+  if (opts.runtime !== 'claude' && (opts.settings?.length ?? 0) > 0) {
+    const loads = RUNTIME_LOADS[opts.runtime] ?? 'its own user config and project files';
+    note(`${opts.runtime}: ${loads}`);
+  }
+  if (opts.effort && !opts.effortSupported) {
+    note(`${opts.runtime}: --effort ${opts.effort} ignored (no effort control on this runtime)`);
+  }
+  return out;
 }

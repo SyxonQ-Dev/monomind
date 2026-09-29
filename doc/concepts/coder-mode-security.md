@@ -1,8 +1,10 @@
 # Coder Mode: Threat Model & Guardrails
 
 > Part of the **Coder mode** epic ([#364](https://github.com/monoes/monomind/issues/364)) — a
-> Claude Code session with full, automated, unrestricted access to the machine, driven through
-> `monomind agent exec --access full` instead of a direct `claude` spawn. This document is the
+> coding-agent session with full, automated, unrestricted access to the machine, driven through
+> `monomind agent exec --access full` instead of a direct CLI spawn. Since protocol rev 15 this
+> covers every coding runtime with `full_access: true` in `agent scan --json` (claude, codex,
+> opencode, antigravity, kimicode, grok, qwen, copilot, crush, pi), not only Claude Code. This document is the
 > threat model and guardrail record required by
 > [#360](https://github.com/monoes/monomind/issues/360), refined against what was actually built
 > in [#355](https://github.com/monoes/monomind/issues/355) (`--access full`),
@@ -34,10 +36,13 @@ invocation, parsed in [`commands/agent-exec.ts`](../../packages/@monomind/cli/sr
 (`ctx.flags.access`). From there it flows through exactly one path:
 `AgentExecOptions.access` → `orgrt/agent-exec.ts`'s `resolveAccess()`/`checkFullAccessGuards()`
 ([`orgrt/agent-exec-access.ts`](../../packages/@monomind/cli/src/orgrt/agent-exec-access.ts)) →
-`AgentRunArgs.access` → `ClaudeAgentRunner.run()`'s strict `args.access === 'full'` check
+`AgentRunArgs.access` → the runner's strict `args.access === 'full'` check. For claude that is
+`ClaudeAgentRunner.run()`
 ([`orgrt/agent-runner-claude.ts`](../../packages/@monomind/cli/src/orgrt/agent-runner-claude.ts)),
-which is the only place `permissionMode: 'bypassPermissions'` +
-`allowDangerouslySkipPermissions: true` get set.
+the only place `permissionMode: 'bypassPermissions'` + `allowDangerouslySkipPermissions: true`
+get set; for every other full-access runtime (rev 15) it is that runner's own switch to its
+CLI's no-approval, no-sandbox mode (codex `--dangerously-bypass-approvals-and-sandbox`, opencode
+permission `allow`, the others' yolo flags), taken only on the same literal `'full'`.
 
 Audited (by direct source inspection, and pinned by regression tests in
 `agent-exec-no-transitive-escalation.test.ts` so a future change fails loudly):
@@ -51,7 +56,7 @@ Audited (by direct source inspection, and pinned by regression tests in
 | Workflow/routine nodes | **No such node exists.** There is no workflow-script or routine primitive anywhere in this codebase that shells out to `monomind agent exec` or imports the agent-exec engine (verified by the same source scan — no `src/**` file outside `commands/agent-exec.ts` and its own tests calls `runAgentExec`). | Structural. |
 | Local dashboard / extension UI server routes (`src/ui/server-routes-*.mjs`, `src/ui/routes-org-*.mjs`) | **No route touches it.** None of the ~35 UI route modules reference `orgrt/agent-exec`, `resolveExecRunner`, or `runAgentExec` — verified by source scan. Coder mode is deliberately **not** an extension action (epic #364, "out of scope v1"). | Structural. |
 | Hooks (`hooks-*.ts` lifecycle hooks, filesystem `PreToolUse`/etc. hooks a project or `--settings` load installs) | A hook can run arbitrary code as a **side effect** of a tool call (that's what a hook is), including inside a coder-mode turn itself once one is already running under `--access full` — but a hook cannot **initiate** a new `agent exec --access full` invocation with escalated access; it has no privileged entry point into `resolveAccess`/`checkFullAccessGuards` that a plain `agent exec --access full` typed by a human doesn't also have to go through. | Same guard as "any process on this machine can run `monomind agent exec --access full` if a human decided to let it" — see §2.2. |
-| Any org write path — org MCP tools, `create-json`, `import`/`okf-import`, runtime role hiring, or an agent editing the org JSON directly | **Can write the config, cannot make it run with full access.** These paths are not individually filtered; the runtime is the backstop. A role written with `policy.access: 'full'` (and even a copied or hand-written `access_ack`) runs scoped unless `sig` verifies under the machine-local key in the operator-credential directory, which sandboxed roles are denied Read/Edit on. The only command that writes a valid grant, `org role set-access <org> <role> full`, refuses in any agent context (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `MONOMIND_ORG_ROLE`, `MONOMIND_SDK_AGENT`, `MONOMIND_AGENT_EXEC`), even with `--yes-i-understand`. | HMAC-signed human grant + agent-context refusal (#365). |
+| Any org write path — org MCP tools, `create-json`, `import`/`okf-import`, runtime role hiring, or an agent editing the org JSON directly | **Can write the config, cannot make it run with full access.** These paths are not individually filtered; the runtime is the backstop. A role written with `policy.access: 'full'` (and even a copied or hand-written `access_ack`) runs scoped unless `sig` verifies under the machine-local key in the operator-credential directory, which sandboxed roles are denied Read/Edit on. The only command that writes a valid grant, `org role set-access <org> <role> full`, refuses in any agent context (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `MONOMIND_ORG_ROLE`, `MONOMIND_SDK_AGENT`, `MONOMIND_AGENT_EXEC`, and since rev 15 the other CLIs' own markers — see §2.6), even with `--yes-i-understand`. | HMAC-signed human grant + agent-context refusal (#365). |
 
 **A note on "a script/process could just run the CLI itself":** guardrail 1 is about
 monomind not *handing* full access to something that only has agent-level (tool-call) reach —
@@ -67,14 +72,17 @@ Implemented in [`orgrt/agent-exec-access.ts`](../../packages/@monomind/cli/src/o
 run unconditionally by `orgrt/agent-exec.ts` before a full-access turn is allowed to start —
 tested in `agent-exec.test.ts`'s `"agent exec: --access full"` suite:
 
-- **Root refusal**: refuses `--access full` when `process.getuid?.() === 0`, the same restriction
-  Claude Code itself applies to `bypassPermissions` — `error {code:"unsafe", fatal:true}` instead
-  of an opaque runner failure.
+- **Root refusal**: refuses `--access full` when `process.getuid?.() === 0`, on every runtime —
+  the same restriction Claude Code itself applies to `bypassPermissions`, kept for CLIs whose own
+  yolo mode would allow root — `error {code:"unsafe", fatal:true}` instead of an opaque runner
+  failure.
 - **Explicit, validated `--cwd`**: required (no silent inherit-the-caller's-cwd), must exist, must
   be a directory — `error {code:"unsafe"}` otherwise.
 - **Runtime allowlist**: only a `RunnerSpec` with `supportsFullAccess: true` may run full access —
-  today that is `claude` alone (`orgrt/runner-registry.ts`'s `RUNNER_SPECS`, pinned by a regression
-  test in this issue's test suite). Every other of the 14 runtimes gets
+  since rev 15 that is claude, codex, opencode, antigravity, kimicode, grok, qwen, copilot, crush
+  and pi (`orgrt/runner-registry.ts`'s `RUNNER_SPECS`; the exact set is pinned by
+  `agent-exec-no-transitive-escalation.test.ts`, so widening it fails a test until this document
+  is updated with it). vercel (no native tools), hermes, qwen-rpc and pi-rpc get
   `error {code:"unsupported", fatal:true}`, never a silent scoped fallback (guardrail 5, below).
 - **No silent downgrade/upgrade**: `access` is resolved once, before the runner ever starts, and
   is reported honestly on the `start` event (`access: "scoped"|"full"`) — a runtime that can't
@@ -96,7 +104,9 @@ env: args.envAuthoritative === false
   : { ...omitAnthropicManagedKeys(process.env), ...args.env }
 ```
 
-For `agent exec`, that's the first branch: the **exact same `process.env`** monomind's own process
+Every other runner builds `{ ...omitAnthropicManagedKeys(process.env), ...args.env }` (ambient
+Anthropic credentials never reach a vendor CLI), in both access modes. For `agent exec` on
+claude, it's the first branch: the **exact same `process.env`** monomind's own process
 already has (HOME/PATH/USER/keychain-backed Claude credentials, and — deliberately, per the
 `o-18` comment in `agent-runner-claude.ts` — an ambient `ANTHROPIC_API_KEY`/`BASE_URL`/`AUTH_TOKEN`
 if the invoking shell had one) is reconstructed and merged with `--env KEY=V` overrides the caller
@@ -132,6 +142,10 @@ Each line is one JSON object appended to `~/.monomind/logs/agent-exec-full-acces
 {"ts":"2026-09-28T00:12:03.456Z","cwd":"/home/user/scratch/coder-1","runtime":"claude","sessionId":"sess_abc","exitCode":0,"toolCalls":14}
 ```
 
+The line is written for every runtime (`runtime` names it). `toolCalls` is only as complete as
+that runtime's `tool_activity_fidelity`: exact for `"full"` runtimes, a count of liveness signals
+for `"start-only"` ones.
+
 - `ts` — turn-end ISO timestamp.
 - `cwd`, `runtime` — from the resolved `AgentExecOptions`.
 - `sessionId` — the runner's own session id once known (omitted if the turn never reached one,
@@ -152,6 +166,31 @@ own journal is lost.
 Covered by §2.2's runtime allowlist and root/`--cwd` guards: a request that can't be honored as
 asked fails with a fatal `error` + `done`, never silently substituting `scoped` for a caller who
 asked for `full` (they'd believe they had full access and didn't) or vice versa.
+
+### 2.6 Every runtime, same kill and marker guarantees (rev 15)
+
+- **Process tree**: each full-access subprocess runner spawns its CLI through
+  [`orgrt/process-group-spawn.ts`](../../packages/@monomind/cli/src/orgrt/process-group-spawn.ts)
+  (`spawnRunnerProcess`): its own process group, the `MONOMIND_EXEC_TREE` marker, and the same
+  sampled tracker claude uses (`process-tree.ts`). `cancel`/`--timeout`/`--budget-usd` kill the
+  whole tree; a normal end reports `done.background_pids`. Scoped turns keep a plain spawn in
+  monomind's own group, byte-identical to before.
+- **`--settings` on other CLIs**: non-`none` stops isolating the CLI's own configuration, so its
+  user config, the repo's `AGENTS.md`/`GEMINI.md`/`opencode.json` and its configured MCP servers
+  load as they would in the user's own terminal. That is the same "the target repo can steer the
+  agent" risk as claude's `--settings project` (§4); a `status {phase:"notice"}` names what loads.
+- **Agent-context markers** (`orgrt/agent-context.ts`) for `org role set-access … full` now also
+  cover the other CLIs, found in each installed CLI's own code on 2026-09-29: the cross-vendor
+  `AI_AGENT` (pi, crush, Claude Code) and `AGENT` (opencode, crush); codex `CODEX_SANDBOX`,
+  `CODEX_SANDBOX_NETWORK_DISABLED`, `CODEX_THREAD_ID`, `CODEX_CI`; opencode `OPENCODE`,
+  `OPENCODE_PID`; antigravity `ANTIGRAVITY_AGENT`; gemini `GEMINI_CLI`; grok `GROK_SESSION_ID`,
+  `GROK_MANAGED_BY_NPM`; copilot `COPILOT_CLI_BINARY_VERSION`, `COPILOT_AGENT_SESSION_ID`; crush
+  `CRUSH`; pi `PI_CODING_AGENT`; qwen `QWEN_CODE` (not installed here — unverified). No marker
+  was found for kimi (not installed here). As before, this is a speed bump, not the boundary
+  (§4). `MONOMIND_AGENT_EXEC` is still set on every runner's env by `agent exec` itself.
+- **Org roles**: `access-grant.ts`, `access-validate.ts` and `org role set-access` accept any
+  runtime whose spec supports full access; the grant flow (signed human ack, drift suspension,
+  taint, unattended gate) is unchanged.
 
 ## 3. What callers own (not monomind's job)
 
@@ -178,7 +217,7 @@ are never mistaken for oversights:
 
 - **`WebFetch`/`WebSearch` under `--access full`**: a fetched page can contain instructions the
   model may act on with a real, unrestricted shell — identical to interactive Claude Code with
-  `--dangerously-skip-permissions`. Mitigation is observability only: every native tool call
+  `--dangerously-skip-permissions` (or any other CLI's yolo mode). Mitigation is observability only: every native tool call
   (including the fetch itself and whatever the model does next) is a `tool_activity` event on the
   caller's stream and, being a native tool call, counts toward the full-access audit log's
   `toolCalls` field. There is no content-level filtering of fetched pages.
@@ -203,12 +242,17 @@ are never mistaken for oversights:
   scoping layer between a top-level turn and its own subagents.
 - **Background jobs that hide from the process-tree kill** (#359): cancel/`--timeout`/budget kill
   every process that inherited the turn's `MONOMIND_EXEC_TREE` env marker or was sampled under
-  the `claude` process, and a normal end reports survivors in `done.background_pids`. A job that
+  the agent CLI process, and a normal end reports survivors in `done.background_pids`. A job that
   clears its own environment and whose launching shell exited between samples can escape both,
   as can one that sets `MONOMIND_EXEC_TREE` to another value (how monomind's own hook daemons
   opt out, #366);
-  so can one that deliberately detaches under another user or service manager. Full access is
-  not a sandbox.
+  so can one that deliberately detaches under another user or service manager. A CLI that runs
+  its tools in a separate long-lived server it did not spawn itself (e.g. an already-running
+  opencode server) is outside the tree too. Full access is not a sandbox.
+- **Weaker observability on start-only runtimes** (rev 15): grok, qwen, copilot, crush and pi
+  report tool starts without ends or real inputs, so the caller's journal and the audit line's
+  `toolCalls` show less than on claude; the UI labels fidelity instead of pretending. Budgets are
+  unenforceable where `reports_cost` is false.
 - **Agent-context detection for `org role set-access … full` is a speed bump** (#365): an agent
   with unrestricted Bash can unset the env markers. The boundary is the operator directory: a
   role's SDK sandbox (`denyRead`) or authority mask (`--tmpfs`) overlays it with an empty tmpfs,

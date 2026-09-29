@@ -67,6 +67,16 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    unattended-run gate (`run_config.allow_unattended_full_access`) and
  *    taint checks in `org validate`. `org status --json` gains
  *    `roles_access` (§7.2) for any role that declares it.
+ *  - `agent-exec-full-access-any` — `agent exec --access full` on every
+ *    runtime whose `agent scan --json` entry has `full_access: true` (not
+ *    only claude), with process-group kill, `background_pids` and the audit
+ *    line on each; `--settings` on a non-claude runtime leaves the CLI's own
+ *    config un-isolated and emits a `status` naming what it loads; scan
+ *    entries carry `resume`, `effort`, `max_turns`, `reports_cost`,
+ *    `init_target`; `tool_activity` start events carry `kind` (§3, §6)
+ *  - `agent-exec-effort` — `agent exec --effort <level>` maps the turn's
+ *    reasoning effort onto the runtime (scan's `effort` says where it is
+ *    honored; elsewhere a `status` notice says it was ignored) (§3.1)
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
@@ -74,6 +84,8 @@ export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec-settings',
   'agent-exec-tool-activity',
   'agent-exec-background-pids',
+  'agent-exec-full-access-any',
+  'agent-exec-effort',
   'agent-scan',
   'agent-scan-read-only',
   'agent-models',

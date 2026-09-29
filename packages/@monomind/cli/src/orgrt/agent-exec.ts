@@ -33,7 +33,7 @@ import {
   jsonSchemaToZodShape,
   type Terminal,
 } from './agent-exec-options.js';
-import { createExecStatusHandler } from './agent-exec-settings.js';
+import { createExecStatusHandler, runtimeStartupNotices } from './agent-exec-settings.js';
 import { hasUnsafeShellSyntax } from './agent-exec-shell-syntax.js';
 import { mapStopReason } from './agent-exec-stop-reason.js';
 import type { AgentMessage, OrgToolDef } from './agent-runner.js';
@@ -142,6 +142,9 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
     // failed above for an unknown id) defaults to false, the safe assumption.
     streams_incrementally: runnerSpec(opts.runtime)?.streamsIncrementally ?? false,
   });
+  // rev 15: what a non-claude --settings turn loads, and an ignored --effort.
+  const effortSupported = runnerSpec(opts.runtime)?.effort ?? false;
+  for (const ev of runtimeStartupNotices({ ...opts, effortSupported })) safeEmit(ev);
 
   // Abort hook for the runner (AgentRunArgs.signal): return() alone queues
   // behind a runner blocked in `for await (child.stdout)` and never reaches
@@ -166,7 +169,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
   };
 
   // Coder mode (#356): startup watchdog for `--settings` non-none turns,
-  // claude-only (other runtimes never emit `status`); a no-op otherwise.
+  // claude-only (only claude reports `ready`); a no-op otherwise.
   const statusHandler = createExecStatusHandler({
     enabled: opts.runtime === 'claude' && (opts.settings?.length ?? 0) > 0,
     timeoutMs: opts.startupTimeoutMs ?? 30_000,
@@ -267,6 +270,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
         prompt: promptStream,
         systemPrompt,
         model: opts.model,
+        effort: opts.effort, // rev 15: each runner maps or ignores it
         cwd: opts.cwd ?? process.cwd(),
         // #365: marks this child as an agent-turn process tree so `monomind
         // org role set-access ... full` (agent-context.ts) refuses to run
@@ -291,7 +295,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
         envAuthoritative: false,
         maxTurns: opts.maxTurns,
         resume: opts.resume,
-        settingSources: opts.settings, // coder mode (#356); other runners ignore it
+        settingSources: opts.settings, // coder mode (#356); each runner decides what it loads
         canUseTool: effectiveCanUseTool,
         access,
         signal: abort.signal,

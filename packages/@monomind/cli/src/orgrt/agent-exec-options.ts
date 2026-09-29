@@ -3,6 +3,7 @@ import type { Readable } from 'node:stream';
 import { z } from 'zod';
 import type { ExecErrorCode } from './agent-exec-errors.js';
 import type { AgentRunner } from './agent-runner.js';
+import type { OrgEffortLevel } from './cost-tier.js';
 
 // ─── options & events ───────────────────────────────────────────────────────
 
@@ -18,11 +19,14 @@ export interface AgentExecOptions {
   runtime: string;
   prompt: string;
   /** #355. `scoped` (default) = today's allow-list behavior, byte-identical
-   *  SDK options. `full` = unrestricted native tool access (claude runtime
-   *  only; guarded — see agent-exec-access.ts). */
+   *  SDK options. `full` = unrestricted native tool access (any runtime
+   *  whose RunnerSpec.supportsFullAccess is true; guarded — see
+   *  agent-exec-access.ts). */
   access?: 'scoped' | 'full';
   systemPrompt?: string;
   model?: string;
+  /** `--effort`: reasoning effort, mapped per runtime (AgentRunArgs.effort). */
+  effort?: OrgEffortLevel;
   cwd?: string;
   resume?: string;
   maxTurns: number;

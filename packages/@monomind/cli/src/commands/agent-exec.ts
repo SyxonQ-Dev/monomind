@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { runAgentExec, type ToolSpec } from '../orgrt/agent-exec.js';
 import { parseSettingsFlag } from '../orgrt/agent-exec-settings.js';
+import { ORG_EFFORT_LEVELS, type OrgEffortLevel } from '../orgrt/cost-tier.js';
 import { scanInstalled } from '../orgrt/runner-registry.js';
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
@@ -166,6 +167,12 @@ export async function runExec(
     return usageError('--tools-file/--tool-names require --tools stdio');
   }
 
+  // rev 15: --effort, validated here; the runner maps or ignores it.
+  const effortFlag = ctx.flags.effort;
+  if (effortFlag !== undefined && !(ORG_EFFORT_LEVELS as readonly unknown[]).includes(effortFlag)) {
+    return usageError(`--effort must be one of ${ORG_EFFORT_LEVELS.join(', ')} (got "${effortFlag}")`);
+  }
+
   // Coder mode (#356): none (default) = today's isolated behavior.
   const parsedSettings = parseSettingsFlag(ctx.flags.settings);
   if ('error' in parsedSettings) return usageError(parsedSettings.error);
@@ -210,6 +217,7 @@ export async function runExec(
     prompt,
     systemPrompt,
     model: ctx.flags.model ? String(ctx.flags.model) : undefined,
+    effort: effortFlag as OrgEffortLevel | undefined,
     cwd: ctx.flags.cwd ? resolve(String(ctx.flags.cwd)) : undefined,
     resume: ctx.flags.resume ? String(ctx.flags.resume) : undefined,
     maxTurns: Number(ctx.flags['max-turns'] ?? 25) || 25,
@@ -275,6 +283,12 @@ export const execCommand: Command = {
       type: 'string',
     },
     { name: 'model', short: 'm', description: 'Model override', type: 'string' },
+    {
+      name: 'effort',
+      description: 'Reasoning effort: off|low|medium|high|xhigh|max (ignored with a notice where unsupported)',
+      type: 'string',
+      choices: [...ORG_EFFORT_LEVELS],
+    },
     { name: 'cwd', description: 'Working dir for the agent (default: cwd)', type: 'string' },
     { name: 'resume', description: 'Session/thread id to resume', type: 'string' },
     { name: 'max-turns', description: 'Cap agent turns (default 25)', type: 'number' },
@@ -302,7 +316,7 @@ export const execCommand: Command = {
     {
       name: 'access',
       description:
-        'scoped (default, allow-list only) or full — unrestricted native tool access (claude runtime only; requires --cwd, refuses root)',
+        'scoped (default, allow-list only) or full — unrestricted native tool access (runtimes with full_access in agent scan; requires --cwd, refuses root)',
       type: 'string',
       choices: ['scoped', 'full'],
     },
@@ -310,7 +324,7 @@ export const execCommand: Command = {
     {
       name: 'settings',
       description:
-        'Coder mode: "none" (default) or a CSV of user,project,local — loads CLAUDE.md, skills, hooks, and project+user MCP servers (claude runtime only)',
+        'Coder mode: "none" (default) or a CSV of user,project,local — claude loads CLAUDE.md, skills, hooks, and project+user MCP servers; other runtimes stop isolating their own CLI config',
       type: 'string',
     },
     {

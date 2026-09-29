@@ -14,9 +14,10 @@ import * as fs from 'node:fs';
 import { delimiter, join } from 'node:path';
 import type { AgentRunner } from './agent-runner.js';
 import { type RuntimeKind, resolveRunner } from './daemon.js';
+import { RUNNER_FEATURES, type RunnerFeatures } from './runner-features.js';
 import { detectVersion, type VersionSource } from './version-probe.js';
 
-export interface RunnerSpec {
+export interface RunnerSpec extends RunnerFeatures {
   /** Runtime id accepted by `agent exec --runtime` and org role `runtime`. */
   id: RuntimeKind;
   /** Binary probed on PATH (null for in-process runtimes like vercel). */
@@ -41,25 +42,27 @@ export interface RunnerSpec {
   streamsIncrementally: boolean;
   /**
    * #355: whether `agent exec --access full` (unrestricted native tool
-   * access, no `canUseTool` denials) is implemented for this runtime.
-   * `claude` is the only one today — every other runner rejects
-   * `--access full` with `error {code:"unsupported", fatal:true}` rather
-   * than silently running scoped. Discoverable via `agent scan --json`'s
-   * `full_access` field.
+   * access, no approvals, no CLI sandbox) is implemented for this runtime.
+   * Rev 13: every coding runtime (claude, codex, opencode, antigravity,
+   * kimicode, grok, qwen, copilot, crush, pi); the rest (vercel — no native
+   * tools; hermes, qwen-rpc, pi-rpc — no resume/tool events, duplicates of
+   * their CLI sibling) reject `--access full` with `error
+   * {code:"unsupported", fatal:true}` rather than silently running scoped.
+   * Discoverable via `agent scan --json`'s `full_access` field.
    */
   supportsFullAccess: boolean;
   /**
    * #357: how faithfully this runner's AgentMessage stream can be turned
    * into `tool_activity` start/end pairs (doc §3.2/§9) — `"full"` (real
-   * tool_use id, input, and a matched end from a real tool_result — claude
-   * only), `"start-only"` (a lightweight `{type:'tool_use', text: toolName}`
+   * tool_use id, input, and a matched end from a real tool_result),
+   * `"start-only"` (a lightweight `{type:'tool_use', text: toolName}`
    * liveness signal with no id to correlate an end with), or `"none"` (no
    * tool signal surfaces in this runner's AgentMessage stream at all today).
    */
   toolActivityFidelity: 'full' | 'start-only' | 'none';
 }
 
-export const RUNNER_SPECS: RunnerSpec[] = [
+const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
   {
     id: 'claude',
     binary: 'claude', // SDK locates its own CLI; PATH probe is best-effort
@@ -72,7 +75,7 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // events with text_delta arrive per-token, and the complete message
     // still follows with full content/usage.
     streamsIncrementally: true,
-    supportsFullAccess: true, // #355: implemented for claude only
+    supportsFullAccess: true, // #355
     // #357: real tool_use id/input via ClaudeAgentRunner's own richer
     // 'tool_use' AgentMessage, matched to a real tool_result end.
     toolActivityFidelity: 'full',
@@ -88,10 +91,10 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // (codex-runner.ts header) — only whole `item.completed` messages.
     // The runner already yields each one the instant it lands.
     streamsIncrementally: false,
-    supportsFullAccess: false,
-    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
-    // signal with no id — best-effort, start-only tool_activity mapping.
-    toolActivityFidelity: 'start-only',
+    supportsFullAccess: true,
+    // Rev 13: the runner yields id-carrying tool_use + matched tool_result
+    // from the CLI's own tool start/complete events.
+    toolActivityFidelity: 'full',
   },
   {
     id: 'kimicode',
@@ -106,10 +109,10 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // unconfirmed reach into `--output-format stream-json`; worth
     // re-checking before ruling this out permanently.
     streamsIncrementally: false,
-    supportsFullAccess: false,
-    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
-    // signal with no id — best-effort, start-only tool_activity mapping.
-    toolActivityFidelity: 'start-only',
+    supportsFullAccess: true,
+    // Rev 13: the runner yields id-carrying tool_use + matched tool_result
+    // from the CLI's own tool start/complete events.
+    toolActivityFidelity: 'full',
   },
   {
     id: 'opencode',
@@ -130,10 +133,10 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // runner: session.ts wants one AgentMessage per text part regardless
     // of which runner backs the role.
     streamsIncrementally: true,
-    supportsFullAccess: false,
-    // #357: opencode-runner.ts never yields a 'tool_use' AgentMessage at
-    // all today — no tool signal to map to tool_activity.
-    toolActivityFidelity: 'none',
+    supportsFullAccess: true,
+    // Rev 13: the runner yields id-carrying tool_use + matched tool_result
+    // from the CLI's own tool start/complete events.
+    toolActivityFidelity: 'full',
   },
   {
     id: 'vercel',
@@ -164,10 +167,10 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // `claude` below: session.ts wants one complete AgentMessage per step
     // for its chat-bus/state-detector, regardless of which runner backs it.
     streamsIncrementally: true,
-    supportsFullAccess: false,
-    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
-    // signal with no id — best-effort, start-only tool_activity mapping.
-    toolActivityFidelity: 'start-only',
+    supportsFullAccess: true,
+    // Rev 13: the runner yields id-carrying tool_use + matched tool_result
+    // from the CLI's own tool start/complete events.
+    toolActivityFidelity: 'full',
   },
   {
     id: 'grok',
@@ -182,7 +185,7 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // possible source of real deltas — unconfirmed, left `false` until
     // verified live.
     streamsIncrementally: false,
-    supportsFullAccess: false,
+    supportsFullAccess: true,
     // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
     // signal with no id — best-effort, start-only tool_activity mapping.
     toolActivityFidelity: 'start-only',
@@ -197,7 +200,7 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // header states directly "qwen's stream-json sends whole messages per
     // event, not per-token deltas — confirmed live, #182".
     streamsIncrementally: false,
-    supportsFullAccess: false,
+    supportsFullAccess: true,
     // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
     // signal with no id — best-effort, start-only tool_activity mapping.
     toolActivityFidelity: 'start-only',
@@ -239,7 +242,7 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // header). The runner already streams each line the instant it
     // arrives; there is no finer granularity available to request.
     streamsIncrementally: false,
-    supportsFullAccess: false,
+    supportsFullAccess: true,
     // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
     // signal with no id — best-effort, start-only tool_activity mapping.
     toolActivityFidelity: 'start-only',
@@ -256,7 +259,7 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // than qwen/pi's live-confirmed `false`s. Worth re-checking live
     // before assuming it can never stream.
     streamsIncrementally: false,
-    supportsFullAccess: false,
+    supportsFullAccess: true,
     // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
     // signal with no id — best-effort, start-only tool_activity mapping.
     toolActivityFidelity: 'start-only',
@@ -271,7 +274,7 @@ export const RUNNER_SPECS: RunnerSpec[] = [
     // accumulation needed, unlike agy", verified against a live 0.73.1
     // binary.
     streamsIncrementally: false,
-    supportsFullAccess: false,
+    supportsFullAccess: true,
     // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
     // signal with no id — best-effort, start-only tool_activity mapping.
     toolActivityFidelity: 'start-only',
@@ -326,6 +329,11 @@ export const RUNNER_SPECS: RunnerSpec[] = [
   },
 ];
 
+export const RUNNER_SPECS: RunnerSpec[] = BASE_SPECS.map((s) => ({
+  ...s,
+  ...RUNNER_FEATURES[s.id],
+}));
+
 const SPEC_BY_ID = new Map(RUNNER_SPECS.map((s) => [s.id, s]));
 
 export function runnerSpec(id: string): RunnerSpec | undefined {
@@ -374,6 +382,12 @@ export interface ScanEntry {
   full_access: boolean;
   /** Mirrors `RunnerSpec.toolActivityFidelity` (#357) — see its doc comment. */
   tool_activity_fidelity: 'full' | 'start-only' | 'none';
+  /** Rev 13 service flags — mirror `RunnerFeatures` (runner-features.ts). */
+  resume: boolean;
+  effort: boolean;
+  max_turns: boolean;
+  reports_cost: boolean;
+  init_target: RunnerFeatures['initTarget'];
 }
 
 import { type InstallRecipe, installRecipe } from './runner-install-recipe.js';
@@ -459,6 +473,11 @@ export async function scanInstalled(opts: ScanOptions = {}): Promise<{
         streams_incrementally: spec.streamsIncrementally,
         full_access: spec.supportsFullAccess,
         tool_activity_fidelity: spec.toolActivityFidelity,
+        resume: spec.resume,
+        effort: spec.effort,
+        max_turns: spec.maxTurns,
+        reports_cost: spec.reportsCost,
+        init_target: spec.initTarget,
       };
     }),
   );
