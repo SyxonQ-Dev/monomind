@@ -44,10 +44,12 @@
  *     every event.
  *   - `--yolo` auto-approves tool actions (org roles gate tool execution
  *     themselves via canUseTool/tool-fence, so CLI-level approval prompts
- *     would otherwise hang a non-interactive run). No distinct tool-call
- *     wire event is documented/observed for this CLI, so — unlike codex's
- *     command_execution items — there is nothing else here to forward as
- *     mid-turn tool liveness beyond the spawn-time yield.
+ *     would otherwise hang a non-interactive run).
+ *   - Native tools: qwen-code's headless adapter writes Claude-compatible
+ *     frames — `tool_use` blocks in assistant messages and `tool_result`
+ *     blocks (with `is_error`) in `user` messages, correlated by the call
+ *     id (read from the qwen-code 0.x bundle, not a live run). They are
+ *     forwarded as rich tool_use/tool_result pairs.
  *
  * File-size sweep: the wire types + event parser (handleQwenEvent,
  * parseQwenEvents) live in qwen-runner-parse.ts, and the subprocess turn
@@ -57,6 +59,7 @@
  */
 import type { AgentMessage, AgentRunArgs, AgentRunner } from './agent-runner.js';
 import type { TurnOutcome } from './qwen-runner-parse.js';
+import { NativeToolCalls } from './kimicode-runner-tools.js';
 import { STARTUP_GRACE_MS, streamTurn, turnError } from './qwen-runner-stream.js';
 import {
   buildToolProtocol,
@@ -74,6 +77,7 @@ export class QwenAgentRunner implements AgentRunner {
   async *run(args: AgentRunArgs): AsyncIterable<AgentMessage> {
     const bin = this.qwenBin || process.env.QWEN_CLI_BIN || 'qwen';
     let sessionId: string | undefined = args.resume;
+    const tools = new NativeToolCalls();
 
     try {
       for await (const p of args.prompt) {
@@ -119,7 +123,16 @@ export class QwenAgentRunner implements AgentRunner {
               // a turn later exits non-zero — preferable to losing it
               // entirely.
               if (ev.text) yield { type: 'assistant', session_id: sessionId, text: ev.text };
-            } else if (ev.kind === 'tool') {
+            }
+            // qwen's own tool_use/tool_result blocks, paired by call id.
+            for (const u of ev.toolUses ?? []) {
+              const m = tools.start(u.id, u.name, u.input, sessionId);
+              if (m) yield m;
+            }
+            for (const r of ev.toolResults ?? []) {
+              yield* tools.end(r.id, r.output, r.isError, sessionId);
+            }
+            if (ev.kind === 'tool') {
               // Liveness only (see header): session.ts never renders
               // tool_use as chat — it only feeds the StateDetector
               // ('tool-call' state) and refreshes last-activity.
