@@ -48,7 +48,9 @@ export type DshStreamEvent =
  * answerer, fails closed), or `read-only` when the caller asked for it —
  * never an ambient `danger-full-access` inherited from the environment.
  */
-export function dshPermissionMode(args: Pick<AgentRunArgs, 'access' | 'env'>): string {
+export function dshPermissionMode(args: Pick<AgentRunArgs, 'access' | 'env' | 'sandbox'>): string {
+  // #396: an explicit `agent exec --sandbox` mode wins, in any access mode.
+  if (args.sandbox && args.sandbox !== 'full') return args.sandbox;
   if (args.access === 'full') return 'danger-full-access';
   return args.env.DSH_PERMISSION_MODE === 'read-only' ? 'read-only' : 'workspace-write';
 }

@@ -25,7 +25,7 @@
  * the runner's own 2h/45s ladders remain the backstop for orphaned children.
  */
 
-import { fullAccessCanUseTool, resolveAccess } from './agent-exec-access.js';
+import { fullAccessCanUseTool, resolveAccess, resolveExecSandbox } from './agent-exec-access.js';
 import { StdioToolBridge, UsageTracker } from './agent-exec-bridge.js';
 import { type ExecErrorCode, execErrorCode, FATAL_CODES } from './agent-exec-errors.js';
 import { execCanUseTool } from './agent-exec-gate.js';
@@ -82,6 +82,8 @@ export async function runAgentExecOnce(
   const hasCallerTools = (opts.toolSpecs?.length ?? 0) > 0;
   const { access, abort: accessDenied } = resolveAccess({ ...opts, hasCallerTools }, emit); // #355
   if (accessDenied) return 2;
+  const sandbox = resolveExecSandbox({ ...opts, access }, emit); // #396
+  if (sandbox.abort) return 2;
   // Tool specs (§4). The bridge itself is constructed below, after
   // terminate() exists (its cancel callback wires into termination).
   const toolSpecs = opts.toolSpecs ?? null;
@@ -147,6 +149,7 @@ export async function runAgentExecOnce(
     ...(opts.resume ? { resume: opts.resume } : {}),
     pid: process.pid,
     access, // #355
+    ...sandbox.report, // #396: native_sandbox + approvals the CLI really runs with
     // rev 5: lets a caller (e.g. a chat UI) set the user's expectations
     // honestly BEFORE assuming a quiet turn is stuck — see runner-registry.ts's
     // RunnerSpec.streamsIncrementally doc comment and doc/agent-exec-protocol.md
@@ -292,6 +295,7 @@ export async function runAgentExecOnce(
         settingSources: opts.settings, // coder mode (#356); each runner decides what it loads
         canUseTool: effectiveCanUseTool,
         access,
+        ...(sandbox.mode ? { sandbox: sandbox.mode } : {}), // #396
         signal: abort.signal,
         onProcessSpawned: (info) => {
           getBackgroundSurvivors = info.getBackgroundSurvivors;

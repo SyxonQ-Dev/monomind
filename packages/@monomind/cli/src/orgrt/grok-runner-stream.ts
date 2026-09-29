@@ -7,7 +7,7 @@
 import type { AgentRunArgs } from './agent-runner.js';
 import { killOnAbort } from './agent-runner.js';
 import { maskedCommand } from './authority-mask.js';
-import { grokSandboxArgs, roleGitLevel } from './cli-sandbox.js';
+import { grokSandboxArgs, grokSandboxModeArgs, roleGitLevel } from './cli-sandbox.js';
 import type { OrgEffortLevel } from './cost-tier.js';
 import {
   extractError,
@@ -58,6 +58,35 @@ export interface TurnOutcome {
   error?: string;
 }
 
+/** `grok` argv for one turn (exported for the argv tests). */
+export function grokCliArgs(
+  prompt: string,
+  sessionId: string | undefined,
+  args: AgentRunArgs,
+): string[] {
+  const cliArgs: string[] = [
+    '-p',
+    prompt,
+    '--output-format',
+    'streaming-messages-json',
+    '--always-approve',
+  ];
+  // #263: below policy.git 'push', grok runs in its own `workspace` sandbox
+  // profile (Landlock/Seatbelt) instead of the default `off`. Tool approval
+  // stays automatic — the org gates tools itself. See cli-sandbox.ts.
+  // Full access (`--access full`) is --always-approve with no sandbox at
+  // any git level.
+  // #396: an explicit `agent exec --sandbox` picks the profile, in any access mode.
+  if (args.sandbox && args.sandbox !== 'full') cliArgs.push(...grokSandboxModeArgs(args.sandbox));
+  else if (args.access !== 'full') cliArgs.push(...grokSandboxArgs(roleGitLevel(args.env)));
+  if (args.model) cliArgs.push('--model', args.model);
+  if (args.effort) cliArgs.push('--reasoning-effort', GROK_EFFORT[args.effort]);
+  if (args.maxTurns > 0) cliArgs.push('--max-turns', String(args.maxTurns));
+  cliArgs.push('--cwd', args.cwd);
+  if (sessionId) cliArgs.push('--resume', sessionId);
+  return cliArgs;
+}
+
 /**
  * Run one `grok` invocation and stream its NDJSON output INCREMENTALLY:
  * each parsed event is yielded as soon as its line arrives on stdout (see
@@ -84,24 +113,7 @@ export async function* streamTurn(
   // `session_id`, and a `result` with usage and total_cost_usd. Its
   // `system`/`result` envelope was confirmed live (an unsigned-in run);
   // the assistant/user frames follow the bundled docs.
-  const cliArgs: string[] = [
-    '-p',
-    prompt,
-    '--output-format',
-    'streaming-messages-json',
-    '--always-approve',
-  ];
-  // #263: below policy.git 'push', grok runs in its own `workspace` sandbox
-  // profile (Landlock/Seatbelt) instead of the default `off`. Tool approval
-  // stays automatic — the org gates tools itself. See cli-sandbox.ts.
-  // Full access (`--access full`) is --always-approve with no sandbox at
-  // any git level.
-  if (args.access !== 'full') cliArgs.push(...grokSandboxArgs(roleGitLevel(args.env)));
-  if (args.model) cliArgs.push('--model', args.model);
-  if (args.effort) cliArgs.push('--reasoning-effort', GROK_EFFORT[args.effort]);
-  if (args.maxTurns > 0) cliArgs.push('--max-turns', String(args.maxTurns));
-  cliArgs.push('--cwd', args.cwd);
-  if (sessionId) cliArgs.push('--resume', sessionId);
+  const cliArgs = grokCliArgs(prompt, sessionId, args);
 
   const proc = spawnRunnerProcess(
     ...maskedCommand(args.authorityMask, bin, cliArgs),

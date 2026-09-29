@@ -71,6 +71,7 @@ describe('version handshake (§2)', () => {
         'agent-exec-rate-limit-retry',
         'agent-exec-access-read',
         'agent-exec-full-access-tools',
+        'agent-exec-sandbox',
       ],
     });
     expect(p.capabilities).toContain('agent-exec');

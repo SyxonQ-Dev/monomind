@@ -268,6 +268,37 @@ concurrently. That annotation is a scheduling hint, not a claim monomind relies 
 the caller's tools may well write, and in `scoped`/`read` mode the gate allows them by name
 exactly as before. `--allow-bash-prefix` stays a usage error with `--access full`.
 
+### 2.9 The permissive default, and `--sandbox` (rev 23, issue #396)
+
+A non-org `agent exec` turn is **not sandboxed by default**, and this is deliberate (kept so no
+existing caller changes behaviour). `--access scoped` is monomind's own mode: on claude it is
+enforced (`canUseTool` + PreToolUse gate), but on a vendor CLI it only limits the caller-tool
+wiring. The CLI itself starts in its most permissive headless mode unless an org role's git level
+says otherwise: codex `--sandbox danger-full-access` (can write anywhere on disk), grok profile
+`off`, and approvals off on copilot (`--allow-all-tools --no-ask-user`), qwen (`--yolo`),
+antigravity (`--dangerously-skip-permissions`), kimicode, crush, pi and aider. Only
+`MONOMIND_GIT_LEVEL` below `push` (set for org roles by the git guard, or passed with `--env`)
+moves codex/grok into `workspace-write`.
+
+Since rev 23 this is reported rather than implied: every `start` event carries `native_sandbox`
+(`read-only`, `workspace-write`, `full` = native sandbox off, `none` = no native sandbox,
+`monomind` = claude's own enforcement) and `approvals` (`off`, `on`, `n/a`), and `agent scan
+--json` lists the same defaults per runtime plus `sandbox_modes`.
+
+**Callers such as mono-agent that do not want an unsandboxed turn should pass `--sandbox`**
+instead of relying on `--env MONOMIND_GIT_LEVEL=…`: `--sandbox workspace-write` (writes in the
+cwd, network on) or `--sandbox read-only`, on runtimes whose `sandbox_modes` lists the mode
+(codex, grok, dsh today). Anywhere else the turn fails with `error {code:"unsupported"}` rather
+than running unsandboxed, so a caller can pick a different runtime or a container. Check
+`native_sandbox` on `start` for what the turn really got. The flag can only narrow: an org role's
+git level below `push` keeps `workspace-write` even under `--sandbox full`, `--access read` keeps
+codex `read-only` whatever the flag says (`--access read --sandbox full` is a usage error), and
+`--sandbox` never enables anything `--access` did not. It is a flag on the human-typed CLI like
+`--access` (§2.1): nothing else constructs it. With `--access full`, `--sandbox read-only|
+workspace-write` keeps the native tools fully approved but inside that sandbox. A native sandbox
+covers what the vendor CLI runs, not monomind's own process or the caller's stdio tools, and the
+runtimes listed as `none` still need a container if the caller needs isolation.
+
 ## 3. What callers own (not monomind's job)
 
 - **mono-agent's coder-mode gating**: off by default, a risk-confirmation dialog before first use,
