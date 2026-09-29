@@ -177,7 +177,7 @@ The agent must synthesize the code analysis and online research into concrete im
 
 Persist each improvement:
 
-**File mode:** Append to `IMPROVE_FILE` using the improvement section format from `.claude/commands/mastermind/_taskfile.md`:
+**File mode:** Append to `IMPROVE_FILE` using the improvement section format from `.claude/skills/mastermind/references/taskfile.md`:
 ```markdown
 ### <Improvement Title>
 > status: discovered
