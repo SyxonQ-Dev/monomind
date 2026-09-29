@@ -8,7 +8,7 @@ pick: low
 
 # Mastermind Issues
 
-This skill is invoked by `mastermind:issues` or directly via `/mastermind-issues`.
+This skill is invoked directly via `/mastermind-issues`.
 
 ---
 

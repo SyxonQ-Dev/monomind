@@ -70,6 +70,21 @@ export function _isOptionalPackageResolvable(pkg: string): boolean {
 }
 
 /**
+ * #420: the file URL of @monoes/monograph's public entry, resolved from the
+ * CLI's own dependencies, or null when it cannot be loaded. Deep paths such as
+ * `@monoes/monograph/dist/src/index.js` are not in its `exports` map
+ * (ERR_PACKAGE_PATH_NOT_EXPORTED), and its root entry is import-only, so this
+ * goes through `import.meta.resolve()` on the package name.
+ */
+export function resolveMonographEntryUrl(): string | null {
+  try {
+    return import.meta.resolve('@monoes/monograph');
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Find source helpers directory.
  * Validates that the directory contains hook-handler.cjs AND its required
  * subdirectory files (utils/telemetry.cjs etc.) to avoid accepting a partial

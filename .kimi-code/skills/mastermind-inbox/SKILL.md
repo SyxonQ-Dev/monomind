@@ -8,7 +8,7 @@ pick: low
 
 # Mastermind Inbox
 
-This skill is invoked by `mastermind:inbox` or directly via `/mastermind-inbox`.
+This skill is invoked directly via `/mastermind-inbox`.
 
 ---
 

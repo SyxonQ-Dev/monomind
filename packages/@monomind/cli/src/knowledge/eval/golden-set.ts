@@ -420,25 +420,25 @@ export const GOLDEN_SET: GoldenPair[] = [
   {
     id: 'ref-codex-map',
     query: 'translation table between our instructions and the openai terminal agent equivalents',
-    relevant: ['.claude/commands/mastermind/references/codex-tools.md'],
+    relevant: ['.claude/skills/mastermind/references/codex-tools.md'],
     tags: ['reference'],
   },
   {
     id: 'ref-gemini-map',
     query: 'translation table for running the same procedures under google model tooling',
-    relevant: ['.claude/commands/mastermind/references/gemini-tools.md'],
+    relevant: ['.claude/skills/mastermind/references/gemini-tools.md'],
     tags: ['reference'],
   },
   {
     id: 'ref-copilot-map',
     query: 'equivalents when the harness is the github autocomplete assistant command line',
-    relevant: ['.claude/commands/mastermind/references/copilot-tools.md'],
+    relevant: ['.claude/skills/mastermind/references/copilot-tools.md'],
     tags: ['reference'],
   },
   {
     id: 'ref-agy-map',
     query: 'command mapping for the agy binary',
-    relevant: ['.claude/commands/mastermind/references/antigravity-tools.md'],
+    relevant: ['.claude/skills/mastermind/references/antigravity-tools.md'],
     tags: ['reference'],
   },
 
@@ -716,7 +716,7 @@ GOLDEN_SET.push(
   {
     id: 'b0-pi-harness',
     query: 'what do i do about task lists and spawned helpers when working inside pi',
-    relevant: ['.claude/commands/mastermind/references/pi-tools.md'],
+    relevant: ['.claude/skills/mastermind/references/pi-tools.md'],
     tags: ['b0'],
   },
   {
@@ -1701,7 +1701,7 @@ GOLDEN_SET.push(
     id: 'b3-workitem-layout',
     query:
       'one shared description of the layout every generated planning document must follow so each command does not invent its own',
-    relevant: ['.claude/commands/mastermind/_taskfile.md'],
+    relevant: ['.claude/skills/mastermind/references/taskfile.md'],
     tags: ['b3'],
   },
   {
@@ -2769,7 +2769,7 @@ GOLDEN_SET.push(
     id: 'b6-instructions-file-location',
     query:
       'where does the assistant look for its persistent project instructions and what does dispatch a helper actually map to',
-    relevant: ['.claude/commands/mastermind/references/claude-code-tools.md'],
+    relevant: ['.claude/skills/mastermind/references/claude-code-tools.md'],
     tags: ['b6'],
   },
   {
@@ -3314,29 +3314,25 @@ GOLDEN_SET.push(
   {
     id: 'b7-pi-equivalent',
     query: 'what are the equivalent capabilities when using the Inflection personal assistant',
-    relevant: ['packages/@monomind/cli/.claude/commands/mastermind/references/pi-tools.md'],
+    relevant: ['packages/@monomind/cli/.claude/skills/mastermind/references/pi-tools.md'],
     tags: ['b7'],
   },
   {
     id: 'b7-agy-equivalent',
     query: 'how do the features translate to the alternative non gravitational command line',
-    relevant: [
-      'packages/@monomind/cli/.claude/commands/mastermind/references/antigravity-tools.md',
-    ],
+    relevant: ['packages/@monomind/cli/.claude/skills/mastermind/references/antigravity-tools.md'],
     tags: ['b7'],
   },
   {
     id: 'b7-anthropic-primitives',
     query: 'which native Anthropic primitives correspond to each orchestration capability',
-    relevant: [
-      'packages/@monomind/cli/.claude/commands/mastermind/references/claude-code-tools.md',
-    ],
+    relevant: ['packages/@monomind/cli/.claude/skills/mastermind/references/claude-code-tools.md'],
     tags: ['b7'],
   },
   {
     id: 'b7-openai-terminal',
     query: 'how do the features map onto the OpenAI terminal assistant equivalent',
-    relevant: ['packages/@monomind/cli/.claude/commands/mastermind/references/codex-tools.md'],
+    relevant: ['packages/@monomind/cli/.claude/skills/mastermind/references/codex-tools.md'],
     tags: ['b7'],
   },
 
@@ -3558,13 +3554,13 @@ GOLDEN_SET.push(
   {
     id: 'b7-google-ai-mapping',
     query: 'what are the equivalent capabilities when using the google ai terminal app',
-    relevant: ['packages/@monomind/cli/.claude/commands/mastermind/references/gemini-tools.md'],
+    relevant: ['packages/@monomind/cli/.claude/skills/mastermind/references/gemini-tools.md'],
     tags: ['b7'],
   },
   {
     id: 'b7-ms-ai-mapping',
     query: 'how do microsoft ai assistant commands map to our features',
-    relevant: ['packages/@monomind/cli/.claude/commands/mastermind/references/copilot-tools.md'],
+    relevant: ['packages/@monomind/cli/.claude/skills/mastermind/references/copilot-tools.md'],
     tags: ['b7'],
   },
   // b7-worker-mgmt-docs removed: target is under the 400-byte corpus minimum
@@ -4693,7 +4689,7 @@ GOLDEN_SET.push(
     id: 'c3lo2-work-item-anatomy',
     query:
       'what does the structured file look like that describes a unit of work with its lifecycle and prerequisites',
-    relevant: ['packages/@monomind/cli/.claude/commands/mastermind/_taskfile.md'],
+    relevant: ['packages/@monomind/cli/.claude/skills/mastermind/references/taskfile.md'],
     tags: ['c3-lo2'],
   },
   {

@@ -18,6 +18,7 @@ import {
   isPortListening,
   walkDir,
 } from '../node/file-system.mjs';
+import { formatGroupedFindings } from '../findings-group.mjs';
 
 // ---------------------------------------------------------------------------
 // Output formatting
@@ -92,6 +93,12 @@ Scan files or URLs for UI anti-patterns and design quality issues.
 Options:
   --json              Output results as JSON
   --quiet             In text mode, only print the final findings count
+  --no-group          In text mode, list every occurrence instead of one line
+                      per unique (rule, snippet) with a count
+  --include-unverified
+                      Also report contrast checks the static analyser cannot
+                      verify (translucent colours, overlays, gradients, SVG
+                      text); hidden by default
   --gpt               Also report GPT-specific provider tells (off by default)
   --gemini            Also report Gemini-specific provider tells (off by default)
   --scope <name>      Only report rules in the given design domain
@@ -138,6 +145,8 @@ async function detectCli() {
   const jsonMode = args.includes('--json');
   const quietMode = args.includes('--quiet');
   const helpMode = args.includes('--help');
+  const groupMode = !args.includes('--no-group');
+  const includeUnverified = args.includes('--include-unverified');
   // --fast (regex-only) is deprecated: since the jsdom removal, the static
   // HTML/CSS analysis is fast and covers every rule, so the regex-only path
   // only loses coverage for no real speed win. Accept the flag for back-compat
@@ -187,7 +196,8 @@ async function detectCli() {
   // apply by default. `--no-config` (raw scan) and the dedicated
   // `--no-inline-ignores` both turn them off.
   const inlineIgnoresEnabled = configEnabled && !args.includes('--no-inline-ignores');
-  const scanOptions = { providers, inlineIgnores: inlineIgnoresEnabled };
+  // Always collect unverified contrast checks so the hidden count can be shown.
+  const scanOptions = { providers, inlineIgnores: inlineIgnoresEnabled, includeUnverified: true };
   if (designSystem) scanOptions.designSystem = designSystem;
   const targets = args.filter(a => !a.startsWith('--'));
 
@@ -307,10 +317,20 @@ async function detectCli() {
 
   allFindings = filterDetectionFindings(allFindings, detectionConfig);
   allFindings = filterByScopes(allFindings, scopes);
+  const unverifiedCount = includeUnverified ? 0 : allFindings.filter(f => f.unverified).length;
+  if (!includeUnverified) allFindings = allFindings.filter(f => !f.unverified);
+  if (unverifiedCount > 0 && !jsonMode && !quietMode) {
+    process.stderr.write(
+      `${unverifiedCount} contrast check${unverifiedCount === 1 ? '' : 's'} could not be verified statically ` +
+      `(translucent colours, overlays, gradients or SVG text) and ${unverifiedCount === 1 ? 'is' : 'are'} hidden. ` +
+      `Pass --include-unverified to list them, or scan the page URL for a browser-rendered check.\n`,
+    );
+  }
 
   if (allFindings.length > 0) {
     if (jsonMode) process.stdout.write(`${formatFindings(allFindings, true)}\n`);
     else if (quietMode) process.stderr.write(`${formatFindingSummary(allFindings.length)}\n`);
+    else if (groupMode) process.stderr.write(`${formatGroupedFindings(allFindings)}\n`);
     else process.stderr.write(`${formatFindings(allFindings, false)}\n`);
     process.exit(2);
   }

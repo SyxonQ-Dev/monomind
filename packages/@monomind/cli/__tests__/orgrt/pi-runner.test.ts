@@ -37,19 +37,26 @@ describe('parsePiEvents', () => {
     expect(r.outputTokens).toBe(42);
   });
 
-  it('captures usage from a top-level usage field too', () => {
+  it('ignores message_update usage (the in-flight message\'s running figure)', () => {
     const r = parsePiEvents([JSON.stringify({ type: 'message_update', usage: { input: 5, output: 1 } })]);
-    expect(r.inputTokens).toBe(5);
-    expect(r.outputTokens).toBe(1);
+    expect(r.inputTokens).toBe(0);
+    expect(r.outputTokens).toBe(0);
   });
 
-  it('keeps the last usage value seen across multiple events', () => {
+  it('sums usage over every assistant message_end (regression: it kept only the last)', () => {
     const r = parsePiEvents([
       JSON.stringify({ type: 'message_update', usage: { input: 5, output: 1 } }),
-      JSON.stringify({ type: 'message_end', message: { content: [], usage: { input: 20, output: 8 } } }),
+      JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [], usage: { input: 20, output: 8, cacheRead: 3, cost: { total: 0.1 } } } }),
+      JSON.stringify({ type: 'turn_end', message: { role: 'assistant', usage: { input: 20, output: 8 } } }),
+      JSON.stringify({ type: 'message_end', message: { role: 'toolResult', content: [{ type: 'text', text: 'out' }] } }),
+      JSON.stringify({ type: 'message_end', message: { role: 'assistant', content: [], usage: { input: 30, output: 2, cacheWrite: 4, cost: { total: 0.2 } } } }),
     ]);
-    expect(r.inputTokens).toBe(20);
-    expect(r.outputTokens).toBe(8);
+    expect(r.inputTokens).toBe(50);
+    expect(r.outputTokens).toBe(10);
+    expect(r.cacheReadTokens).toBe(3);
+    expect(r.cacheWriteTokens).toBe(4);
+    expect(r.costUsd).toBeCloseTo(0.3, 10);
+    expect(r.texts).toEqual([]);
   });
 
   it('ignores tool_execution_* and system-ish events without throwing', () => {
@@ -173,7 +180,8 @@ describe('PiAgentRunner streaming (#204)', () => {
 
       // First message must be the spawn-time liveness yield — this wins
       // session.ts's first-pull watchdog race deterministically.
-      expect(messages[0]).toEqual({ type: 'tool_use', text: 'turn started' });
+      expect(messages[0]).toMatchObject({ type: 'tool_use' });
+      expect(messages[0].tool_use_id).toBeUndefined();
       expect(times[0] - start).toBeLessThan(300);
 
       // pi's own tool_execution_start is forwarded as tool_use liveness.

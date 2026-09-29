@@ -117,6 +117,21 @@ describe('listRuntimeModels', () => {
     });
   });
 
+  it('dsh serves its curated list without spawning anything', async () => {
+    const r = await listRuntimeModels('dsh', {
+      env: { PATH: '' },
+      runCli: async () => {
+        throw new Error('must not spawn');
+      },
+    });
+    expect(r).toMatchObject({ supported: true, curated: true });
+    expect(r.error).toBeUndefined();
+    expect(r.models.find((m) => m.default)?.id).toBe('deepseek-flash');
+    expect(r.models.some((m) => m.id === 'openrouter/nvidia/nemotron-3-ultra-550b-a55b:free')).toBe(
+      true,
+    );
+  });
+
   it('unknown runtime and missing binary are reported as errors', async () => {
     expect((await listRuntimeModels('nope')).error?.code).toBe('unknown-runtime');
     const missing = await listRuntimeModels('antigravity', { env: { PATH: '' } });

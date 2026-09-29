@@ -787,7 +787,7 @@ function isEmojiOnlyText(text) {
 }
 
 function checkColors(opts) {
-  const { tag, textColor, bgColor, effectiveBg, effectiveBgStops, fontSize, fontWeight, hasDirectText, isEmojiOnly, bgClip, bgImage, classList } = opts;
+  const { tag, textColor, bgColor, effectiveBg, effectiveBgStops, fontSize, fontWeight, hasDirectText, isEmojiOnly, bgClip, bgImage, classList, isSvgText } = opts;
   if (SAFE_TAGS.has(tag)) {
     // Exception for <a> and <button> elements styled as buttons. SAFE_TAGS
     // exists to suppress contrast noise on inline links and unstyled controls,
@@ -835,7 +835,14 @@ function checkColors(opts) {
         // like `text-paper/60` on `bg-ink` sections are the FP pattern.
         const isAlphaFallbackFP = !DETECTOR_IS_BROWSER && !effectiveBg && (textColor.a != null && textColor.a < 1);
         if (!isAlphaFallbackFP) {
-          findings.push({ id: 'low-contrast', snippet: `${ratio.toFixed(1)}:1 (need ${threshold}:1) — text ${colorToHex(textColor)} on ${colorToHex(bgs[worstIdx])}` });
+          const snippet = `${ratio.toFixed(1)}:1 (need ${threshold}:1) — text ${colorToHex(textColor)} on ${colorToHex(bgs[worstIdx])}`;
+          // Static analysis can't composite translucent text/surfaces, see
+          // through gradients, or read SVG `fill`, so those ratios are guesses:
+          // report them as unverified rather than definite failures (#424).
+          const unverified = !DETECTOR_IS_BROWSER && (
+            (textColor.a ?? 1) < 1 || !effectiveBg || (effectiveBg.a ?? 1) < 1 || effectiveBg.uncertain || isSvgText
+          );
+          findings.push(unverified ? { id: 'low-contrast', snippet, unverified: true } : { id: 'low-contrast', snippet });
         }
       }
     }
@@ -1395,9 +1402,22 @@ function readOwnBackgroundColor(el, computedStyle) {
   return bg;
 }
 
+// Static mode marks the result `uncertain` when the colour is a guess: a
+// translucent layer was stacked on (or skipped over) the surface we found, a
+// body-level gradient was assumed white, or the walk never reached <body> and
+// fell back to the default white (a fragment's real surface is unknown).
+// Contrast measured against an uncertain surface is reported as unverified.
+function markUncertain(bg, uncertain) {
+  if (!DETECTOR_IS_BROWSER && uncertain) bg.uncertain = true;
+  return bg;
+}
+
 function resolveBackground(el, win, customPropMap) {
   let current = el;
+  let sawTranslucent = false;
+  let sawBody = false;
   while (current && current.nodeType === 1) {
+    if (current.tagName === 'BODY' || current.tagName === 'HTML') sawBody = true;
     const style = DETECTOR_IS_BROWSER ? getComputedStyle(current) : win.getComputedStyle(current);
     const bgImage = style.backgroundImage || '';
     const hasGradientOrUrl = bgImage && bgImage !== 'none' && (/gradient/i.test(bgImage) || /url\s*\(/i.test(bgImage));
@@ -1429,8 +1449,9 @@ function resolveBackground(el, win, customPropMap) {
     }
 
     if (bg && bg.a > 0.1) {
-      if (DETECTOR_IS_BROWSER || bg.a >= 0.5) return bg;
+      if (DETECTOR_IS_BROWSER || bg.a >= 0.5) return markUncertain(bg, sawTranslucent || bg.a < 1);
     }
+    if (bg && bg.a > 0) sawTranslucent = true;
     // No solid bg-color at this level. If THIS level has a gradient/url
     // with no underlying solid color we can read:
     //   • on body/html: assume white. Body-level gradients are almost
@@ -1445,13 +1466,13 @@ function resolveBackground(el, win, customPropMap) {
     //     bgs worth checking against).
     if (hasGradientOrUrl) {
       if (current.tagName === 'BODY' || current.tagName === 'HTML') {
-        return { r: 255, g: 255, b: 255, a: 1 };
+        return markUncertain({ r: 255, g: 255, b: 255, a: 1 }, true);
       }
       return null;
     }
     current = current.parentElement;
   }
-  return { r: 255, g: 255, b: 255 };
+  return markUncertain({ r: 255, g: 255, b: 255 }, sawTranslucent || !sawBody);
 }
 
 // Walk parents looking for a gradient background and return its color stops.
@@ -2563,6 +2584,8 @@ function checkElementColors(el, style, tag, window, customPropMap, hasAnchorInhe
     bgClip: style.webkitBackgroundClip || style.backgroundClip || '',
     bgImage: style.backgroundImage || '',
     classList: el.getAttribute?.('class') || el.className || '',
+    // SVG text paints with `fill`, not `color`, so its CSS colour says nothing.
+    isSvgText: tag === 'text' || tag === 'tspan' || tag === 'textpath',
   });
 }
 

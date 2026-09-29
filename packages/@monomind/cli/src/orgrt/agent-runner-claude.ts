@@ -63,6 +63,10 @@ export class ClaudeAgentRunner implements AgentRunner {
           const r = await t.handler(input);
           return { content: [{ type: 'text' as const, text: r.text }] };
         },
+        // #389: Claude Code runs an MCP call concurrently with its siblings
+        // only when the tool says readOnlyHint (its isConcurrencySafe, checked
+        // in Claude Code 2.1.226); only callers that opt in set it.
+        t.concurrent ? { annotations: { readOnlyHint: true } } : undefined,
       ),
     );
     const orgServer = createSdkMcpServer({ name: 'org', version: '1.0.0', tools: sdkTools });

@@ -6,7 +6,7 @@
  * in-process engine `agent exec` uses (runAgentExec) — max turns 1, no
  * caller tools, scoped access, a fresh temporary cwd — and folds the NDJSON
  * events into one result object with a status a caller can store:
- * ok | ok_unexpected | auth | quota | model_unavailable | timeout |
+ * ok | ok_unexpected | auth | quota | rate_limited | model_unavailable | timeout |
  * missing_binary | error.
  */
 

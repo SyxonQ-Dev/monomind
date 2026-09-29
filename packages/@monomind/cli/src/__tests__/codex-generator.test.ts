@@ -47,9 +47,8 @@ describe('Codex init artifacts', () => {
     expect(config).toContain('[[hooks.PreToolUse]]');
     expect(config).toContain('[[hooks.PostToolUse]]');
     expect(config).toContain('command = "npx"');
-    expect(config).toContain('"monomind@latest"');
+    expect(config).toContain('"monomind"');
     expect(config).toContain('env = {');
-    expect(config).toContain('MONOMIND_MAX_AGENTS = "15"');
     expect(config).toContain('[tui]');
     expect(config).toContain(
       `status_line = [${CODEX_STATUS_LINE_ITEMS.map((item) => `"${item}"`).join(', ')}]`,

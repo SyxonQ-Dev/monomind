@@ -6,6 +6,7 @@
  * the init target flags.
  */
 
+import { mcpCommand } from '../platform-adapters/renderers/mcp.js';
 import type { InitOptions } from './types.js';
 
 /**
@@ -20,11 +21,9 @@ function tomlString(value: string): string {
   return JSON.stringify(value);
 }
 
-function monomindCommand(): { command: string; args: string[] } {
-  if (process.platform === 'win32') {
-    return { command: 'cmd', args: ['/c', 'npx', '-y', 'monomind@latest', 'mcp', 'start'] };
-  }
-  return { command: 'npx', args: ['-y', 'monomind@latest', 'mcp', 'start'] };
+function monomindCommand(pin?: string): { command: string; args: string[] } {
+  const [command, ...args] = mcpCommand('codex', process.platform, pin);
+  return { command, args };
 }
 
 export const CODEX_STATUS_LINE_ITEMS = [
@@ -170,7 +169,7 @@ export function generateCodexConfig(options: InitOptions): string {
   ];
 
   if (options.mcp.monomind) {
-    const server = monomindCommand();
+    const server = monomindCommand(options.mcp.pin);
     lines.push(
       '[mcp_servers.monomind]',
       `command = ${tomlString(server.command)}`,
@@ -178,7 +177,7 @@ export function generateCodexConfig(options: InitOptions): string {
       'enabled = true',
       'startup_timeout_sec = 30',
       'tool_timeout_sec = 120',
-      `env = { npm_config_update_notifier = "false", MONOMIND_MODE = "v1", MONOMIND_HOOKS_ENABLED = "true", MONOMIND_TOPOLOGY = ${tomlString(options.runtime.topology)}, MONOMIND_MAX_AGENTS = ${tomlString(String(options.runtime.maxAgents))}, MONOMIND_MEMORY_BACKEND = ${tomlString(options.runtime.memoryBackend)} }`,
+      'env = { npm_config_update_notifier = "false" }',
       '',
     );
   }
