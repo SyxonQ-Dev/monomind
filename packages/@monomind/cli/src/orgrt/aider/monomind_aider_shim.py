@@ -48,6 +48,7 @@ from monomind_aider_setup import (
     apply_effort,
     as_list,
     git_root_of,
+    load_session,
     load_user_config,
     path_in_scope,
 )
@@ -341,16 +342,13 @@ def run(req, emit):
         emit("error", code="runner-error", message="invalid session id")
         return EXIT_USAGE
     hist_path = os.path.join(state_dir, sid + ".json")
-    done_messages = []
-    if resume:
-        saved = _read(hist_path)
-        if saved is None:
-            emit("status", message="aider: no saved history for session %s; starting fresh" % sid)
-        else:
-            try:
-                done_messages = json.loads(saved).get("messages") or []
-            except ValueError:
-                emit("status", message="aider: session %s history unreadable; starting fresh" % sid)
+    done_messages, note, other_cwd = load_session(hist_path, cwd) if resume else ([], None, None)
+    if other_cwd:
+        msg = "aider: session %s was recorded under another cwd (%s)" % (sid, other_cwd)
+        emit("error", code="session", message=msg)
+        return EXIT_USAGE
+    if note:
+        emit("status", message=note % sid)
     emit("session", session_id=sid, resumed=bool(done_messages))
     emit("status", message="aider: MCP servers are not supported on this runtime")
 

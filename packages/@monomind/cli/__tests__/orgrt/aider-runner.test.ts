@@ -212,6 +212,14 @@ describe('AiderAgentRunner (shim)', () => {
     expect(cls.fatal && /auth/i.test(cls.label ?? '')).toBe(true);
   });
 
+  it('a session recorded under another cwd (shim exit 2, code session) is fatal', async () => {
+    const line = j({ code: 'session', message: 'aider: session s-1 was recorded under another cwd (/a)', type: 'error' });
+    vi.mocked(cp.spawn).mockReturnValue(mockChild([line], 2));
+    const err = await collect({ resume: 's-1' }).catch((e) => e);
+    expect(err.fatal).toBe(true);
+    expect(err.message).toContain('another cwd');
+  });
+
   it('a non-zero exit without an error event still fails the turn', async () => {
     vi.mocked(cp.spawn).mockReturnValue(mockChild(head(), 1));
     await expect(collect()).rejects.toThrow(/aider failed \(exit 1\)/);

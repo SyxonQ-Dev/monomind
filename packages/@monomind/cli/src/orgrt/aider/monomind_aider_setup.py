@@ -4,6 +4,7 @@
 Split out of monomind_aider_shim.py (file-size rule); shipped beside it.
 """
 
+import json
 import os
 
 THINKING_TOKENS = {"low": 4096, "medium": 8192, "high": 16384, "xhigh": 24576, "max": 32768}
@@ -72,6 +73,22 @@ def apply_effort(model, effort, emit):
     elif effort != "off":
         emit("status", message="aider: --effort %s ignored (model %s has no effort control)"
              % (effort, model.name))
+
+
+def load_session(path, cwd):
+    """(messages, status note, other cwd) for resuming the conversation saved
+    at `path`; a session saved under another cwd is not loaded."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except OSError:
+        return [], "aider: no saved history for session %s; starting fresh", None
+    except ValueError:
+        return [], "aider: session %s history unreadable; starting fresh", None
+    saved = data.get("cwd") if isinstance(data, dict) else None
+    if saved and os.path.realpath(saved) != os.path.realpath(cwd):
+        return [], None, saved
+    return (data.get("messages") if isinstance(data, dict) else None) or [], None, None
 
 
 def path_in_scope(scope_dir, edit_root, path):

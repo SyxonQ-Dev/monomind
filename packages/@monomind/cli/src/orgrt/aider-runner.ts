@@ -375,6 +375,12 @@ export function aiderError(outcome: AiderOutcome, sawEvent: boolean): Error {
     (err as Error & { fatal?: boolean }).fatal = true;
     return err;
   }
+  if (e?.code === 'session') {
+    // Resuming another folder's conversation: retrying cannot help.
+    const err = new Error(`AiderAgentRunner: ${e.message}`);
+    (err as Error & { fatal?: boolean }).fatal = true;
+    return err;
+  }
   if (e) return new Error(`AiderAgentRunner: aider failed (${e.code}): ${e.message}${tail}`);
   return new Error(
     `AiderAgentRunner: aider failed (exit ${outcome.exitCode})` +

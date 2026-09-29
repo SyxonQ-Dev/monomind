@@ -197,6 +197,21 @@ class ShimRun(unittest.TestCase):
         self.assertIn("remember the word banana", sent)
         self.assertIn("first answer", sent)
 
+    def test_resume_under_another_cwd_is_refused(self):
+        self.run_shim(["first answer"], prompt="remember the word banana")
+        sid = self.of("session")[0]["session_id"]
+        path = os.path.join(self.state, sid + ".json")
+        with open(path) as f:
+            before = f.read()
+        other = os.path.join(self.tmp.name, "other")
+        os.makedirs(other)
+        code, seen = self.run_shim(["x"], prompt="what word?", session_id=sid, cwd=other)
+        self.assertEqual(code, 2)
+        self.assertEqual(self.of("error")[0]["code"], "session")
+        self.assertEqual(seen, [], "no model call with another folder's conversation")
+        with open(path) as f:
+            self.assertEqual(f.read(), before)
+
     def test_a_reflection_reply_is_separated_from_the_first(self):
         # A failed edit makes aider reflect the error and ask the model again.
         bad = "a.txt\n```\n<<<<<<< SEARCH\nnot there\n=======\nx\n>>>>>>> REPLACE\n```"
