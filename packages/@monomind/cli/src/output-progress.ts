@@ -52,19 +52,20 @@ export class Progress {
       }
     }
 
-    // Clear previous line and write new
+    // Clear previous line and write new. stderr, like the spinner: progress
+    // is status, never part of a command's stdout result (#495).
     if (this.lastRender) {
-      process.stdout.write(`\r${' '.repeat(this.lastRender.length)}\r`);
+      this.formatter.writeError(`\r${' '.repeat(this.lastRender.length)}\r`);
     }
 
-    process.stdout.write(output);
+    this.formatter.writeError(output);
     this.lastRender = output;
   }
 
   finish(): void {
     this.current = this.total;
     this.render();
-    process.stdout.write('\n');
+    this.formatter.writeError('\n');
   }
 
   private formatTime(ms: number): string {
