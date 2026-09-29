@@ -96,7 +96,7 @@ describe('PiAgentRunner coder mode', () => {
     expect(result?.cost_usd).toBeCloseTo(0.03, 10);
   });
 
-  it('continues the same session on a tool round with --session <id>', async () => {
+  it('continues the same session on a tool round with --session-id <id>', async () => {
     const tool = {
       name: 'org_echo',
       description: 'echo',
@@ -108,28 +108,48 @@ describe('PiAgentRunner coder mode', () => {
       .mockReturnValueOnce(mockChild(TURN('s-7', fence)))
       .mockReturnValueOnce(mockChild(TURN('s-7')));
     await collect({ tools: [tool], canUseTool: async () => ({ behavior: 'allow' }) });
-    expect(argvAt(0)).not.toContain('--session');
+    const first = argvAt(0);
     const second = argvAt(1);
-    expect(second[second.indexOf('--session') + 1]).toBe('s-7');
+    const id = first[first.indexOf('--session-id') + 1];
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
+    // The header's id wins from then on (it equals the requested id live).
+    expect(second[second.indexOf('--session-id') + 1]).toBe('s-7');
   });
 
-  it('AgentRunArgs.resume seeds --session and skips re-sending the system prompt', async () => {
+  it('AgentRunArgs.resume seeds --session-id and skips re-sending the system prompt', async () => {
     vi.mocked(cp.spawn).mockReturnValue(mockChild(TURN('old')));
     await collect({ resume: 'old' });
     const a = argvAt(0);
-    expect(a[a.indexOf('--session') + 1]).toBe('old');
-    expect(a.at(-1)).toBe('go');
+    expect(a[a.indexOf('--session-id') + 1]).toBe('old');
+    expect(a).not.toContain('--session');
+    expect(a.slice(-2)).toEqual(['--', 'go']);
   });
 
-  it('coder mode (full access) keeps pi’s own session store; org roles keep the per-run dir', async () => {
+  it('never points pi at a session directory in the project (sessions stay in pi’s own store)', async () => {
     vi.mocked(cp.spawn).mockReturnValue(mockChild(TURN('s')));
     await collect();
-    expect(argvAt(0)).toContain('--session-dir');
     vi.mocked(cp.spawn).mockReturnValue(mockChild(TURN('s')));
     await collect({ access: 'full' });
-    expect(argvAt(1)).not.toContain('--session-dir');
+    for (const a of [argvAt(0), argvAt(1)]) {
+      expect(a).not.toContain('--session-dir');
+      expect(a.join(' ')).not.toContain('.monomind-pi-session');
+    }
     const opts = vi.mocked(cp.spawn).mock.calls[1]?.[2] as cp.SpawnOptions;
     expect(opts.detached).toBe(process.platform !== 'win32');
+  });
+
+  it('--settings sources trust the project (--approve); otherwise the run is isolated', async () => {
+    vi.mocked(cp.spawn).mockReturnValue(mockChild(TURN('s')));
+    await collect({ access: 'full', settingSources: ['user', 'project'] });
+    vi.mocked(cp.spawn).mockReturnValue(mockChild(TURN('s')));
+    await collect({ access: 'full' });
+    const coder = argvAt(0);
+    expect(coder).toContain('--approve');
+    expect(coder).not.toContain('--no-approve');
+    expect(coder).not.toContain('-nc');
+    const isolated = argvAt(1);
+    expect(isolated).not.toContain('--approve');
+    for (const f of ['--no-approve', '-ne', '-ns', '-np', '-nc']) expect(isolated).toContain(f);
   });
 
   it('maps effort onto --thinking 1:1', async () => {
