@@ -1,8 +1,9 @@
 // Split out of browser.ts (file-size sweep). Pure move: no behaviour change.
 
 import { fetchBrowserWebSocketUrl } from './browser-discovery.js';
-import { launchedPids, launchedUserDataDirs } from './browser-state.js';
+import { launchedPids, launchedUserDataDirs, ownedUserDataDirPorts } from './browser-state.js';
 import { CdpClient, fetchTargets } from './cdp.js';
+import { removeOwnedProfileDir } from './profile-dir.js';
 import {
   listSessionRecords,
   loadSessionRecord,
@@ -41,6 +42,11 @@ const REAP_CONNECT_TIMEOUT_MS = 3000;
  * singleton lock, and if the caller's process exited first the kill never
  * happened at all. Callers reasonably read a resolved close() as "that
  * browser is gone"; on the graceful path it now means that.
+ *
+ * A profile directory monobrowse created for that browser (the default temp
+ * profile, or a CLI session's — never a caller-supplied one) is deleted once
+ * the process is gone, on both paths (#395). In a fresh process the dir and
+ * its ownership come from the persisted session record.
  */
 export async function closeBrowser(client: CdpClient, port: number): Promise<void> {
   let gracefullyClosed = false;
@@ -71,6 +77,7 @@ export async function closeBrowser(client: CdpClient, port: number): Promise<voi
   }
 
   let pid = launchedPids.get(port);
+  let profileDir = ownedUserDataDirPorts.has(port) ? launchedUserDataDirs.get(port) : undefined;
   if (pid === undefined) {
     // Fresh process (each CLI invocation is its own node process — see
     // module header) — launchedPids is per-process and empty here even
@@ -89,6 +96,7 @@ export async function closeBrowser(client: CdpClient, port: number): Promise<voi
         const age = persisted.savedAt !== undefined ? Date.now() - persisted.savedAt : undefined;
         if (age === undefined || age <= PERSISTED_PID_MAX_AGE_MS) {
           pid = persisted.pid;
+          if (persisted.ownsUserDataDir) profileDir = persisted.userDataDir;
         }
       }
     } catch {
@@ -97,6 +105,7 @@ export async function closeBrowser(client: CdpClient, port: number): Promise<voi
   }
   if (pid === undefined) return; // not a process we launched, or too stale to trust — nothing to kill
   launchedPids.delete(port);
+  ownedUserDataDirPorts.delete(port);
 
   // Liveness-check before every SIGKILL (not just the safety-net path below)
   // — process.kill(pid, 0) throws ESRCH if the PID is no longer running,
@@ -109,17 +118,18 @@ export async function closeBrowser(client: CdpClient, port: number): Promise<voi
     } catch {
       /* already exited, or never was — nothing to do */
     }
-    return;
+  } else if (!(await waitForProcessExit(pid))) {
+    // Browser.close was acknowledged — wait for the process to actually go
+    // away, then force-kill as a safety net in case it hung.
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      /* raced us to exit — expected */
+    }
   }
 
-  // Browser.close was acknowledged — wait for the process to actually go away,
-  // then force-kill as a safety net in case it hung.
-  if (await waitForProcessExit(pid)) return;
-  try {
-    process.kill(pid, 'SIGKILL');
-  } catch {
-    /* raced us to exit — expected */
-  }
+  // Waits (bounded) for the killed process to be gone before deleting.
+  if (profileDir) await removeOwnedProfileDir(profileDir, { pid });
 }
 
 /** Poll until `pid` is gone or PROCESS_EXIT_TIMEOUT_MS elapses. Returns

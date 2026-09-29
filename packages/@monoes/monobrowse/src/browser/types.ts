@@ -10,6 +10,12 @@ export interface BrowserConfig {
   headless?: boolean;
   executablePath?: string;
   userDataDir?: string;
+  /** The caller created `userDataDir` for this launch alone (the CLI's
+   *  session profile), so monobrowse deletes it when the browser closes,
+   *  like the default profile. Only honoured for a directory that matches
+   *  monobrowse's own tmpdir naming; any other `userDataDir` is never
+   *  deleted. */
+  ownsUserDataDir?: boolean;
   args?: string[];
   /** Milliseconds to wait for the launched Chrome to open its CDP port
    *  before giving up. Default 10000 — raise this for environments where
