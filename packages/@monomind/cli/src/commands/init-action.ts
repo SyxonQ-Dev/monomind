@@ -12,6 +12,7 @@ import { DEFAULT_INIT_OPTIONS, executeInit } from '../init/index.js';
 import { reportProjectMemory } from '../init/init-memory.js';
 import { formatIndexSummary } from '../init/project-indexes.js';
 import { resolveInitOptions } from '../init/resolve-options.js';
+import { countInitFiles, formatInitFileCounts, snapshotInitFiles } from '../init/written-files.js';
 import { ingestDirectory } from '../knowledge/document-pipeline.js';
 import { output } from '../output.js';
 import { mcpAddHint } from '../platform-adapters/renderers/mcp.js';
@@ -103,6 +104,7 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
   spinner.start();
 
   try {
+    const filesBefore = snapshotInitFiles(cwd);
     const result = await executeInit(options);
 
     if (!result.success) {
@@ -215,19 +217,8 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
 
     output.writeln();
 
-    const summary: string[] = [];
-
-    if (result.created.directories.length > 0) {
-      summary.push(`Directories: ${result.created.directories.length} created`);
-    }
-
-    if (result.created.files.length > 0) {
-      summary.push(`Files: ${result.created.files.length} created`);
-    }
-
-    if (result.skipped.length > 0) {
-      summary.push(`Skipped: ${result.skipped.length} (already exist)`);
-    }
+    // #420: counted on disk — result.created/skipped list items, not files.
+    const summary = formatInitFileCounts(countInitFiles(cwd, filesBefore));
 
     // o-38: a retirement is a destructive action and must never be folded
     // into "Files: N created" — that is exactly how the original data-loss
