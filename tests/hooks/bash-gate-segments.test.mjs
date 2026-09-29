@@ -64,8 +64,32 @@ const ALLOWED = [
   `echo "DELETE FROM users is dangerous" >> notes.md`,
   `printf '%s\\n' "never run ${RMRF} ~" | tee -a notes.md`,
   `cat <<'EOF' > notes.md\n${RMRF} ~\nDROP TABLE users;\nEOF`,
-  `cat <<EOF > notes.md\n${FORCE_PUSH} origin main is risky\nEOF\ngit status`,
+  `cat <<EOF > notes.md\n${FORCE_PUSH} origin main is risky\nEOF\nls`,
   `gh issue comment 1 --body "avoid ${RMRF} / and git reset --hard"`,
+  `grep -rn "${RMRF}" src | wc -l`,
+  `git log --grep "${FORCE_PUSH}" 2>/dev/null`,
+];
+
+// Commands that execute a quoted string but are not in any executor list:
+// only the allowlist (mask ONLY for commands known not to execute) stops them.
+const ALLOWLIST_ONLY_BYPASSES = [
+  `npm exec -c '${RMRF} ~'`,
+  `yarn exec '${RMRF} ~'`,
+  `pnpm dlx shx '${RMRF} ~'`,
+  `concurrently "${RMRF} ~"`,
+  `nodemon --exec "${RMRF} ~"`,
+  `entr -s '${RMRF} ~'`,
+  `watchexec -- "${RMRF} ~"`,
+  `docker exec c sh -lc "${RMRF} ~"`,
+  `some-unknown-runner --run "${RMRF} ~"`,
+  `less "+!${RMRF} ~" f`,
+  `rg --pre '${RMRF} ~' x`,
+  `git grep -O"${RMRF} ~" x`,
+  `printf -v X '%s' '${RMRF} ~'; $X`,
+  `echo '${RMRF} ~' > x.sh; ./x.sh`,
+  `echo '${RMRF} ~' | nu`,
+  `cat <<'EOF' | unknown-runner\n${RMRF} ~\nEOF`,
+  `X=$(echo '${RMRF} ~'); $X`,
 ];
 
 const BLOCKED = [
@@ -99,6 +123,7 @@ const BLOCKED = [
   `git -c alias.x='!${RMRF} ~' x`,
   `git reset --hard HEAD~1`,
   `kubectl delete namespace prod`,
+  ...ALLOWLIST_ONLY_BYPASSES,
 ];
 
 describe('pre-bash destructive gate: mentions are allowed (#427)', () => {
@@ -123,6 +148,20 @@ describe('pre-bash destructive gate: executed text still blocks (#427)', () => {
       expect(parsed.reason).toMatch(/Destructive operation blocked/);
     });
   }
+});
+
+describe('the allowlist alone keeps executed text visible (no executor list)', () => {
+  const RM = /\brm\s+-rf\b/;
+  for (const cmd of ALLOWLIST_ONLY_BYPASSES) {
+    it(`scans the payload of: ${JSON.stringify(cmd)}`, () => {
+      expect(SCAN._segmentTargets(cmd).some((t) => RM.test(t))).toBe(true);
+    });
+  }
+
+  it('masks only for allowlisted commands', () => {
+    expect(SCAN._segmentTargets(`grep -rn "${RMRF}" src/`).some((t) => RM.test(t))).toBe(false);
+    expect(SCAN._segmentTargets(`mytool "${RMRF}" src/`).some((t) => RM.test(t))).toBe(true);
+  });
 });
 
 describe('pipesNetworkIntoShell', () => {

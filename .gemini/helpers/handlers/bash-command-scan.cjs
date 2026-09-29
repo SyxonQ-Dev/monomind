@@ -6,46 +6,61 @@
  * `git commit -m "document git push --force risks"`, `echo 'DROP TABLE' > f`,
  * or a heredoc whose body is documentation.
  *
- * `destructiveScanTargets(cmd)` returns the strings the gate should match:
+ * `destructiveScanTargets(cmd)` returns the strings the gate should match.
+ * The command is split into segments on && || ; | & and newlines outside
+ * quotes (mirroring splitCommandSegments in
+ * packages/@monomind/cli/src/mcp-tools/hooks-embedding-agents.ts).
  *
- *   - Normally: one string per command segment (split on && || ; | & and
- *     newlines outside quotes, mirroring splitCommandSegments in
- *     packages/@monomind/cli/src/mcp-tools/hooks-embedding-agents.ts), with
- *     quote characters removed and every quoted literal that contains
- *     whitespace replaced by a placeholder. A quoted literal WITHOUT
- *     whitespace is kept (dequoted), so `"rm" -rf ~`, `r"m" -rf ~` and
- *     `git push "--force"` still match. Quoted assignment values
- *     (`X="rm -rf ~"; $X`) and double-quoted text containing `$(`/backticks
- *     are kept too, because the shell can execute them. Heredoc bodies are
- *     dropped, except an unquoted-delimiter body that contains a command
- *     substitution.
+ *   - A segment is MASKED (quoted literals containing whitespace become a
+ *     placeholder; quoted-delimiter heredoc bodies are dropped) only when its
+ *     command word is on SAFE_COMMANDS, an allowlist of commands that do not
+ *     execute their arguments, AND every other segment of its pipeline is too
+ *     (so nothing unknown reads its output), AND — if any segment writes a
+ *     file — every segment of the whole command is allowlisted (so
+ *     `echo '…' > x.sh; ./x.sh` is not masked). Even in a masked segment,
+ *     quoted words without whitespace (`"rm" -rf`) and assignment values
+ *     (`X="rm -rf ~"`) stay visible.
+ *   - Every other segment is scanned dequoted but unmasked: quote characters
+ *     are removed, the literal text is kept.
+ *   - The whole RAW command (the pre-#427 behaviour) is scanned when a quote
+ *     is unterminated, when there is a command substitution (`$(…)`,
+ *     backticks, `<(…)`) or a dynamic command word (`$X`), or when any word
+ *     names a known string executor (EXECUTOR_WORD) — an extra safety layer
+ *     on top of the allowlist.
  *
- *   - The whole RAW command (the previous behaviour) when any word in it
- *     names something that executes a string: a shell (`bash -c`, `sh -c`),
- *     `eval`, `xargs`, `ssh`, `su`, `watch`, `trap`, an interpreter
- *     (`python -c`, `node -e`, `awk`), a database client (`psql`, `mysql`,
- *     `sqlite3`), a git sub-command that runs commands, and so on. In that
- *     case a quoted payload may well be executed, so nothing is masked.
- *
- * Masking can only ever REMOVE a match that sat entirely inside a quoted
- * literal of a non-executing command; anything outside quotes, or anything
- * a listed executor could run, is still scanned. Dependency-free on purpose:
- * helpers run on every PreToolUse and must not import packages.
+ * Masking therefore only ever hides text inside quotes given to a command
+ * known not to run it. Dependency-free on purpose: helpers run on every
+ * PreToolUse and must not import packages.
  */
 
 'use strict';
 
 var PLACEHOLDER = '_q_';
 
-// Words that make a quoted argument executable. Matched against each
-// unquoted word's basename (so /usr/bin/bash counts).
+// Commands whose quoted arguments are data. Exact command word only (no
+// paths: `./echo` could be anything). less (+ commands, LESSOPEN), sed (`e`),
+// awk (system), find (-exec) and xargs are deliberately absent.
+var SAFE_COMMANDS = /^(?:grep|egrep|fgrep|rg|ag|ack|echo|printf|cat|tee|head|tail|wc|jq|yq|touch|mkdir|ls|git|gh)$/;
+var SAFE_GIT_SUBCOMMAND = /^(?:commit|tag|notes|log|show|grep|diff)$/;
+var SAFE_GH_SUBCOMMAND = /^(?:issue|pr|api|release)$/;
+// Options that make an otherwise-safe command run a program.
+var UNSAFE_OPTION = {
+  printf: /^-v/,                                   // assigns a variable
+  rg: /^--pre/,                                    // runs a preprocessor
+  ack: /^--pager/,                                 // runs a pager
+  git: /^(?:-O|--open-files-in-pager|--ext-diff|--textconv)/,
+};
+
+// Words that make a quoted argument executable; any one of them anywhere in
+// the command forces a raw scan. Matched against each word's basename.
 var EXECUTOR_WORD = new RegExp('^(?:' + [
   // shells and string-executing builtins/wrappers
-  'sh', 'bash', 'zsh', 'dash', 'ksh', 'mksh', 'fish', 'csh', 'tcsh', 'ash', 'busybox',
-  'eval', 'exec', 'source', 'alias', 'trap', 'xargs', 'parallel', 'env', 'sudo', 'doas',
+  'sh', 'bash', 'zsh', 'dash', 'ksh', 'mksh', 'fish', 'csh', 'tcsh', 'ash', 'busybox', 'nu',
+  'eval', 'exec', 'source', '\\.', 'alias', 'trap', 'xargs', 'parallel', 'env', 'sudo', 'doas',
   'su', 'runuser', 'watch', 'script', 'flock', 'nsenter', 'chroot', 'setsid', 'unshare',
   'ssh', 'rsync', 'tmux', 'screen', 'expect', 'at', 'batch', 'crontab', 'find', 'fd',
-  'make', 'just',
+  'make', 'just', 'npm', 'yarn', 'pnpm', 'concurrently', 'nodemon', 'entr', 'watchexec',
+  'docker', 'podman', 'kubectl',
   // interpreters
   'python[0-9.]*', 'pypy[0-9.]*', 'node', 'nodejs', 'deno', 'bun', 'perl', 'ruby', 'php',
   'lua', 'luajit', 'tclsh', 'rscript', 'osascript', 'pwsh', 'powershell', 'cmd', 'cmd\\.exe',
@@ -57,73 +72,78 @@ var EXECUTOR_WORD = new RegExp('^(?:' + [
   'wrangler', 'turso', 'dolt', 'sf', 'sfdx',
 ].join('|') + ')$', 'i');
 
-// git runs strings through these sub-commands/options; a plain
-// `git commit -m "…"` is still masked.
+// git runs strings through these sub-commands/options.
 var GIT_EXECUTING_WORD = /^(?:-c|--exec(?:=.*)?|-x|--config-env(?:=.*)?|config|alias\..*|rebase|bisect|submodule|filter-branch|filter-repo|difftool|mergetool|daemon|-C)$/;
 
 var ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=/;
 var SUBSTITUTION = /\$\(|`/;
+// An output redirect to anything but /dev/null or another fd.
+var WRITE_REDIRECT = /(?:^|[^>&])>>?\s*(?![&\s]|\/dev\/null(?![^\s;&|]))/;
 
 /**
- * Walk the command once, producing masked segments and the list of words
- * (dequoted, as the shell would see them) used for executor detection.
+ * Walk the command once. Each segment keeps a masked and a plain (dequoted,
+ * unmasked) rendering plus its words; heredoc bodies are collected with the
+ * index of the segment that owns them.
  */
 function parse(cmd) {
-  var segments = [];
+  var segs = [];
+  var heredocs = [];
+  var pending = [];
   var words = [];
-  var seg = '';      // masked text of the current segment
-  var word = '';     // dequoted current word (for executor detection)
+  var pipeline = 0;
+  var cur = { masked: '', plain: '', words: [], pipeline: 0 };
+  var word = '';
   var wordMasked = '';
+  var wordExtra = ''; // spaced quoted pieces, re-emitted standalone in the plain text
   var inWord = false;
-  var pendingHeredocs = [];
   var unterminated = false;
-  // `$(( 1 << 2 ))` is a shift, not a heredoc: never mask bodies there.
+  var dynamic = false;
+  // `$(( 1 << 2 ))` is a shift, not a heredoc: never treat `<<` as one there.
   var arithmetic = cmd.indexOf('((') !== -1;
   var i = 0;
   var n = cmd.length;
 
+  function emit(s) { cur.masked += s; cur.plain += s; }
   function endWord() {
     if (inWord) {
       words.push(word);
-      seg += wordMasked;
+      cur.words.push(word);
+      cur.masked += wordMasked;
+      cur.plain += word + wordExtra;
     }
     word = '';
     wordMasked = '';
+    wordExtra = '';
     inWord = false;
   }
-  function endSegment() {
+  function endSegment(piped) {
     endWord();
-    var t = seg.trim();
-    if (t) segments.push(t);
-    seg = '';
+    if (cur.plain.trim()) segs.push(cur);
+    if (!piped) pipeline++;
+    cur = { masked: '', plain: '', words: [], pipeline: pipeline };
   }
-  function addQuoted(content, executable) {
+  function addQuoted(content) {
     // Assignment values and literals without whitespace stay visible.
-    var keep = executable || !/\s/.test(content) || ASSIGNMENT_WORD.test(word);
+    var keep = !/\s/.test(content) || ASSIGNMENT_WORD.test(word);
     word += content;
+    if (/\s/.test(content)) wordExtra += ' ' + content; // so -O"rm …" still reads as rm …
     wordMasked += keep ? content : PLACEHOLDER;
     inWord = true;
   }
   function readHeredocBodies() {
     // Called just after an unquoted newline: consume each pending body.
-    while (pendingHeredocs.length) {
-      var h = pendingHeredocs.shift();
-      var body = '';
-      var closed = false;
+    while (pending.length) {
+      var h = pending.shift();
+      h.body = '';
       while (i < n) {
         var eol = cmd.indexOf('\n', i);
         if (eol === -1) eol = n;
         var line = cmd.slice(i, eol);
         i = eol + 1;
-        var cmp = h.stripTabs ? line.replace(/^\t+/, '') : line;
-        if (cmp === h.delim) { closed = true; break; }
-        body += line + '\n';
+        if ((h.stripTabs ? line.replace(/^\t+/, '') : line) === h.delim) { h.closed = true; break; }
+        h.body += line + ' ';
       }
-      // Keep the body when it never closed (not really a heredoc) or when an
-      // unquoted delimiter expands $(…) / backticks inside it.
-      if (!closed || (!h.quoted && SUBSTITUTION.test(body))) {
-        segments.push(body.replace(/\n/g, ' '));
-      }
+      heredocs.push(h);
     }
   }
 
@@ -131,7 +151,7 @@ function parse(cmd) {
     var ch = cmd[i];
     if (ch === '\\') {
       var next = cmd[i + 1];
-      if (next === '\n') { endWord(); seg += ' '; i += 2; continue; }
+      if (next === '\n') { endWord(); emit(' '); i += 2; continue; }
       word += next || '';
       wordMasked += next || '';
       inWord = true;
@@ -143,7 +163,7 @@ function parse(cmd) {
         while (end !== -1 && cmd[end - 1] === '\\') end = cmd.indexOf("'", end + 1);
       }
       if (end === -1) { unterminated = true; end = n; }
-      addQuoted(cmd.slice(start, end), false);
+      addQuoted(cmd.slice(start, end));
       i = end + 1;
     } else if (ch === '"') {
       var j = i + 1;
@@ -154,35 +174,46 @@ function parse(cmd) {
         j++;
       }
       if (j >= n) unterminated = true;
-      addQuoted(content, SUBSTITUTION.test(content));
+      if (SUBSTITUTION.test(content)) dynamic = true;
+      addQuoted(content);
       i = j + 1;
     } else if (ch === '<' && cmd.slice(i, i + 3) === '<<<') {
       endWord();
-      seg += '<<<';
+      emit('<<<');
       i += 3;
     } else if (ch === '<' && cmd[i + 1] === '<' && !arithmetic) {
       endWord();
       var m = /^<<(-?)[ \t]*(?:'([^']*)'|"([^"]*)"|\\?([^\s;&|<>()]+))/.exec(cmd.slice(i));
       if (m) {
-        var quoted = m[2] !== undefined || m[3] !== undefined || /^<<-?[ \t]*\\/.test(m[0]);
-        var delim = m[2] !== undefined ? m[2] : m[3] !== undefined ? m[3] : m[4].replace(/['"\\]/g, '');
-        pendingHeredocs.push({ delim: delim, quoted: quoted, stripTabs: m[1] === '-' });
-        seg += m[0].replace(/['"]/g, '') + ' ';
+        pending.push({
+          delim: m[2] !== undefined ? m[2] : m[3] !== undefined ? m[3] : m[4].replace(/['"\\]/g, ''),
+          quoted: m[2] !== undefined || m[3] !== undefined || /^<<-?[ \t]*\\/.test(m[0]),
+          stripTabs: m[1] === '-',
+          owner: segs.length,
+          closed: false,
+        });
+        emit(m[0].replace(/['"]/g, '') + ' ');
         i += m[0].length;
       } else {
-        seg += '<<';
+        emit('<<');
         i += 2;
       }
+    } else if (ch === '&' && (cmd[i - 1] === '>' || cmd[i - 1] === '<' || cmd[i + 1] === '>')) {
+      word += ch; // part of a redirect: 2>&1, &>file
+      wordMasked += ch;
+      inWord = true;
+      i++;
     } else if ((ch === '&' || ch === '|') && cmd[i + 1] === ch) {
-      endSegment();
+      endSegment(false);
       i += 2;
     } else if (ch === ';' || ch === '&' || ch === '|' || ch === '\n') {
-      endSegment();
+      endSegment(ch === '|');
       i += (ch === '|' && cmd[i + 1] === '&') ? 2 : 1;
       if (ch === '\n') readHeredocBodies();
     } else if (/\s/.test(ch) || ch === '(' || ch === ')' || ch === '`' || ch === '{' || ch === '}') {
+      if (ch === '`' || (ch === '(' && /[$<>]/.test(cmd[i - 1] || ''))) dynamic = true;
       endWord();
-      seg += ch;
+      emit(ch);
       i++;
     } else {
       word += ch;
@@ -191,8 +222,9 @@ function parse(cmd) {
       i++;
     }
   }
-  endSegment();
-  return { segments: segments, words: words, unterminated: unterminated };
+  endSegment(false);
+  pending.forEach(function (h) { h.body = ''; heredocs.push(h); });
+  return { segs: segs, heredocs: heredocs, words: words, unterminated: unterminated, dynamic: dynamic };
 }
 
 function basename(w) {
@@ -212,6 +244,24 @@ function hasExecutor(words) {
   return false;
 }
 
+/** The command word of a segment (after leading VAR=val), or ''. */
+function commandWord(seg) {
+  for (var k = 0; k < seg.words.length; k++) {
+    if (!ASSIGNMENT_WORD.test(seg.words[k])) return { name: seg.words[k], rest: seg.words.slice(k + 1) };
+  }
+  return { name: '', rest: [] };
+}
+
+/** True when the segment's command is known not to execute its arguments. */
+function isSafeSegment(seg) {
+  var c = commandWord(seg);
+  if (!SAFE_COMMANDS.test(c.name)) return false;
+  if (c.name === 'git' && !SAFE_GIT_SUBCOMMAND.test(c.rest[0] || '')) return false;
+  if (c.name === 'gh' && !SAFE_GH_SUBCOMMAND.test(c.rest[0] || '')) return false;
+  var unsafe = UNSAFE_OPTION[c.name];
+  return !unsafe || !c.rest.some(function (w) { return unsafe.test(w); });
+}
+
 /**
  * Return the strings the destructive-ops patterns should be matched against.
  * See the file header for the rules.
@@ -219,8 +269,31 @@ function hasExecutor(words) {
 function destructiveScanTargets(cmd) {
   if (typeof cmd !== 'string' || !cmd) return [];
   var parsed = parse(cmd);
-  if (parsed.unterminated || hasExecutor(parsed.words)) return [cmd];
-  return parsed.segments;
+  if (hasExecutor(parsed.words)) return [cmd];
+  return segmentTargets(cmd, parsed);
+}
+
+/** The allowlist-based targets alone, without the executor safety layer. */
+function segmentTargets(cmd, parsed) {
+  if (parsed.unterminated || parsed.dynamic) return [cmd];
+  var segs = parsed.segs;
+  for (var k = 0; k < segs.length; k++) {
+    if (commandWord(segs[k]).name.indexOf('$') !== -1) return [cmd]; // `$X args`
+    segs[k].safe = isSafeSegment(segs[k]);
+  }
+  var allSafe = segs.every(function (s) { return s.safe; });
+  var writes = segs.some(function (s) { return commandWord(s).name === 'tee' || WRITE_REDIRECT.test(s.plain); });
+  function maskable(s) {
+    if (!s || !s.safe || (writes && !allSafe)) return false;
+    return segs.every(function (o) { return o.pipeline !== s.pipeline || o.safe; });
+  }
+  var targets = segs.map(function (s) { return maskable(s) ? s.masked : s.plain; });
+  parsed.heredocs.forEach(function (h) {
+    // An unquoted delimiter expands $(…) and backticks in the body.
+    var inert = h.quoted || !SUBSTITUTION.test(h.body);
+    if (!(h.closed && inert && maskable(segs[h.owner])) && h.body) targets.push(h.body);
+  });
+  return targets;
 }
 
 // ─── Network content piped into a shell ──────────────────────────────────────
@@ -250,6 +323,6 @@ function pipesNetworkIntoShell(cmd) {
 module.exports = {
   destructiveScanTargets,
   pipesNetworkIntoShell,
-  _parse: parse,
   _hasExecutor: hasExecutor,
+  _segmentTargets: function (cmd) { return segmentTargets(cmd, parse(cmd)); },
 };
