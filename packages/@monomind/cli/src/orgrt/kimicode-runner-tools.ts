@@ -19,90 +19,22 @@
  *     code. `text` stays the tool name, so the org runtime's StateDetector
  *     liveness is unchanged.
  *
- * The start message sets `AgentMessage.kind`, which tool-activity.ts prefers
- * over its own name table (tool-kind.ts) — this table knows the CLIs' own
- * names (agy's run_command, grok's search_replace, ...).
+ * The start message sets `AgentMessage.kind` from tool-kind.ts's name table,
+ * the same one tool-activity.ts falls back to.
  */
 
 import type { AgentMessage } from './agent-runner.js';
-import type { ToolKind } from './tool-kind.js';
+import { toolKind as sharedToolKind, type ToolKind } from './tool-kind.js';
 
 export type { ToolKind };
 
-/** Native tool names of the CLIs this module serves (agy, kimi, grok, qwen,
- *  copilot, pi), lowercased. The names do not collide in meaning across
- *  CLIs, so one table serves all of them. */
-const NAME_KIND: Record<string, ToolKind> = {
-  // shell
-  bash: 'shell',
-  shell: 'shell',
-  powershell: 'shell',
-  run_command: 'shell',
-  run_shell_command: 'shell',
-  run_terminal_command: 'shell',
-  exec: 'shell',
-  // edit
-  edit: 'edit',
-  edit_file: 'edit',
-  replace: 'edit',
-  search_replace: 'edit',
-  str_replace: 'edit',
-  str_replace_editor: 'edit',
-  replace_file_content: 'edit',
-  multi_replace_file_content: 'edit',
-  multiedit: 'edit',
-  // write
-  write: 'write',
-  write_file: 'write',
-  write_to_file: 'write',
-  create: 'write',
-  create_file: 'write',
-  // read
-  read: 'read',
-  read_file: 'read',
-  view: 'read',
-  view_file: 'read',
-  // search
-  grep: 'search',
-  grep_search: 'search',
-  search_file_content: 'search',
-  glob: 'search',
-  find: 'search',
-  find_by_name: 'search',
-  rg: 'search',
-  // web
-  web_search: 'web',
-  websearch: 'web',
-  search_web: 'web',
-  web_fetch: 'web',
-  webfetch: 'web',
-  fetch: 'web',
-  fetchurl: 'web',
-  read_url_content: 'web',
-  // mcp
-  call_mcp_tool: 'mcp',
-  // task (subagents)
-  task: 'task',
-  agent: 'task',
-  spawn_subagent: 'task',
-  invoke_subagent: 'task',
-  browser_subagent: 'task',
-  // todo
-  todo_write: 'todo',
-  todowrite: 'todo',
-  update_todo: 'todo',
-  set_todo_list: 'todo',
-  settodolist: 'todo',
-  // patch
-  apply_patch: 'patch',
-};
-
 const MCP_NAME_RE = /^mcp__(.+?)__(.+)$/;
 
-/** Contract kind for a native tool name. */
+/** Contract kind for a native tool name — the one name table in
+ *  tool-kind.ts, which lists these CLIs' own names (agy's run_command,
+ *  grok's search_replace, ...). */
 export function toolKind(name: string): ToolKind {
-  if (MCP_NAME_RE.test(name)) return 'mcp';
-  return NAME_KIND[name.toLowerCase()] ?? 'other';
+  return sharedToolKind(name);
 }
 
 type Raw = Record<string, unknown>;
@@ -324,13 +256,15 @@ export class NativeToolCalls {
   }
 
   /** End message(s) for a call; `fallback` names a call whose start never
-   *  arrived. Empty when the id is unknown and there is no fallback. */
+   *  arrived, `exitCode` a shell call's exit status when the CLI reports it.
+   *  Empty when the id is unknown and there is no fallback. */
   end(
     id: string,
     output: unknown,
     isError: boolean,
     sessionId?: string,
     fallback?: { name: string; rawInput: unknown },
+    exitCode?: number,
   ): AgentMessage[] {
     const out: AgentMessage[] = [];
     if (!this.open.has(id)) {
@@ -349,6 +283,7 @@ export class NativeToolCalls {
       is_error: isError,
       text: toolOutputText(output),
       duration_ms: Date.now() - call.startedAt,
+      ...(typeof exitCode === 'number' ? { exit_code: exitCode } : {}),
     });
     return out;
   }

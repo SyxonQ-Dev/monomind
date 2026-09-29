@@ -31,7 +31,7 @@ describe('toolKind', () => {
     expect(toolKind('todo_write')).toBe('todo');
     expect(toolKind('Agent')).toBe('task');
     expect(toolKind('apply_patch')).toBe('patch');
-    expect(toolKind('list_dir')).toBe('other');
+    expect(toolKind('list_dir')).toBe('search');
   });
 });
 

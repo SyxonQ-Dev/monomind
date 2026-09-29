@@ -44,6 +44,22 @@ describe('toolKind', () => {
       list: 'search',
       web_search: 'web',
       mcp_tool_call: 'mcp',
+      todo_list: 'todo',
+    };
+    for (const [name, kind] of Object.entries(cases)) expect(toolKind(name), name).toBe(kind);
+  });
+
+  it('maps the agy, grok and copilot native names', () => {
+    const cases: Record<string, string> = {
+      run_command: 'shell',
+      view_file: 'read',
+      write_to_file: 'write',
+      replace_file_content: 'edit',
+      grep_search: 'search',
+      find_by_name: 'search',
+      search_replace: 'edit',
+      list_dir: 'search',
+      create: 'write',
     };
     for (const [name, kind] of Object.entries(cases)) expect(toolKind(name), name).toBe(kind);
   });
