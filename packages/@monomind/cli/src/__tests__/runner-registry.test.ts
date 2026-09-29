@@ -49,6 +49,7 @@ describe('version handshake (§2)', () => {
         'agent-exec-settings',
         'agent-exec-tool-activity',
         'agent-exec-background-pids',
+        'agent-exec-effort',
         'agent-scan',
         'agent-scan-read-only',
         'agent-models',

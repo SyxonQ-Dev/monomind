@@ -1,4 +1,4 @@
-# Agent Exec Protocol — v1 (rev 15)
+# Agent Exec Protocol — v1 (rev 16)
 
 - **Status**: Implemented (Phase 0 of the mono-agent delegation plan — see
   `mono-agent:docs/plans/local-agent-monomind-delegation.md`)
@@ -6,6 +6,10 @@
   the Coder mode threat model, the `--access full` guardrails (root refusal, no transitive
   escalation, env hygiene, audit log), what callers own, and residual risks (issue #360).
 - **Revision history**:
+  - rev 16 (2026-09-29): **reasoning effort** — new capability `agent-exec-effort` and flag
+    `--effort off|low|medium|high|xhigh|max` (§3.1). claude maps it onto the Agent SDK's `effort`
+    option (`off` disables thinking); codex gets `-c model_reasoning_effort=<level>` (`off` →
+    `none`). Other runtimes ignore it. An unknown level is rejected before the turn starts. Additive only.
   - rev 15 (2026-09-29): **per-profile web captures** — new capability
     `knowledge-profile-captures`. A capture envelope whose `meta.json` names a `profile` ingests
     into `profile:<id>` even when its URL has a query string (earlier builds failed every chunk
@@ -333,6 +337,7 @@ progress go to stderr. A caller must be able to `JSON.parse` every stdout line.
 | `--tools-file <path>` | | Tool definitions as JSON (§4.1); enables native tool wiring where the runner supports it |
 | `--tool-timeout <dur>` | | Max wait for a caller `tool_result` frame (default `120s`) |
 | `--model <id>` | | Model override |
+| `--effort <level>` | | rev 16, capability `agent-exec-effort`. Reasoning effort: `off`, `low`, `medium`, `high`, `xhigh` or `max`. claude: the Agent SDK's `effort` option (`off` → thinking disabled). codex: `-c model_reasoning_effort=<level>` (`off` → `none`). Other runtimes ignore it. Any other value is rejected before the turn starts (non-zero exit, no events) |
 | `--cwd <path>` | | Working dir for the agent (default: cwd) |
 | `--resume <sessionId>` | | Resume a prior session/thread/conversation |
 | `--max-turns <n>` | | Cap agent turns (default `25`; the orgrt default is effectively unlimited and is NOT inherited here) |

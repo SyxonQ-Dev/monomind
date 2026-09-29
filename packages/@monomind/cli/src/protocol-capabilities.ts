@@ -72,6 +72,9 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    `transcript.md`/`summary.md` are their own documents beside
  *    `readable.md`, and `doc search|cite|related|lookup|list --scope
  *    profile:<id>` read that store (rev 15)
+ *  - `agent-exec-effort` — `agent exec --effort <level>` maps the turn's
+ *    reasoning effort onto the runtime: claude (SDK `effort`) and codex
+ *    (`-c model_reasoning_effort`); other runtimes ignore it (rev 16, §3.1)
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
@@ -79,6 +82,7 @@ export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec-settings',
   'agent-exec-tool-activity',
   'agent-exec-background-pids',
+  'agent-exec-effort',
   'agent-scan',
   'agent-scan-read-only',
   'agent-models',

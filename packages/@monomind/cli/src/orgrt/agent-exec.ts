@@ -267,6 +267,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
         prompt: promptStream,
         systemPrompt,
         model: opts.model,
+        effort: opts.effort, // rev 16: each runner maps or ignores it
         cwd: opts.cwd ?? process.cwd(),
         // #365: marks this child as an agent-turn process tree so `monomind
         // org role set-access ... full` (agent-context.ts) refuses to run
