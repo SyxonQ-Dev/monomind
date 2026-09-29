@@ -1,10 +1,11 @@
 // packages/@monomind/cli/src/orgrt/pi-runner-stream.ts
-import { spawn } from 'node:child_process';
 import type { AgentRunArgs } from './agent-runner.js';
 import { killOnAbort } from './agent-runner.js';
 import { maskedCommand } from './authority-mask.js';
+import type { OrgEffortLevel } from './cost-tier.js';
 import { classifyStderr } from './kimicode-runner.js';
 import { parsePiLine } from './pi-runner-parse.js';
+import { spawnRunnerProcess } from './process-group-spawn.js';
 import { omitAnthropicManagedKeys } from './provider.js';
 import { TOOL_CALL_RE } from './tool-fence.js';
 
@@ -16,20 +17,34 @@ export const TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000;
  *  defensive backstop rather than a known risk the way it is for copilot. */
 export const STARTUP_GRACE_MS = 45_000;
 
+/** `pi --thinking` levels (off|minimal|low|medium|high|xhigh|max) cover
+ *  every abstract effort level 1:1. */
+const PI_THINKING: Record<OrgEffortLevel, string> = {
+  off: 'off',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+};
+
 /**
  * One parsed pi stream event, normalized for incremental streaming.
  *   - 'assistant': rawText is one whole message_end text (fences intact) for
  *     end-of-turn tool-call parsing; text is the fence-stripped prose,
  *     present only when non-empty.
- *   - 'tool':      pi's own tool activity (tool_execution_start), or the
- *     spawn-time liveness yield — forwarded by run() as a `tool_use`
- *     liveness AgentMessage (see header).
+ *   - 'native':    pi's own tool call starting (`toolStart`) or ending
+ *     (`toolEnd`), paired by toolCallId.
+ *   - 'tool':      the spawn-time liveness yield — forwarded by run() as a
+ *     `tool_use` liveness AgentMessage (see header).
  */
 export interface PiStreamEvent {
-  kind: 'assistant' | 'tool';
+  kind: 'assistant' | 'native' | 'tool';
   text?: string;
   rawText?: string;
   toolName?: string;
+  toolStart?: { id: string; name: string; input: unknown };
+  toolEnd?: { id: string; output: unknown; isError: boolean };
 }
 
 export interface TurnOutcome {
@@ -41,6 +56,10 @@ export interface TurnOutcome {
   hangSuspected: boolean;
   inputTokens: number;
   outputTokens: number;
+  /** Sum of this invocation's assistant `usage.cost.total`, when pi priced any. */
+  costUsd?: number;
+  /** The `session` header's id. */
+  sessionId?: string;
 }
 
 /**
@@ -54,7 +73,8 @@ export interface TurnOutcome {
 export async function* streamTurn(
   bin: string,
   prompt: string,
-  sessionDir: string,
+  sessionDir: string | undefined,
+  sessionId: string | undefined,
   args: AgentRunArgs,
   outcome: TurnOutcome,
 ): AsyncGenerator<PiStreamEvent> {
@@ -66,25 +86,39 @@ export async function* streamTurn(
   // `--mode json` alone (no `--print`) was verified NOT to block on an
   // interactive trust prompt, matching this file's original assumption —
   // removing `--approve` was the only fix needed.
-  const cliArgs: string[] = ['--mode', 'json', '--session-dir', sessionDir];
+  //
+  // pi has no approval prompts to bypass — its tools always run — so full
+  // access needs no flag. `sessionDir` is undefined when the user's own pi
+  // setup is kept (coder mode): sessions then live in pi's own store.
+  // `--session <id>` resumes the id the `session` header reported.
+  const cliArgs: string[] = ['--mode', 'json'];
+  if (sessionDir) cliArgs.push('--session-dir', sessionDir);
+  if (sessionId) cliArgs.push('--session', sessionId);
   if (args.model) cliArgs.push('--model', args.model);
+  if (args.effort) cliArgs.push('--thinking', PI_THINKING[args.effort]);
   cliArgs.push(prompt);
 
-  const child = spawn(...maskedCommand(args.authorityMask, bin, cliArgs), {
-    cwd: args.cwd,
-    // PI_TELEMETRY/PI_SKIP_VERSION_CHECK: confirmed via pi's own docs —
-    // suppresses install/update telemetry and version-check network calls
-    // that otherwise add latency/flakiness to every headless turn.
-    // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
-    // vendor CLI; an explicit value in args.env still wins below.
-    env: {
-      ...omitAnthropicManagedKeys(process.env),
-      PI_TELEMETRY: '0',
-      PI_SKIP_VERSION_CHECK: '1',
-      ...args.env,
+  // Process-group leader under --access full (process-group-spawn.ts).
+  const proc = spawnRunnerProcess(
+    ...maskedCommand(args.authorityMask, bin, cliArgs),
+    {
+      cwd: args.cwd,
+      // PI_TELEMETRY/PI_SKIP_VERSION_CHECK: confirmed via pi's own docs —
+      // suppresses install/update telemetry and version-check network calls
+      // that otherwise add latency/flakiness to every headless turn.
+      // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
+      // vendor CLI; an explicit value in args.env still wins below.
+      env: {
+        ...omitAnthropicManagedKeys(process.env),
+        PI_TELEMETRY: '0',
+        PI_SKIP_VERSION_CHECK: '1',
+        ...args.env,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
     },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+    args,
+  );
+  const child = proc.child;
 
   let stderrTail = '';
   child.stderr?.on('data', (c: Buffer) => {
@@ -101,18 +135,8 @@ export async function* streamTurn(
   const KILL_GRACE_MS = 5000;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
   const killChild = (): void => {
-    try {
-      child.kill('SIGTERM');
-    } catch {
-      /* already gone */
-    }
-    killTimer = setTimeout(() => {
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        /* already gone */
-      }
-    }, KILL_GRACE_MS);
+    proc.target.kill('SIGTERM');
+    killTimer = setTimeout(() => proc.target.kill('SIGKILL'), KILL_GRACE_MS);
     killTimer.unref?.();
   };
   const timer = setTimeout(() => {
@@ -127,7 +151,7 @@ export async function* streamTurn(
   }, STARTUP_GRACE_MS);
   // Abort hook (see AgentRunArgs.signal): kill the child so the stdout
   // loop below unblocks instead of orphaning it on iterator.return().
-  const unsubscribeAbort = killOnAbort(args.signal, child, KILL_GRACE_MS);
+  const unsubscribeAbort = killOnAbort(args.signal, proc.target, KILL_GRACE_MS);
 
   // Attach the exit promise BEFORE consuming stdout: on a spawn failure
   // (ENOENT, bad binary) the 'error' event fires almost immediately —
@@ -149,11 +173,13 @@ export async function* streamTurn(
     if (!parsed) return;
     if (typeof parsed.inputTokens === 'number') outcome.inputTokens = parsed.inputTokens;
     if (typeof parsed.outputTokens === 'number') outcome.outputTokens = parsed.outputTokens;
+    if (parsed.costUsd !== undefined) outcome.costUsd = (outcome.costUsd ?? 0) + parsed.costUsd;
+    if (parsed.sessionId) outcome.sessionId = parsed.sessionId;
     if (parsed.assistantText) {
       const stripped = parsed.assistantText.replace(TOOL_CALL_RE, '').trim();
       yield { kind: 'assistant', rawText: parsed.assistantText, text: stripped || undefined };
-    } else if (parsed.toolName) {
-      yield { kind: 'tool', toolName: parsed.toolName };
+    } else if (parsed.toolStart || parsed.toolEnd) {
+      yield { kind: 'native', toolStart: parsed.toolStart, toolEnd: parsed.toolEnd };
     }
   }
 
@@ -183,6 +209,7 @@ export async function* streamTurn(
     clearTimeout(timer);
     if (hangTimer) clearTimeout(hangTimer);
     unsubscribeAbort();
+    proc.stop();
     if (child.exitCode === null && child.signalCode === null) {
       // NOT confirmed dead. Either the consumer abandoned this stream
       // mid-turn (session.ts's silent abort calls iterator.return(), the

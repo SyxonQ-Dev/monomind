@@ -22,8 +22,8 @@
  *   first-pull race regardless of model-thinking latency), assistant text is
  *   yielded as each `message_end` event lands (pi sends whole messages, not
  *   per-token deltas — no accumulation needed, unlike agy), and pi's own
- *   `tool_execution_start` events are forwarded as `tool_use` liveness
- *   messages at their start boundary. Tool_call fences are still collected
+ *   `tool_execution_start`/`tool_execution_end` events are forwarded as
+ *   rich `tool_use`/`tool_result` pairs matched by toolCallId. Tool_call fences are still collected
  *   from the raw texts and parsed at end of turn (fence parsing needs the
  *   complete text). Fatal provider errors (auth/quota) are classified via
  *   the shared classifyStderr helper and tagged non-retryable, same as
@@ -51,17 +51,18 @@
  *     there is no confirmed explicit `--resume <id>` flag for headless use,
  *     so this runner points every turn at the SAME per-run session dir
  *     rather than tracking a session id, and disclaims true cross-process
- *     resume as best-effort).
+ *     resume as best-effort). SUPERSEDED for pi 0.87: the first --mode json
+ *     record is a `session` header with the id, and `--session <id>` resumes
+ *     it — the runner now passes it on every later invocation, and drops
+ *     `--session-dir` in coder mode so sessions stay in pi's own store.
  *   - Event types seen: `agent_start` (ignored), `message_update` (partial;
  *     carries a cumulative `usage` object — kept as running totals but
  *     superseded by `message_end`), `message_end` (final `content` array
  *     with `{type:'text', text}` / `{type:'toolCall', ...}` items — only
  *     `text` items are surfaced to the bus), `tool_execution_start` /
  *     `tool_execution_end` (org tool calls use the shared tool-fence
- *     protocol, not pi's native tool-call surface, but `tool_execution_start`
- *     is forwarded as `tool_use` liveness — see header note above — while
- *     `tool_execution_end` is still ignored to avoid a duplicate liveness
- *     ping per command).
+ *     protocol, not pi's native tool-call surface; both tool_execution events
+ *     become matched tool_use/tool_result pairs — see header note above).
  *   - Usage field names differ from the other CLIs: `usage.input` /
  *     `usage.output` (not `input_tokens`/`output_tokens`).
  *
@@ -69,6 +70,7 @@
  */
 import { join } from 'node:path';
 import type { AgentMessage, AgentRunArgs, AgentRunner } from './agent-runner.js';
+import { NativeToolCalls } from './kimicode-runner-tools.js';
 import type { TurnOutcome } from './pi-runner-stream.js';
 import { STARTUP_GRACE_MS, streamTurn, turnError } from './pi-runner-stream.js';
 import {
@@ -86,12 +88,22 @@ export class PiAgentRunner implements AgentRunner {
 
   async *run(args: AgentRunArgs): AsyncIterable<AgentMessage> {
     const bin = this.piBin || process.env.PI_CLI_BIN || 'pi';
-    // Stable per-run session directory — see file header on why this
-    // substitutes for an explicit resume-by-id flag.
-    const sessionDir = join(args.cwd, '.monomind-pi-session');
+    // Stable per-run session directory for org roles. Coder mode (--access
+    // full / --settings) keeps the user's own pi setup instead: sessions in
+    // pi's own store, not a directory in the user's project.
+    const userSetup = args.access === 'full' || (args.settingSources?.length ?? 0) > 0;
+    const sessionDir = userSetup ? undefined : join(args.cwd, '.monomind-pi-session');
+    // The `session` header's id (pi docs/json.md); every later invocation
+    // passes `--session <id>`, so a tool round or the next prompt continues
+    // the same conversation. AgentRunArgs.resume seeds it.
+    let sessionId: string | undefined = args.resume;
+    const tools = new NativeToolCalls();
+    // pi prices each assistant message; the result carries this run's
+    // running sum (cumulative, like every runner's cost_usd).
+    let runCostUsd: number | undefined;
 
     try {
-      let first = true;
+      let first = !sessionId;
       for await (const p of args.prompt) {
         const text = typeof p === 'string' ? p : (p?.message?.content ?? String(p ?? ''));
         let nextPrompt = first
@@ -117,7 +129,8 @@ export class PiAgentRunner implements AgentRunner {
           // collected here while the stripped prose streams out live below.
           const rawTexts: string[] = [];
 
-          for await (const ev of streamTurn(bin, nextPrompt, sessionDir, args, outcome)) {
+          for await (const ev of streamTurn(bin, nextPrompt, sessionDir, sessionId, args, outcome)) {
+            if (outcome.sessionId) sessionId = outcome.sessionId;
             if (ev.kind === 'assistant' && ev.rawText !== undefined) {
               rawTexts.push(ev.rawText);
               // Yield assistant prose AS IT ARRIVES (per message_end event,
@@ -125,10 +138,19 @@ export class PiAgentRunner implements AgentRunner {
               // session.ts's watchdog must see messages DURING the turn.
               // Note this means partial output may already be yielded when a
               // turn later exits non-zero — preferable to losing it entirely.
-              if (ev.text) yield { type: 'assistant', text: ev.text };
+              if (ev.text) yield { type: 'assistant', session_id: sessionId, text: ev.text };
+            } else if (ev.kind === 'native') {
+              // pi's own tool calls, paired by toolCallId.
+              if (ev.toolStart) {
+                const t = ev.toolStart;
+                const m = tools.start(t.id, t.name, t.input, sessionId);
+                if (m) yield m;
+              }
+              if (ev.toolEnd) {
+                yield* tools.end(ev.toolEnd.id, ev.toolEnd.output, ev.toolEnd.isError, sessionId);
+              }
             } else if (ev.kind === 'tool') {
-              // Liveness for pi's own tool activity (or the spawn-time
-              // yield): session.ts never renders tool_use as chat — it only
+              // Liveness for the spawn-time yield: session.ts never renders tool_use as chat — it only
               // feeds the StateDetector ('tool-call' state) and refreshes
               // last-activity.
               yield { type: 'tool_use', text: ev.toolName };
@@ -149,6 +171,8 @@ export class PiAgentRunner implements AgentRunner {
 
           turnInputTokens += outcome.inputTokens;
           turnOutputTokens += outcome.outputTokens;
+          if (outcome.sessionId) sessionId = outcome.sessionId;
+          if (outcome.costUsd !== undefined) runCostUsd = (runCostUsd ?? 0) + outcome.costUsd;
 
           const malformed: string[] = [];
           const calls = parseToolCalls(rawTexts, (raw, err) =>
@@ -167,9 +191,11 @@ export class PiAgentRunner implements AgentRunner {
 
         yield {
           type: 'result',
+          session_id: sessionId,
           subtype: 'success',
           input_tokens: turnInputTokens,
           output_tokens: turnOutputTokens,
+          ...(runCostUsd !== undefined ? { cost_usd: runCostUsd } : {}),
         };
       }
     } catch (err) {
