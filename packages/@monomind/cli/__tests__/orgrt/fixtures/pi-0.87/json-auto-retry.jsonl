@@ -1,4 +1,4 @@
-{"type":"session","version":3,"id":"mm-probe-3","timestamp":"2026-09-29T08:58:43.003Z","cwd":"/home/monoes/scratch/cli-probe/pi-cwd"}
+{"type":"session","version":3,"id":"mm-probe-3","timestamp":"2026-09-29T08:58:43.003Z","cwd":"/w"}
 {"type":"agent_start"}
 {"type":"turn_start"}
 {"type":"message_start","message":{"role":"system","content":"","sections":{}}}
