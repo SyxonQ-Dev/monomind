@@ -26,10 +26,10 @@ const FIXTURE = [
   '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll run the requested probe command, then make both file edits using patches."}}',
   '{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/usr/bin/bash -lc \'echo probe\'","aggregated_output":"","exit_code":null,"status":"in_progress"}}',
   '{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/usr/bin/bash -lc \'echo probe\'","aggregated_output":"probe\\n","exit_code":0,"status":"completed"}}',
-  '{"type":"item.started","item":{"id":"item_2","type":"file_change","changes":[{"path":"/home/monoes/scratch/codex-probe/note.txt","kind":"add"}],"status":"in_progress"}}',
-  '{"type":"item.completed","item":{"id":"item_2","type":"file_change","changes":[{"path":"/home/monoes/scratch/codex-probe/note.txt","kind":"add"}],"status":"completed"}}',
-  '{"type":"item.started","item":{"id":"item_3","type":"file_change","changes":[{"path":"/home/monoes/scratch/codex-probe/note.txt","kind":"update"}],"status":"in_progress"}}',
-  '{"type":"item.completed","item":{"id":"item_3","type":"file_change","changes":[{"path":"/home/monoes/scratch/codex-probe/note.txt","kind":"update"}],"status":"completed"}}',
+  '{"type":"item.started","item":{"id":"item_2","type":"file_change","changes":[{"path":"/home/me/scratch/codex-probe/note.txt","kind":"add"}],"status":"in_progress"}}',
+  '{"type":"item.completed","item":{"id":"item_2","type":"file_change","changes":[{"path":"/home/me/scratch/codex-probe/note.txt","kind":"add"}],"status":"completed"}}',
+  '{"type":"item.started","item":{"id":"item_3","type":"file_change","changes":[{"path":"/home/me/scratch/codex-probe/note.txt","kind":"update"}],"status":"in_progress"}}',
+  '{"type":"item.completed","item":{"id":"item_3","type":"file_change","changes":[{"path":"/home/me/scratch/codex-probe/note.txt","kind":"update"}],"status":"completed"}}',
   '{"type":"item.completed","item":{"id":"item_4","type":"agent_message","text":"done"}}',
   '{"type":"turn.completed","usage":{"input_tokens":55766,"cached_input_tokens":46080,"cache_write_input_tokens":0,"output_tokens":228,"reasoning_output_tokens":0}}',
 ];
@@ -159,10 +159,10 @@ describe('CodexAgentRunner coder mode: tool events', () => {
     expect(starts[1]).toMatchObject({
       tool: 'file_change',
       kind: 'patch',
-      input: { files: [{ file_path: '/home/monoes/scratch/codex-probe/note.txt', action: 'add' }] },
+      input: { files: [{ file_path: '/home/me/scratch/codex-probe/note.txt', action: 'add' }] },
     });
     expect(starts[2].input).toEqual({
-      files: [{ file_path: '/home/monoes/scratch/codex-probe/note.txt', action: 'update' }],
+      files: [{ file_path: '/home/me/scratch/codex-probe/note.txt', action: 'update' }],
     });
     expect(ends[2]).toMatchObject({ is_error: false });
     expect(ends[2].exit_code).toBeUndefined();
