@@ -136,11 +136,14 @@ export const hooksPreTask: MCPTool = {
       taskId,
       description,
       suggestedAgents: suggestion.agents,
+      confident: suggestion.confident,
       complexity,
       estimatedDuration: estimatedDuration(complexity),
       risks: complexity === 'high' ? ['Complex task may require multiple iterations'] : [],
       recommendations: [
-        `Use ${suggestion.agents[0].type} as primary agent`,
+        suggestion.confident
+          ? `Use ${suggestion.agents[0].type} as primary agent`
+          : 'No confident agent match (monomind pick); choose the agent yourself',
         suggestion.agents.length > 2
           ? 'Consider using swarm coordination'
           : 'Single agent recommended',

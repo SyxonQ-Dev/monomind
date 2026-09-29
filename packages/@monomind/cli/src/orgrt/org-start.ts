@@ -18,6 +18,7 @@ import * as orgMemory from './org-memory.js';
 import * as startSteps from './org-start-steps.js';
 import { readHistory } from './reporting.js';
 import { mergeEffectiveRoleConfig, type RoleOverrides } from './role-slot.js';
+import { sweepStaleRoleTmpdirs } from './role-tmpdir.js';
 import { SessionLedger } from './session-ledger.js';
 import { TaskDag } from './task-dag.js';
 import type { BusEvent, OrgRole } from './types.js';
@@ -219,6 +220,15 @@ async function startOrgInner(
     credential: randomUUID(),
   };
   daemon.orgs.set(name, running);
+  // #480: private role TMPDIRs a dead earlier run of this org left behind.
+  const staleTmp = sweepStaleRoleTmpdirs({ org: name, root: daemon.root, run });
+  if (staleTmp.length > 0)
+    bus.emit({
+      type: 'audit',
+      reason: 'role-tmpdir-sweep',
+      msg: `removed ${staleTmp.length} stale role TMPDIR(s) left by an earlier run of this org`,
+      data: { removed: staleTmp },
+    });
 
   const roleFences = await startSteps.createRoleFences(daemon, def);
   if (roleFences.size > 0) running.fences = roleFences;

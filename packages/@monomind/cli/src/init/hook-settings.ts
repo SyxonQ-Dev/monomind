@@ -52,10 +52,7 @@ export function monomindHookId(command: unknown): string | undefined {
 }
 
 /** A hook's id may also be satisfied under another event (older layouts). */
-const EQUIVALENT_EVENTS: Record<string, string[]> = {
-  // Older `init upgrade` put the auto-memory sync on SessionEnd; now it is Stop.
-  'auto-memory-hook.mjs sync': ['Stop', 'SessionEnd'],
-};
+const EQUIVALENT_EVENTS: Record<string, string[]> = {};
 
 function idsIn(hooks: HooksByEvent, event: string): Set<string> {
   const ids = new Set<string>();

@@ -18,6 +18,7 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -299,16 +300,36 @@ describe('POST /api/knowledge/search (warm Second Brain endpoint)', () => {
   }, 30_000);
 });
 
+/** A stand-in for ANOTHER project's dashboard: answers every route, and
+ *  /api/identity names a different project dir. Since #477 a start whose
+ *  control.json names this project's OWN live dashboard reuses it and exits,
+ *  so the pairing guard below is exercised the way it still applies: a
+ *  control.json paired with a server that belongs to someone else. */
+async function startForeignDashboard(): Promise<{ port: number; close: () => void }> {
+  const srv = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(
+      req.url === '/api/identity'
+        ? JSON.stringify({ pid: process.pid, dir: path.join(tmpDir, 'another-project') })
+        : '{}',
+    );
+  });
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  const port = (srv.address() as net.AddressInfo).port;
+  return { port, close: () => srv.close() };
+}
+
 describe('dashboard-token pairing guard (secondary instances)', () => {
   it('a secondary server does not clobber the primary pairing; it writes dashboard-token-<port>', async () => {
-    // control.json marks server A as the live primary — exactly what
-    // control-start.cjs writes after a spawn.
+    // control.json marks a live server as the primary — exactly what
+    // control-start.cjs writes after pairing with a server it found listening.
+    const foreign = await startForeignDashboard();
     fs.writeFileSync(
       path.join(tmpDir, '.monomind', 'control.json'),
       JSON.stringify({
-        pid: serverA?.pid,
-        port: PORT_A,
-        url: `http://localhost:${PORT_A}`,
+        pid: process.pid,
+        port: foreign.port,
+        url: `http://localhost:${foreign.port}`,
         startedAt: new Date().toISOString(),
       }),
     );
@@ -333,6 +354,7 @@ describe('dashboard-token pairing guard (secondary instances)', () => {
     // And the primary keeps answering with the untouched primary pairing.
     const resA = await search(PORT_A, primaryBefore, { query: 'sanity check on primary' });
     expect(resA.status).toBe(200);
+    foreign.close();
   }, 60_000);
 
   // A primary whose event loop is blocked answers no probe at all — on a
@@ -370,12 +392,13 @@ describe('dashboard-token pairing guard (secondary instances)', () => {
   // deliberately replaces the primary pairing.
   it('a server control-start spawned as the primary writes dashboard-token even when control.json names a live server', async () => {
     const PORT_D = await freePort();
+    const foreign = await startForeignDashboard();
     fs.writeFileSync(
       path.join(tmpDir, '.monomind', 'control.json'),
       JSON.stringify({
-        pid: serverA?.pid,
-        port: PORT_A,
-        url: `http://localhost:${PORT_A}`,
+        pid: process.pid,
+        port: foreign.port,
+        url: `http://localhost:${foreign.port}`,
         startedAt: new Date().toISOString(),
       }),
     );
@@ -392,5 +415,6 @@ describe('dashboard-token pairing guard (secondary instances)', () => {
     expect(fs.existsSync(path.join(tmpDir, '.monomind', `dashboard-token-${PORT_D}`))).toBe(false);
     const res = await search(PORT_D, pairing, { query: 'sanity check on the new primary' });
     expect(res.status).toBe(200);
+    foreign.close();
   }, 60_000);
 });

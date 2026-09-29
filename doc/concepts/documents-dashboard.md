@@ -45,7 +45,10 @@ keyword matching when none is running.
   immediately after spawning." When opted in, it checks for an already-running, non-stale server
   first; otherwise it spawns `server.mjs` detached and writes `.monomind/control.json`.
 - Default port **4242** ([`control-start.cjs → DEFAULT_PORT`](packages/@monomind/cli/.claude/helpers/control-start.cjs#DEFAULT_PORT), [`src/ui/server.mjs → startServer`](packages/@monomind/cli/src/ui/server.mjs#startServer)
-  `startServer({ port = 4242, ... })`), auto-incrementing up to 10 times on collision.
+  `startServer({ port = 4242, ... })`), auto-incrementing up to 10 times on collision. A start
+  for a project whose dashboard already answers `/api/identity` (on that port or the one
+  `control.json` records) prints that URL and exits 0 instead
+  ([#477](https://github.com/monoes/monomind/issues/477)).
 - A user opens `http://localhost:4242` and clicks **Documents** in the sidebar.
 
 ---

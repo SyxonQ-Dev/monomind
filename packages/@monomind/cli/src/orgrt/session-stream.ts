@@ -15,6 +15,7 @@ import type { resolveRoleCostTier } from './cost-tier.js';
 import type { StreamOptions } from './mailbox.js';
 import { resolveProviderEnv, type resolveRoleProvider } from './provider.js';
 import type { resolveRoleGitEnforcement, roleAuthorityMask } from './role-sandbox.js';
+import { roleTmpEnv } from './role-tmpdir.js';
 import { gatedCanUseTool } from './session-gate.js';
 import { rolePromptFor } from './session-prompt.js';
 import type { SessionOpts } from './session-types.js';
@@ -72,6 +73,9 @@ export function sessionRunArgs(
     effort: tier?.effort,
     env: {
       ...resolveProviderEnv(prov.cfg),
+      // #480: the session's private TMPDIR. Right after the inherited env so
+      // any overlay below that sets TMPDIR itself keeps its explicit value.
+      ...roleTmpEnv(opts.roleTmpdir),
       // D8: how a NON-Claude provider expresses the tier's effort level.
       // Empty for Claude (handled natively by ClaudeAgentRunner) and for a
       // provider that declares no mechanism — which simply ignores effort.

@@ -4,13 +4,20 @@
  * one "Reply with the single word: ok" turn, reported as a single result
  * (doc/agent-exec-protocol.md "agent test --json", capability `agent-test-json`,
  * issue #390).
- * `--json` prints the result object. Without it, `agent test` is unchanged: the
+ * `--json` prints the result object; `--sandbox` and `--env` go to the turn as
+ * in `agent exec` (#474, capability `agent-test-sandbox`). Without it, `agent test` is unchanged: the
  * pre-rev-18 smoke turn that streams `agent exec`'s NDJSON events (§6).
  */
 
 import { type AgentTestOptions, agentTestExitCode, runAgentTest } from '../orgrt/agent-test.js';
+import type { SandboxMode } from '../orgrt/runner-sandbox.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
-import { parseDuration, testCommand as streamTestCommand } from './agent-exec.js';
+import {
+  parseDuration,
+  parseEnvFlags,
+  sandboxFlagError,
+  testCommand as streamTestCommand,
+} from './agent-exec.js';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
@@ -35,16 +42,27 @@ export async function runAgentTestCommand(
     return 2;
   }
   let timeoutMs: number;
+  let env: Record<string, string>;
   try {
     timeoutMs = parseDuration(ctx.flags.timeout, 'timeout') ?? DEFAULT_TIMEOUT_MS;
+    env = parseEnvFlags(ctx.flags.env); // #474: same rules as agent exec --env
   } catch (e) {
     process.stderr.write(`agent test: ${e instanceof Error ? e.message : String(e)}\n`);
+    return 2;
+  }
+  // #474: same values as agent exec --sandbox; the test turn is always scoped.
+  const sandbox = ctx.flags.sandbox;
+  const sandboxError = sandboxFlagError(sandbox, 'scoped');
+  if (sandboxError) {
+    process.stderr.write(`agent test: ${sandboxError}\n`);
     return 2;
   }
   const result = await runAgentTest({
     runtime,
     model: ctx.flags.model ? String(ctx.flags.model) : undefined,
     timeoutMs,
+    ...(sandbox !== undefined ? { sandbox: sandbox as SandboxMode } : {}),
+    ...(Object.keys(env).length ? { env } : {}),
     ...seams,
   });
   process.stdout.write(`${JSON.stringify(result)}\n`);
@@ -75,6 +93,17 @@ export const testCommand: Command = {
       type: 'string',
     },
     {
+      name: 'sandbox',
+      description:
+        "The vendor CLI's own sandbox, as agent exec --sandbox (read-only, workspace-write or full); reported as native_sandbox",
+      type: 'string',
+    },
+    {
+      name: 'env',
+      description: 'Extra env for the agent process, KEY=V (repeatable), as agent exec --env',
+      type: 'array',
+    },
+    {
       name: 'json',
       description:
         'Print one JSON result (status, reply, latency, tokens, cost) instead of the NDJSON event stream',
@@ -89,6 +118,10 @@ export const testCommand: Command = {
     {
       command: 'monomind agent test claude --model claude-sonnet-5 --json',
       description: 'Check one model and print the structured result',
+    },
+    {
+      command: 'monomind agent test codex --sandbox workspace-write --json',
+      description: "Test a turn inside the CLI's own workspace-write sandbox",
     },
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {

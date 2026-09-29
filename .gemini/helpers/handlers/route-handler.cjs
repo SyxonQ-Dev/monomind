@@ -3,17 +3,13 @@
 // Behavioral equivalence verified: 133 routing tests pass post-extraction.
 // hCtx (hook context) contains all shared state and utility functions:
 //   hCtx.hookInput, hCtx.toolInput, hCtx.toolName, hCtx.prompt, hCtx.args, hCtx.CWD
-//   hCtx.session, hCtx.router, hCtx.intelligence
+//   hCtx.session
 //   hCtx.isSimpleCommand — function defined in main(), passed via hCtx
-//   hCtx.getLearningService — async factory for LearningService singleton
 //   Utility fns: _recordRecentEdit, _findAffectedTests, _recordHookLatency,
 //     _getBudgetStatus, _injectCompactGraphMap, _maybeRebuildMonograph,
 //     _buildKnowledgeSearchFn, getMonographSuggestions, getMonographNeighbors,
 //     runWithTimeout, safeRequire, scanMicroAgentTriggers, _recordGraphTelemetry,
 //     _recordDecisionMarkers, _recordToolCall, _openMonographDb, fs, path
-//
-// NOTE: The 'route' handler has a local variable named 'ctx' (from intelligence.getContext).
-// The dispatcher passes the hook context as 'hCtx' to avoid collision.
 
 const path = require('path');
 const fs = require('fs');
@@ -193,7 +189,6 @@ module.exports = {
     var hookStart = Date.now();
     var prompt = hCtx.prompt;
     var hookInput = hCtx.hookInput;
-    var intelligence = hCtx.intelligence;
     var CWD = hCtx.CWD;
 
     // For slash commands and single-action invocations: no pick. The command
@@ -222,30 +217,6 @@ module.exports = {
     // banners — whose cost it can't repay (#415).
     if (pickCore.isTrivialPrompt(prompt)) return;
 
-    if (intelligence && intelligence.getContext) {
-      try {
-        // Each hook event runs as a fresh node process, so the module-level
-        // _entries cache is always empty here — without init() getContext()
-        // returns null on every prompt and stored patterns are never recalled.
-        // init() reads one small JSON file (auto-memory-store.json), so the
-        // per-prompt cost is negligible.
-        if (intelligence.init) {
-          try { intelligence.init(); } catch (e) { /* non-fatal */ }
-        }
-        // Bootstrap intelligence from monograph on first prompt if store is sparse
-        if (intelligence.bootstrapFromDb) {
-          try {
-            var bDb = hCtx._openMonographDb();
-            if (bDb) {
-              var bootstrapped = intelligence.bootstrapFromDb(bDb);
-              if (bootstrapped > 0) advisoryLog('[INTELLIGENCE] Bootstrapped ' + bootstrapped + ' hub nodes from knowledge graph');
-            }
-          } catch (e) { /* non-fatal */ }
-        }
-        const ctx = intelligence.getContext(prompt);
-        if (ctx) advisoryLog(ctx);
-      } catch (e) { /* non-fatal */ }
-    }
     {
       // ── The pick, in BOTH modes: Jev over the agent registry, else a strong
       //    keyword match over the same registry (bounded by
@@ -484,12 +455,21 @@ module.exports = {
               // silently failing auth and reporting keyword where the warm
               // server would have answered semantic.
               var sbCtrlUrl = 'http://localhost:4242';
+              var sbCtrlPid = null;
               var _sbCfgDirs = sbRoot && sbRoot !== CWD ? [CWD, sbRoot] : [CWD];
               for (var _sbCi = 0; _sbCi < _sbCfgDirs.length; _sbCi++) {
                 try {
                   var sbCtl = JSON.parse(fs.readFileSync(path.join(_sbCfgDirs[_sbCi], '.monomind', 'control.json'), 'utf-8'));
-                  if (sbCtl.url) { sbCtrlUrl = sbCtl.url; break; }
+                  if (sbCtl.url) { sbCtrlUrl = sbCtl.url; sbCtrlPid = sbCtl.pid; break; }
                 } catch (_) {}
+              }
+              // #416: a server whose recorded pid is gone cannot answer — skip
+              // the POST instead of paying its timeout on every prompt. A
+              // missing/0 pid (not yet paired) can't be judged, so it is tried.
+              if (Number.isInteger(sbCtrlPid) && sbCtrlPid > 0) {
+                try { process.kill(sbCtrlPid, 0); } catch (e) {
+                  if (!e || e.code !== 'EPERM') throw new Error('control server pid not alive');
+                }
               }
               var sbAuth = '';
               for (var _sbAi = 0; _sbAi < _sbCfgDirs.length; _sbAi++) {
@@ -503,7 +483,9 @@ module.exports = {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-monomind-token': sbAuth },
                 body: JSON.stringify({ query: sbPrompt, namespace: 'knowledge:shared', limit: 3 }),
-                signal: AbortSignal.timeout(900),
+                // A warm server answers in well under this; a hung one must
+                // not hold the prompt for long (#416: was 900 ms).
+                signal: AbortSignal.timeout(250),
               });
               if (sbResp.ok) {
                 var sbData = await sbResp.json();
@@ -527,8 +509,12 @@ module.exports = {
             }
             // Relevance floor: injecting weak matches pollutes every prompt's
             // context — configurable via .monomind/second-brain.json, default
-            // 0.35 for semantic hits, 0.5 for the noisier keyword fallback.
-            var sbFloor = sbMethod === 'keyword' ? 0.5 : 0.35;
+            // 0.65 for semantic hits, 0.5 for the noisier keyword fallback.
+            // #416: at the old 0.35 floor, 2 of 27 injected excerpts were
+            // relevant. Semantic scores are gte-modernbert cosine (+0.05 for
+            // project hits, see routes-org-knowledge.mjs), where unrelated
+            // prose in the same repo routinely lands at 0.4–0.6.
+            var sbFloor = sbMethod === 'keyword' ? 0.5 : 0.65;
             var sbInjectionLimit = 3;
             try {
               var sbConf = JSON.parse(fs.readFileSync(path.join(CWD, '.monomind', 'second-brain.json'), 'utf-8'));
@@ -536,6 +522,13 @@ module.exports = {
               if (typeof sbConf.injectionLimit === 'number' && sbConf.injectionLimit > 0) sbInjectionLimit = sbConf.injectionLimit;
             } catch (_) {}
             if (sbHits) sbHits = sbHits.filter(function(h) { return (h.score || 0) >= sbFloor; });
+            // One excerpt by default; a runner-up only rides along when it
+            // scores within 0.03 of the top hit (a genuine tie, not a tail).
+            if (sbHits && sbHits.length > 1) {
+              sbHits.sort(function(a, b) { return (b.score || 0) - (a.score || 0); });
+              var sbTop = sbHits[0].score || 0;
+              sbHits = sbHits.filter(function(h, i) { return i === 0 || sbTop - (h.score || 0) <= 0.03; });
+            }
             if (sbHits && sbHits.length > sbInjectionLimit) sbHits = sbHits.slice(0, sbInjectionLimit);
 
             // Telemetry: append one JSONL line per evaluated prompt so the
@@ -618,8 +611,7 @@ module.exports = {
         // [AUDIT]) carry identical content until the underlying metrics file
         // changes, so re-injecting them on every prompt is pure token waste.
         // Show each at most once per session per file version, keyed on the
-        // file's mtime — same marker-file pattern as mcp-not-connected-warned.json
-        // below. If the metrics file is rewritten, the banner may fire again.
+        // file's mtime. If the metrics file is rewritten, the banner may fire again.
         var bannerSessId = String((hCtx.hookInput && (hCtx.hookInput.sessionId || hCtx.hookInput.session_id)) || '');
         var bannerShownOnce = function (tag, metricsFilePath) {
           try {
@@ -671,35 +663,6 @@ module.exports = {
           }
           if (mapData && mapData.graphStaleness && mapData.graphStaleness.commitsBehind > 10 && bannerShownOnce('codebase-staleness', mapFile)) {
             advisoryLog('[CODEBASE] Graph index ' + mapData.graphStaleness.commitsBehind + ' commits behind HEAD — run monograph build');
-          }
-        }
-        // Graph gate connectivity nudge — the pre-search/pre-bash gate
-        // (utils/monograph.cjs _graphGateShouldBlock) hard-blocks the first
-        // Grep/Glob/bash-grep-or-find call each session until a real
-        // monograph_query/monograph_suggest call fires. If that block was
-        // never followed by a real graph call, the monomind MCP server is
-        // most likely not connected this session (config present but
-        // unapproved/not started) — surface it once so the user can fix the
-        // actual cause instead of the gate silently degrading to a no-op.
-        var graphGateFile = path.join(CWD, '.monomind', 'graph-gate-state.json');
-        var mcpWarnFile = path.join(CWD, '.monomind', 'mcp-not-connected-warned.json');
-        if (fs.existsSync(graphGateFile) && fs.statSync(graphGateFile).size < 4096) {
-          var gateState = JSON.parse(fs.readFileSync(graphGateFile, 'utf-8'));
-          var gateSessId = String((hCtx.hookInput && (hCtx.hookInput.sessionId || hCtx.hookInput.session_id)) || '');
-          if (gateState && gateState.sessionId === gateSessId && gateState.blockedOnce && !gateState.queried) {
-            var alreadyWarnedMcp = false;
-            if (fs.existsSync(mcpWarnFile)) {
-              try {
-                var mcpWarnData = JSON.parse(fs.readFileSync(mcpWarnFile, 'utf-8'));
-                if (mcpWarnData && mcpWarnData.sessionId === gateSessId) alreadyWarnedMcp = true;
-              } catch (e) { /* corrupt — warn again to be safe */ }
-            }
-            if (!alreadyWarnedMcp) {
-              advisoryLog('[MCP] The graph gate blocked a search but no monograph_query/monograph_suggest call followed — the monomind MCP server is likely not connected this session. Run `claude mcp add monomind -- npx monomind@latest mcp start` (then restart), or approve the .mcp.json trust prompt if one is pending.');
-              try {
-                fs.writeFileSync(mcpWarnFile, JSON.stringify({ sessionId: gateSessId, warnedAt: new Date().toISOString() }));
-              } catch (e) { /* non-fatal */ }
-            }
           }
         }
         // Deep dive findings (god nodes, high-degree files from background analysis)

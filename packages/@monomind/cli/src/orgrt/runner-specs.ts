@@ -234,6 +234,8 @@ export const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures | keyof Run
     binary: 'crush',
     binEnv: 'CRUSH_CLI_BIN',
     installHint: 'install Crush per https://github.com/charmbracelet/crush',
+    // #473: crush's own sign-in error says "please run 'crush' to set up a provider".
+    loginHint: 'crush (interactive provider setup)',
     // No structured protocol at all — crush's `run` subcommand has no
     // documented JSON event stream, just plain text (crush-runner.ts
     // header). The runner already streams each line the instant it
@@ -270,6 +272,8 @@ export const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures | keyof Run
     // PI_INSTALL_HINT also names --ignore-scripts and pi.dev/install.sh);
     // this plain form stays an `npm` install recipe a caller can run.
     installHint: 'npm install -g @earendil-works/pi-coding-agent',
+    // #473: pi's own sign-in error says "Use /login to log into a provider".
+    loginHint: 'pi, then /login (or export the provider API key)',
     // Rev 20 (#381): message_update's assistantMessageEvent.text_delta
     // streams per token when includePartialMessages is set, tool-call fences
     // held back until complete — live-verified against pi 0.87.1.
@@ -284,6 +288,8 @@ export const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures | keyof Run
     binary: 'pi',
     binEnv: 'PI_CLI_BIN',
     installHint: 'npm install -g @earendil-works/pi-coding-agent',
+    // #473: pi's own sign-in error says "Use /login to log into a provider".
+    loginHint: 'pi, then /login (or export the provider API key)',
     // Real per-token streaming via message_update's assistantMessageEvent
     // text_delta (fence-safely buffered by computeSafeChunk), live-verified
     // against pi 0.87.1 with a free OpenRouter model (#381).

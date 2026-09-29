@@ -48,7 +48,6 @@ function makeHCtx(overrides = {}) {
     router: null,
     intelligence: null,
     isSimpleCommand: () => false,
-    getLearningService: async () => null,
     _recordRecentEdit: () => {},
     _findAffectedTests: () => [],
     _recordHookLatency: () => {},
@@ -193,29 +192,25 @@ describe('route-handler routing path', () => {
     expect(output).not.toContain('Primary Recommendation');
   });
 
-  it('calls intelligence.getContext when available', async () => {
-    const rh = loadRH();
-    const mockGetCtx = vi.fn().mockReturnValue(null);
-    const hCtx = makeHCtx({
-      prompt: 'implement auth module',
-      intelligence: { getContext: mockGetCtx },
-    });
-    await rh.handle(hCtx);
-    expect(mockGetCtx).toHaveBeenCalledWith('implement auth module');
-  });
-
-  it('prints intelligence context when returned', async () => {
+  // #417: the per-prompt [INTELLIGENCE] lookup matched nothing in practice
+  // and rewrote ranked-context.json on every prompt.
+  it('does not run the intelligence lookup or rewrite ranked-context.json', async () => {
     const rh = loadRH();
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const hCtx = makeHCtx({
-      prompt: 'implement auth module',
-      intelligence: {
-        getContext: vi.fn().mockReturnValue('[INTELLIGENCE] Relevant patterns: auth pattern'),
-      },
-    });
-    await rh.handle(hCtx);
+    const intelligence = {
+      init: vi.fn(),
+      bootstrapFromDb: vi.fn(),
+      getContext: vi.fn().mockReturnValue('[INTELLIGENCE] Relevant patterns: auth pattern'),
+    };
+    await rh.handle(makeHCtx({ prompt: 'implement auth module', intelligence }));
+    expect(intelligence.init).not.toHaveBeenCalled();
+    expect(intelligence.bootstrapFromDb).not.toHaveBeenCalled();
+    expect(intelligence.getContext).not.toHaveBeenCalled();
     const output = logSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(output).toContain('[INTELLIGENCE]');
+    expect(output).not.toContain('[INTELLIGENCE]');
+    expect(fs.existsSync(path.join(tmpDir, '.monomind', 'data', 'ranked-context.json'))).toBe(
+      false,
+    );
   });
 
   it('handles missing router gracefully (no throw)', async () => {
@@ -490,6 +485,100 @@ describe('route-handler second-brain gate', () => {
     const calls = knowledgeCalls(fetchSpy);
     expect(calls).toHaveLength(1);
     expect(String(calls[0][0])).toBe('http://127.0.0.1:4242/api/knowledge/search');
+  });
+
+  // #416: a dead or hung dashboard server must not cost every prompt ~900 ms,
+  // and weak excerpts must not be injected at all.
+  const writeControl = (cwd, ctl) => {
+    fs.mkdirSync(path.join(cwd, '.monomind'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, '.monomind', 'control.json'), JSON.stringify(ctl));
+  };
+  const lastTelemetry = (cwd) => {
+    const lines = fs.readFileSync(telemetry(cwd), 'utf-8').trim().split('\n');
+    return JSON.parse(lines[lines.length - 1]);
+  };
+  const serve = (results) =>
+    vi.fn(async (url) =>
+      String(url).includes('/api/knowledge/search')
+        ? new Response(JSON.stringify({ method: 'semantic', results }), { status: 200 })
+        : new Response('{}', { status: 404 }),
+    );
+  const hit = (key, score) => ({
+    key,
+    content: `excerpt ${key}`,
+    score,
+    tags: [`src:/p/${key}.md`],
+  });
+  const runCaptured = async (fetchSpy) => {
+    const lines = [];
+    vi.spyOn(console, 'log').mockImplementation((...a) => lines.push(a.join(' ')));
+    vi.stubGlobal('fetch', fetchSpy);
+    await loadRH().handle(
+      makeHCtx({ prompt: PROMPT, router: router(), _buildKnowledgeSearchFn: searchFn() }),
+    );
+    vi.unstubAllGlobals();
+    return lines.join('\n');
+  };
+
+  it('skips the lookup when control.json names a dead pid', async () => {
+    const { spawnSync } = await import('node:child_process');
+    const deadPid = spawnSync(process.execPath, ['-e', '']).pid;
+    writeControl(tmpDir, { url: 'http://127.0.0.1:4242', pid: deadPid });
+    writeKnowledge(tmpDir, 'doc-metadata.jsonl');
+    const fetchSpy = serve([hit('a', 0.9)]);
+    await runCaptured(fetchSpy);
+    expect(knowledgeCalls(fetchSpy)).toHaveLength(0);
+    expect(fs.existsSync(telemetry(tmpDir))).toBe(true);
+  });
+
+  it('still queries when control.json names a live pid', async () => {
+    writeControl(tmpDir, { url: 'http://127.0.0.1:4242', pid: process.pid });
+    writeKnowledge(tmpDir, 'doc-metadata.jsonl');
+    const fetchSpy = serve([]);
+    await runCaptured(fetchSpy);
+    expect(knowledgeCalls(fetchSpy)).toHaveLength(1);
+  });
+
+  it('gives up on a hung server well before the old 900 ms timeout', async () => {
+    writeControl(tmpDir, { url: 'http://127.0.0.1:4242', pid: process.pid });
+    writeKnowledge(tmpDir, 'doc-metadata.jsonl');
+    const fetchSpy = vi.fn((url, opts) =>
+      String(url).includes('/api/knowledge/search')
+        ? new Promise((_, reject) =>
+            opts.signal.addEventListener('abort', () => reject(new Error('aborted'))),
+          )
+        : Promise.resolve(new Response('{}', { status: 404 })),
+    );
+    const t0 = Date.now();
+    await runCaptured(fetchSpy);
+    expect(knowledgeCalls(fetchSpy)).toHaveLength(1);
+    expect(Date.now() - t0).toBeLessThan(700);
+  });
+
+  it('injects nothing when every result is below the relevance floor', async () => {
+    writeControl(tmpDir, { url: 'http://127.0.0.1:4242', pid: process.pid });
+    writeKnowledge(tmpDir, 'doc-metadata.jsonl');
+    const out = await runCaptured(serve([hit('a', 0.6), hit('b', 0.55), hit('c', 0.5)]));
+    expect(out).not.toContain('[SECOND_BRAIN]');
+    expect(lastTelemetry(tmpDir)).toMatchObject({ injected: false, hits: 0 });
+  });
+
+  it('injects exactly one excerpt when only the top result is strong', async () => {
+    writeControl(tmpDir, { url: 'http://127.0.0.1:4242', pid: process.pid });
+    writeKnowledge(tmpDir, 'doc-metadata.jsonl');
+    const out = await runCaptured(serve([hit('a', 0.82), hit('b', 0.7), hit('c', 0.68)]));
+    expect(out).toContain('[SECOND_BRAIN] 1 relevant excerpt(s)');
+    expect(out).toContain('excerpt a');
+    expect(out).not.toContain('excerpt b');
+    expect(lastTelemetry(tmpDir)).toMatchObject({ injected: true, hits: 1, topScore: 0.82 });
+  });
+
+  it('keeps a second excerpt only when its score is close to the top', async () => {
+    writeControl(tmpDir, { url: 'http://127.0.0.1:4242', pid: process.pid });
+    writeKnowledge(tmpDir, 'doc-metadata.jsonl');
+    const out = await runCaptured(serve([hit('a', 0.8), hit('b', 0.79), hit('c', 0.7)]));
+    expect(out).toContain('[SECOND_BRAIN] 2 relevant excerpt(s)');
+    expect(out).not.toContain('excerpt c');
   });
 });
 

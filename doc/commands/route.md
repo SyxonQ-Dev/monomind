@@ -1,7 +1,7 @@
 # `monomind route` Command Reference
 
 > **Version 2.9.0**  
-> CLI reference for `monomind route` subcommands. Task routing maps developer tasks to registry agents through the central picker (`route task`, the default — the same ranking as `monomind pick` and the `pick` MCP tool), 256-D vector cosine similarity (`RouteLayer`, via `route semantic`), and coverage gap analysis (`route coverage`) — backed by an outcome-tracking ledger (`route stats`/`feedback`) that measures routing accuracy over time. There is no reinforcement learning of any kind: no Q-table, no epsilon exploration, no learned state-action values. `route task`'s router (`createKeywordRouter`, `monovector/index.ts`) delegates to [`routing/agent-pick.ts → pickAgents`](packages/@monomind/cli/src/routing/agent-pick.ts#pickAgents).
+> CLI reference for `monomind route` subcommands. Task routing maps developer tasks to registry agents through the central picker (`route task`, the default — the same ranking as `monomind pick` and the `pick` MCP tool), 256-D vector cosine similarity (`RouteLayer`, via `route semantic` — deprecated), and coverage gap analysis (`route coverage`) — backed by an outcome-tracking ledger (`route stats`/`feedback`) that measures routing accuracy over time. There is no reinforcement learning of any kind: no Q-table, no epsilon exploration, no learned state-action values. `route task` is `monomind pick --agents` ([`routing/agent-pick.ts → pickForTask`](packages/@monomind/cli/src/routing/agent-pick.ts#pickForTask)); the outcome-ledger subcommands still use `createKeywordRouter` (`monovector/index.ts`).
 
 ---
 
@@ -16,8 +16,8 @@ monomind route <subcommand> [options]
 
 | Subcommand | Alias | Description |
 |---|---|---|
-| `task` | *(default)* | Route a task to the best registry agent (same ranking as `monomind pick`) |
-| `semantic` | `sem` | Route a task through the central picker, falling back to cosine similarity (`RouteLayer`) and Haiku |
+| `task` | *(default)* | Route a task to the best registry agent (same answer and output as `monomind pick --agents`) |
+| `semantic` | `sem` | Deprecated: use `route task` / `monomind pick`. Central picker, then cosine similarity (`RouteLayer`) and Haiku |
 | `list-agents` | `agents`, `ls` | List the registry agents `route task` can pick |
 | `stats` | — | Show keyword router outcome statistics (accuracy, adherence, trend) |
 | `feedback` | — | Record a reward signal (-1.0 to 1.0) for a routing decision, into the outcomes ledger |
@@ -31,7 +31,7 @@ monomind route <subcommand> [options]
 ## Subcommand Details
 
 ### 1. `monomind route task` *(default)*
-Routes a task description to the best agent in `.monomind/registry.json` through the central picker: the Jev decision model when configured, otherwise keyword overlap with each agent's name and description (`createKeywordRouter` → `pickAgents` → `rankForTask`). The agent it returns is a spawnable name (the Task tool's `subagent_type`); with no registry match it answers `coder`.
+Runs `monomind pick -t "<task>" --agents` ([`pickAction`](packages/@monomind/cli/src/commands/pick.ts#pickAction) → `pickForTask` → `rankForTask`) and prints exactly its output, text or `--json`, so the two cannot disagree: the Jev decision model when configured, otherwise keyword overlap with each agent's name and description. Agents are spawnable names (the Task tool's `subagent_type`). When pick has no confident match, neither does `route task`: it lists the candidates pick ranked (or "(no match)") and names no agent.
 
 ```bash
 monomind route task "implement authentication system"
@@ -46,7 +46,10 @@ monomind route task "review security" --agent "Security Engineer"
 
 ---
 
-### 2. `monomind route semantic`
+### 2. `monomind route semantic` *(deprecated)*
+
+> Deprecated: use `route task` or `monomind pick`. The route layer (`@monoes/routing`) stays installed but gets no new work ([#430](https://github.com/monoes/monomind/issues/430)).
+
 Routes a task through the route layer ([Routing § 6](../concepts/routing.md#6-the-route-layer-route-semantic-hooks_route_semantic-agent-spawn---task)): the central picker's decision model (kept only at or above `MONOMIND_JEV_MIN_CONFIDENCE`), the `@monoes/routing` keyword pre-filter, the picker's keyword ranking when its top agent clearly leads (score ≥ 2, 1.5× the runner-up), then real-embedding cosine similarity in an isolated worker, a headless Haiku fallback below the threshold, and the 256-D hash encoder when the worker is unavailable.
 
 ```bash

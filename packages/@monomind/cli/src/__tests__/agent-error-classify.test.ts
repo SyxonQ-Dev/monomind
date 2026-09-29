@@ -131,11 +131,52 @@ describe('classifyAgentError: other statuses', () => {
       "No inference provider configured. Run 'hermes model' to choose a provider and model",
     ],
     ['codex', 'CodexAgentRunner: codex exec failed (exit 1): 401 Unauthorized'],
+    // #473 crush 0.96.1, no providers set up (reported in issue #473 from a HOME
+    // without runtime credentials)
+    [
+      'crush',
+      "CrushAgentRunner: crush run failed (exit 1)\nstderr: No providers configured - please run 'crush' to set up a provider interactively.",
+    ],
+    // #473 crush 0.96.1 (seen 2026-09-29, empty CRUSH_GLOBAL_CONFIG/DATA, ~/.aws present)
+    [
+      'crush (bedrock, seen)',
+      'CrushAgentRunner: crush run failed (exit 1)\nstderr: ERROR Agent processing failed: failed to start agent processing stream: authentication error: failed to refresh cached credentials, no EC2 IMDS role found',
+    ],
+    // #473 pi 0.87.1 (seen 2026-09-29 with an empty PI_CODING_AGENT_DIR; also in issue #473)
+    [
+      'pi',
+      'PiAgentRunner: pi failed (exit 1)\nstderr: No API key found for the selected model.\n\nUse /login to log into a provider via OAuth or API key. See:\n  /home/u/.local/share/mise/installs/pi/0.87.1/pi/docs/providers.md',
+    ],
+    ['no api key configured', 'Error: no API key configured for provider openrouter'],
+    ['use /login alone', 'Use /login to log into a provider via OAuth or API key.'],
   ])('%s runner-error auth wording → auth', (_rt, message) => {
     expect(classifyAgentError({ code: 'runner-error', message })).toEqual({
       status: 'auth',
       code: 'auth',
     });
+  });
+
+  it('#473 sign-in wording does not swallow model-unavailable or quota errors', () => {
+    // pi (seen): unknown model with no key set still reports the model first.
+    expect(
+      classifyAgentError({
+        code: 'runner-error',
+        message:
+          'Error: Model "nonexistent-model-9" not found. Use --list-models to see available models.',
+      }).status,
+    ).toBe('model_unavailable');
+    expect(
+      classifyAgentError({
+        code: 'runner-error',
+        message: 'large model "x" not found. No providers configured',
+      }).status,
+    ).toBe('model_unavailable');
+    for (const message of [
+      "You've hit your usage limit.",
+      'insufficient_quota: check your API key billing details',
+    ]) {
+      expect(classifyAgentError({ code: 'runner-error', message }).status).not.toBe('auth');
+    }
   });
 
   it('runner-error quota wording → quota', () => {

@@ -140,13 +140,13 @@ All of these rank through [`pickForTask`](packages/@monomind/cli/src/routing/age
 |---|---|
 | `mcp__monomind__pick` ([`pick-tools.ts → pickTool`](packages/@monomind/cli/src/mcp-tools/pick-tools.ts#pickTool)) | Input `{ task, kind?: "agents" \| "skills" \| "both", categories?, top?: 1-20 }`; returns the same JSON as `monomind pick --json` plus a one-line `summary` (`agent: <name> · skill: <invoke>`) |
 | `monomind pick -t "<task>"` ([`commands/pick.ts`](packages/@monomind/cli/src/commands/pick.ts)) | `--agents`/`--skills`, `--categories`, `--top N` (1-50), `--min-confidence P`, `--explain` (how the outcome prior moved each keyword score, plus the pick history), `--json` |
-| `hooks_route`, `monomind hooks route` | `primaryAgent`/`alternativeAgents` as `{ type, confidence, reason }`; `topK` 1-20. The `useSemanticRouter` input is gone |
-| `hooks_pre-task`, `hooks_explain` | Suggested agents / the explanation of the same pick |
-| `monomind route task` | Routed through `createKeywordRouter`, which now delegates to the picker; `route list-agents` lists the registry |
+| `hooks_route`, `monomind hooks route` | `primaryAgent`/`alternativeAgents` as `{ type, confidence, reason }`, plus pick's `confident` verdict and `summary`; `topK` 1-20. The `useSemanticRouter` input is gone |
+| `hooks_pre-task`, `hooks_explain` | Suggested agents / the explanation of the same pick, with `confident`; pre-task names a primary agent only when pick is confident |
+| `monomind route task` (and bare `monomind route "<task>"`) | Runs `monomind pick --agents` and prints exactly its output (text or `--json`); `data.agentId` is the top agent only when pick is confident. `route list-agents` lists the registry |
 | `guidance_recommend` | A top-level `agents` array (`{ name, confidence, reason }`) from the picker; capability areas no longer list agents |
 | `agent spawn --type` | Accepts registry names, plus aliases for the old fixed types (`architect` → `Software Architect`, `security-auditor` → `Security Engineer`, …) |
 
-When nothing ranks, the wrappers answer `coder`.
+When nothing ranks, the MCP wrappers answer `coder` with `confident: false`; `route task` prints pick's "(no match)".
 
 `monomind pick --json` returns:
 
@@ -165,6 +165,8 @@ The outcome prior (section 7) re-ranks keyword agent results in every selector: 
 ---
 
 ## 6. The Route Layer (`route semantic`, `hooks_route_semantic`, `agent spawn --task`)
+
+> **Deprecated.** The route layer (`@monoes/routing`, `route-layer-factory.ts`) is kept for `route semantic`, `hooks_route_semantic` and `agent spawn --task` but gets no new work: use `monomind pick` / the `pick` MCP tool (or `route task`, which is the same thing). It can answer differently from the picker once the picker has no confident answer ([#430](https://github.com/monoes/monomind/issues/430)).
 
 [`route-layer-factory.ts → createConfiguredRouteLayer`](packages/@monomind/cli/src/routing/route-layer-factory.ts#createConfiguredRouteLayer) runs, in order:
 

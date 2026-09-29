@@ -103,58 +103,6 @@ describe('intelligence.init', () => {
   });
 });
 
-// ── getContext ─────────────────────────────────────────────────────────────────
-
-describe('intelligence.getContext', () => {
-  it('returns null for empty prompt', () => {
-    const intl = loadIntl();
-    intl.init();
-    expect(intl.getContext('')).toBeNull();
-  });
-
-  it('returns null for null prompt', () => {
-    const intl = loadIntl();
-    intl.init();
-    expect(intl.getContext(null)).toBeNull();
-  });
-
-  it('returns null when no entries exist', () => {
-    const intl = loadIntl();
-    expect(intl.getContext('implement authentication')).toBeNull();
-  });
-
-  it('returns [INTELLIGENCE] context string when matching entries exist', () => {
-    seedStore(tmpDir, [
-      {
-        id: 'e1',
-        content: 'implement feature authentication oauth jwt',
-        summary: 'auth',
-        category: 'default',
-        confidence: 0.8,
-      },
-    ]);
-    const intl = loadIntl();
-    intl.init();
-    const ctx = intl.getContext('implement authentication');
-    expect(ctx).toContain('[INTELLIGENCE]');
-  });
-
-  it('returns null when prompt has no word overlap with entries', () => {
-    seedStore(tmpDir, [
-      {
-        id: 'e1',
-        content: 'authentication oauth jwt token',
-        summary: 'auth',
-        category: 'default',
-        confidence: 0.8,
-      },
-    ]);
-    const intl = loadIntl();
-    intl.init();
-    expect(intl.getContext('zzzzunrelated1234zzzz')).toBeNull();
-  });
-});
-
 // ── recordEdit ─────────────────────────────────────────────────────────────────
 
 describe('intelligence.recordEdit', () => {

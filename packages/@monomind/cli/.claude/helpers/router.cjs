@@ -2,10 +2,10 @@
 /**
  * Skill keyword matcher for the prompt hook.
  *
- * handlers/route-handler.cjs calls matchSkills() for its skill hint. Agent
- * picks come from .monomind/registry.json via the pick index, not from this
- * file: the keyword agent table (routeTask) that used to live here named
- * slugs that are not installed agents, and nothing at runtime called it.
+ * Legacy: no hook loads this file any more (#430) — the prompt hook's pick
+ * (handlers/pick-core.cjs) ranks agents and skills from the shared catalogs.
+ * The keyword agent table (routeTask) that used to live here named slugs
+ * that are not installed agents, and nothing at runtime called it.
  *
  * Exports:
  *   matchSkills(prompt, topN)   → array of { skill, invoke, description, score }

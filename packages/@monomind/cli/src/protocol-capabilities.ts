@@ -123,6 +123,9 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    mode on another runtime is `unsupported`); never loosens an org role's
  *    git level; `start` carries `native_sandbox` and `approvals`, scan
  *    entries carry them plus `sandbox_modes` (§3.1, §3.2, §6, rev 23)
+ *  - `agent-test-sandbox` — `agent test <id> --json` accepts `--sandbox` and
+ *    `--env` as `agent exec` does, and the result carries `native_sandbox`
+ *    (issue #474, §13)
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
@@ -153,6 +156,7 @@ export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec-access-read',
   'agent-exec-full-access-tools',
   'agent-exec-sandbox',
+  'agent-test-sandbox',
 ] as const;
 
 /** The exact handshake object emitted by `monomind --version --json`. */

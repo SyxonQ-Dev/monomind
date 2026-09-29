@@ -9,6 +9,7 @@ import * as decisionOps from './decisions.js';
 import { stopEndpointRetries } from './endpoint-roles.js';
 import { clearIdleRecord, readIdleRecord } from './idle-deadline.js';
 import { historyFile, readRunEvents, summarizeRun } from './reporting.js';
+import { releaseRunTmpdirs } from './role-tmpdir.js';
 import { sandboxStubs } from './sandbox-stubs.js';
 
 export async function stopOrg(
@@ -185,6 +186,8 @@ async function finishStop(
   }
   // The run's sessions are gone: take down the sandbox stubs it held.
   sandboxStubs.release(`${name}:${org.run}`);
+  // #480: and every private role TMPDIR a session did not already remove.
+  releaseRunTmpdirs(name, org.run);
   // #302 truth gate: every stop path funnels through here, so this is the
   // one place that can record how the run ACTUALLY ended, regardless of
   // which of the five paths triggered it. `closedBy` is undefined only for

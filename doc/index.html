@@ -321,7 +321,7 @@ code { font-family: var(--ff-m); font-size: 0.85em; background: var(--surface2);
   <div class="page-content" style="padding-top:0">
     <div class="section-title reveal">Why Monomind?</div>
     <div class="card-grid">
-      <div class="card reveal"><div class="card-icon">🧠</div><div class="card-title">Persistent Memory</div><div class="card-desc">Four-tier memory palace (L0–L3) with BM25 search, plus a JSON pattern store with episodic recall injected at prompt time. Context survives across sessions.</div></div>
+      <div class="card reveal"><div class="card-icon">🧠</div><div class="card-title">Persistent Memory</div><div class="card-desc">A JSON pattern store with episodic recall injected at prompt time. Context survives across sessions.</div></div>
       <div class="card reveal"><div class="card-icon">🏢</div><div class="card-title">Org Runtime</div><div class="card-desc">Run real agent organizations — role hierarchies, goals, budgets, and approval workflows backed by actual Claude Agent SDK sessions per role, with a live dashboard.</div></div>
       <div class="card reveal"><div class="card-icon">🔗</div><div class="card-title">Knowledge Graph</div><div class="card-desc">Monograph builds a full dependency graph of your codebase — 19 MCP tools by default (27 more via MONOGRAPH_MCP_ADVANCED=1) for impact analysis, dead code detection, path finding, and multi-repo queries.</div></div>
       <div class="card reveal"><div class="card-icon">⚡</div><div class="card-title">Agent &amp; Skill Picking</div><div class="card-desc">One index of your agents and skills, ranked for every prompt and delivered to Claude as a <code>[PICK]</code> line. Adherence and outcomes are logged and measured by <code>doctor -c pick</code>. <a href="#agents" style="color:var(--accent)">Agents &amp; Skills</a></div></div>
@@ -512,18 +512,7 @@ code { font-family: var(--ff-m); font-size: 0.85em; background: var(--surface2);
     <div class="page-header">
       <span class="page-tag">Concepts</span>
       <h1 class="page-title">Memory &amp; Knowledge</h1>
-      <p class="page-desc">Four-tier memory palace, BM25 search, a JSON pattern store with episodic recall, Monograph (code knowledge graph — 19+27 MCP tools), and Second Brain (document knowledge base — 22 file formats including all Microsoft Office and Google Drive types).</p>
-    </div>
-    <div class="section-title reveal">Memory Palace — Four Tiers</div>
-    <div class="reveal" style="margin-bottom:24px;display:flex;gap:12px;flex-wrap:wrap">
-      <img src="assets/memory-photo.png" alt="Memory Palace visualization" style="flex:1;min-width:200px;border-radius:10px;object-fit:cover;max-height:200px">
-      <img src="assets/memory-illustration.svg" alt="Memory Palace tier diagram" style="flex:2;min-width:280px;border-radius:10px">
-    </div>
-    <div class="tier-stack reveal">
-      <div class="tier-row tier-l0"><div class="tier-label">L0<br>In-flight</div><div class="tier-content"><strong>Current session context.</strong> Stored in <code>drawers.jsonl</code>. Each drawer has a key, value, tags array, timestamp, and score. Ephemeral — not persisted across sessions unless promoted.</div></div>
-      <div class="tier-row tier-l1"><div class="tier-label">L1<br>Working</div><div class="tier-content"><strong>Cross-session working memory.</strong> Closets store aggregated entries from multiple drawers. Closet boost adds +0.5 per matching search term. BM25 parameters: K1=1.5, B=0.75.</div></div>
-      <div class="tier-row tier-l2"><div class="tier-label">L2<br>Long-term</div><div class="tier-content"><strong>Pattern store + episodic recall.</strong> Patterns live in plain JSON (<code>patterns.json</code>, <code>auto-memory-store.json</code>) loaded by <code>intelligence.init()</code> at session start; episodic memories (<code>episodic/episodes.jsonl</code>) are keyword-matched and injected at prompt time. No vector database in the hot path.</div></div>
-      <div class="tier-row tier-l3"><div class="tier-label">L3<br>Deep search</div><div class="tier-content"><strong>BM25 over all drawers.</strong> Full-corpus search across <code>drawers.jsonl</code> with closet-term boosting — the most comprehensive retrieval layer, used on explicit search calls.</div></div>
+      <p class="page-desc">A JSON pattern store with episodic recall, Monograph (code knowledge graph — 19+27 MCP tools), and Second Brain (document knowledge base — 22 file formats including all Microsoft Office and Google Drive types).</p>
     </div>
     <div class="section-title reveal">Storage</div>
     <div class="table-wrap reveal">
@@ -532,7 +521,6 @@ code { font-family: var(--ff-m); font-size: 0.85em; background: var(--surface2);
       <tbody>
         <tr><td class="mono">patterns.json / auto-memory-store.json</td><td>Learned patterns, prompt-time recall</td><td>Default hot path. Plain JSON, keyword matching.</td></tr>
         <tr><td class="mono">episodic/episodes.jsonl</td><td>Episodic recall</td><td>Keyword-matched against the prompt; injected as context.</td></tr>
-        <tr><td class="mono">palace/drawers.jsonl</td><td>Verbatim BM25 search</td><td>800-char chunks, scored on retrieval.</td></tr>
         <tr><td class="mono">SQLite + local embeddings (default)</td><td>Semantic + keyword search, local vectors</td><td>better-sqlite3 with sql.js WASM fallback; local HF embeddings; no data leaves the machine. LanceDB was removed 2026-07; a dormant pure-JS HNSW index is the scale-up path if needed.</td></tr>
       </tbody>
     </table>

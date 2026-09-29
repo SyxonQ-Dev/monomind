@@ -160,12 +160,13 @@ describe('ADR-O001 D7: an org with no loadout catalog is unchanged', () => {
   });
 });
 
-// Captured against 8546057f7 (pre-D7).
-const COORDINATOR_PROMPT_SHA = 'aac1470d23beab53bc0e30aa5a8af493bd06bc9e78254cdc52e6ca4157fc4ed0';
-const WORKER_PROMPT_SHA = 'dff3a95ffbbb6d7238d544976ed42b593ff2738653456a4ce3f5058643a4e0dc';
+// Captured against 8546057f7 (pre-D7). Recaptured (with SESSION_PROMPT_SHA)
+// when every role prompt gained the private-TMPDIR line (#480).
+const COORDINATOR_PROMPT_SHA = '18f35e9a9104b0492787e2e8dcf5cd6462727d11992f1bbd462c775850078d2c';
+const WORKER_PROMPT_SHA = 'ac32b47114e44c7fe84c39ddfede2278178d091e0774abce3cff63df7a97730e';
 // Recaptured when role guidance stopped being keyed off ui.icon: the fixture's
 // dev role no longer carries archetype text, so its prompt has none.
-const SESSION_PROMPT_SHA = '64fc1c260b590557c7321104a37b2457eaf507507c91ca92c59e9c63ac6d9fc1';
+const SESSION_PROMPT_SHA = '57b9b5b5e005d51bb4c3785fec1e2d3c4692f8e2be0186b6986ff21d921ca24d';
 // Recaptured when org_task_done's evidence gained an optional `worktree`
 // (evidence may be pinned to any local worktree or branch head).
 // Recaptured when each evidence check gained an optional `expectExit` (a

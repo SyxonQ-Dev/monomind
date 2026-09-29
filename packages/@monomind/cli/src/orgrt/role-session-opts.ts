@@ -16,6 +16,7 @@ import * as questionOps from './questions.js';
 import { endTurn, withTrace } from './role-trace.js';
 import { resolveRoleRunner } from './runner-resolve.js';
 import { effectiveToolProviders } from './skill-library.js';
+import { isTerminalStatus } from './task-dag.js';
 import { resolveAutoAssignee, type TaskPick } from './task-match.js';
 import { type DecisionKind, ORG_DIR, type OrgRole } from './types.js';
 
@@ -118,6 +119,11 @@ export function buildRoleSessionOpts(
     maxTurns: role.max_turns_per_message ?? def.run_config.max_turns_per_message,
     resumeSessionId: roleCheckpoint?.sessionId,
     sessionLedger: running.sessionLedger,
+    // #480: a closed task's session TMPDIR is removed (role-tmpdir.ts).
+    isTaskClosed: (taskId: string) => {
+      const task = running.taskDag?.get(taskId);
+      return !!task && isTerminalStatus(task.status);
+    },
     // ADR-O001 D3 x D7: a task-scoped session is built with its task's own
     // recorded loadout. Unresolvable → no loadout, loudly (as at spawn).
     loadoutFor: (taskId: string) => {
