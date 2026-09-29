@@ -105,18 +105,22 @@ describe('--settings on non-claude runtimes', () => {
   });
 
   it('an unlisted runtime gets a generic description', () => {
-    const [n] = runtimeStartupNotices({ runtime: 'crush', settings: ['user'], effortSupported: false });
+    const [n] = runtimeStartupNotices({
+      runtime: 'vercel',
+      settings: ['user'],
+      effortSupported: false,
+    });
     expect(n).toEqual({
       v: 1,
       type: 'status',
       phase: 'notice',
-      message: 'crush: its own user config and project files',
+      message: 'vercel: its own user config and project files',
     });
   });
 
   it('--settings none on a non-claude runtime emits nothing', () => {
-    expect(runtimeStartupNotices({ runtime: 'codex', settings: [], effortSupported: true })).toEqual(
-      [],
-    );
+    expect(
+      runtimeStartupNotices({ runtime: 'codex', settings: [], effortSupported: true }),
+    ).toEqual([]);
   });
 });

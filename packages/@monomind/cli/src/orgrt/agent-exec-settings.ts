@@ -102,7 +102,14 @@ const RUNTIME_LOADS: Record<string, string> = {
   codex: 'user config (~/.codex/config.toml, incl. its MCP servers) + project AGENTS.md',
   opencode: 'user config (~/.config/opencode) + project opencode.json, AGENTS.md and MCP servers',
   antigravity: 'user settings (~/.gemini) + project GEMINI.md and .gemini/',
-  kimicode: 'user config (~/.kimi) + project AGENTS.md and .kimi-code/',
+  kimicode: 'user config (~/.kimi-code) + project AGENTS.md and .kimi-code/',
+  // From each CLI's docs; not checked live.
+  grok: 'user config (~/.grok/config.toml, MCP servers) + Claude-compatible files (CLAUDE.md, .claude/, .mcp.json)',
+  qwen: 'user settings (~/.qwen/settings.json, MCP servers) + project QWEN.md and .qwen/',
+  copilot:
+    'user config (~/.copilot, MCP servers incl. built-in GitHub) + project custom instructions (AGENTS.md, .github/copilot-instructions.md)',
+  crush: 'user config (~/.config/crush/crush.json) + project crush.json and AGENTS.md',
+  pi: 'user settings (~/.pi/agent) + project AGENTS.md/CLAUDE.md',
 };
 
 /**
