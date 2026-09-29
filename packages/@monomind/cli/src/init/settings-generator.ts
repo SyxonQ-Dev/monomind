@@ -107,8 +107,6 @@ export function generateSettings(options: InitOptions): object {
     },
     memory: {
       backend: options.runtime.memoryBackend,
-      learningBridge: { enabled: options.runtime.enableLearningBridge ?? true },
-      agentScopes: { enabled: options.runtime.enableAgentScopes ?? true },
     },
     neural: {
       enabled: options.runtime.enableNeural,

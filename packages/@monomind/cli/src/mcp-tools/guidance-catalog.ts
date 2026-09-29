@@ -95,7 +95,7 @@ export const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
       'memory init',
     ],
     agents: ['monoswarm-memory-manager'],
-    skills: ['memory-advanced', 'memory-vector-search', 'memory-patterns', 'memory-learning'],
+    skills: ['memory-toolkit'],
     whenToUse: 'When you need to persist, search, or retrieve knowledge across sessions.',
   },
   'intelligence-learning': {
@@ -210,13 +210,7 @@ export const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
       'sync-coordinator',
       'github-modes',
     ],
-    skills: [
-      'github-release-management',
-      'github-workflow-automation',
-      'github-code-review',
-      'github-project-management',
-      'github-multi-repo',
-    ],
+    skills: ['github-toolkit'],
     whenToUse: 'When working with GitHub repos, PRs, issues, releases, or CI/CD pipelines.',
   },
   'session-workflow': {
@@ -243,7 +237,8 @@ export const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
     tools: ['embeddings_generate', 'embeddings_compare', 'embeddings_search', 'embeddings_init'],
     commands: [],
     agents: [],
-    skills: ['memory-vector-search', 'memory-optimization'],
+    // No shipped skill covers the embeddings_* tools.
+    skills: [],
     whenToUse:
       'When you need semantic search, document embedding, or vector similarity operations.',
   },

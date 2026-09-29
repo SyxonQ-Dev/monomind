@@ -126,15 +126,6 @@ memory:
   backend: ${options.runtime.memoryBackend}
   persistPath: .monomind/data
   cacheSize: 100
-  # ADR-049: memory scopes (learningBridge values are config-only; nothing reads them yet)
-  learningBridge:
-    enabled: ${options.runtime.enableLearningBridge ?? options.runtime.enableNeural}
-    confidenceDecayRate: 0.005
-    accessBoostAmount: 0.03
-    consolidationThreshold: 10
-  agentScopes:
-    enabled: ${options.runtime.enableAgentScopes ?? true}
-    defaultScope: project
 
 neural:
   enabled: ${options.runtime.enableNeural}
