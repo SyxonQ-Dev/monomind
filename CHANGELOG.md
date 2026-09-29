@@ -2,6 +2,12 @@
 
 All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
+## [Unreleased]
+
+### Fixed
+
+- **A claude role's Bash tool uses the role's private TMPDIR** ([#503](https://github.com/monoes/monomind/issues/503), follow-up to [#480](https://github.com/monoes/monomind/issues/480)). Claude Code reads `CLAUDE_CODE_TMPDIR` before `TMPDIR`, and its Bash tool exports that variable to every command it runs. An org started from a Claude Code session's Bash tool inherited the outer session's value, so in the SDK sandbox a claude role's Bash got that shared directory as `$TMPDIR` and a bare `mktemp` landed there: `$HOME/mrg-tmp/claude-1000/claude-1000` in the 2.20.0 release run's drill. Without the sandbox, `$TMPDIR` was right, but a `claude` started from the role's shell still used the shared directory. The role environment now sets `CLAUDE_CODE_TMPDIR` to the role's directory as well as `TMPDIR`, `TMP` and `TEMP`. Claude Code keeps its own files in `claude-<uid>/` inside that directory. The sandbox is unchanged: its writable roots already include the base the role directory sits in. A new opt-in test (`MONOMIND_SANDBOX_E2E=1`) runs the bundled Claude Code CLI against a scripted API, both unsandboxed and in the sandbox, and checks `$TMPDIR`, `mktemp -d` and `$CLAUDE_CODE_TMPDIR`.
+
 ## [2.20.0] — 2026-09-29
 
 ### Added

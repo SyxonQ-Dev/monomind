@@ -11,7 +11,7 @@
  *
  * So each role session — each task session under `session_scope: "task"` —
  * gets its own `<base>/<org>-<role>-<random>/` (mode 0700), exported as
- * TMPDIR, TMP and TEMP. `<base>` is the TMPDIR the role would otherwise have
+ * TMPDIR, TMP, TEMP and CLAUDE_CODE_TMPDIR. `<base>` is the TMPDIR the role would otherwise have
  * had, so the OS sandbox's writable temp root and the file-tool roots (both
  * built from that base) already cover it.
  *
@@ -60,9 +60,14 @@ export function roleTmpBase(env: NodeJS.ProcessEnv = process.env): string {
   return resolve(env.TMPDIR || env.TMP || env.TEMP || tmpdir());
 }
 
-/** The env overlay pointing every temp-dir convention at `dir`. */
+/** The env overlay pointing every temp-dir convention at `dir`.
+ *  CLAUDE_CODE_TMPDIR (#503): Claude Code reads it before TMPDIR, and its
+ *  Bash tool exports it to every command, so an org started from a Claude
+ *  Code session inherits the outer session's temp dir. Left in place, a
+ *  claude role's sandboxed Bash got that shared dir as TMPDIR, and any
+ *  `claude` a role ran used it too. Claude Code adds `claude-<uid>/` under it. */
 export function roleTmpEnv(dir: string | undefined): Record<string, string> {
-  return dir ? { TMPDIR: dir, TMP: dir, TEMP: dir } : {};
+  return dir ? { TMPDIR: dir, TMP: dir, TEMP: dir, CLAUDE_CODE_TMPDIR: dir } : {};
 }
 
 /** Creates `<base>/<org>-<role>-XXXXXX` (0700) with its owner marker and
