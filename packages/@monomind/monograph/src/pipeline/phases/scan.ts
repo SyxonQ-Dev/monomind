@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, readdirSync, readFileSync, type statSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import micromatch from 'micromatch';
@@ -28,6 +29,15 @@ const DEFAULT_IGNORE = new Set([
   '.vercel',
   '.wrangler',
   '.open-next',
+  // Platform asset mirrors `monomind init` writes next to .claude/, the
+  // monograph cache and the agent mail dir — never user source (#404).
+  '.agents',
+  '.gemini',
+  '.kimi-code',
+  '.opencode',
+  '.codex',
+  '.monograph',
+  '.mail',
 ]);
 
 const BINARY_EXTENSIONS = new Set([
@@ -59,11 +69,42 @@ const GENERATED_PATTERNS = [
   /\.min\.(js|css)$/,
   /\.pb\.go$/,
   /_generated\.ts$/,
-  // Monograph's own build output (reporting/graph-report.ts writes it to the repo
-  // root). Indexing it feeds a previous build's prose back into the graph as
+  // Monograph's own build output (written to the repo root before #414, and still
+  // when a build passes reportPath: 'GRAPH_REPORT.md'). Indexing it feeds a previous build's prose back into the graph as
   // document nodes and edges, compounding on every rebuild.
   /^GRAPH_REPORT\.md$/,
 ];
+
+/**
+ * Files git would consider part of the working tree under `repoPath` (tracked
+ * plus untracked-but-not-ignored), relative to `repoPath`, and every ancestor
+ * directory of those files. Returns null outside a git work tree or when git
+ * is unavailable, so the scan falls back to walking everything.
+ */
+function listGitVisible(repoPath: string): { files: Set<string>; dirs: Set<string> } | null {
+  let out: string;
+  try {
+    out = execFileSync(
+      'git',
+      ['-C', repoPath, 'ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+      { encoding: 'utf8', maxBuffer: 512 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+  } catch {
+    return null;
+  }
+  const files = new Set<string>();
+  const dirs = new Set<string>();
+  for (const raw of out.split('\0')) {
+    // A trailing slash marks a nested repository/submodule git does not descend into.
+    const rel = raw.endsWith('/') ? raw.slice(0, -1) : raw;
+    if (!rel) continue;
+    files.add(rel);
+    for (let i = rel.indexOf('/'); i !== -1; i = rel.indexOf('/', i + 1)) {
+      dirs.add(rel.slice(0, i));
+    }
+  }
+  return { files, dirs };
+}
 
 export interface ScanOutput {
   filePaths: string[];
@@ -95,7 +136,15 @@ export const scanPhase: PipelinePhase<ScanOutput> = {
       }
     }
 
-    function walk(dir: string) {
+    // Honour .gitignore: inside a git work tree only files git lists are scanned.
+    const gitVisible = listGitVisible(ctx.repoPath);
+    const relOf = (fullPath: string) => fullPath.slice(ctx.repoPath.length + 1).replace(/\\/g, '/');
+    const isRescued = (rel: string) =>
+      negationPatterns.length > 0 && micromatch.isMatch(rel, negationPatterns, { dot: true });
+
+    // `gitFiltered` is false below a submodule or nested repo, which git lists
+    // as a single entry — everything inside it is walked as before.
+    function walk(dir: string, gitFiltered = gitVisible !== null) {
       let dirents: import('fs').Dirent[];
       try {
         dirents = readdirSync(dir, { withFileTypes: true });
@@ -121,26 +170,26 @@ export const scanPhase: PipelinePhase<ScanOutput> = {
           continue;
         }
 
+        const rel = relOf(fullPath);
         if (stat.isDirectory()) {
-          // Always traverse directories — negation patterns may rescue files inside ignored dirs
-          walk(fullPath);
+          if (!gitVisible || !gitFiltered) walk(fullPath, false);
+          else if (gitVisible.files.has(rel)) walk(fullPath, false);
+          // Skip wholly gitignored trees (venvs, caches) unless a negation
+          // pattern could rescue something inside them.
+          else if (gitVisible.dirs.has(rel) || negationPatterns.length > 0) walk(fullPath, true);
           continue;
         }
 
+        if (gitVisible && gitFiltered && !gitVisible.files.has(rel) && !isRescued(rel)) continue;
+
         if (ignorePatterns.length > 0) {
-          const rel = fullPath.slice(ctx.repoPath.length + 1);
           const isIgnored = micromatch.isMatch(rel, ignorePatterns, { dot: true });
           const isDirIgnored = micromatch.isMatch(
             rel,
             ignorePatterns.map((p) => (p.endsWith('/') ? `${p}**` : p)),
             { dot: true },
           );
-          if (isIgnored || isDirIgnored) {
-            const isNegated =
-              negationPatterns.length > 0 &&
-              micromatch.isMatch(rel, negationPatterns, { dot: true });
-            if (!isNegated) continue;
-          }
+          if ((isIgnored || isDirIgnored) && !isRescued(rel)) continue;
         }
 
         const ext = extname(entry).toLowerCase();

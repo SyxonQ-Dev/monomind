@@ -14,9 +14,11 @@
  *
  *     npx -y --package=@monoes/monomindcli@<version> monomind mcp start
  *
- * Default behaviour is deliberately unchanged (floating `monomind@latest`):
- * pinning is opt-in via `monomind init --pin`, so upgrading monomind never
- * silently freezes an existing project on the version that ran `init`.
+ * Issue #419 made pinning the default: the generated entry names the version
+ * of monomind that ran `init` (a floating `@latest` cost 3–4 s per start, a
+ * cold npx cache could hang past every client timeout, and the server could
+ * change version mid-session). `--pin latest` / `--no-pin` opt back into the
+ * floating command; `monomind init --force` re-pins after an upgrade.
  */
 
 import { readFileSync } from 'node:fs';
@@ -24,16 +26,44 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { initCommand } from '../commands/init.js';
+import { VERSION } from '../index.js';
 import { generateClaudeMd } from '../init/claudemd-generator.js';
+import { generateCodexConfig } from '../init/codex-generator.js';
+import { generateKimiMcpConfig } from '../init/kimi-generator-mcp.js';
 import { generateMCPCommands, generateMCPConfig } from '../init/mcp-generator.js';
+import { generateOpencodeConfig } from '../init/opencode-generator.js';
+import { resolveInitOptions } from '../init/resolve-options.js';
 import { DEFAULT_INIT_OPTIONS } from '../init/types.js';
-import { mcpAddHint, mcpCommand, mcpServerEntry } from '../platform-adapters/renderers/mcp.js';
+import {
+  MCP_FLOATING_PIN,
+  mcpAddHint,
+  mcpCommand,
+  mcpServerEntry,
+} from '../platform-adapters/renderers/mcp.js';
+import type { CommandContext } from '../types.js';
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 describe('mcpCommand() pinning (issue #312)', () => {
-  it('still defaults to the floating unscoped package — pinning is opt-in', () => {
-    expect(mcpCommand('claude', 'linux')).toEqual(['npx', '-y', 'monomind@latest', 'mcp', 'start']);
+  it('defaults to the running version (issue #419)', () => {
+    expect(mcpCommand('claude', 'linux')).toEqual([
+      'npx',
+      '-y',
+      `--package=@monoes/monomindcli@${VERSION}`,
+      'monomind',
+      'mcp',
+      'start',
+    ]);
+  });
+
+  it('floats on the unscoped package only when asked for `latest`', () => {
+    expect(mcpCommand('claude', 'linux', MCP_FLOATING_PIN)).toEqual([
+      'npx',
+      '-y',
+      'monomind@latest',
+      'mcp',
+      'start',
+    ]);
   });
 
   it('pins through --package= so npx can pick a bin from the multi-bin scoped package', () => {
@@ -102,10 +132,24 @@ describe('mcpServerEntry() pinning', () => {
 describe('init writes the pinned .mcp.json entry', () => {
   const base = { ...DEFAULT_INIT_OPTIONS, targetDir: '/nonexistent-project-for-issue-312' };
 
-  it('is unpinned by default', () => {
+  it('is pinned to the running version by default', () => {
     const config = generateMCPConfig(base) as {
       mcpServers: { monomind: { args: string[] } };
     };
+    expect(config.mcpServers.monomind.args).toEqual([
+      '-y',
+      `--package=@monoes/monomindcli@${VERSION}`,
+      'monomind',
+      'mcp',
+      'start',
+    ]);
+  });
+
+  it('floats on monomind@latest when options.mcp.pin is `latest`', () => {
+    const config = generateMCPConfig({
+      ...base,
+      mcp: { ...base.mcp, pin: MCP_FLOATING_PIN },
+    }) as { mcpServers: { monomind: { args: string[] } } };
     expect(config.mcpServers.monomind.args).toEqual(['-y', 'monomind@latest', 'mcp', 'start']);
   });
 
@@ -134,8 +178,11 @@ describe('init writes the pinned .mcp.json entry', () => {
 });
 
 describe('the `claude mcp add` hints all come from one builder', () => {
-  it('mcpAddHint() renders the default and pinned forms', () => {
+  it('mcpAddHint() renders the default, floating and pinned forms', () => {
     expect(mcpAddHint(undefined, 'linux')).toBe(
+      `claude mcp add monomind -- npx -y --package=@monoes/monomindcli@${VERSION} monomind mcp start`,
+    );
+    expect(mcpAddHint(MCP_FLOATING_PIN, 'linux')).toBe(
       'claude mcp add monomind -- npx -y monomind@latest mcp start',
     );
     expect(mcpAddHint('2.11.1', 'linux')).toBe(
@@ -153,8 +200,67 @@ describe('the `claude mcp add` hints all come from one builder', () => {
     expect(source).toContain('mcpAddHint');
   });
 
+  // Quick Setup ships only in the opt-in full/security/performance templates
+  // since GH #412 trimmed it from the default one.
   it('CLAUDE.md quick-setup shows the same command the hints do', () => {
-    const md = generateClaudeMd({ ...DEFAULT_INIT_OPTIONS, targetDir: SRC });
+    const md = generateClaudeMd({ ...DEFAULT_INIT_OPTIONS, targetDir: SRC }, 'full');
     expect(md).toContain(mcpAddHint());
+  });
+});
+
+describe('init --pin flag resolution (issue #419)', () => {
+  const resolvePin = (flags: Record<string, unknown>) => {
+    const result = resolveInitOptions(
+      { flags, args: [], cwd: '/x' } as unknown as CommandContext,
+      '/x',
+    );
+    if (!result.ok) throw new Error(result.message);
+    return result.options.mcp.pin;
+  };
+
+  it('leaves the pin to the renderer default (running version) when absent', () => {
+    expect(resolvePin({})).toBeUndefined();
+  });
+
+  it('bare --pin and --pin <version> pin exactly', () => {
+    expect(resolvePin({ pin: true })).toBe(VERSION);
+    expect(resolvePin({ pin: '2.11.1' })).toBe('2.11.1');
+  });
+
+  it('--pin latest and --no-pin opt into the floating command', () => {
+    expect(resolvePin({ pin: 'latest' })).toBe(MCP_FLOATING_PIN);
+    expect(resolvePin({ 'no-pin': true })).toBe(MCP_FLOATING_PIN);
+  });
+});
+
+describe('Codex, OpenCode and Kimi configs share the pinned command (issue #419)', () => {
+  const base = { ...DEFAULT_INIT_OPTIONS, targetDir: '/nonexistent-project-for-issue-419' };
+  const floating = { ...base, mcp: { ...base.mcp, pin: MCP_FLOATING_PIN } };
+  const pinnedPackage = `--package=@monoes/monomindcli@${VERSION}`;
+  const deadEnv = /MONOMIND_(MODE|HOOKS_ENABLED|TOPOLOGY|MAX_AGENTS|MEMORY_BACKEND)/;
+
+  it('codex config.toml', () => {
+    expect(generateCodexConfig(base)).toContain(`"${pinnedPackage}"`);
+    expect(generateCodexConfig(base)).not.toContain('monomind@latest');
+    expect(generateCodexConfig(floating)).toContain('"monomind@latest"');
+    expect(generateCodexConfig(base)).not.toMatch(deadEnv);
+  });
+
+  it('opencode.json', () => {
+    const entry = (options: typeof base) =>
+      (generateOpencodeConfig(options).mcp as { monomind: { command: string[]; env: object } })
+        .monomind;
+    expect(entry(base).command).toContain(pinnedPackage);
+    expect(entry(floating).command).toContain('monomind@latest');
+    expect(JSON.stringify(entry(base).env)).not.toMatch(deadEnv);
+  });
+
+  it('kimi mcp.json', () => {
+    const entry = (options: typeof base) =>
+      (generateKimiMcpConfig(options).mcpServers as { monomind: { args: string[]; env: object } })
+        .monomind;
+    expect(entry(base).args).toContain(pinnedPackage);
+    expect(entry(floating).args).toContain('monomind@latest');
+    expect(JSON.stringify(entry(base).env)).not.toMatch(deadEnv);
   });
 });

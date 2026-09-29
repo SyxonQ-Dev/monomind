@@ -75,9 +75,10 @@ export async function writeOpencodeFiles(
   // unwrapped by an older version is migrated rather than duplicated.
   const agentsMdPath = path.join(targetDir, 'AGENTS.md');
   const agentsMdExists = fs.existsSync(agentsMdPath);
+  const guard = guardFor(targetDir, options, result);
   const agentsMd =
     !agentsMdExists || options.force
-      ? guardFor(targetDir, options, result).mergeBlock(
+      ? guard.mergeBlock(
           agentsMdPath,
           agentsMdExists ? fs.readFileSync(agentsMdPath, 'utf-8') : '',
           'agents-md',
@@ -141,6 +142,7 @@ export async function writeOpencodeFiles(
         seenAgents.add(name);
         fs.mkdirSync(destAgents, { recursive: true });
         atomicWriteFile(path.join(destAgents, `${name}.md`), converted);
+        guard.record(path.join(destAgents, `${name}.md`));
         agentCount++;
       }
     }
@@ -160,10 +162,9 @@ export async function writeOpencodeFiles(
         const src = fs.readFileSync(abs, 'utf-8');
         const converted = convertCommandMd(src, category, fileBase);
         fs.mkdirSync(destCommands, { recursive: true });
-        atomicWriteFile(
-          path.join(destCommands, opencodeCommandFilename(category, fileBase)),
-          converted,
-        );
+        const dest = path.join(destCommands, opencodeCommandFilename(category, fileBase));
+        atomicWriteFile(dest, converted);
+        guard.record(dest);
         commandCount++;
       }
     }

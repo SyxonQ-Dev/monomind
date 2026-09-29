@@ -35,7 +35,7 @@ The system monitors workload and spawns additional agents when:
 **Status Monitoring:**
 ```javascript
 // Check swarm health
-mcp__monomind__swarm_status({
+mcp__monomind__monoswarm_status({
   swarmId: "current"
 })
 
@@ -55,7 +55,7 @@ mcp__monomind__agent_health({
 Uses Monomind MCP tools for agent coordination:
 ```javascript
 // Initialize swarm with appropriate topology
-mcp__monomind__swarm_init({
+mcp__monomind__monoswarm_init({
   "topology": "mesh",
   "maxAgents": 8,
   "strategy": "auto"
