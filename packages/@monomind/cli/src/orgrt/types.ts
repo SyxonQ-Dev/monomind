@@ -272,6 +272,9 @@ export const OrgDefSchema = z
         'pi-rpc',
         'qwen-rpc',
         'hermes',
+        'cline',
+        'aider',
+        'dsh',
       ])
       .optional(),
   })

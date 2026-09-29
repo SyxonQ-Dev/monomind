@@ -5,16 +5,31 @@
 // does not reference `this` — it was a private method purely for grouping,
 // so moving it to a standalone function changes nothing observable; the
 // class in antigravity-runner.ts now calls it as an imported function.
-import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import type { AgentRunArgs } from './agent-runner.js';
 import { killOnAbort } from './agent-runner.js';
 import type { AgyEvent, AgyStreamEvent, TurnOutcome } from './antigravity-runner-types.js';
 import { maskedCommand } from './authority-mask.js';
+import type { OrgEffortLevel } from './cost-tier.js';
 import { classifyStderr } from './kimicode-runner.js';
+import { NativeToolCalls } from './kimicode-runner-tools.js';
+import { spawnRunnerProcess } from './process-group-spawn.js';
 import { omitAnthropicManagedKeys } from './provider.js';
 import { TOOL_CALL_RE } from './tool-fence.js';
 
 const TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours, matching kimi/codex runners
+
+/** `agy --effort` accepts low|medium|high|max (agy --help): 'off' has no
+ *  agy equivalent below low, and 'xhigh' rounds down rather than jumping to
+ *  the most expensive level. */
+const AGY_EFFORT: Record<OrgEffortLevel, string> = {
+  off: 'low',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'high',
+  max: 'max',
+};
 
 // The opening marker TOOL_CALL_RE looks for (see tool-fence.ts:
 // /```tool_call\s*\n([\s\S]*?)```/g). computeSafeChunk matches on this
@@ -104,22 +119,34 @@ export async function* streamTurn(
 ): AsyncGenerator<AgyStreamEvent> {
   // ARG ORDER (from agy headless docs):
   //   agy -p "<prompt>" --output-format stream-json
-  //       [--model X] [--dangerously-skip-permissions]
+  //       [--model X] [--effort L] [--dangerously-skip-permissions]
   //       [--continue | --conversation <id>]
+  // --dangerously-skip-permissions is passed at every access level: a
+  // headless agy has no one to answer a permission prompt, so this is also
+  // what full access (`--access full`) runs with. agy isolates none of the
+  // user's own config, so `--settings` needs nothing extra here.
   const cliArgs: string[] = ['-p', prompt, '--output-format', 'stream-json'];
   if (args.model) cliArgs.push('--model', args.model);
+  if (args.effort) cliArgs.push('--effort', AGY_EFFORT[args.effort]);
   cliArgs.push('--dangerously-skip-permissions');
   if (conversationId) {
     cliArgs.push('--conversation', conversationId);
   }
 
-  const child = spawn(...maskedCommand(args.authorityMask, bin, cliArgs), {
-    cwd: args.cwd,
-    // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
-    // vendor CLI; an explicit value in args.env still wins below.
-    env: { ...omitAnthropicManagedKeys(process.env), ...args.env },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  // Process-group leader under --access full, so cancel reaches the whole
+  // tree and agent exec can report background_pids (process-group-spawn.ts).
+  const proc = spawnRunnerProcess(
+    ...maskedCommand(args.authorityMask, bin, cliArgs),
+    {
+      cwd: args.cwd,
+      // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
+      // vendor CLI; an explicit value in args.env still wins below.
+      env: { ...omitAnthropicManagedKeys(process.env), ...args.env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+    args,
+  );
+  const child = proc.child;
 
   let stderrTail = '';
   child.stderr?.on('data', (c: Buffer) => {
@@ -132,18 +159,8 @@ export async function* streamTurn(
   const KILL_GRACE_MS = 5000;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
   const killChild = (): void => {
-    try {
-      child.kill('SIGTERM');
-    } catch {
-      /* already gone */
-    }
-    killTimer = setTimeout(() => {
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        /* already gone */
-      }
-    }, KILL_GRACE_MS);
+    proc.target.kill('SIGTERM');
+    killTimer = setTimeout(() => proc.target.kill('SIGKILL'), KILL_GRACE_MS);
     killTimer.unref?.();
   };
 
@@ -156,7 +173,7 @@ export async function* streamTurn(
   }, TURN_TIMEOUT_MS);
   // Abort hook (see AgentRunArgs.signal): kill the child so the stdout
   // loop below unblocks instead of orphaning it on iterator.return().
-  const unsubscribeAbort = killOnAbort(args.signal, child, KILL_GRACE_MS);
+  const unsubscribeAbort = killOnAbort(args.signal, proc.target, KILL_GRACE_MS);
 
   // Attach the exit promise BEFORE consuming stdout: on a spawn failure
   // (ENOENT, bad binary) the 'error' event fires almost immediately —
@@ -202,6 +219,12 @@ export async function* streamTurn(
   // '' for the whole step, so flushText()'s own diff naturally degrades to
   // "reveal the whole finalStripped text", byte-for-byte the pre-streaming
   // behavior, with no separate code path needed for that case.
+  // agy's tool steps: an ACTIVE step_update starts a call and the DONE one
+  // for the same step_index ends it with the tool's output (verified live).
+  // agy has no call id of its own, so the id is the step index under a
+  // per-invocation prefix (step indexes are not unique across invocations).
+  const tools = new NativeToolCalls();
+  const callPrefix = `agy_${randomUUID().slice(0, 8)}_`;
   let pendingText = '';
   let pendingStepIndex: number | undefined;
   let visibleSoFar = '';
@@ -319,11 +342,19 @@ export async function* streamTurn(
         }
         return events;
       } else if (step.step_type === 'tool' && step.tool_info?.name) {
-        events.push({
-          kind: 'tool',
-          toolName: step.tool_info.name.slice(0, 200),
-          conversationId: lastConversationId,
-        });
+        const name = step.tool_info.name.slice(0, 200);
+        const rawInput = step.tool_info.parameters ?? step.tool_info.args ?? {};
+        const id = `${callPrefix}${step.step_index ?? 'x'}`;
+        const native =
+          step.state === 'DONE'
+            ? tools.end(id, step.tool_info.output ?? '', false, lastConversationId, {
+                name,
+                rawInput,
+              })
+            : [tools.start(id, name, rawInput, lastConversationId)].filter((m) => m !== null);
+        if (native.length > 0) {
+          events.push({ kind: 'native', native, conversationId: lastConversationId });
+        }
         return events;
       }
     } else if (ev.event === 'result' && ev.result) {
@@ -391,6 +422,7 @@ export async function* streamTurn(
   } finally {
     clearTimeout(timer);
     unsubscribeAbort();
+    proc.stop();
     if (child.exitCode === null && child.signalCode === null) {
       // NOT confirmed dead. Either the consumer abandoned this stream
       // mid-turn (session.ts's silent abort calls iterator.return(), the

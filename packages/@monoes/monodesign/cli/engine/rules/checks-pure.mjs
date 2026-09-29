@@ -60,7 +60,7 @@ function isEmojiOnlyText(text) {
 }
 
 function checkColors(opts) {
-  const { tag, textColor, bgColor, effectiveBg, effectiveBgStops, fontSize, fontWeight, hasDirectText, isEmojiOnly, bgClip, bgImage, classList } = opts;
+  const { tag, textColor, bgColor, effectiveBg, effectiveBgStops, fontSize, fontWeight, hasDirectText, isEmojiOnly, bgClip, bgImage, classList, isSvgText } = opts;
   if (SAFE_TAGS.has(tag)) {
     // Exception for <a> and <button> elements styled as buttons. SAFE_TAGS
     // exists to suppress contrast noise on inline links and unstyled controls,
@@ -108,7 +108,14 @@ function checkColors(opts) {
         // like `text-paper/60` on `bg-ink` sections are the FP pattern.
         const isAlphaFallbackFP = !DETECTOR_IS_BROWSER && !effectiveBg && (textColor.a != null && textColor.a < 1);
         if (!isAlphaFallbackFP) {
-          findings.push({ id: 'low-contrast', snippet: `${ratio.toFixed(1)}:1 (need ${threshold}:1) — text ${colorToHex(textColor)} on ${colorToHex(bgs[worstIdx])}` });
+          const snippet = `${ratio.toFixed(1)}:1 (need ${threshold}:1) — text ${colorToHex(textColor)} on ${colorToHex(bgs[worstIdx])}`;
+          // Static analysis can't composite translucent text/surfaces, see
+          // through gradients, or read SVG `fill`, so those ratios are guesses:
+          // report them as unverified rather than definite failures (#424).
+          const unverified = !DETECTOR_IS_BROWSER && (
+            (textColor.a ?? 1) < 1 || !effectiveBg || (effectiveBg.a ?? 1) < 1 || effectiveBg.uncertain || isSvgText
+          );
+          findings.push(unverified ? { id: 'low-contrast', snippet, unverified: true } : { id: 'low-contrast', snippet });
         }
       }
     }

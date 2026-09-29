@@ -9,10 +9,14 @@
  *  - codex: `codex debug models`, only entries with `visibility: "list"`.
  *  - antigravity: `agy models` (`<id>\t<label>` lines).
  *  - opencode: `opencode models` (`<provider>/<model>` lines).
+ *  - dsh: no listing command (its picker is the web Models page), so the
+ *    runner's own curated list (dsh-runner-models.ts DSH_MODELS, incl. the
+ *    free OpenRouter/NVIDIA routes) with `curated: true`.
  * Every other runtime has no listing command: `supported: false`, `[]`.
  */
 
 import { spawn } from 'node:child_process';
+import { DSH_MODELS } from './dsh-runner-models.js';
 import { locateBinary, resolveBinary, runnerSpec } from './runner-registry.js';
 
 export interface AgentModel {
@@ -32,6 +36,9 @@ export interface ModelsResult {
   runtime: string;
   /** false: this runtime has no model-listing command (`models` is `[]`). */
   supported: boolean;
+  /** true: a static list monomind ships for a runtime with no listing
+   *  command (dsh), not one the runtime printed. */
+  curated?: boolean;
   models: AgentModel[];
   error?: { code: 'unknown-runtime' | 'missing-binary' | 'list-failed'; message: string };
 }
@@ -185,6 +192,9 @@ export async function listRuntimeModels(
       models: [],
       error: { code: 'unknown-runtime', message: `unknown runtime "${runtime}" (see agent scan)` },
     };
+  }
+  if (runtime === 'dsh') {
+    return { ...base, supported: true, curated: true, models: DSH_MODELS.map((m) => ({ ...m })) };
   }
   if (!LISTABLE.has(runtime)) return { ...base, supported: false, models: [] };
 

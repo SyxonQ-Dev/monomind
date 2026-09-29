@@ -14,9 +14,9 @@ export interface CodexTokenUsage {
 }
 
 /** Current (v0.149.0+) item-based wire format's `item` payload. Only the
- *  fields this runner acts on are typed — other item types (reasoning,
- *  patch_apply, mcp_tool_call, …) are ignored, same policy as the legacy
- *  format's untyped variants. */
+ *  fields this runner acts on are typed (codex-runner-tools.ts maps the
+ *  tool items); reasoning and other non-tool items are ignored, same
+ *  policy as the legacy format's untyped variants. */
 export interface CodexItem {
   id: string;
   type: string;
@@ -26,7 +26,20 @@ export interface CodexItem {
   command?: string;
   aggregated_output?: string;
   exit_code?: number | null;
+  /** in_progress | completed | failed (| declined) */
   status?: string;
+  /** file_change */
+  changes?: Array<{ path: string; kind?: string; diff?: string }>;
+  /** mcp_tool_call */
+  server?: string;
+  tool?: string;
+  arguments?: unknown;
+  result?: { content?: Array<{ type?: string; text?: string }>; [k: string]: unknown };
+  error?: { message?: string };
+  /** web_search */
+  query?: string;
+  /** todo_list */
+  items?: Array<{ text: string; completed?: boolean }>;
 }
 
 export interface CodexEvent {
@@ -43,6 +56,7 @@ export interface CodexEvent {
     | 'item.started'
     | 'item.completed'
     | 'turn.completed'
+    | 'turn.failed'
     | (string & {});
   // LEGACY session_configured / CURRENT thread.started
   session_id?: string;
@@ -51,7 +65,7 @@ export interface CodexEvent {
   message?: string;
   // LEGACY token_count
   info?: { last_token_usage?: CodexTokenUsage; total_token_usage?: CodexTokenUsage };
-  // LEGACY task_complete
+  // LEGACY task_complete / CURRENT turn.failed
   turn_id?: string;
   last_agent_message?: string;
   error?: { message: string };
@@ -69,14 +83,30 @@ export interface CodexEvent {
  *   - 'tool':      codex's own tool activity (a command_execution item's
  *     start, or the spawn-time liveness yield) — forwarded by run() as a
  *     `tool_use` liveness AgentMessage (see header).
+ *   - 'tool_start' / 'tool_end': one codex tool item's start and matched
+ *     end (codex-runner-tools.ts), correlated by `toolUseId`, with the
+ *     contract §4 canonical `toolKind`/`input` on the start and the
+ *     result on the end — forwarded as rich `tool_use`/`tool_result`.
  *   - 'meta':      any other event that only carries a thread id.
  */
 export interface CodexStreamEvent {
-  kind: 'assistant' | 'tool' | 'meta';
+  kind: 'assistant' | 'tool' | 'tool_start' | 'tool_end' | 'meta';
   text?: string;
   rawText?: string;
+  /** 'tool' / 'tool_start': short progress label. */
   toolName?: string;
   threadId?: string;
+  /** tool_start / tool_end */
+  toolUseId?: string;
+  /** Native codex item type (command_execution, file_change, …). */
+  tool?: string;
+  toolKind?: 'shell' | 'patch' | 'mcp' | 'web' | 'todo' | 'other';
+  input?: Record<string, unknown>;
+  /** tool_end */
+  output?: string;
+  isError?: boolean;
+  exitCode?: number;
+  durationMs?: number;
 }
 
 export interface TurnOutcome {

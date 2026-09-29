@@ -19,9 +19,14 @@ export interface AgentExecOptions {
   runtime: string;
   prompt: string;
   /** #355. `scoped` (default) = today's allow-list behavior, byte-identical
-   *  SDK options. `full` = unrestricted native tool access (claude runtime
-   *  only; guarded — see agent-exec-access.ts). */
-  access?: 'scoped' | 'full';
+   *  SDK options. `full` = unrestricted native tool access (any runtime
+   *  whose RunnerSpec.supportsFullAccess is true; guarded — see
+   *  agent-exec-access.ts). `read` (#388) = read files, search, web and
+   *  read-only shell only (agent-exec-read.ts; runtimes with readAccess). */
+  access?: 'scoped' | 'read' | 'full';
+  /** #396 (rev 23): `--sandbox` — the vendor CLI's own sandbox mode
+   *  (runner-sandbox.ts). undefined = today's default, argv unchanged. */
+  sandbox?: 'read-only' | 'workspace-write' | 'full';
   systemPrompt?: string;
   model?: string;
   /** `--effort`: reasoning effort, mapped per runtime (AgentRunArgs.effort). */

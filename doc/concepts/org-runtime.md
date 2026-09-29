@@ -417,8 +417,9 @@ design:**
 1. **Grant it**: `monomind org role set-access <org> <role> full` (interactive confirm, or
    `--yes-i-understand` for scripts). This is the ONLY place in monomind that writes
    `policy.access: 'full'` together with a matching, SIGNED `access_ack`. It refuses a role whose
-   resolved runtime doesn't advertise `full_access: true` (`agent scan --json`; only `claude`
-   today). `monomind org role set-access <org> <role> scoped` (a revoke) needs no signature and
+   resolved runtime doesn't advertise `full_access: true` (`agent scan --json`; claude, codex,
+   opencode, antigravity, kimicode, grok, qwen, copilot, crush and pi — not vercel, hermes,
+   qwen-rpc or pi-rpc). `monomind org role set-access <org> <role> scoped` (a revoke) needs no signature and
    stays allowed everywhere.
 2. **The grant is refused outright when it looks agent-invoked.** Scoped chats/orgs already let an
    agent run `monomind org …` through an allowed Bash prefix, so before doing anything else,

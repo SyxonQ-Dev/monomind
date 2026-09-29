@@ -45,23 +45,23 @@ npx monomind monoswarm scale <swarm-id> --agents 12
 
 ```javascript
 // Initialize swarm
-mcp__monomind__swarm_init({
+mcp__monomind__monoswarm_init({
   topology: "hierarchical",
   maxAgents: 8,
   strategy: "specialized"
 })
 
 // Check status
-mcp__monomind__swarm_status({ swarmId: "current" })
+mcp__monomind__monoswarm_status({ swarmId: "current" })
 
 // Coordinate tasks
-mcp__monomind__coordination_orchestrate({ task: "build feature", strategy: "parallel" })
+mcp__monomind__task_create({ description: "build feature", strategy: "parallel" })
 
 // Spawn an agent
 mcp__monomind__agent_spawn({ type: "coder", capabilities: ["typescript", "api"] })
 
 // Shut down swarm
-mcp__monomind__swarm_shutdown({ swarmId: "current" })
+mcp__monomind__monoswarm_shutdown({ swarmId: "current" })
 ```
 
 ## Strategy Selection

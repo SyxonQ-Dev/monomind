@@ -77,3 +77,14 @@ export function codexSandboxArgs(level: GitLevel): string[] {
 export function grokSandboxArgs(level: GitLevel): string[] {
   return level === 'push' ? [] : ['--sandbox', 'workspace'];
 }
+
+/** #396: `codex exec` flags for an explicit `agent exec --sandbox` mode.
+ *  workspace-write keeps network on, exactly like a role below 'push'. */
+export function codexSandboxModeArgs(mode: 'read-only' | 'workspace-write'): string[] {
+  return mode === 'read-only' ? ['--sandbox', 'read-only'] : codexSandboxArgs('commit');
+}
+
+/** #396: `grok` profile for an explicit `agent exec --sandbox` mode. */
+export function grokSandboxModeArgs(mode: 'read-only' | 'workspace-write'): string[] {
+  return ['--sandbox', mode === 'read-only' ? 'read-only' : 'workspace'];
+}

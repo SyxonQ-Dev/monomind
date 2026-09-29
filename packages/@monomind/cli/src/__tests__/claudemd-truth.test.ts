@@ -98,13 +98,19 @@ describe('claudemd-truth (i-041/i-117)', () => {
     it('the hooks row equals hooksCommand.subcommands.length BY REFERENCE, not the literal 28', () => {
       // Asserting the literal 28 would be the same hardcoding one layer up
       // (plan's explicit trap). This must read the live array.
-      const generated = generateClaudeMd({ ...DEFAULT_INIT_OPTIONS, targetDir: process.cwd() });
+      const generated = generateClaudeMd(
+        { ...DEFAULT_INIT_OPTIONS, targetDir: process.cwd() },
+        'full',
+      );
       expect(generated).toContain(`\`hooks\` | ${hooksSubcommands.length}`);
       expect(generated).not.toContain('`hooks` | 29');
     });
 
     it('AC-4 — the count is ALIVE: mutating hooksCommand.subcommands changes the rendered number', () => {
-      const before = generateClaudeMd({ ...DEFAULT_INIT_OPTIONS, targetDir: process.cwd() });
+      const before = generateClaudeMd(
+        { ...DEFAULT_INIT_OPTIONS, targetDir: process.cwd() },
+        'full',
+      );
       const beforeCount = hooksSubcommands.length;
       expect(before).toContain(`\`hooks\` | ${beforeCount}`);
 
@@ -118,7 +124,10 @@ describe('claudemd-truth (i-041/i-117)', () => {
       };
       hooksSubcommands.push(scratchSubcommand as (typeof hooksSubcommands)[number]);
       try {
-        const after = generateClaudeMd({ ...DEFAULT_INIT_OPTIONS, targetDir: process.cwd() });
+        const after = generateClaudeMd(
+          { ...DEFAULT_INIT_OPTIONS, targetDir: process.cwd() },
+          'full',
+        );
         expect(after).toContain(`\`hooks\` | ${beforeCount + 1}`);
         expect(after).not.toContain(`\`hooks\` | ${beforeCount} `);
       } finally {
@@ -126,7 +135,10 @@ describe('claudemd-truth (i-041/i-117)', () => {
       }
 
       // Reverted: the count is back to what it was before the probe.
-      const reverted = generateClaudeMd({ ...DEFAULT_INIT_OPTIONS, targetDir: process.cwd() });
+      const reverted = generateClaudeMd(
+        { ...DEFAULT_INIT_OPTIONS, targetDir: process.cwd() },
+        'full',
+      );
       expect(reverted).toContain(`\`hooks\` | ${beforeCount}`);
     });
 
@@ -181,7 +193,10 @@ describe('claudemd-truth (i-041/i-117)', () => {
 
   describe('§2 — worker count is a derived build-time constant', () => {
     it('the generated doc equals WORKER_COUNT from generated-counts.ts, not a literal', () => {
-      const generated = generateClaudeMd({ ...DEFAULT_INIT_OPTIONS, targetDir: process.cwd() });
+      const generated = generateClaudeMd(
+        { ...DEFAULT_INIT_OPTIONS, targetDir: process.cwd() },
+        'full',
+      );
       expect(generated).toContain(`${WORKER_COUNT} background workers`);
       expect(generated).not.toContain('8 background workers');
     });
@@ -407,8 +422,8 @@ describe('claudemd-truth (i-041/i-117)', () => {
   describe('i-035 regression guard (same worktree, same two generators)', () => {
     it("the honest monoswarm sentence still survives this item's edits", () => {
       // Only swarmOrchestration() ("## Monoswarm Orchestration", full/
-      // security/performance) and swarmRules() ("## Monoswarm Rules",
-      // standard) carry i-035's honest sentence — antiDriftConfig(),
+      // security/performance) carries i-035's honest sentence (swarmRules(),
+      // "## Monoswarm Rules", left the standard template in GH #412) — antiDriftConfig(),
       // autoStartProtocol() and executionRules() never made the claim it
       // replaces, so a broad "## Monoswarm" substring match would wrongly
       // flag them.

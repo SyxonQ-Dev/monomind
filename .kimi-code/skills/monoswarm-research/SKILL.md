@@ -24,15 +24,15 @@ Then describe the research topic:
 
 ```javascript
 // Initialize research swarm
-mcp__monomind__swarm_init({
+mcp__monomind__monoswarm_init({
   topology: "mesh",
   maxAgents: 6,
   strategy: "adaptive"
 })
 
 // Coordinate research
-mcp__monomind__coordination_orchestrate({
-  task: "research topic X",
+mcp__monomind__task_create({
+  description: "research topic X",
   strategy: "parallel"
 })
 ```
@@ -73,5 +73,5 @@ mcp__monomind__memory_pattern-search({
 ## Monitoring
 
 ```javascript
-mcp__monomind__swarm_status({ swarmId: "current" })
+mcp__monomind__monoswarm_status({ swarmId: "current" })
 ```
