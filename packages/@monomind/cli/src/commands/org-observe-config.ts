@@ -201,6 +201,23 @@ export const createAction = async (ctx: CommandContext, name: string): Promise<C
       `Org "${name}" created from template "${templateName}" (${def.roles.length} roles).`,
     ),
   );
+  // #502: the human creating an org is its operator — sign it, from the
+  // bytes just written. A role's own process tree never signs.
+  const { roleContextMarker, signOrgDef } = await import('../orgrt/org-signature.js');
+  if (roleContextMarker()) {
+    log(
+      output.warning(
+        `  Not signed (org role context) — the operator must run: monomind org sign ${name}`,
+      ),
+    );
+  } else {
+    signOrgDef(ctx.cwd, name, JSON.parse(readFileSync(file, 'utf8')));
+    log(
+      output.info(
+        `  Signed as the operator. After editing its policy or roles, re-sign: monomind org sign ${name}`,
+      ),
+    );
+  }
   log(
     output.info(
       `  Budget: ${def.run_config.budget_tokens} tokens · Turn limit: ${def.run_config.max_turns_per_message} per message (effectively unlimited by default — set run_config.max_turns_per_message, or a role's own max_turns_per_message, to cap it).`,

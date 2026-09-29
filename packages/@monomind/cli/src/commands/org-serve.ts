@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { OrgDaemon } from '../orgrt/daemon.js';
+import { orgSignatureEnforced, verifyOrgDef } from '../orgrt/org-signature.js';
 import { readHistory } from '../orgrt/reporting.js';
 import { startOrgServer } from '../orgrt/server.js';
 import { ORG_DIR } from '../orgrt/types.js';
@@ -286,6 +287,16 @@ export const serveAction = async (ctx: CommandContext): Promise<CommandResult> =
       const defPath = join(ctx.cwd, ORG_DIR, `${name}.json`);
       if (existsSync(defPath)) {
         const rawDef = JSON.parse(readFileSync(defPath, 'utf8'));
+        // #502: prechecks are shell commands from the definition, run by
+        // this daemon as the operator — verify the operator's signature on
+        // these same bytes before running any of them (startOrg checks too).
+        const signed = orgSignatureEnforced()
+          ? verifyOrgDef(ctx.cwd, name, rawDef)
+          : ({ ok: true } as const);
+        if (!signed.ok) {
+          log(output.warning(`${signed.message} — skipping scheduled run`));
+          return;
+        }
         const checks = rawDef?.run_config?.prechecks;
         if (Array.isArray(checks) && checks.length > 0) {
           const { runPrechecks } = await import('../orgrt/prechecks.js');
@@ -390,6 +401,11 @@ export const serveAction = async (ctx: CommandContext): Promise<CommandResult> =
           const lastEnded = readHistory(ctx.cwd, stem).at(-1)?.endedAt ?? 0;
           const since = lastEnded ? Date.now() - lastEnded : undefined;
           const due = (since ?? Infinity) >= ms;
+          if (orgSignatureEnforced()) {
+            const signed = verifyOrgDef(ctx.cwd, stem, def);
+            if (!signed.ok)
+              log(output.warning(`${signed.message} — its scheduled runs are refused until then`));
+          }
           sched.add(stem, ms, due, since);
           const waitMin = due ? 0 : Math.round((ms - (since ?? 0)) / 60_000);
           log(

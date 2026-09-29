@@ -32,6 +32,7 @@ import {
   type RoleFence,
 } from './fence.js';
 import { drainInbox, newMessageId, queueMessage } from './inbox.js';
+import { assertOrgDefSigned } from './org-signature.js';
 import { expandOrgPolicyPathVars, promptVarsFor } from './prompt-vars.js';
 import * as questionOps from './questions.js';
 import { resolveRoleRunner } from './runner-resolve.js';
@@ -72,7 +73,12 @@ export async function prepareOrgStart(
     /* best-effort: not a git repo, git missing, or a wedged hook */
   }
   const defPath = join(daemon.root, ORG_DIR, `${name}.json`);
-  const parsedDef = OrgDefSchema.parse(JSON.parse(readFileSync(defPath, 'utf8')));
+  const rawDef: unknown = JSON.parse(readFileSync(defPath, 'utf8'));
+  // #502: every start path (org run, serve's runfile poll and schedule,
+  // resume) comes through here — refuse a definition the operator has not
+  // signed, checking the very bytes that get parsed below.
+  assertOrgDefSigned(daemon.root, name, rawDef);
+  const parsedDef = OrgDefSchema.parse(rawDef);
   const bp = resolveOrgDefBlueprints(parsedDef, daemon.root);
   // {{home}} / {{org_root}} in policy paths, before any root or sandbox sees them.
   const def = expandOrgPolicyPathVars(bp.def, promptVarsFor(daemon.root));

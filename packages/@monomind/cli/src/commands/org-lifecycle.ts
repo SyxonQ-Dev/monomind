@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { rolesAccessStatus } from '../orgrt/access-grant.js';
 import { readIdleStatus } from '../orgrt/idle-deadline.js';
+import { orgSignatureEnforced, verifyOrgDef } from '../orgrt/org-signature.js';
 import {
   describeRunOutcome,
   readHistory,
@@ -137,6 +138,21 @@ export const reloadAction = async (ctx: CommandContext): Promise<CommandResult> 
   mkdirSync(join(ctx.cwd, ORG_DIR, name), { recursive: true });
   writeFileSync(join(ctx.cwd, ORG_DIR, name, 'reload'), new Date().toISOString());
   log(output.info(`Reload requested for "${name}" — the daemon picks it up within ~2s.`));
+  // #502: the daemon refuses a definition that does not verify and keeps the
+  // running org on its last verified one — say so here, not only in its log.
+  try {
+    const raw: unknown = JSON.parse(readFileSync(join(ctx.cwd, ORG_DIR, `${name}.json`), 'utf8'));
+    const check = orgSignatureEnforced() ? verifyOrgDef(ctx.cwd, name, raw) : { ok: true };
+    if (!check.ok && 'message' in check) {
+      log(
+        output.warning(
+          `${check.message} — until then the reload is refused and the running org keeps its last verified definition.`,
+        ),
+      );
+    }
+  } catch {
+    /* unreadable: the daemon reports it */
+  }
   return { success: true, message: `reload requested for ${name}` };
 };
 

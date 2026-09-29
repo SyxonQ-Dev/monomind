@@ -33,7 +33,7 @@ import type { OrgDef, OrgRole } from './types.js';
 
 /** Recursively sort object keys so the same logical config always serializes
  *  identically regardless of property insertion order. */
-function canonical(value: unknown): unknown {
+export function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
   if (value && typeof value === 'object') {
     const out: Record<string, unknown> = {};
