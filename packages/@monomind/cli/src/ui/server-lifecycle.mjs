@@ -2,10 +2,10 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { SESSION_ID_RE } from './server-constants.mjs';
-import { activeWatchers, watchSafely } from './server-net.mjs';
+import { activeWatchers, watchSafely, watchTree } from './server-net.mjs';
 import { _insertRunEvent, activeOrgRuns, runStreamClients } from './server-rundb.mjs';
 import { pathToSections } from './server-session-utils.mjs';
-import { broadcast, broadcastMm } from './sse-manager.mjs';
+import { broadcast, broadcastMm, writeSse } from './sse-manager.mjs';
 
 // ── Phase 1: fs.watch orgs dir — pick up run events written directly to JSONL files
 // without going through the HTTP endpoint (e.g. when runorg.md bash writes run:start directly).
@@ -60,13 +60,7 @@ function _readNewOrgLines(absPath, orgName, runId) {
       // Forward to per-org SSE clients so the chat tab gets live bash-written events
       if (clients && clients.size > 0) {
         const _sseData = `data: ${_rawLine}\n\n`;
-        for (const _cl of clients) {
-          try {
-            _cl.write(_sseData);
-          } catch (_) {
-            clients.delete(_cl);
-          }
-        }
+        for (const _cl of clients) writeSse(_cl, _sseData, clients);
       }
       // Also broadcast to mastermind-stream for the org activity strip
       if (ev.org && ev.org === orgName) broadcastMm({ ...ev, _fromWatcher: true });
@@ -83,25 +77,32 @@ function watchOrgsParentDir(_orgsDir, retry) {
   const _parentDir = path.dirname(_orgsDir);
   if (!fs.existsSync(_parentDir)) return;
   try {
-    watchSafely(
+    // One-shot (#477): it used to stay open after the retry — never closed on
+    // shutdown, and every later event naming `orgs` started another orgs watcher.
+    const _parentWatcher = watchSafely(
       fs.watch(_parentDir, (_evType, _fname) => {
-        if (_fname === 'orgs' && fs.existsSync(_orgsDir)) retry();
+        if (_fname !== 'orgs' || !fs.existsSync(_orgsDir)) return;
+        _parentWatcher.close();
+        const idx = activeWatchers.indexOf(_parentWatcher);
+        if (idx !== -1) activeWatchers.splice(idx, 1);
+        retry();
       }),
       'orgs-parent',
     );
+    activeWatchers.push(_parentWatcher);
   } catch (_) {}
 }
 
 // Self-report the ACTUAL bound port for the spawner (control-start.cjs).
 // An HTTP probe cannot distinguish this server from another project's server
 // already answering on the requested port — this file is identity-proof.
-function reportBoundPort(boundPort) {
+function reportBoundPort(boundPort, pid = process.pid) {
   if (!process.env.MONOMIND_BOUND_REPORT) return;
   try {
     fs.mkdirSync(path.dirname(process.env.MONOMIND_BOUND_REPORT), { recursive: true });
     fs.writeFileSync(
       process.env.MONOMIND_BOUND_REPORT,
-      JSON.stringify({ pid: process.pid, port: boundPort, ts: Date.now() }),
+      JSON.stringify({ pid, port: boundPort, ts: Date.now() }),
     );
   } catch (_) {
     /* non-fatal — spawner falls back to pid-matched HTTP probe */
@@ -140,27 +141,31 @@ function seedOrgsFileSizes(_orgsDir) {
 function startOrgsFsWatchFallback(_orgsDir) {
   try {
     const _orgsWatcher = watchSafely(
-      fs.watch(_orgsDir, { recursive: true, persistent: false }, (_evType, _fname) => {
-        if (
-          !_fname?.endsWith('.jsonl') ||
-          _fname.endsWith('.warm.jsonl') ||
-          _fname.endsWith('.convs.jsonl')
-        )
-          return;
-        const _parts = _fname.replace(/\\/g, '/').split('/');
-        if (_parts.length >= 3 && _parts[1] === 'runs') {
-          const _wOrgName = _parts[0];
-          const _wRunId = _parts[2].replace('.jsonl', '');
+      watchTree(
+        _orgsDir,
+        (_evType, _fname) => {
           if (
-            _wOrgName &&
-            _wRunId &&
-            /^[a-z0-9][a-z0-9_-]*$/i.test(_wOrgName) &&
-            /^[a-z0-9][a-z0-9_-]*$/i.test(_wRunId)
-          ) {
-            _readNewOrgLines(path.join(_orgsDir, _fname.replace(/\\/g, '/')), _wOrgName, _wRunId);
+            !_fname?.endsWith('.jsonl') ||
+            _fname.endsWith('.warm.jsonl') ||
+            _fname.endsWith('.convs.jsonl')
+          )
+            return;
+          const _parts = _fname.replace(/\\/g, '/').split('/');
+          if (_parts.length >= 3 && _parts[1] === 'runs') {
+            const _wOrgName = _parts[0];
+            const _wRunId = _parts[2].replace('.jsonl', '');
+            if (
+              _wOrgName &&
+              _wRunId &&
+              /^[a-z0-9][a-z0-9_-]*$/i.test(_wOrgName) &&
+              /^[a-z0-9][a-z0-9_-]*$/i.test(_wRunId)
+            ) {
+              _readNewOrgLines(path.join(_orgsDir, _fname.replace(/\\/g, '/')), _wOrgName, _wRunId);
+            }
           }
-        }
-      }),
+        },
+        { persistent: false },
+      ),
       'orgs-fswatch',
     );
     activeWatchers.push(_orgsWatcher);
@@ -242,10 +247,7 @@ function setupServerLifecycle({ projectDir, MONOMIND_HOME, boundPort }) {
   const monomindDir = path.join(projectDir || process.cwd(), '.monomind');
   if (fs.existsSync(monomindDir)) {
     try {
-      const w = watchSafely(
-        fs.watch(monomindDir, { recursive: true }, scheduleRefresh),
-        '.monomind',
-      );
+      const w = watchSafely(watchTree(monomindDir, scheduleRefresh), '.monomind');
       activeWatchers.push(w);
     } catch {
       // Directory may not support recursive watch on all platforms — ignore
@@ -256,10 +258,7 @@ function setupServerLifecycle({ projectDir, MONOMIND_HOME, boundPort }) {
   const claudeSessionsDir = path.join(projectDir || process.cwd(), '.claude', 'sessions');
   if (fs.existsSync(claudeSessionsDir)) {
     try {
-      const w = watchSafely(
-        fs.watch(claudeSessionsDir, { recursive: true }, scheduleRefresh),
-        '.claude/sessions',
-      );
+      const w = watchSafely(watchTree(claudeSessionsDir, scheduleRefresh), '.claude/sessions');
       activeWatchers.push(w);
     } catch {
       // Ignore unsupported watch
@@ -366,7 +365,7 @@ function setupServerLifecycle({ projectDir, MONOMIND_HOME, boundPort }) {
                   'Content-Length': Buffer.byteLength(_rbBody),
                 },
               },
-              () => {},
+              (res) => res.resume(),
             );
             _rbReq.on('error', () => {});
             _rbReq.setTimeout(2000, () => {
@@ -422,7 +421,7 @@ function setupServerLifecycle({ projectDir, MONOMIND_HOME, boundPort }) {
                       'Content-Length': Buffer.byteLength(_stopBody),
                     },
                   },
-                  () => {},
+                  (res) => res.resume(),
                 );
                 _stopReq.on('error', () => {});
                 _stopReq.setTimeout(2000, () => {
@@ -438,6 +437,7 @@ function setupServerLifecycle({ projectDir, MONOMIND_HOME, boundPort }) {
   }, 60000); // every 60s — intentionally infrequent, just a safety net
 
   function stopBackgroundTasks() {
+    clearTimeout(debounceTimer);
     clearInterval(_spoolTimer);
     clearInterval(_rbTimer);
     clearInterval(_heartbeatTimer);

@@ -26,6 +26,8 @@ import { createHandleMastermindEvent } from './server-mastermind-event.mjs';
 import {
   activeWatchers,
   bindServer,
+  dashboardServingProject,
+  findRunningDashboard,
   isAllowedHost,
   openUrl,
   parseHostHeader,
@@ -43,24 +45,17 @@ import {
 } from './server-orgutils.mjs';
 import { checkRequestGate } from './server-request-gate.mjs';
 import {
+  _closeRunDb,
   _initRunDb,
   _require,
   _runDb,
-  _runDbPersistTimer,
-  _writeQueue,
-  _writeRunDbSnapshot,
   activeOrgRuns,
   looksLikeOurProcess,
   runStreamClients,
 } from './server-rundb.mjs';
+import { createShutdown } from './server-shutdown.mjs';
 import { setupKnowledgeBridgeWarmup } from './server-startup-tasks.mjs';
-import {
-  addMmClient,
-  broadcastMm,
-  closeSseClients,
-  getSseClientCount,
-  removeMmClient,
-} from './sse-manager.mjs';
+import { addMmClient, broadcastMm, getSseClientCount, removeMmClient } from './sse-manager.mjs';
 
 // Re-exported: these used to be defined directly here; other modules/tests still
 // import them by name from 'ui/server.mjs'.
@@ -164,6 +159,19 @@ let currentPort = null;
 let currentUrl = null;
 let _activeServer = null;
 
+// startServer's result when this project's dashboard is already being served
+// by another process: nothing was started, and `url` is that server's.
+function alreadyRunningResult(existing) {
+  reportBoundPort(existing.port, existing.pid);
+  return {
+    port: existing.port,
+    url: existing.url,
+    pid: existing.pid,
+    server: null,
+    alreadyRunning: true,
+  };
+}
+
 export async function startServer({
   port = 4242,
   projectDir,
@@ -173,6 +181,15 @@ export async function startServer({
 } = {}) {
   // #308: resolve the home now that the caller's project dir is in hand.
   MONOMIND_HOME = getMonomindHome(projectDir, projectDirExplicit);
+  // #477: a second start for a project whose dashboard is already up (on the
+  // port control.json records, or on the requested one) reuses it instead of
+  // starting another beside it. This runs before anything that could keep the
+  // process alive. Port 0 asks for a fresh ephemeral server, so it never reuses.
+  const _projectRoot = projectDir || process.cwd();
+  if (port !== 0) {
+    const existing = await findRunningDashboard(_projectRoot, port);
+    if (existing) return alreadyRunningResult(existing);
+  }
   // i-052 commit 3: warn on every start, not only at `init` (executor.ts).
   // The dashboard is what WRITES dashboard-token — a user who never
   // re-runs `init` after the file got committed (e.g. before commits 1-2
@@ -204,11 +221,14 @@ export async function startServer({
   // Handed to routes-org-mastermind.mjs via ctx below; never called directly here.
   const handleMastermindEvent = createHandleMastermindEvent({ projectDir, MONOMIND_HOME });
 
+  // Set once the server is bound (server-shutdown.mjs); the request handler and
+  // the signal handlers call through this.
+  let _shutdown = null;
+  const shutdown = () => _shutdown?.();
+
   const { checkAuth: _checkAuth, sendUnauthorized: _sendUnauthorized } = createAuthGate({
     dashboardAuthValue,
   });
-
-  setupKnowledgeBridgeWarmup({ projectDir, _getKnowledgeBridge, watchSafely, activeWatchers });
 
   const server = http.createServer(async (req, res) => {
     const gate = checkRequestGate({
@@ -304,8 +324,22 @@ export async function startServer({
     }
   } catch (_) {}
 
-  // Bind to available port (after activeOrgRuns is populated — no race window)
-  const boundPort = await bindServer(server, port);
+  // Bind to available port (after activeOrgRuns is populated — no race window).
+  // A busy port that turns out to be this project's own dashboard (a start that
+  // raced another) ends the walk: reuse it rather than bind port+1 (#477).
+  let boundPort;
+  try {
+    boundPort = await bindServer(server, port, {
+      onBusy: port === 0 ? undefined : (p) => dashboardServingProject(p, _projectRoot),
+    });
+  } catch (err) {
+    // Nothing started so far may outlive a failed start (#477): the run DB's
+    // persist timer is the only background work begun before listen.
+    _closeRunDb();
+    server.close();
+    if (err.code === 'EALREADYRUNNING') return alreadyRunningResult(err.existing);
+    throw err;
+  }
   const url = `http://localhost:${boundPort}`;
 
   reportBoundPort(boundPort);
@@ -313,6 +347,8 @@ export async function startServer({
   propagateDashboardToken(boundPort);
 
   const { stopBackgroundTasks } = setupServerLifecycle({ projectDir, MONOMIND_HOME, boundPort });
+  // Watchers and the ingest sweep start only once the port is ours (#477).
+  setupKnowledgeBridgeWarmup({ projectDir, _getKnowledgeBridge, watchSafely, activeWatchers });
 
   function watchOrgsDir() {
     const _orgsDir = path.join(MONOMIND_HOME, '.monomind', 'orgs');
@@ -371,51 +407,17 @@ export async function startServer({
   _activeServer = server;
 
   // --------------------------------------------------------- Graceful shutdown
-  function shutdown() {
-    stopBackgroundTasks();
-    // Flush SQLite run-event index to disk before exit (bypasses 1000ms debounce timer)
-    clearTimeout(_runDbPersistTimer);
-    _writeRunDbSnapshot();
-    for (const w of activeWatchers) {
-      try {
-        w.close();
-      } catch {
-        // Already closed
-      }
-    }
-    activeWatchers.length = 0;
-
-    // Close all SSE connections
-    closeSseClients();
-
-    // i-052 commit 4: best-effort cleanup of the credential THIS process
-    // wrote (primary `dashboard-token`, or this process's own
-    // `dashboard-token-<port>` secondary) — belt-and-braces only.
-    // writeDashboardToken's age-based sweep is the actual backstop for a
-    // dirty death: SIGKILL never reaches this handler at all, and a
-    // failed unlink here (permissions, already-gone) must not block the
-    // rest of shutdown.
-    if (tokenState.path) {
-      try {
-        fs.unlinkSync(tokenState.path);
-      } catch (_) {
-        /* already gone, or unremovable — the age sweep is the backstop */
-      }
-    }
-
-    // Drain in-flight JSONL appends before closing (prevents truncated writes on fast SIGTERM)
-    Promise.all([..._writeQueue.values()])
-      .catch(() => {})
-      .finally(() => {
-        server.close(() => {
-          running = false;
-          currentPort = null;
-          currentUrl = null;
-          _activeServer = null;
-          process.exit(0);
-        });
-      });
-  }
+  _shutdown = createShutdown({
+    server,
+    stopBackgroundTasks,
+    tokenState,
+    onClosed: () => {
+      running = false;
+      currentPort = null;
+      currentUrl = null;
+      _activeServer = null;
+    },
+  });
 
   process.once('SIGTERM', shutdown);
   process.once('SIGINT', shutdown);
@@ -458,8 +460,17 @@ if (_isMain) {
     openBrowser: false,
     projectDir: _dir,
     projectDirExplicit: Boolean(process.env.CLAUDE_PROJECT_DIR),
-  }).catch((err) => {
-    process.stderr.write(`[server] failed to start: ${err.message}\n`);
-    process.exit(1);
-  });
+  })
+    .then((res) => {
+      // #477: a duplicate start exits cleanly instead of lingering.
+      if (!res.alreadyRunning) return;
+      process.stdout.write(
+        `[server] dashboard already running for this project at ${res.url} (pid ${res.pid})\n`,
+      );
+      process.exit(0);
+    })
+    .catch((err) => {
+      process.stderr.write(`[server] failed to start: ${err.message}\n`);
+      process.exit(1);
+    });
 }

@@ -75,6 +75,13 @@ const AUTH_PATTERNS: RegExp[] = [
   /\bunauthori[sz]ed\b|authentication (?:failed|error|required)/i,
   // hermes (seen): "No inference provider configured. … set an API key"
   /no inference provider configured/i,
+  // #473 crush (issue report): "No providers configured - please run 'crush'
+  // to set up a provider interactively."
+  /\bno providers? configured\b/i,
+  // #473 pi (seen): "No API key found for the selected model. Use /login to
+  // log into a provider via OAuth or API key."
+  /\bno api key (?:found|configured)\b/i,
+  /\buse \/login\b/i,
 ];
 
 /** Runners re-throw ENOENT as prose ("requires the Codex CLI (codex) on PATH"). */

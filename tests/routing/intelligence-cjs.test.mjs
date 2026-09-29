@@ -1,6 +1,6 @@
 /**
  * Tests for .claude/helpers/intelligence.cjs
- * Covers: getContext(), feedback(), consolidate(), recordEdit()
+ * Covers: feedback(), consolidate(), recordEdit()
  *
  * Uses CLAUDE_PROJECT_DIR injection to isolate from production data.
  */
@@ -39,33 +39,6 @@ afterEach(() => {
   if (ORIG_ENV !== undefined) process.env.CLAUDE_PROJECT_DIR = ORIG_ENV;
   else delete process.env.CLAUDE_PROJECT_DIR;
   fs.rmSync(tmpDir, { recursive: true, force: true });
-});
-
-describe('intelligence.cjs — getContext', () => {
-  it('returns null for empty prompt', () => {
-    const result = intelligence.getContext('');
-    expect(result).toBeNull();
-  });
-
-  it('returns null for null prompt', () => {
-    const result = intelligence.getContext(null);
-    expect(result).toBeNull();
-  });
-
-  it('returns string or null for a valid prompt (cold start allowed)', () => {
-    const result = intelligence.getContext('fix authentication bug');
-    // When no entries are loaded, returns null. With entries, returns a string.
-    expect(result === null || typeof result === 'string').toBe(true);
-  });
-
-  it('when result is a string, it contains the expected header line', () => {
-    intelligence.init();
-    const result = intelligence.getContext('authentication security login');
-    if (result !== null) {
-      expect(typeof result).toBe('string');
-      expect(result).toContain('[INTELLIGENCE]');
-    }
-  });
 });
 
 describe('intelligence.cjs — recordEdit', () => {
@@ -130,7 +103,7 @@ describe('intelligence.cjs — feedback', () => {
     expect(last).toHaveProperty('success', true);
   });
 
-  it('feedback entry has required fields: ts, success, context, recentEdits', () => {
+  it('feedback entry has required fields: ts, success, recentEdits', () => {
     const OUTCOMES = path.join(getDataDir(), 'intelligence-outcomes.jsonl');
 
     intelligence.feedback(true);
@@ -139,7 +112,6 @@ describe('intelligence.cjs — feedback', () => {
     const last = JSON.parse(lines[lines.length - 1]);
     expect(last).toHaveProperty('ts');
     expect(last).toHaveProperty('success');
-    expect(last).toHaveProperty('context');
     expect(last).toHaveProperty('recentEdits');
     expect(Array.isArray(last.recentEdits)).toBe(true);
   });

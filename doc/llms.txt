@@ -22,7 +22,7 @@
 
 ### Memory Subsystem
 - Persistent SQLite memory backend in WAL mode (`PRAGMA journal_mode = WAL`).
-- Three layers: Memory Palace (verbatim chunk search), JSON pattern store (episodic/routing paths), and Monograph.
+- Two layers: JSON pattern store (episodic/routing paths) and Monograph.
 - Concept Doc: [`doc/concepts/memory.md`](doc/concepts/memory.md)
 
 ### Monograph (Codebase Knowledge Graph)

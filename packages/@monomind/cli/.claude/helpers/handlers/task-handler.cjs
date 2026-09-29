@@ -12,7 +12,6 @@ module.exports = {
   handlePreTask: async function(hCtx) {
     var hookInput = hCtx.hookInput;
     var prompt = hCtx.prompt;
-    var router = hCtx.router;
     var session = hCtx.session;
     var CWD = hCtx.CWD;
 

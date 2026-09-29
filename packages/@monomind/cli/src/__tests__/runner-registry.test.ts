@@ -72,6 +72,7 @@ describe('version handshake (§2)', () => {
         'agent-exec-access-read',
         'agent-exec-full-access-tools',
         'agent-exec-sandbox',
+        'agent-test-sandbox',
       ],
     });
     expect(p.capabilities).toContain('agent-exec');
