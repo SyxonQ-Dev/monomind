@@ -1,4 +1,4 @@
-# Agent Exec Protocol — v1 (rev 23)
+# Agent Exec Protocol — v1 (rev 24)
 
 - **Status**: Implemented (Phase 0 of the mono-agent delegation plan — see
   `mono-agent:docs/plans/local-agent-monomind-delegation.md`)
@@ -6,6 +6,20 @@
   the Coder mode threat model, the `--access full` guardrails (root refusal, no transitive
   escalation, env hygiene, audit log), what callers own, and residual risks (issue #360).
 - **Revision history**:
+  - rev 24 (2026-09-29): **subagent events on every runtime** (issue #387, remaining part) — no
+    new capability; `agent-exec-subagent-events` now covers every runtime, not only claude. On a
+    runtime other than claude, a native tool call whose `tool_activity(start)` has `kind:"task"`
+    is followed by a synthesized `subagent` `started` event, and its `tool_activity(end)` by a
+    `finished` event (§3.2.1). Both use the call's `tool_activity` id as `id` and `tool_use_id`.
+    These events are synthesized from `tool_activity`, so they carry less than claude's: no
+    `progress` phase, no `usage`, no `last_tool`; `finished.status` is `completed`, `failed`,
+    `denied` or `stopped` (cancel/timeout), and `summary` is the first 500 characters of the
+    call's output. Runtimes whose runner sets `kind:"task"` itself: opencode (`task`), cline
+    (`spawn_agent`, `team_*`) and dsh (`subagent`, `subagent_fork`); on others the shared name
+    table (`orgrt/tool-kind.ts`) gives `task` to `Task`, `Agent`, `spawn_subagent`,
+    `invoke_subagent`, `browser_subagent`, `spawn_agent` and `subagent`. A start-only
+    `tool_activity` (no real id) gets no `subagent` event. claude is unchanged: it keeps its
+    SDK-based events and gets no synthesized ones. New golden fixture `subagent-synth.ndjson`.
   - rev 23 (2026-09-29): **truthful native sandbox, and `--sandbox`** (issue #396) — new
     capability `agent-exec-sandbox`. The default does not change: without the new flag every
     runtime starts exactly as in rev 22, and a non-org turn still runs most vendor CLIs without
@@ -518,9 +532,9 @@ Malformed caller input (§4): monomind emits `error {code:"bad-frame", fatal:fal
 continues; the pending `tool_call` is failed with `ERROR: bad tool_result frame` fed back to the
 agent.
 
-### 3.2.1 `subagent` events (capability `agent-exec-subagent-events`, rev 17)
+### 3.2.1 `subagent` events (capability `agent-exec-subagent-events`, rev 17; every runtime since rev 24)
 
-**claude runtime only.** When the agent delegates to a native subagent (the `Task`/`Agent` tool),
+**claude** (rev 17): when the agent delegates to a native subagent (the `Task`/`Agent` tool),
 monomind forwards the Agent SDK's task lifecycle as `subagent` events:
 
 | Field | Phases | Meaning |
@@ -556,6 +570,38 @@ Example (`doc/agent-exec-protocol/fixtures/subagent.ndjson`, abridged):
 {"v":1,"type":"subagent","phase":"progress","id":"task_1","tool_use_id":"toolu_task","summary":"Found loadConfig in src/config.ts","last_tool":"Grep","usage":{"total_tokens":4210,"tool_uses":1,"duration_ms":2310}}
 {"v":1,"type":"subagent","phase":"finished","id":"task_1","tool_use_id":"toolu_task","status":"completed","summary":"Config is loaded by loadConfig() in src/config.ts.","usage":{"total_tokens":5120,"tool_uses":1,"duration_ms":3050}}
 {"v":1,"type":"tool_activity","id":"toolu_task","phase":"end","name":"Task","ok":true,"output":"…","output_truncated":false,"duration_ms":3120}
+```
+
+**Other runtimes** (rev 24): the runtime reports no subagent lifecycle, so monomind synthesizes
+`subagent` events from a task-kind tool call, at lower fidelity:
+
+- `started` comes right after a `tool_activity(start)` with `kind:"task"`, and `finished` right
+  after that call's `tool_activity(end)`. `id` and `tool_use_id` are both the call's
+  `tool_activity` id (there is no separate task id).
+- `started` carries `subagent_type`, `description` and `prompt` only when the tool input has
+  them: `subagent_type`, `description` and `prompt` keys as-is (opencode's `task`, dsh's
+  `subagent`), or a `task` key as `prompt` (cline's `spawn_agent`/`team_*`).
+- `finished.status` is `"completed"` when the call ended `ok`, `"failed"` when it errored,
+  `"denied"` when it was refused (`denied:true`), and `"stopped"` when a cancel or timeout closed
+  it. `summary` is the call's output cut to 500 characters, omitted when empty.
+- There is no `progress` phase and no `usage` or `last_tool`, and nothing ties the subagent's
+  own tool calls or text to it: vendor runners send `parent_tool_use_id: null`.
+- Only calls with a real id qualify: a start-only `tool_activity` (§3.2) gets no `subagent`
+  event, since no end could close it.
+
+Runtimes whose runner marks a call `kind:"task"`: opencode (`task`), cline (`spawn_agent`,
+`team_*`) and dsh (`subagent`, `subagent_fork`). Any other runtime's call gets `task` from the
+shared name table (`orgrt/tool-kind.ts`) when named `Task`, `Agent`, `spawn_subagent`,
+`invoke_subagent`, `browser_subagent`, `spawn_agent` or `subagent`. claude never gets
+synthesized events, so it never reports a subagent twice.
+
+Example (`doc/agent-exec-protocol/fixtures/subagent-synth.ndjson`, abridged):
+
+```
+{"v":1,"type":"tool_activity","id":"call_task","phase":"start","name":"task","kind":"task","input":{"description":"Find config loader","prompt":"Find where the app loads its config file.","subagent_type":"explore"},"parent_tool_use_id":null}
+{"v":1,"type":"subagent","phase":"started","id":"call_task","tool_use_id":"call_task","subagent_type":"explore","description":"Find config loader","prompt":"Find where the app loads its config file."}
+{"v":1,"type":"tool_activity","id":"call_task","phase":"end","name":"task","ok":true,"output":"Config is loaded by loadConfig() in src/config.ts.","output_truncated":false}
+{"v":1,"type":"subagent","phase":"finished","id":"call_task","tool_use_id":"call_task","status":"completed","summary":"Config is loaded by loadConfig() in src/config.ts."}
 ```
 
 ### 3.3 Example
@@ -846,7 +892,7 @@ Callers may read `<projectRoot>/.monomind/orgs/<name>/runtime.json` and run `bus
 3. Handshake test (`--version --json` shape + capability gating).
 4. Golden NDJSON transcripts published at `doc/agent-exec-protocol/fixtures/*.ndjson` (success,
    tool-loop, fatal auth, timeout, cancel, bad-frame, tool-activity, full-access,
-   full-access-background, subagent) so callers can build contract tests without running monomind;
+   full-access-background, subagent, subagent-synth) so callers can build contract tests without running monomind;
    mono-agent's Phase 1 gate consumes these.
 5. Two real runners smoke-tested (whatever is installed in CI/dev).
 

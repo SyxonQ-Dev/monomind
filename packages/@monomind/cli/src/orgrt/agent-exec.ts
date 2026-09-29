@@ -41,7 +41,7 @@ import type { AgentMessage, OrgToolDef } from './agent-runner.js';
 import { appendFullAccessAudit } from './full-access-audit.js';
 import { loadCreateOrgSkillGuidance } from './org-design-skill.js';
 import { resolveExecRunner, runnerSpec } from './runner-registry.js';
-import { ToolActivityTracker } from './tool-activity.js';
+import { NATIVE_SUBAGENT_RUNTIMES, ToolActivityTracker } from './tool-activity.js';
 
 export type { ExecErrorCode } from './agent-exec-errors.js';
 export type { AgentExecOptions, ToolSpec } from './agent-exec-options.js';
@@ -242,7 +242,8 @@ export async function runAgentExecOnce(
 
   // #357: tool_activity events (see tool-activity.ts) — observability only.
   const fidelity = runnerSpec(opts.runtime)?.toolActivityFidelity;
-  const toolActivity = new ToolActivityTracker(safeEmit, fidelity);
+  const synthSubagents = !NATIVE_SUBAGENT_RUNTIMES.has(opts.runtime); // #387 rev 24
+  const toolActivity = new ToolActivityTracker(safeEmit, fidelity, synthSubagents);
   const effectiveCanUseTool = rawCanUseTool
     ? toolActivity.wrapCanUseTool(rawCanUseTool)
     : fullAccessCanUseTool; // #355
