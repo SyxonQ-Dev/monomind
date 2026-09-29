@@ -28,6 +28,8 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 - **`monoswarm`, `autopilot` and `agent spawn` say they start nothing** ([#418](https://github.com/monoes/monomind/issues/418)). `monoswarm init` recorded `"status": "running"` with an empty roster and `monoswarm status` showed a hard-coded 5% progress for a swarm with no tasks. The state file now records `"initialized"`, status reads `recorded (no agents started)` and shows progress only from recorded task files (`n/a` when there are none), and `monoswarm start` shows a "Suggested Agent Roster (not started)" instead of an "Agent Deployment Plan". `agent spawn` prints "recorded in the agent store" and that no process was started (pointing at `monomind agent exec`); the `agent_spawn` MCP tool returns `status: "registered"` with the same note. `monoswarm` and `autopilot` are marked deprecated in help, `autopilot status` and the docs; `autopilot status` says when no task source has tasks, since nothing writes `swarm-tasks.json`. Removing both commands is left for a later release.
 
+- **Grep/search `[MONOGRAPH_HINT]`s no longer point at test mocks** ([#447](https://github.com/monoes/monomind/issues/447)). The pre-bash and pre-search hint lookups in `hook-handler.cjs` took the first matching graph row, which was often a test (`grep bridgeStoreEntry` hinted `…/__tests__/hooks-core-commands.test.ts:17`), and since #409 those hints reach the model. Symbol hints now skip test files, using the same test-path heuristic as the monograph node resolver (#441), so a symbol matched only in tests gets no hint; file-name hints rank non-test files first.
+
 ## [2.19.0] — 2026-09-29
 
 ### Changed
