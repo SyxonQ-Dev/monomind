@@ -341,6 +341,57 @@ describe('session-restore-handler', () => {
       );
     });
 
+    // #416: the background reindex ran `npx -y monomind@latest doc ingest .`
+    // over the whole repo — a different version than installed, and 2,400
+    // files incl. package READMEs, duplicates and org run logs.
+    describe('reindex command', () => {
+      const cmd = (root, pathEnv = '') => loadHandler().knowledgeIngestCommand(root, pathEnv);
+      const layout = (root) => {
+        fs.mkdirSync(path.join(root, 'docs'), { recursive: true });
+        fs.mkdirSync(path.join(root, 'doc'), { recursive: true });
+        fs.mkdirSync(path.join(root, 'packages', 'x'), { recursive: true });
+        fs.writeFileSync(path.join(root, 'README.md'), '# r\n');
+        fs.writeFileSync(path.join(root, 'CHANGELOG.md'), '# c\n');
+        fs.writeFileSync(path.join(root, 'notes.txt'), 'n\n');
+        fs.writeFileSync(path.join(root, 'packages', 'x', 'README.md'), '# x\n');
+      };
+
+      it('uses the project-local binary and scoped paths', () => {
+        layout(tmpDir);
+        const bin = path.join(tmpDir, 'node_modules', '.bin', 'monomind');
+        fs.mkdirSync(path.dirname(bin), { recursive: true });
+        fs.writeFileSync(bin, '#!/bin/sh\n');
+        const c = cmd(tmpDir);
+        expect(c.cmd).toBe(bin);
+        expect(c.args).toEqual(['doc', 'ingest', 'docs', 'doc', 'CHANGELOG.md', 'README.md']);
+        expect(c.targets).toEqual(['docs', 'doc', 'CHANGELOG.md', 'README.md']);
+        expect(JSON.stringify(c)).not.toContain('npx');
+        expect(JSON.stringify(c)).not.toContain('@latest');
+      });
+
+      it('falls back to the monorepo CLI entry with node', () => {
+        layout(tmpDir);
+        const cli = path.join(tmpDir, 'packages', '@monomind', 'cli', 'bin', 'cli.js');
+        fs.mkdirSync(path.dirname(cli), { recursive: true });
+        fs.writeFileSync(cli, '');
+        const c = cmd(tmpDir);
+        expect(c.cmd).toBe(process.execPath);
+        expect(c.args.slice(0, 3)).toEqual([cli, 'doc', 'ingest']);
+      });
+
+      it('returns null with no installed binary (never npx)', () => {
+        layout(tmpDir);
+        expect(cmd(tmpDir)).toBeNull();
+      });
+
+      it('returns null when there is nothing in scope to ingest', () => {
+        const bin = path.join(tmpDir, 'node_modules', '.bin', 'monomind');
+        fs.mkdirSync(path.dirname(bin), { recursive: true });
+        fs.writeFileSync(bin, '#!/bin/sh\n');
+        expect(cmd(tmpDir)).toBeNull();
+      });
+    });
+
     it('does nothing when no knowledge base exists anywhere', async () => {
       const root = tmpDir;
       const sub = path.join(root, 'packages', 'cli');
