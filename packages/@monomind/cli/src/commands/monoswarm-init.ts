@@ -7,7 +7,7 @@ import { STRATEGIES, TOPOLOGIES } from './monoswarm-state.js';
 // Initialize swarm
 export const initCommand: Command = {
   name: 'init',
-  description: 'Initialize a new swarm',
+  description: 'Record a new swarm state file (starts no agents)',
   options: [
     {
       name: 'topology',

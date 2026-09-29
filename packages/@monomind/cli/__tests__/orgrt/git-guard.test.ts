@@ -320,3 +320,96 @@ describe('git guard — residual risk without the OS sandbox', () => {
     expect(remoteHead()).toBe(localHead());
   });
 });
+
+describe('git guard — scoped to the protected repositories (#481)', () => {
+  // The guard's core.hooksPath and core.excludesFile reach git through
+  // `includeIf.gitdir:` entries in the GIT_CONFIG_* env, so a repository the
+  // role's own tests create in TMPDIR sees none of it.
+  const scopedGuard = (level: GitLevel = 'commit') =>
+    prepareGitGuard({
+      level,
+      stateDir: join(base, 'guard', `scoped-${level}`),
+      protectedGitDirs: [gitCommonDir(repo)!],
+      excludeSandboxPlaceholders: true,
+      baseEnv: {},
+    })!;
+  const sh = (env: Record<string, string>, cmd: string, cwd: string) =>
+    spawnSync('sh', ['-c', cmd], { cwd, encoding: 'utf8', env: { ...cleanEnv(), ...env } });
+  const addWorktree = (name: string) => {
+    const wt = join(base, `wt-${name}`);
+    git(repo, 'worktree', 'add', '-q', '-b', `wt-${name}`, wt);
+    return wt;
+  };
+  const CONFIG = 'git config --get core.hooksPath; git config --get core.excludesFile; true';
+
+  it('exports no direct hooksPath/excludesFile key, only includeIf entries', () => {
+    const keys = Object.entries(scopedGuard().env)
+      .filter(([k]) => k.startsWith('GIT_CONFIG_KEY_'))
+      .map(([, v]) => v);
+    expect(keys).not.toContain('core.hooksPath');
+    expect(keys).not.toContain('core.excludesFile');
+    expect(keys.some((k) => /^includeIf\.gitdir(\/i)?:.+\.path$/.test(k))).toBe(true);
+  });
+
+  it('applies in the protected repo, its subdirectories and its linked worktrees', () => {
+    const guard = scopedGuard();
+    const wt = addWorktree('cfg');
+    mkdirSync(join(repo, 'sub'), { recursive: true });
+    for (const cwd of [repo, join(repo, 'sub'), wt]) {
+      const r = sh(guard.env, CONFIG, cwd);
+      expect(r.stdout.trim().split('\n'), cwd).toEqual([guard.hooksDir, join(guard.dir, 'excludes')]);
+    }
+  });
+
+  it('does not apply in an unrelated repo, so `git add .claude/settings.json` works there', () => {
+    const guard = scopedGuard();
+    const other = mkdtempSync(join(tmpdir(), 'git-guard-other-'));
+    try {
+      git(other, 'init', '-q');
+      expect(sh(guard.env, CONFIG, other).stdout.trim()).toBe('');
+      mkdirSync(join(other, '.claude'));
+      writeFileSync(join(other, '.claude', 'settings.json'), '{}\n');
+      const r = sh(guard.env, 'git add .claude/settings.json && git diff --cached --name-only', other);
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout.trim()).toBe('.claude/settings.json');
+      // the process-wide transport settings still apply everywhere
+      expect(sh(guard.env, 'git config --get protocol.file.allow', other).stdout.trim()).toBe('never');
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it('a guarded worktree still hides the sandbox placeholders', () => {
+    const guard = scopedGuard();
+    const wt = addWorktree('excl');
+    mkdirSync(join(wt, '.claude'), { recursive: true });
+    writeFileSync(join(wt, '.claude', 'settings.json'), '');
+    const r = sh(guard.env, 'git status --porcelain', wt);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout.trim()).toBe('');
+  });
+
+  it('a guarded worktree still refuses commits at read level', () => {
+    const guard = scopedGuard('read');
+    const wt = addWorktree('read');
+    const before = localHead(wt);
+    const r = sh(guard.env, 'git commit -q --no-verify --allow-empty -m nope', wt);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('monomind git-guard');
+    expect(localHead(wt)).toBe(before);
+  });
+
+  it('a guarded worktree still refuses pushes at commit level', () => {
+    const guard = scopedGuard('commit');
+    const wt = addWorktree('push');
+    git(wt, 'commit', '-q', '--allow-empty', '-m', 'work');
+    const before = remoteHead();
+    const r = sh(guard.env, `git push --no-verify origin HEAD:refs/heads/${branch}`, wt);
+    expect(r.status).not.toBe(0);
+    expect(remoteHead()).toBe(before);
+    const hook = sh(guard.env, `git -c protocol.file.allow=always push origin HEAD:refs/heads/${branch}`, wt);
+    expect(hook.status).not.toBe(0);
+    expect(hook.stderr).toContain('git push is not allowed');
+    expect(remoteHead()).toBe(before);
+  });
+});
