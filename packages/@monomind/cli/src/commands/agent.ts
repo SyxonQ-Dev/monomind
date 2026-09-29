@@ -5,10 +5,11 @@
 
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
-import { execCommand, scanCommand, testCommand } from './agent-exec.js';
+import { execCommand, scanCommand } from './agent-exec.js';
 import { listCommand, spawnCommand, statusCommand, stopCommand } from './agent-lifecycle.js';
 import { modelsCommand } from './agent-models.js';
 import { healthCommand, metricsCommand, poolCommand } from './agent-ops.js';
+import { testCommand } from './agent-test.js';
 
 export const agentCommand: Command = {
   name: 'agent',
@@ -55,7 +56,7 @@ export const agentCommand: Command = {
       `${output.highlight('exec')}          - Run one agent turn via a local runner (NDJSON protocol)`,
       `${output.highlight('scan')}          - Detect installed agent runtimes`,
       `${output.highlight('models')}        - List a runtime's available models`,
-      `${output.highlight('test')}          - Smoke-test a runtime`,
+      `${output.highlight('test')}          - Smoke-test a runtime (--json: structured result)`,
     ]);
     output.writeln();
     output.writeln('Run "monomind agent <subcommand> --help" for subcommand help');

@@ -54,6 +54,7 @@ describe('version handshake (§2)', () => {
         'agent-scan',
         'agent-scan-read-only',
         'agent-models',
+        'agent-test-json',
         'org-json-v1',
         'org-tool-providers',
         'org-decision-attribution',
