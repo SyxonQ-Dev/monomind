@@ -91,9 +91,15 @@ export const validateAction = async (ctx: CommandContext): Promise<CommandResult
       const gitFindings = gitEnforcementFindings(def);
       errors.push(...gitFindings.errors);
       warnings.push(...gitFindings.warnings);
-      // #492: a bare absolute scope path that doesn't exist is likely a typo.
-      const { missingScopePathWarnings } = await import('../orgrt/policy-paths.js');
-      warnings.push(...missingScopePathWarnings(def.roles));
+      // #492: directory scope entries, checked as the daemon will see them —
+      // after {{org_root}}/{{home}} expansion.
+      const { scopeEntryFindings } = await import('../orgrt/policy-scopes.js');
+      const { expandOrgPolicyPathVars, promptVarsFor } = await import('../orgrt/prompt-vars.js');
+      const scopeFindings = scopeEntryFindings(
+        expandOrgPolicyPathVars(def, promptVarsFor(ctx.cwd || process.cwd())).roles,
+      );
+      errors.push(...scopeFindings.errors);
+      warnings.push(...scopeFindings.warnings);
       if (def.name !== stem)
         warnings.push(
           `def.name "${def.name}" differs from filename — the runtime addresses this org as "${stem}"`,
