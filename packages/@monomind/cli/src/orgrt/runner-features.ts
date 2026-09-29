@@ -35,12 +35,13 @@ export interface RunnerFeatures {
 
 export const RUNNER_FEATURES: Record<RuntimeKind, RunnerFeatures> = {
   claude: { resume: true, effort: true, maxTurns: true, reportsCost: true, initTarget: 'claude' },
-  // effort: `-c model_reasoning_effort=<level>` (codex-runner).
+  // effort: codex `-c model_reasoning_effort`, opencode model variant, agy
+  // `--effort`, grok/copilot `--reasoning-effort` (each runner's own mapping).
   codex: { resume: true, effort: true, maxTurns: false, reportsCost: false, initTarget: 'codex' },
   // cost: the served instance reports per-message USD (opencode-runner.ts).
   opencode: {
     resume: true,
-    effort: false,
+    effort: true,
     maxTurns: false,
     reportsCost: true,
     initTarget: 'opencode',
@@ -48,7 +49,7 @@ export const RUNNER_FEATURES: Record<RuntimeKind, RunnerFeatures> = {
   vercel: { resume: true, effort: false, maxTurns: true, reportsCost: false, initTarget: null },
   antigravity: {
     resume: true,
-    effort: false,
+    effort: true,
     maxTurns: false,
     reportsCost: false,
     initTarget: 'antigravity',
@@ -60,14 +61,14 @@ export const RUNNER_FEATURES: Record<RuntimeKind, RunnerFeatures> = {
     reportsCost: false,
     initTarget: 'kimicode',
   },
-  grok: { resume: true, effort: false, maxTurns: false, reportsCost: false, initTarget: null },
+  grok: { resume: true, effort: true, maxTurns: false, reportsCost: false, initTarget: null },
   qwen: { resume: true, effort: false, maxTurns: false, reportsCost: false, initTarget: null },
   // Resume is per-process only (the rpc session lives as long as the child).
   'qwen-rpc': { resume: false, effort: false, maxTurns: false, reportsCost: false, initTarget: null },
   // crush resumes with --continue inside one run only; no id to hand back.
   crush: { resume: false, effort: false, maxTurns: false, reportsCost: false, initTarget: null },
-  // copilot documents --resume=<id> but emits no session id to pass back.
-  copilot: { resume: false, effort: false, maxTurns: false, reportsCost: false, initTarget: null },
+  // copilot: the closing result line carries sessionId; --resume=<id>.
+  copilot: { resume: true, effort: true, maxTurns: false, reportsCost: false, initTarget: null },
   pi: { resume: false, effort: false, maxTurns: false, reportsCost: false, initTarget: null },
   'pi-rpc': { resume: false, effort: false, maxTurns: false, reportsCost: false, initTarget: null },
   // hermes reports cost_usd: 0 — not a real figure.

@@ -57,11 +57,11 @@ describe('agent exec --effort', () => {
   });
 
   it('a runtime without effort control gets a status notice after start', async () => {
-    const { events, seen } = await exec({ runtime: 'grok', effort: 'max' });
+    const { events, seen } = await exec({ runtime: 'crush', effort: 'max' });
     expect(seen[0].effort).toBe('max');
     expect(events[0].type).toBe('start');
     expect(events[1]).toMatchObject({ type: 'status', phase: 'notice' });
-    expect(String(events[1].message)).toMatch(/grok: --effort max ignored/);
+    expect(String(events[1].message)).toMatch(/crush: --effort max ignored/);
   });
 
   it('command layer rejects an unknown level with exit 2', async () => {

@@ -30,13 +30,14 @@
  *
  * Fidelity varies by runtime (doc §9, runner-registry.ts's
  * `toolActivityFidelity`):
- *  - `full` (claude, codex, opencode, antigravity, kimicode): start/end
+ *  - `full` (claude, codex, opencode, antigravity, kimicode, grok, qwen,
+ *    copilot): start/end
  *    pairs correlated by a real id — any runner that yields the rich
  *    `tool_use` shape (id + name) and a matching `tool_result` gets them,
  *    whatever its runtime. ClaudeAgentRunner gates its rich shape behind
  *    extras.includePartialMessages (agent-exec.ts sets it, session.ts, the
  *    org runtime, never does).
- *  - `start-only` (grok/qwen/crush/copilot/pi): a lightweight
+ *  - `start-only` (crush/pi): a lightweight
  *    `{type:'tool_use', text: toolName}` liveness signal with no id —
  *    mapped best-effort to a START-ONLY tool_activity under a locally-
  *    minted id (no matching end is possible without one, and none is

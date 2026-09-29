@@ -249,8 +249,8 @@ are never mistaken for oversights:
   so can one that deliberately detaches under another user or service manager. A CLI that runs
   its tools in a separate long-lived server it did not spawn itself (e.g. an already-running
   opencode server) is outside the tree too. Full access is not a sandbox.
-- **Weaker observability on start-only runtimes** (rev 15): grok, qwen, copilot, crush and pi
-  report tool starts without ends or real inputs, so the caller's journal and the audit line's
+- **Weaker observability on start-only runtimes** (rev 15): crush and pi report tool starts
+  without ends or real inputs, so the caller's journal and the audit line's
   `toolCalls` show less than on claude; the UI labels fidelity instead of pretending. Budgets are
   unenforceable where `reports_cost` is false.
 - **Agent-context detection for `org role set-access … full` is a speed bump** (#365): an agent

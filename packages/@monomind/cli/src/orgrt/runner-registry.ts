@@ -92,7 +92,7 @@ const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     // The runner already yields each one the instant it lands.
     streamsIncrementally: false,
     supportsFullAccess: true,
-    // Rev 13: the runner yields id-carrying tool_use + matched tool_result
+    // Rev 15: the runner yields id-carrying tool_use + matched tool_result
     // from the CLI's own tool start/complete events.
     toolActivityFidelity: 'full',
   },
@@ -110,7 +110,7 @@ const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     // re-checking before ruling this out permanently.
     streamsIncrementally: false,
     supportsFullAccess: true,
-    // Rev 13: the runner yields id-carrying tool_use + matched tool_result
+    // Rev 15: the runner yields id-carrying tool_use + matched tool_result
     // from the CLI's own tool start/complete events.
     toolActivityFidelity: 'full',
   },
@@ -134,7 +134,7 @@ const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     // of which runner backs the role.
     streamsIncrementally: true,
     supportsFullAccess: true,
-    // Rev 13: the runner yields id-carrying tool_use + matched tool_result
+    // Rev 15: the runner yields id-carrying tool_use + matched tool_result
     // from the CLI's own tool start/complete events.
     toolActivityFidelity: 'full',
   },
@@ -168,7 +168,7 @@ const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     // for its chat-bus/state-detector, regardless of which runner backs it.
     streamsIncrementally: true,
     supportsFullAccess: true,
-    // Rev 13: the runner yields id-carrying tool_use + matched tool_result
+    // Rev 15: the runner yields id-carrying tool_use + matched tool_result
     // from the CLI's own tool start/complete events.
     toolActivityFidelity: 'full',
   },
@@ -186,9 +186,9 @@ const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     // verified live.
     streamsIncrementally: false,
     supportsFullAccess: true,
-    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
-    // signal with no id — best-effort, start-only tool_activity mapping.
-    toolActivityFidelity: 'start-only',
+    // Rev 15: the runner yields id-carrying tool_use + matched tool_result
+    // from the CLI's own tool start/complete events.
+    toolActivityFidelity: 'full',
   },
   {
     id: 'qwen',
@@ -201,9 +201,9 @@ const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     // event, not per-token deltas — confirmed live, #182".
     streamsIncrementally: false,
     supportsFullAccess: true,
-    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
-    // signal with no id — best-effort, start-only tool_activity mapping.
-    toolActivityFidelity: 'start-only',
+    // Rev 15: the runner yields id-carrying tool_use + matched tool_result
+    // from the CLI's own tool start/complete events.
+    toolActivityFidelity: 'full',
   },
   {
     id: 'qwen-rpc',
@@ -260,9 +260,9 @@ const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     // before assuming it can never stream.
     streamsIncrementally: false,
     supportsFullAccess: true,
-    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
-    // signal with no id — best-effort, start-only tool_activity mapping.
-    toolActivityFidelity: 'start-only',
+    // Rev 15: the runner yields id-carrying tool_use + matched tool_result
+    // from the CLI's own tool start/complete events.
+    toolActivityFidelity: 'full',
   },
   {
     id: 'pi',

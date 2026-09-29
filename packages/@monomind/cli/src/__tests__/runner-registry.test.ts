@@ -161,7 +161,7 @@ describe('runner registry', () => {
     expect(byId.get('claude')?.toolActivityFidelity).toBe('full');
     for (const id of ['codex', 'opencode', 'antigravity', 'kimicode'])
       expect(byId.get(id as 'codex')?.toolActivityFidelity, id).toBe('full');
-    expect(byId.get('grok')?.toolActivityFidelity).toBe('start-only');
+    expect(byId.get('crush')?.toolActivityFidelity).toBe('start-only');
     expect(byId.get('vercel')?.toolActivityFidelity).toBe('none');
   });
 });
