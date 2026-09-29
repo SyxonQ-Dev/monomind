@@ -3320,17 +3320,13 @@ GOLDEN_SET.push(
   {
     id: 'b7-agy-equivalent',
     query: 'how do the features translate to the alternative non gravitational command line',
-    relevant: [
-      'packages/@monomind/cli/.claude/skills/mastermind/references/antigravity-tools.md',
-    ],
+    relevant: ['packages/@monomind/cli/.claude/skills/mastermind/references/antigravity-tools.md'],
     tags: ['b7'],
   },
   {
     id: 'b7-anthropic-primitives',
     query: 'which native Anthropic primitives correspond to each orchestration capability',
-    relevant: [
-      'packages/@monomind/cli/.claude/skills/mastermind/references/claude-code-tools.md',
-    ],
+    relevant: ['packages/@monomind/cli/.claude/skills/mastermind/references/claude-code-tools.md'],
     tags: ['b7'],
   },
   {
