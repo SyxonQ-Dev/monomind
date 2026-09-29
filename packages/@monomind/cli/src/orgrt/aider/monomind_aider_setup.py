@@ -74,6 +74,15 @@ def apply_effort(model, effort, emit):
              % (effort, model.name))
 
 
+def path_in_scope(scope_dir, edit_root, path):
+    """Whether `path` (relative to aider's root `edit_root`, or absolute) is
+    inside `scope_dir` after symlinks and outside any .git dir."""
+    base = os.path.realpath(scope_dir)
+    rel = os.path.relpath(os.path.realpath(os.path.join(edit_root or base, path)), base)
+    parts = rel.split(os.sep)
+    return parts[0] != ".." and ".git" not in parts
+
+
 def git_root_of(cwd):
     d = os.path.abspath(cwd)
     while True:

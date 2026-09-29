@@ -126,6 +126,23 @@ class ShimRun(unittest.TestCase):
         self.assertIn("declined", end["output"])
         self.assertNotIn("exit_code", end)
 
+    def test_scoped_mode_keeps_edits_inside_cwd(self):
+        outside = os.path.join(self.tmp.name, "outside.txt")
+        link = os.path.join(self.cwd, "link.txt")
+        os.symlink(outside, link)
+        os.makedirs(os.path.join(self.cwd, ".git", "hooks"))
+        for target in ("../outside.txt", outside, "link.txt", ".git/hooks/pre-commit"):
+            reply = "%s\n```\n<<<<<<< SEARCH\n=======\nescaped\n>>>>>>> REPLACE\n```\n" % target
+            self.run_shim([reply, "ok"], access="scoped")
+            self.assertFalse(os.path.exists(outside), target)
+            self.assertFalse(os.path.exists(os.path.join(self.cwd, ".git/hooks/pre-commit")), target)
+        # Inside cwd still works in scoped mode; full mode may write anywhere.
+        self.run_shim([EDIT_REPLY], access="scoped")
+        self.assertTrue(os.path.exists(os.path.join(self.cwd, "hello.txt")))
+        reply = "../outside.txt\n```\n<<<<<<< SEARCH\n=======\nfull\n>>>>>>> REPLACE\n```\n"
+        self.run_shim([reply], access="full")
+        self.assertTrue(os.path.exists(outside))
+
     def test_a_failing_command_reports_its_exit_code(self):
         reply = "Check.\n\n```bash\nexit 7\n```\n"
         self.run_shim([reply], access="full")

@@ -28,7 +28,7 @@ Access: `full` answers every confirmation yes, INCLUDING the ones aider marks
 explicit_yes_required (running a model-suggested shell command), which
 `--yes-always` answers no. That is what gives coder mode real shell autonomy.
 `scoped` answers those no (and never installs packages), reporting each
-declined command as a failed shell call.
+declined command as a failed shell call; it declines files outside cwd or in .git.
 
 Sessions: the conversation is kept as JSON under `state_dir` (never in the
 user's repo), keyed by a shim-minted id; resuming loads it back as aider's
@@ -49,12 +49,16 @@ from monomind_aider_setup import (
     as_list,
     git_root_of,
     load_user_config,
+    path_in_scope,
 )
 
 EXIT_OK, EXIT_FAIL, EXIT_USAGE, EXIT_API, EXIT_IMPORT = 0, 1, 2, 3, 4
 SESSION_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 # Questions scoped access always answers no, besides explicit_yes_required.
 SCOPED_DENY = ("Run pip install?", "Install playwright?")
+# Questions about a file (the subject): scoped access keeps it inside cwd.
+PATH_QUESTIONS = ("Create new file?", "Add file to the chat?",
+                  "Allow edits to file that has not been added to the chat?")
 OUTPUT_CAP = 64 * 1024
 
 
@@ -106,6 +110,8 @@ def make_io_class(InputOutput):
             self.tools = tools
             self.errors = []
             self.hit_reflection_cap = False
+            # Scoped path checks: cwd, and aider's root (set once coder exists).
+            self.scope_dir, self.edit_root = kw.get("root") or os.getcwd(), None
 
         def confirm_ask(
             self,
@@ -118,6 +124,8 @@ def make_io_class(InputOutput):
         ):
             self.num_user_asks += 1
             risky = explicit_yes_required or question.strip() in SCOPED_DENY
+            if question.strip() in PATH_QUESTIONS and subject:
+                risky = risky or not path_in_scope(self.scope_dir, self.edit_root, subject)
             yes = self.full or not risky
             if not yes and subject and question.startswith("Run shell command"):
                 for cmd in subject.splitlines():
@@ -411,6 +419,7 @@ def run(req, emit):
         test_cmd=conf.get("test-cmd"),
         map_tokens=int(conf.get("map-tokens", 1024)),
     )
+    io.edit_root = coder.root
     max_turns = req.get("max_turns")
     if isinstance(max_turns, int) and max_turns > 0:
         coder.max_reflections = max_turns - 1
