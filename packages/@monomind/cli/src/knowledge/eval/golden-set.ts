@@ -3314,14 +3314,14 @@ GOLDEN_SET.push(
   {
     id: 'b7-pi-equivalent',
     query: 'what are the equivalent capabilities when using the Inflection personal assistant',
-    relevant: ['packages/@monomind/cli/.claude/commands/mastermind/references/pi-tools.md'],
+    relevant: ['packages/@monomind/cli/.claude/skills/mastermind/references/pi-tools.md'],
     tags: ['b7'],
   },
   {
     id: 'b7-agy-equivalent',
     query: 'how do the features translate to the alternative non gravitational command line',
     relevant: [
-      'packages/@monomind/cli/.claude/commands/mastermind/references/antigravity-tools.md',
+      'packages/@monomind/cli/.claude/skills/mastermind/references/antigravity-tools.md',
     ],
     tags: ['b7'],
   },
@@ -3329,14 +3329,14 @@ GOLDEN_SET.push(
     id: 'b7-anthropic-primitives',
     query: 'which native Anthropic primitives correspond to each orchestration capability',
     relevant: [
-      'packages/@monomind/cli/.claude/commands/mastermind/references/claude-code-tools.md',
+      'packages/@monomind/cli/.claude/skills/mastermind/references/claude-code-tools.md',
     ],
     tags: ['b7'],
   },
   {
     id: 'b7-openai-terminal',
     query: 'how do the features map onto the OpenAI terminal assistant equivalent',
-    relevant: ['packages/@monomind/cli/.claude/commands/mastermind/references/codex-tools.md'],
+    relevant: ['packages/@monomind/cli/.claude/skills/mastermind/references/codex-tools.md'],
     tags: ['b7'],
   },
 
@@ -3558,13 +3558,13 @@ GOLDEN_SET.push(
   {
     id: 'b7-google-ai-mapping',
     query: 'what are the equivalent capabilities when using the google ai terminal app',
-    relevant: ['packages/@monomind/cli/.claude/commands/mastermind/references/gemini-tools.md'],
+    relevant: ['packages/@monomind/cli/.claude/skills/mastermind/references/gemini-tools.md'],
     tags: ['b7'],
   },
   {
     id: 'b7-ms-ai-mapping',
     query: 'how do microsoft ai assistant commands map to our features',
-    relevant: ['packages/@monomind/cli/.claude/commands/mastermind/references/copilot-tools.md'],
+    relevant: ['packages/@monomind/cli/.claude/skills/mastermind/references/copilot-tools.md'],
     tags: ['b7'],
   },
   // b7-worker-mgmt-docs removed: target is under the 400-byte corpus minimum
@@ -4693,7 +4693,7 @@ GOLDEN_SET.push(
     id: 'c3lo2-work-item-anatomy',
     query:
       'what does the structured file look like that describes a unit of work with its lifecycle and prerequisites',
-    relevant: ['packages/@monomind/cli/.claude/commands/mastermind/_taskfile.md'],
+    relevant: ['packages/@monomind/cli/.claude/skills/mastermind/references/taskfile.md'],
     tags: ['c3-lo2'],
   },
   {
