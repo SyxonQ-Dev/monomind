@@ -14,7 +14,7 @@
 import { statSync } from 'node:fs';
 import { type RunnerSpec, runnerSpec } from './runner-registry.js';
 
-export type AccessMode = 'scoped' | 'full';
+export type AccessMode = 'scoped' | 'read' | 'full';
 
 /**
  * `canUseTool` for `--access full`: every call is allowed. Subprocess
@@ -81,9 +81,23 @@ export function checkFullAccessGuards(opts: {
   return null;
 }
 
+/** #388: `--access read` needs a runtime with a real read-only mode
+ *  (runner-access.ts); anywhere else it is refused, never run as scoped. */
+export function checkReadAccess(
+  runtime: string,
+  spec: RunnerSpec | undefined,
+): AccessGuardError | null {
+  if (spec?.readAccess) return null;
+  return {
+    code: 'unsupported',
+    message: `--access read is not supported by runtime "${runtime}" (no verified read-only mode — see agent scan --json access_modes)`,
+  };
+}
+
 /**
- * Resolves `opts.access` (default `'scoped'`) and, for `'full'`, runs every
- * guard and emits the protocol `error`+`done` pair itself on failure — kept
+ * Resolves `opts.access` (default `'scoped'`) and, for `'read'` (#388) and
+ * `'full'`, runs every guard and emits the protocol `error`+`done` pair
+ * itself on failure — kept
  * out of agent-exec.ts's own line budget (a file shared with #356/#357).
  * `abort: true` means the caller must stop and return exit code 2.
  */
@@ -92,12 +106,12 @@ export function resolveAccess(
   emit: (ev: Record<string, unknown>) => void,
 ): { access: AccessMode; abort: boolean } {
   const access = opts.access ?? 'scoped';
-  if (access !== 'full') return { access, abort: false };
-  const err = checkFullAccessGuards({
-    runtime: opts.runtime,
-    cwd: opts.cwd,
-    spec: runnerSpec(opts.runtime),
-  });
+  if (access === 'scoped') return { access, abort: false };
+  const spec = runnerSpec(opts.runtime);
+  const err =
+    access === 'read'
+      ? checkReadAccess(opts.runtime, spec)
+      : checkFullAccessGuards({ runtime: opts.runtime, cwd: opts.cwd, spec });
   if (!err) return { access, abort: false };
   emit({ v: 1, type: 'error', code: err.code, fatal: true, message: err.message });
   emit({ v: 1, type: 'done', exit_code: 2 });

@@ -95,6 +95,15 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    entries carry `resume`, `effort`, `max_turns`, `reports_cost`,
  *    `init_target`; `tool_activity` start events carry `kind` (§3, §6,
  *    rev 19)
+ *  - `agent-exec-access-read` — `agent exec --access read` (issue #388):
+ *    native read tools, web, TodoWrite and caller tools, plus an allowlist of
+ *    read-only shell commands (`git status|diff|log|show|blame`, `ls`, `cat`,
+ *    `head`, `tail`, `wc`, `rg`, `grep`, `find` without actions that run or
+ *    write; `--allow-bash-prefix` adds to it); no edits, general shell or
+ *    subagents. claude enforces it itself; codex runs `--sandbox read-only`,
+ *    pi/pi-rpc `--tools read,grep,find,ls`; any other runtime answers
+ *    `unsupported`. `agent scan --json` entries carry `access_modes`
+ *    (§3.1, §6, rev 21)
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
@@ -121,6 +130,7 @@ export const AGENT_PROTOCOL_CAPABILITIES = [
   'init-json',
   'knowledge-profile-captures',
   'agent-exec-subagent-events',
+  'agent-exec-access-read',
 ] as const;
 
 /** The exact handshake object emitted by `monomind --version --json`. */

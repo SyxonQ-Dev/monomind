@@ -28,13 +28,13 @@
 import { fullAccessCanUseTool, resolveAccess } from './agent-exec-access.js';
 import { StdioToolBridge, UsageTracker } from './agent-exec-bridge.js';
 import { type ExecErrorCode, FATAL_CODES } from './agent-exec-errors.js';
+import { execCanUseTool } from './agent-exec-gate.js';
 import {
   type AgentExecOptions,
   jsonSchemaToZodShape,
   type Terminal,
 } from './agent-exec-options.js';
 import { createExecStatusHandler, runtimeStartupNotices } from './agent-exec-settings.js';
-import { hasUnsafeShellSyntax } from './agent-exec-shell-syntax.js';
 import { mapStopReason } from './agent-exec-stop-reason.js';
 import type { AgentMessage, OrgToolDef } from './agent-runner.js';
 import { appendFullAccessAudit } from './full-access-audit.js';
@@ -220,35 +220,17 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
   // tool.handler (the stdio bridge that actually emits tool_call/tool_result
   // on the wire) was never reached, since canUseTool denies before it runs.
   const allowedToolNames = new Set(tools.flatMap((t) => [`mcp__org__${t.name}`, t.name]));
-  const bashPrefixes = opts.allowBashPrefixes ?? [];
-  const rawCanUseTool = async (toolName: string, input: Record<string, unknown>) => {
-    if (allowedToolNames.has(toolName)) return { behavior: 'allow' as const, updatedInput: input };
-    if (toolName === 'Bash' && bashPrefixes.length > 0 && typeof input.command === 'string') {
-      const cmd = input.command.trimStart();
-      const matchesPrefix = bashPrefixes.some((p) => cmd === p || cmd.startsWith(`${p} `));
-      if (matchesPrefix && !hasUnsafeShellSyntax(cmd))
-        return { behavior: 'allow' as const, updatedInput: input };
-      if (matchesPrefix)
-        return {
-          behavior: 'deny' as const,
-          message:
-            'Bash command contains shell metacharacters (;, &, |, `, $(, <() — only a single literal invocation is allowed, no chaining/substitution/redirection.',
-        };
-    }
-    return {
-      behavior: 'deny' as const,
-      message:
-        toolName === 'Bash' && bashPrefixes.length > 0
-          ? `Bash is only allowed for commands starting with: ${bashPrefixes.join(', ')}.`
-          : `Tool "${toolName}" was not in the tool list this exec call was given.`,
-    };
-  };
+  const rawCanUseTool =
+    access === 'full'
+      ? null
+      : execCanUseTool(access, allowedToolNames, opts.allowBashPrefixes ?? []); // #388
 
   // #357: tool_activity events (see tool-activity.ts) — observability only.
   const fidelity = runnerSpec(opts.runtime)?.toolActivityFidelity;
   const toolActivity = new ToolActivityTracker(safeEmit, fidelity);
-  const canUseTool = toolActivity.wrapCanUseTool(rawCanUseTool);
-  const effectiveCanUseTool = access === 'full' ? fullAccessCanUseTool : canUseTool; // #355
+  const effectiveCanUseTool = rawCanUseTool
+    ? toolActivity.wrapCanUseTool(rawCanUseTool)
+    : fullAccessCanUseTool; // #355
 
   // This session's own tool list has no way to reach the real
   // mastermind:createorg skill (no settingSources, no `skills` SDK option,

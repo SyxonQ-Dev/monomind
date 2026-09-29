@@ -140,10 +140,11 @@ export async function runExec(
 
   // #355: --access full is a usage-error flag combo, checked before the
   // engine runs (root/runtime/--cwd guards live inside it — see
-  // agent-exec-access.ts's "not only the caller" doc comment).
+  // agent-exec-access.ts's "not only the caller" doc comment). `read`
+  // (#388) is checked per runtime inside the engine too.
   const access = String(ctx.flags.access ?? 'scoped');
-  if (access !== 'scoped' && access !== 'full') {
-    return usageError(`--access must be "scoped" or "full" (got "${access}")`);
+  if (access !== 'scoped' && access !== 'read' && access !== 'full') {
+    return usageError(`--access must be "scoped", "read" or "full" (got "${access}")`);
   }
   if (access === 'full' && ctx.flags['allow-bash-prefix']) {
     return usageError('--access full cannot be combined with --allow-bash-prefix');
@@ -215,7 +216,7 @@ export async function runExec(
 
   const exitCode = await runAgentExec({
     runtime,
-    access: access as 'scoped' | 'full',
+    access: access as 'scoped' | 'read' | 'full',
     prompt,
     systemPrompt,
     model: ctx.flags.model ? String(ctx.flags.model) : undefined,
@@ -313,15 +314,15 @@ export const execCommand: Command = {
     {
       name: 'allow-bash-prefix',
       description:
-        'CSV of command prefixes (e.g. "monomind,monoagentcli") the Bash tool may run, on top of --tools-file — scoped, not a blanket Bash grant. Incompatible with --access full',
+        'CSV of command prefixes (e.g. "monomind,monoagentcli") the Bash tool may run, on top of --tools-file — scoped, not a blanket Bash grant. With --access read, added to the read-only list. Incompatible with --access full',
       type: 'string',
     },
     {
       name: 'access',
       description:
-        'scoped (default, allow-list only) or full — unrestricted native tool access (runtimes with full_access in agent scan; requires --cwd, refuses root)',
+        'scoped (default, allow-list only), read — read files, search, web and read-only git, no edits or general shell (runtimes listing "read" in agent scan access_modes), or full — unrestricted native tool access (runtimes with full_access in agent scan; requires --cwd, refuses root)',
       type: 'string',
-      choices: ['scoped', 'full'],
+      choices: ['scoped', 'read', 'full'],
     },
     { name: 'protocol', description: 'Protocol version pin (1)', type: 'string' },
     {

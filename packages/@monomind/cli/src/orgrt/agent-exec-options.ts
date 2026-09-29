@@ -21,8 +21,9 @@ export interface AgentExecOptions {
   /** #355. `scoped` (default) = today's allow-list behavior, byte-identical
    *  SDK options. `full` = unrestricted native tool access (any runtime
    *  whose RunnerSpec.supportsFullAccess is true; guarded — see
-   *  agent-exec-access.ts). */
-  access?: 'scoped' | 'full';
+   *  agent-exec-access.ts). `read` (#388) = read files, search, web and
+   *  read-only shell only (agent-exec-read.ts; runtimes with readAccess). */
+  access?: 'scoped' | 'read' | 'full';
   systemPrompt?: string;
   model?: string;
   /** `--effort`: reasoning effort, mapped per runtime (AgentRunArgs.effort). */

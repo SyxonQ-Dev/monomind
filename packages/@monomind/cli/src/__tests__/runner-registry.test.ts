@@ -68,6 +68,7 @@ describe('version handshake (§2)', () => {
         'init-json',
         'knowledge-profile-captures',
         'agent-exec-subagent-events',
+        'agent-exec-access-read',
       ],
     });
     expect(p.capabilities).toContain('agent-exec');

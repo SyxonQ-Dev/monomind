@@ -30,8 +30,11 @@ export interface AgentRunArgs {
    *  RunnerSpec.supportsFullAccess is true runs its CLI's own no-approval,
    *  no-sandbox mode in a process group (process-group-spawn.ts). Unset/
    *  `scoped` = today's behavior, byte-identical. Set by agent-exec.ts and
-   *  full-access org roles (#365). Runners without full access ignore it. */
-  access?: 'scoped' | 'full';
+   *  full-access org roles (#365). Runners without full access ignore it.
+   *  `read` (#388, agent exec only) = the CLI's own read-only mode on a
+   *  runtime whose RunnerSpec.readAccess is true (runner-access.ts); claude
+   *  gets it from the caller's canUseTool instead. */
+  access?: 'scoped' | 'read' | 'full';
   /** The mailbox prompt stream (or any async iterable of prompt messages). */
   prompt: AsyncIterable<any>;
   systemPrompt: string;

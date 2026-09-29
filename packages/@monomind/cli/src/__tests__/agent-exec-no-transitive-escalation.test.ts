@@ -146,12 +146,22 @@ describe('#360: no transitive escalation to --access full', () => {
       ].sort(),
     );
   });
+
+  it('#388: exactly the pinned read set advertises readAccess, and read never widens to full', async () => {
+    const { RUNNER_SPECS } = await import('../orgrt/runner-registry.js');
+    const readRuntimes = RUNNER_SPECS.filter((s) => s.readAccess).map((s) => s.id);
+    // Widening this set needs a verified read-only mode: see runner-access.ts.
+    expect(readRuntimes.sort()).toEqual(['claude', 'codex', 'pi', 'pi-rpc'].sort());
+    const engine = readFileSync(join(SRC_ROOT, 'orgrt', 'agent-exec.ts'), 'utf8');
+    // Only `access === 'full'` selects the allow-everything gate.
+    expect(engine).toMatch(/access === 'full'\s*\?\s*null\s*:\s*execCanUseTool\(access,/);
+  });
 });
 
 describe('#360: ClaudeAgentRunner ignores anything but the exact literal access: "full"', () => {
   it('near-miss access values never enable bypassPermissions (strict equality, no coercion)', async () => {
     const { ClaudeAgentRunner } = await import('../orgrt/agent-runner-claude.js');
-    const nearMisses: unknown[] = ['FULL', 'Full', true, 1, 'scoped', '', null, undefined];
+    const nearMisses: unknown[] = ['FULL', 'Full', true, 1, 'scoped', 'read', '', null, undefined];
     for (const access of nearMisses) {
       let captured: any;
       const stubQuery = ((opts: any) => {
