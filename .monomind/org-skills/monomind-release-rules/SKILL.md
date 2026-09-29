@@ -278,6 +278,27 @@ with the Environment prefix.
   FIRST line of PREFLIGHT.md, in REPORT.md's warnings and in the
   `org_complete` summary: `VERSION: task named X, npm already has Y, releasing
   Z`. It is not an error and not a question for the human.
+- TAG CHAIN (release-captain, at SETUP, after publisher's `fetch origin --tags`):
+  `<previous>` is the version X of the last `chore(release): publish X` commit
+  C reachable from the target (`git -C ORG_ROOT log -1 --format='%H %s'
+  --grep='^chore(release): publish ' <target>`), and every `v<previous>` range
+  in this run means C. Check that `vX` exists and points at C
+  (`git -C ORG_ROOT rev-parse -q --verify 'refs/tags/vX^{commit}'`) and that
+  `curl -s https://api.github.com/repos/monoes/monomind/releases/tags/vX` has
+  tag_name vX. 2.18.3 shipped to npm and main with neither (issue #386).
+  - Both present: nothing to do.
+  - One missing and `npm view monomind@X version` prints X (X did ship): record
+    a WARNING and send publisher a TAG HEAL task naming X and C, then go on
+    without waiting — nothing in this run reads the tag, only C. Publisher runs
+    only the missing steps: `GIT_AUTHOR_NAME=nokhodian GIT_AUTHOR_EMAIL=nokhodian@gmail.com
+    GIT_COMMITTER_NAME=nokhodian GIT_COMMITTER_EMAIL=nokhodian@gmail.com
+    git -C ORG_ROOT tag -a vX -m 'monomind X' C` and `git -C ORG_ROOT
+    push origin vX`; then writes C's `## [X]` CHANGELOG.md section plus an
+    `**npm**:` line to $GATE/release-notes-X.md and runs `gh release create vX
+    --verify-tag --latest=false --title vX --notes-file $GATE/release-notes-X.md`
+    (never `--latest`: that belongs to the newest release).
+  - `vX` exists but points elsewhere, or X is not on npm: WARNING only; change
+    no tag or release, and use C for the ranges.
 - LOCAL MAIN SYNC (publisher, after the push to origin; `<sha>` = the release
   SHA, S = `ORG_ROOT-sync-VERSION`). Only when ORG_ROOT is on `main` with no
   tracked changes (`git -C ORG_ROOT symbolic-ref --short HEAD` prints main,
