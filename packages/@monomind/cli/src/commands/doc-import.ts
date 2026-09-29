@@ -63,7 +63,7 @@ export const importDocCommand: Command = {
         scope,
         getKnowledgeRoot(scope, getProjectRoot()),
       );
-      spinner.succeed(
+      spinner.result(
         `Imported ${result.totalChunks} chunks from ${result.filesProcessed} documents (${result.filesSkipped} already indexed)`,
       );
       if (result.errors.length) {

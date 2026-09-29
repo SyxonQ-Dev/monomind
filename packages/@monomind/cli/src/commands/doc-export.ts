@@ -42,7 +42,7 @@ export const exportDocCommand: Command = {
       // lives in that profile's brain, and reading the project's log for it
       // exported an empty bundle.
       const result = await exportToOKF(outDir, getKnowledgeRoot(scope, getProjectRoot()), scope);
-      spinner.succeed(`Exported ${result.exported} documents to ${result.outputDir}`);
+      spinner.result(`Exported ${result.exported} documents to ${result.outputDir}`);
       return { success: true, data: result };
     } catch (err) {
       spinner.fail(String(err));
