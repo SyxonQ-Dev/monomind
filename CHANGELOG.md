@@ -4,6 +4,8 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+## [2.18.5] — 2026-09-29
+
 ### Added
 
 - **`agent exec --effort <level>`** (agent-exec protocol rev 16, capability `agent-exec-effort`). Sets the turn's reasoning effort: `off`, `low`, `medium`, `high`, `xhigh` or `max`. claude gets it as the Agent SDK's `effort` option (`off` disables thinking); codex gets `-c model_reasoning_effort=<level>` (`off` becomes `none`). Other runtimes ignore it, and an unknown level is rejected before the turn starts.
