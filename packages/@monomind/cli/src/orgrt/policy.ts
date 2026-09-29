@@ -4,7 +4,7 @@
 // below where other modules import them from here.
 import { homedir } from 'node:os';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { isDecisionFile } from './authority-mask.js';
+import { isAuthorityFile } from './authority-mask.js';
 import type { OrgBus } from './bus.js';
 import { fileToolDenied, isDashboardCredential } from './file-roots.js';
 import { checkGitPolicy } from './policy-git.js';
@@ -40,7 +40,7 @@ export interface TokenUsage {
 
 const zeroTokens = (): TokenUsage => ({ input: 0, output: 0, cacheRead: 0, cacheCreation: 0 });
 
-const WRITE_TOOLS = new Set(['Write', 'Edit', 'NotebookEdit']);
+const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 /** Harness messaging tools that bypass the org bus. Always denied: an agent
  *  that picks one gets the SDK's misleading "no agent named X is reachable"
  *  error, concludes its teammate is down, and deadlocks the run (observed in
@@ -285,7 +285,9 @@ export class PolicyEngine {
           ? input.file_path
           : typeof input.path === 'string'
             ? input.path
-            : null;
+            : typeof input.notebook_path === 'string' // NotebookEdit's path argument
+              ? input.notebook_path
+              : null;
       if (p === null && !unrestricted) {
         // Grep/Glob's `path` argument is optional in the SDK (defaults to cwd,
         // i.e. searches everything) — without this check, a path-less call
@@ -346,9 +348,13 @@ export class PolicyEngine {
           return deny(
             `path ${p} resolves inside ${deniedHit}, which no role may touch regardless of scope, root, or allowWrite (credential store, guard config, socket, or runtime dir)`,
           );
-        if (WRITE_TOOLS.has(tool) && isDecisionFile(real))
+        // #498: the org definitions (each role's own policy), the decision
+        // files and the runtime state under .monomind/orgs/ — see
+        // authority-mask.ts. `real` is the resolved path, so a symlink to
+        // one of them is refused too.
+        if (WRITE_TOOLS.has(tool) && isAuthorityFile(real))
           return deny(
-            `path ${p} records a human's decisions (gates, approvals, questions, inbox) — only the org daemon writes it`,
+            `path ${p} is org authority state (an org definition, a human's decisions, or runtime state under .monomind/orgs/) — no role may write it, regardless of scope, root, or allowWrite; only the operator and the org daemon do`,
           );
         if (isDashboardCredential(real))
           return deny(

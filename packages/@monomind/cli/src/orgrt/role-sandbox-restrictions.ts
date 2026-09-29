@@ -2,7 +2,13 @@
 import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
-import { authorityDirs, DECISION_FILES, decisionFilePaths } from './authority-mask.js';
+import {
+  authorityDirs,
+  authorityFilePaths,
+  DECISION_FILES,
+  GIT_GUARD_DIR,
+  ORG_STATE_FILES,
+} from './authority-mask.js';
 import {
   DAEMON_SOCKETS,
   dashboardCredentialPaths,
@@ -167,11 +173,15 @@ export function buildClaudeRestrictions(
     ]),
     ...authorityDirs(home, env).flatMap((d) => [rule('Read', `${d}/**`), rule('Edit', `${d}/**`)]),
     ...roleDenyWrite.flatMap((d) => [rule('Edit', d), rule('Edit', `${d}/**`)]),
-    // Decision files: only the daemon writes them (authority-mask.ts).
+    // Authority files: the org definitions, the decision files and the
+    // daemon's state (authority-mask.ts, #498). policy.ts's isAuthorityFile
+    // is the complete check; these name the known files for the SDK too.
     ...(ctx.orgRoot
-      ? DECISION_FILES.map((f) =>
-          rule('Edit', join(ctx.orgRoot as string, '.monomind', 'orgs', '*', f)),
-        )
+      ? [
+          ...['*.json', '*.jsonl', '*.yaml', '*.yml'],
+          ...[...DECISION_FILES, ...ORG_STATE_FILES].map((f) => join('*', f)),
+          `${join('*', GIT_GUARD_DIR)}/**`,
+        ].map((f) => rule('Edit', join(ctx.orgRoot as string, '.monomind', 'orgs', f)))
       : []),
   ];
   if (!sandboxEnabled) return { disallowedTools };
@@ -189,7 +199,7 @@ export function buildClaudeRestrictions(
       ...(lockedRepo ? gitDirs : gitDirs.flatMap((d) => [join(d, 'config'), join(d, 'hooks')])),
       ...gitDirs.flatMap(gitLocalRemotePaths),
       ...HOME_DENY_WRITE.map((p) => join(home, p)),
-      ...decisionFilePaths(ctx.orgRoot),
+      ...authorityFilePaths(ctx.orgRoot),
       ...roleDenyWrite,
     ]),
     [ctx.cwd, join(home, '.claude')],

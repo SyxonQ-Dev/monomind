@@ -353,7 +353,13 @@ uses them must read `sandbox_applied` (and `native_sandbox`) rather than assume 
 - **Org-role opt-in (#365)**: granting `policy.access: "full"` to an org role is a human decision
   made with `monomind org role set-access`; the grant flow, drift suspension, taint checks and
   unattended-run gating are documented in [`org-runtime.md`](org-runtime.md) ("Full access"),
-  layered on top of the guardrails in §2 of this document.
+  layered on top of the guardrails in §2 of this document. The `access_ack` signature covers only
+  a full-access grant. The rest of a role's policy (scopes, git level, `sandbox.allowWrite`) lives
+  in the same org definition file, so that file, the decision files and the daemon's state under
+  `.monomind/orgs/` are authority files that no scoped role may write with a file tool, whatever
+  its scope (#498; the list and the Bash-side limits are in [`org-runtime.md`](org-runtime.md),
+  "Authority files"). An active full-access role runs with no policy gate and can still write
+  them.
 
 ## 4. Residual risks (accepted, not mitigated further by this issue)
 
