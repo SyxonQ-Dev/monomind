@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { rowToNode } from '../storage/node-store.js';
 import type { MonographNode } from '../types.js';
+import { resolveNodeByName, type SymbolCandidate } from './resolve-node.js';
 
 // ── Output type ────────────────────────────────────────────────────────────────
 
@@ -12,6 +13,10 @@ export interface MonographContextResult {
   importedBy: MonographNode[];
   community: { id: number; label?: string } | null;
   inProcesses: Array<{ id: string; name: string }>;
+  /** True when `name` matched several nodes and nothing narrowed it to one. */
+  ambiguous?: boolean;
+  /** Populated when ambiguous (non-test first) — re-query with `nodeId` or `filePath`. */
+  candidates?: SymbolCandidate[];
 }
 
 // ── Shared helper: query related nodes by edge relation and direction ──────────
@@ -41,21 +46,20 @@ function queryRelated(
 
 export function getMonographContext(
   db: Database.Database,
-  input: { name: string; filePath?: string },
+  input: { name: string; filePath?: string; nodeId?: string },
 ): MonographContextResult {
   const LIMIT = 50;
 
-  // 1. Find the node
-  let nodeRow: Record<string, unknown> | undefined;
-  if (input.filePath) {
-    nodeRow = db
-      .prepare('SELECT * FROM nodes WHERE name = ? AND file_path = ? LIMIT 1')
-      .get(input.name, input.filePath) as Record<string, unknown> | undefined;
-  } else {
-    nodeRow = db.prepare('SELECT * FROM nodes WHERE name = ? LIMIT 1').get(input.name) as
-      | Record<string, unknown>
-      | undefined;
-  }
+  // 1. Find the node — several same-named definitions are returned as
+  // candidates rather than silently narrowed to one.
+  const { row: nodeRow, candidates } = input.nodeId
+    ? {
+        row: db.prepare('SELECT * FROM nodes WHERE id = ?').get(input.nodeId) as
+          | Record<string, unknown>
+          | undefined,
+        candidates: [],
+      }
+    : resolveNodeByName(db, input.name, input.filePath);
 
   if (!nodeRow) {
     return {
@@ -66,6 +70,8 @@ export function getMonographContext(
       importedBy: [],
       community: null,
       inProcesses: [],
+      ambiguous: candidates.length > 1,
+      candidates,
     };
   }
 
@@ -96,5 +102,15 @@ export function getMonographContext(
     )
     .all(nodeId, LIMIT) as Array<{ id: string; name: string }>;
 
-  return { node, callers, callees, imports, importedBy, community, inProcesses: processRows };
+  return {
+    node,
+    callers,
+    callees,
+    imports,
+    importedBy,
+    community,
+    inProcesses: processRows,
+    ambiguous: false,
+    candidates: [],
+  };
 }

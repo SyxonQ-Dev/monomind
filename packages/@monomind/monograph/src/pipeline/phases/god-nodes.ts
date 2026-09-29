@@ -1,3 +1,4 @@
+import { isAnonymousClosure } from '../../storage/anonymous-closure.js';
 import type { GodNode, MonographEdge } from '../../types.js';
 import type { PipelinePhase } from '../types.js';
 import type { CrossFileOutput } from './cross-file.js';
@@ -10,6 +11,11 @@ const EXCLUDED_LABELS = new Set(['File', 'Folder', 'Community', 'Concept']);
 const TEST_PATH_RE = /(\.test\.|\.spec\.|__tests__|__mocks__)/;
 function isTestNode(n: { filePath?: string | null }): boolean {
   return !!(n.filePath && TEST_PATH_RE.test(n.filePath));
+}
+
+// Anonymous closures have no name worth reporting as a hotspot (#404).
+function isRankable(n: { label: string; name: string; filePath?: string | null }): boolean {
+  return !EXCLUDED_LABELS.has(n.label) && !isTestNode(n) && !isAnonymousClosure(n);
 }
 
 export type GodNodeCategory =
@@ -65,7 +71,7 @@ export const godNodesPhase: PipelinePhase<GodNodesOutput> = {
     const allFanIn: number[] = [];
     const allFanOut: number[] = [];
     for (const n of symbolNodes) {
-      if (EXCLUDED_LABELS.has(n.label) || isTestNode(n)) continue;
+      if (!isRankable(n)) continue;
       allFanIn.push(inDeg.get(n.id) ?? 0);
       allFanOut.push(outDeg.get(n.id) ?? 0);
     }
@@ -85,12 +91,7 @@ export const godNodesPhase: PipelinePhase<GodNodesOutput> = {
     const p75FanOut = thresholds.p75FanOut;
 
     const godNodes = symbolNodes
-      .filter(
-        (n) =>
-          !EXCLUDED_LABELS.has(n.label) &&
-          !isTestNode(n) &&
-          (inDeg.get(n.id) ?? 0) + (outDeg.get(n.id) ?? 0) > p95FanIn,
-      )
+      .filter((n) => isRankable(n) && (inDeg.get(n.id) ?? 0) + (outDeg.get(n.id) ?? 0) > p95FanIn)
       .map((n) => {
         const fanIn = inDeg.get(n.id) ?? 0;
         const fanOut = outDeg.get(n.id) ?? 0;
