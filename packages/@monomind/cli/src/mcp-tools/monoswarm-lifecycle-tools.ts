@@ -94,7 +94,8 @@ export const monoswarmLifecycleTools: MCPTool[] = [
         initialized: true,
         topology,
         maxAgents,
-        status: 'running',
+        // Recorded, not running: monoswarm_init starts no process (#418).
+        status: 'initialized',
         agents: [],
         coordinator: coordinatorId
           ? { agentId: coordinatorId, electedAt: now, term: 1 }
@@ -308,7 +309,9 @@ export const monoswarmLifecycleTools: MCPTool[] = [
         };
       }
 
-      const isRunning = state.status === 'running';
+      // 'initialized' is the live state monoswarm_init records (#418); older
+      // state files still say 'running'.
+      const isRunning = state.status === 'initialized' || state.status === 'running';
       const stateFileExists = existsSync(getMonoswarmStatePath());
 
       const checks = [
@@ -320,7 +323,7 @@ export const monoswarmLifecycleTools: MCPTool[] = [
         {
           name: 'coordinator',
           status: isRunning ? 'ok' : 'warn',
-          message: isRunning ? 'Status: running' : `Status: ${state.status}`,
+          message: `Status: ${state.status}`,
         },
         {
           name: 'agents',

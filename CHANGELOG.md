@@ -26,6 +26,8 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 - **`monomind init` runs its doctor pass once, after all its writes, and prints only problems** ([#425](https://github.com/monoes/monomind/issues/425)). The embedded doctor ran before init's last writes and printed each check, then its post-fix re-check, so one run said "No .gitignore found" and then "All … gitignored" (and "1 stale" then "match"). `init` now runs it at the end, applies the same fixes silently, prints only the warnings and failures left after them, then a one-line `Health check: N passed, W warning(s), F failed` summary.
 
+- **`monoswarm`, `autopilot` and `agent spawn` say they start nothing** ([#418](https://github.com/monoes/monomind/issues/418)). `monoswarm init` recorded `"status": "running"` with an empty roster and `monoswarm status` showed a hard-coded 5% progress for a swarm with no tasks. The state file now records `"initialized"`, status reads `recorded (no agents started)` and shows progress only from recorded task files (`n/a` when there are none), and `monoswarm start` shows a "Suggested Agent Roster (not started)" instead of an "Agent Deployment Plan". `agent spawn` prints "recorded in the agent store" and that no process was started (pointing at `monomind agent exec`); the `agent_spawn` MCP tool returns `status: "registered"` with the same note. `monoswarm` and `autopilot` are marked deprecated in help, `autopilot status` and the docs; `autopilot status` says when no task source has tasks, since nothing writes `swarm-tasks.json`. Removing both commands is left for a later release.
+
 ## [2.19.0] — 2026-09-29
 
 ### Changed

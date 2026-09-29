@@ -136,25 +136,19 @@ export function getSwarmStatus(swarmId?: string) {
     }
   }
 
-  // Calculate dynamic progress based on actual state
-  // If no swarm state, show 0%. Otherwise calculate from completed tasks
+  // Progress comes only from recorded tasks — 0 when there are none (#418).
   const totalTasks = completedTasks + inProgressTasks + pendingTasks;
-  let progress = 0;
-  if (totalTasks > 0) {
-    progress = Math.round((completedTasks / totalTasks) * 100);
-  } else if (swarmState) {
-    // Swarm initialized but no tasks yet
-    progress = 5;
-  }
+  const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
-  // Determine status
+  // Determine status. monoswarm never starts agent processes, so "running"
+  // is only claimed for in-progress task records — never for agent rows.
   let status = 'idle';
-  if (inProgressTasks > 0 || activeAgents > 0) {
+  if (inProgressTasks > 0) {
     status = 'running';
-  } else if (completedTasks > 0 && pendingTasks === 0 && inProgressTasks === 0) {
+  } else if (completedTasks > 0 && pendingTasks === 0) {
     status = 'completed';
   } else if (swarmState) {
-    status = 'ready';
+    status = 'recorded (no agents started)';
   }
 
   const swarmConfig = (swarmState as { config?: Record<string, unknown> })?.config;
