@@ -57,12 +57,8 @@ npx monomind memory import --input backup.json --merge
 | Tool | Purpose |
 |---|---|
 | `mcp__monomind__memory_pattern-store` | Store a memory entry |
-| `mcp__monomind__memory_retrieve` | Retrieve by key |
 | `mcp__monomind__memory_pattern-search` | Search memory |
-| `mcp__monomind__memory_list` | List entries |
-| `mcp__monomind__memory_delete` | Delete entries |
-| `mcp__monomind__memory_stats` | Usage statistics |
-| `mcp__monomind__memory_migrate` | Migrate between backends |
+| `mcp__monomind__memory_health` | Usage statistics |
 
 ## Backends
 

@@ -45,6 +45,8 @@ cd your-project && monomind init
 claude mcp add monomind -- npx -y monomind@latest mcp start
 ```
 
+`monomind init` itself writes `.mcp.json` (and the Codex/OpenCode/Kimi/Antigravity configs) pinned to the installed version, so a start reuses the npx cache instead of re-resolving `@latest`; `--pin latest` keeps the floating `monomind@latest`, and `monomind init --force` re-pins after an upgrade.
+
 <details>
 <summary><strong>Using Antigravity (agy)?</strong></summary>
 

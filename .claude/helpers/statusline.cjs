@@ -897,7 +897,7 @@ function getGraphUsage() {
                    + (d.bash_grep_call || 0) + (d.bash_find_call || 0);
     const total = graphWins + searches + (d.preresolve_miss || 0);
     if (total === 0) return null;
-    return { graphWins: graphWins, searches: searches, pct: Math.round((graphWins / total) * 100), dollarsSaved: d.dollars_saved || 0 };
+    return { graphWins: graphWins, searches: searches, pct: Math.round((graphWins / total) * 100), hints: d.graph_assist_search || 0 };
   } catch { return null; }
 }
 
@@ -1385,8 +1385,7 @@ function generateDashboard() {
   let contextLine = `${x.teal}🧠 CONTEXT${x.reset} ${graphStr}`;
   if (usage) {
     const col = usage.pct >= 40 ? x.green : usage.pct >= 15 ? x.gold : x.coral;
-    const savedCol = usage.dollarsSaved >= 0.10 ? x.green : x.slate;
-    contextLine += ` ${DIV} ${col}📊${usage.pct}%${x.reset}${x.slate}·${100 - usage.pct}%grep${x.reset} ${savedCol}💰$${usage.dollarsSaved.toFixed(2)}${x.reset}`;
+    contextLine += ` ${DIV} ${col}📊${usage.pct}%${x.reset}${x.slate}·${100 - usage.pct}%grep${x.reset} ${x.slate}💡${usage.hints} hints${x.reset}`;
   }
   if (hil.pending > 0) {
     contextLine += ` ${DIV} ${x.coral}✨${x.bold}${hil.pending}${x.reset}${x.coral}HIL${x.reset}`;

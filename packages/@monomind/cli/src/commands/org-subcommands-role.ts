@@ -115,8 +115,8 @@ export const setAccessAction = async (ctx: CommandContext): Promise<CommandResul
     log(
       output.warning(
         '  This role will run with NO tool allow-list, NO file-write/read restriction, NO OS sandbox,\n' +
-          '  and NO per-tool approval gate — the same as running `claude` interactively with\n' +
-          '  bypassPermissions. Budgets (maxTokens/maxUsd) still apply. Every tool call is still\n' +
+          `  and NO per-tool approval gate — the same as running \`${runtimeId}\` interactively in its\n` +
+          '  no-approval mode. Budgets (maxTokens/maxUsd) still apply. Every tool call is still\n' +
           '  logged (org bus + ~/.monomind/logs/agent-exec-full-access.log).',
       ),
     );

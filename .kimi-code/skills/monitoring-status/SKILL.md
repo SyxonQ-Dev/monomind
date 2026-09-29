@@ -90,10 +90,10 @@ npx monomind status memory
 
 ```javascript
 // Swarm status
-mcp__monomind__swarm_status({ includeMetrics: true })
+mcp__monomind__monoswarm_status({ includeMetrics: true })
 
 // Memory stats
-mcp__monomind__memory_stats({})
+mcp__monomind__memory_health({})
 
 // Task summary
 mcp__monomind__task_summary({})

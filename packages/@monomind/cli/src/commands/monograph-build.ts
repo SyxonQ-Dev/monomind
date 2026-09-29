@@ -36,6 +36,12 @@ export const buildCommand: Command = {
       type: 'boolean',
       description: 'Force full rebuild even if index is fresh',
     },
+    {
+      name: 'report-path',
+      type: 'string',
+      description:
+        'Where to write GRAPH_REPORT.md, relative to the indexed path (default: .monomind/GRAPH_REPORT.md; env MONOGRAPH_REPORT_PATH)',
+    },
   ],
   examples: [
     { command: 'monomind monograph build', description: 'Index code + all documents' },
@@ -45,11 +51,16 @@ export const buildCommand: Command = {
     },
     { command: 'monomind monograph build --code-only', description: 'Code only, skip docs' },
     { command: 'monomind monograph build -p ./docs', description: 'Index a specific path' },
+    {
+      command: 'monomind monograph build --report-path GRAPH_REPORT.md',
+      description: 'Write the report to the repo root (the old location)',
+    },
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
     const root = resolve((ctx.flags.path as string | undefined) ?? process.cwd());
     const codeOnly = ctx.flags['code-only'] === true;
     const force = ctx.flags.force === true;
+    const reportPath = (ctx.flags['report-path'] as string | undefined) || undefined;
     const llmFlag = ctx.flags.llm === true;
     const llmSections = parseInt((ctx.flags['llm-sections'] as string) || '50', 10);
     const { isClaudeCodeAvailable } = await import('../routing/llm-caller.js');
@@ -96,6 +107,7 @@ export const buildCommand: Command = {
         codeOnly,
         force,
         llmMaxSections,
+        reportPath,
         onProgress: (p: { phase: string; message?: string }) => {
           const msg = `[${p.phase}] ${p.message ?? ''}`;
           progressLines.push(msg);

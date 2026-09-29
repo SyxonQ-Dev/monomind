@@ -191,7 +191,7 @@ export const sqlBackendReadMethods = {
 
   /**
    * Semantic search. Below MONOMIND_HNSW_THRESHOLD active embedded entries
-   * (default 5000), brute-force cosine over stored embeddings — namespace-
+   * (default 100,000), brute-force cosine over stored embeddings — namespace-
    * and TTL-filtered in SQL — stays cheaper (a few tens of ms at second-brain
    * scale). Above it, getAnnIndex() builds (or loads a persisted) HNSW graph
    * and this searches that instead; results are still namespace/threshold

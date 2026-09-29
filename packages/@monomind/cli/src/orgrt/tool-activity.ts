@@ -30,21 +30,27 @@
  *
  * Fidelity varies by runtime (doc §9, runner-registry.ts's
  * `toolActivityFidelity`):
- *  - claude: full start/end pairs, correlated by the SDK's real tool_use id,
- *    via ClaudeAgentRunner's 'tool_use' AgentMessage (gated behind
- *    extras.includePartialMessages — agent-exec.ts sets it, session.ts, the
- *    org runtime, never does, so the org runtime's message stream and
- *    behavior are unaffected by this feature).
- *  - codex/kimicode/antigravity/grok/qwen/crush/copilot/pi/hermes: these
- *    runners already yield a lightweight `{type:'tool_use', text: toolName}`
- *    liveness signal with no id at all — mapped best-effort to a
- *    START-ONLY tool_activity under a locally-minted id (no matching end is
- *    possible without one, and none is emitted).
- *  - opencode/vercel/qwen-rpc/pi-rpc: no tool signal at all today — no
- *    tool_activity either.
+ *  - `full` (claude, codex, opencode, antigravity, kimicode, grok, qwen,
+ *    copilot): start/end
+ *    pairs correlated by a real id — any runner that yields the rich
+ *    `tool_use` shape (id + name) and a matching `tool_result` gets them,
+ *    whatever its runtime. ClaudeAgentRunner gates its rich shape behind
+ *    extras.includePartialMessages (agent-exec.ts sets it, session.ts, the
+ *    org runtime, never does).
+ *  - `start-only` (crush/pi): a lightweight
+ *    `{type:'tool_use', text: toolName}` liveness signal with no id —
+ *    mapped best-effort to a START-ONLY tool_activity under a locally-
+ *    minted id (no matching end is possible without one, and none is
+ *    emitted). A `full` runner may still send one for a call it cannot pair.
+ *  - `none` (vercel/hermes/qwen-rpc/pi-rpc): no tool_activity at all.
+ *
+ * Rev 19: every start carries `kind` (tool-kind.ts) — the runner's own
+ * `AgentMessage.kind` when set, else derived from the tool name — and an
+ * end carries `exit_code` when the runner reported one.
  */
 
 import type { AgentMessage } from './agent-runner.js';
+import { toolKind } from './tool-kind.js';
 
 /** Per-string-field cap (§3.2: "16 KiB per string field"). */
 const MAX_FIELD_BYTES = 16 * 1024;
@@ -176,7 +182,7 @@ export class ToolActivityTracker {
 
   private onToolUse(m: AgentMessage): void {
     if (m.tool_use_id && m.tool) {
-      // Native (rich) shape — ClaudeAgentRunner only.
+      // Native (rich) shape — any runner that has a real id.
       if (isBridgedToolName(m.tool)) return; // bridged: tool_call/tool_result cover it (§4)
       this.open.set(m.tool_use_id, m.tool);
       this.startCount++;
@@ -187,17 +193,18 @@ export class ToolActivityTracker {
           id: m.tool_use_id,
           phase: 'start',
           name: m.tool,
+          kind: toolKind(m.tool, m.kind),
           input: capInput((m.input ?? {}) as Record<string, unknown>),
           parent_tool_use_id: m.parent_tool_use_id ?? null,
         }),
       );
       return;
     }
-    // Vendor lightweight liveness signal (codex/grok/copilot/pi/...): no id
-    // to correlate an end with — best-effort, start-only (doc §9). Gated by
+    // Vendor lightweight liveness signal (grok/copilot/pi/...): no id to
+    // correlate an end with — best-effort, start-only (doc §9). Gated by
     // fidelity so a runner with no real per-tool signal at all (hermes)
     // never produces a misleading event from its own placeholder ping.
-    if (this.fidelity !== 'start-only' || !m.text) return;
+    if (this.fidelity === 'none' || !m.text) return;
     const id = `activity_${++this.syntheticCounter}`;
     this.startCount++;
     this.emit({
@@ -206,6 +213,7 @@ export class ToolActivityTracker {
       id,
       phase: 'start',
       name: m.text,
+      kind: toolKind(m.text, m.kind),
       input: null,
       parent_tool_use_id: null,
     });
@@ -215,7 +223,8 @@ export class ToolActivityTracker {
     const id = m.tool_use_id;
     if (!id || !this.open.has(id)) return;
     this.open.delete(id);
-    const denied = this.denied.delete(id);
+    // A canUseTool denial, or one the runner itself reports (rev 20).
+    const denied = this.denied.delete(id) || m.denied === true;
     const { value: output, truncated } = capString(m.text ?? '');
     this.emit(
       shrinkToFit({
@@ -229,6 +238,7 @@ export class ToolActivityTracker {
         output_truncated: truncated,
         ...(denied ? { denied: true } : {}),
         ...(m.duration_ms !== undefined ? { duration_ms: m.duration_ms } : {}),
+        ...(typeof m.exit_code === 'number' ? { exit_code: m.exit_code } : {}),
       }),
     );
   }

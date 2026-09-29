@@ -167,7 +167,7 @@ export async function runExec(
     return usageError('--tools-file/--tool-names require --tools stdio');
   }
 
-  // rev 16: --effort, validated here; the runner maps or ignores it.
+  // rev 16 (+ rev 19 notice): --effort, validated here; the runner maps or ignores it.
   const effortFlag = ctx.flags.effort;
   if (effortFlag !== undefined && !(ORG_EFFORT_LEVELS as readonly unknown[]).includes(effortFlag)) {
     return usageError(
@@ -288,7 +288,7 @@ export const execCommand: Command = {
     {
       name: 'effort',
       description:
-        'Reasoning effort: off|low|medium|high|xhigh|max (claude and codex; other runtimes ignore it)',
+        'Reasoning effort: off|low|medium|high|xhigh|max (mapped per runtime — see agent scan --json effort; ignored with a notice where unsupported)',
       type: 'string',
       choices: [...ORG_EFFORT_LEVELS],
     },
@@ -319,7 +319,7 @@ export const execCommand: Command = {
     {
       name: 'access',
       description:
-        'scoped (default, allow-list only) or full — unrestricted native tool access (claude runtime only; requires --cwd, refuses root)',
+        'scoped (default, allow-list only) or full — unrestricted native tool access (runtimes with full_access in agent scan; requires --cwd, refuses root)',
       type: 'string',
       choices: ['scoped', 'full'],
     },
@@ -327,7 +327,7 @@ export const execCommand: Command = {
     {
       name: 'settings',
       description:
-        'Coder mode: "none" (default) or a CSV of user,project,local — loads CLAUDE.md, skills, hooks, and project+user MCP servers (claude runtime only)',
+        'Coder mode: "none" (default) or a CSV of user,project,local — claude loads CLAUDE.md, skills, hooks, and project+user MCP servers; other runtimes stop isolating their own CLI config',
       type: 'string',
     },
     {
