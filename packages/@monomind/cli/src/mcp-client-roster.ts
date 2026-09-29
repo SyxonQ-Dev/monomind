@@ -7,87 +7,53 @@ import { categoryFromToolName, ensureCategory } from './mcp-client-registry.js';
 import type { MCPTool } from './mcp-tools/types.js';
 
 /**
- * Core tool roster — the categories advertised via tools/list by default.
- * Non-core categories remain CALLABLE (callMCPTool/hasTool lazy-load any
- * category by name) but are not advertised, cutting the per-call schema
- * payload from ~270 tools to ~70. Set MONOMIND_MCP_FULL=1 to advertise all.
+ * Core tool roster — the tools advertised via tools/list by default.
+ * Everything else remains CALLABLE (callMCPTool/hasTool lazy-load any
+ * category by name) and discoverable via monomind_tool_search, but is not
+ * advertised, cutting the per-call schema payload from ~270 tools to ~20.
+ * Set MONOMIND_MCP_FULL=1 to advertise all.
+ *
+ * Issue #410: the state-file tools (agent_/task_/session_/config_/system_/
+ * guidance_/hooks_, mcp_status) are no longer advertised — they only read or
+ * write JSON bookkeeping and cost ~20 KB of schema per session.
  */
 export const FULL_ROSTER = process.env.MONOMIND_MCP_FULL === '1';
 
-export const CORE_TOOL_CATEGORIES = new Set([
-  'memory',
-  'monograph',
-  'hooks',
-  'task',
-  'session',
-  'knowledge',
-  'system',
-  'mcp',
-  'guidance',
-  'config',
-  'agent',
-  'monomind',
-  'monodesign',
-  'platforms',
+export const CORE_ADVERTISED_TOOLS = new Set([
+  // monograph: code-graph navigation
+  'monograph_build',
+  'monograph_query',
+  'monograph_suggest',
+  'monograph_impact',
+  'monograph_context',
+  'monograph_neighbors',
+  // agent/skill picking and hidden-tool discovery
   'pick',
-  'org',
+  'org_skill_show',
+  'monomind_tool_search',
+  // document knowledge base (knowledge_remove: the generated CLAUDE.md tells
+  // the model to retract stale documents with it)
+  'knowledge_search',
+  'knowledge_ingest',
+  'knowledge_remove',
+  'monodesign_detect',
+  'monodesign_fix',
+  'monodesign_palette',
+  // memory: the Memory Loop in the generated CLAUDE.md/GEMINI.md/AGENTS.md
+  // (pattern-store, kg_search, kg_ingest, feedback) and the KG_NUDGE
+  // session-end hook (kg_stats glossary) name these tools directly.
+  'memory_pattern-store',
+  'memory_feedback',
+  'memory_kg_ingest',
+  'memory_kg_search',
+  'memory_kg_stats',
 ]);
 
-// Only this subset of hooks is advertised; the rest of hooks (intelligence,
-// model-routing, trajectory, worker tools) is discovery-only.
-export const CORE_HOOKS_ALLOWLIST = new Set([
-  'hooks_route',
-  'hooks_pre-edit',
-  'hooks_post-edit',
-  'hooks_pre-command',
-  'hooks_post-command',
-  'hooks_pre-task',
-  'hooks_post-task',
-  'hooks_explain',
-]);
-
-// Rarely-used tools inside otherwise-core categories: not advertised via
-// tools/list, but still callable and discoverable via monomind_tool_search.
-export const CORE_HIDDEN_TOOLS = new Set([
-  // monograph: build/index maintenance, impact-map, and route-map variants
-  'monograph_dead_code',
-  'monograph_route_map',
-  'monograph_augment',
-  'monograph_staleness',
-  'monograph_detect_changes',
-  'monograph_get_node',
-  'monograph_god_nodes',
-  'monograph_watch',
-  'monograph_watch_stop',
-  'monograph_doctor',
-  'monograph_health',
-  'monograph_stats',
-  'monograph_api_impact',
-  // memory: routing, admin, batch, hierarchical, and KG maintenance variants
-  'memory_route',
-  'memory_semantic-route',
-  'memory_causal-edge',
-  'memory_batch',
-  'memory_context-synthesize',
-  'memory_controllers',
-  'memory_health',
-  'memory_consolidate',
-  'memory_kg_consolidate',
-  'memory_hierarchical-store',
-  'memory_hierarchical-recall',
-  'memory_pattern-search',
-  // NOTE: memory_kg_stats and memory_kg_rollback stay ADVERTISED — the
-  // Memory Loop documented in CLAUDE.md (ingest → search → rollback on bad
-  // ingest, glossary via kg_stats) references them; hiding them broke that
-  // workflow in Claude sessions for ~160 tokens of savings.
-]);
+/** Categories that hold at least one advertised tool (loaded by ensureCoreLoaded). */
+export const CORE_TOOL_CATEGORIES = new Set([...CORE_ADVERTISED_TOOLS].map(categoryFromToolName));
 
 export function isCoreAdvertised(tool: MCPTool): boolean {
-  const cat = categoryFromToolName(tool.name);
-  if (!CORE_TOOL_CATEGORIES.has(cat)) return false;
-  if (cat === 'hooks') return CORE_HOOKS_ALLOWLIST.has(tool.name);
-  if (CORE_HIDDEN_TOOLS.has(tool.name)) return false;
-  return true;
+  return CORE_ADVERTISED_TOOLS.has(tool.name);
 }
 
 let _coreLoaded = false;
