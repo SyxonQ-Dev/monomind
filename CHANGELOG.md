@@ -4,6 +4,10 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Security
+
+- **`hooks_pre-command` no longer rates destructive compound commands as safe** ([#399](https://github.com/monoes/monomind/issues/399)). The MCP tool capped any command starting with `echo`/`ls`/`cat` at low risk and `git` at 0.2, so `echo hi && rm -rf ~/` and `git push --force origin main` returned `shouldProceed: true` while the PreToolUse Bash gate blocked them. It now splits the command on `&&`, `||`, `;`, `|`, `&` and newlines (quotes respected), checks every segment with no prefix caps, and applies the Bash gate's destructive patterns (mirrored, parity pinned by a test). Force-push to main/master, recursive `rm` of `~`, `$HOME` or `/`, piping into a shell (`curl … | sh`, `cat x | sh`), `dd of=/dev/…`, `mkfs` and fork bombs are critical and `shouldProceed: false`; `ls -la`, `git status` and `echo hi` stay low.
+
 ## [2.18.5] — 2026-09-29
 
 ### Added
