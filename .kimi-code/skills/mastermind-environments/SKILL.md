@@ -1,6 +1,6 @@
 ---
 name: mastermind-environments
-description: Mastermind environments — manage execution environments (local, SSH, sandbox) for an org. Controls where agent workloads run, SSH connection details, and which environment is the default.
+description: Mastermind environments — bookkeeping only — not enforced by the Org Runtime. Records execution environments (local, SSH, sandbox) and a default in a side file; agents still run wherever the Org Runtime runs them.
 type: domain-skill
 default_mode: confirm
 pick: low
@@ -8,7 +8,9 @@ pick: low
 
 # Mastermind Environments
 
-This skill is invoked by `mastermind:environments` or directly via `/mastermind-environments`.
+This skill is invoked directly via `/mastermind-environments`.
+
+**Bookkeeping only — not enforced by the Org Runtime.** It writes `.monomind/orgs/<org>-environments.json`, which no runtime code reads: creating an environment or changing the default does not change where agents run.
 
 ---
 

@@ -164,6 +164,8 @@ function checkElementColors(el, style, tag, window, customPropMap, hasAnchorInhe
     bgClip: style.webkitBackgroundClip || style.backgroundClip || '',
     bgImage: style.backgroundImage || '',
     classList: el.getAttribute?.('class') || el.className || '',
+    // SVG text paints with `fill`, not `color`, so its CSS colour says nothing.
+    isSvgText: tag === 'text' || tag === 'tspan' || tag === 'textpath',
   });
 }
 

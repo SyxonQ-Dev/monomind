@@ -78,7 +78,13 @@ describe('generated CLAUDE.md matches the detected stack (GH #278)', () => {
   });
 
   it('keeps npm commands and /src for a plain Node repo (regression guard)', () => {
-    const dir = projectWith({ 'package.json': '{"name":"svc","version":"1.0.0"}' }, ['src']);
+    const dir = projectWith(
+      {
+        'package.json':
+          '{"name":"svc","version":"1.0.0","scripts":{"build":"tsc","test":"vitest run"}}',
+      },
+      ['src'],
+    );
 
     const md = generateClaudeMd({ ...DEFAULT_INIT_OPTIONS, targetDir: dir });
 
@@ -89,7 +95,7 @@ describe('generated CLAUDE.md matches the detected stack (GH #278)', () => {
 
   it('uses pnpm when the repo has a pnpm lockfile', () => {
     const dir = projectWith({
-      'package.json': '{"name":"svc","version":"1.0.0"}',
+      'package.json': '{"name":"svc","version":"1.0.0","scripts":{"build":"tsc","test":"vitest"}}',
       'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
     });
 

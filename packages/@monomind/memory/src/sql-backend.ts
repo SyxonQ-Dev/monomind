@@ -95,7 +95,10 @@ export class SqlBackend extends EventEmitter implements IMemoryBackend {
   static readonly ANN_THRESHOLD = (() => {
     const raw = process.env.MONOMIND_HNSW_THRESHOLD;
     const n = raw !== undefined ? parseInt(raw, 10) : NaN;
-    return Number.isFinite(n) && n > 0 ? n : 5000;
+    // 100k, not 5k (issue #426): at 20k vectors brute force answered in
+    // ~0.25 s while the JSON-cached graph took ~1.2 s to load (~1 GB RSS)
+    // and ~78 s to build the first time.
+    return Number.isFinite(n) && n > 0 ? n : 100_000;
   })();
 
   /** Directory to cache the built ANN graph in, next to the real DB file.

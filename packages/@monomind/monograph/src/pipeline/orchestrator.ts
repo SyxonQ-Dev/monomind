@@ -54,6 +54,12 @@ export interface BuildOptions extends Partial<PipelineOptions> {
   force?: boolean;
   /** When true, skip the full rebuild if the index is already fresh (matches HEAD). Default false. */
   incremental?: boolean;
+  /**
+   * Where to write GRAPH_REPORT.md; a relative path resolves against the repo.
+   * Defaults to $MONOGRAPH_REPORT_PATH, else `.monomind/GRAPH_REPORT.md` (#414 —
+   * pass `'GRAPH_REPORT.md'` for the pre-#414 repo-root location).
+   */
+  reportPath?: string;
 }
 
 /**
@@ -337,7 +343,9 @@ async function buildAsyncLocked(
       try {
         const suggestOut = outputs.get('suggest') as { questions: SuggestedQuestion[] } | undefined;
         const questions = suggestOut?.questions ?? [];
-        await generateGraphReport(resolve(repoPath), undefined, dbPath, questions);
+        const reportOpt = options.reportPath ?? (process.env.MONOGRAPH_REPORT_PATH || undefined);
+        const reportPath = reportOpt ? resolve(repoPath, reportOpt) : undefined;
+        await generateGraphReport(resolve(repoPath), reportPath, dbPath, questions);
       } catch {
         // Report generation is non-fatal — the build itself already committed.
       }

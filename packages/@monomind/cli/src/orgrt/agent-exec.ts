@@ -25,23 +25,23 @@
  * the runner's own 2h/45s ladders remain the backstop for orphaned children.
  */
 
-import { fullAccessCanUseTool, resolveAccess } from './agent-exec-access.js';
+import { fullAccessCanUseTool, resolveAccess, resolveExecSandbox } from './agent-exec-access.js';
 import { StdioToolBridge, UsageTracker } from './agent-exec-bridge.js';
-import { type ExecErrorCode, FATAL_CODES } from './agent-exec-errors.js';
+import { type ExecErrorCode, execErrorCode, FATAL_CODES } from './agent-exec-errors.js';
+import { execCanUseTool } from './agent-exec-gate.js';
 import {
   type AgentExecOptions,
   jsonSchemaToZodShape,
   type Terminal,
 } from './agent-exec-options.js';
-import { createExecStatusHandler } from './agent-exec-settings.js';
-import { hasUnsafeShellSyntax } from './agent-exec-shell-syntax.js';
+import { type AttemptContext, runWithRateLimitRetry } from './agent-exec-retry.js';
+import { createExecStatusHandler, runtimeStartupNotices } from './agent-exec-settings.js';
 import { mapStopReason } from './agent-exec-stop-reason.js';
 import type { AgentMessage, OrgToolDef } from './agent-runner.js';
 import { appendFullAccessAudit } from './full-access-audit.js';
-import { classifyStderr } from './kimicode-runner.js';
 import { loadCreateOrgSkillGuidance } from './org-design-skill.js';
 import { resolveExecRunner, runnerSpec } from './runner-registry.js';
-import { ToolActivityTracker } from './tool-activity.js';
+import { NATIVE_SUBAGENT_RUNTIMES, ToolActivityTracker } from './tool-activity.js';
 
 export type { ExecErrorCode } from './agent-exec-errors.js';
 export type { AgentExecOptions, ToolSpec } from './agent-exec-options.js';
@@ -52,9 +52,18 @@ export { jsonSchemaToZodShape } from './agent-exec-options.js';
 /**
  * Run one agent exec turn. Emits protocol events via opts.emit and returns
  * the process exit code (§3.2): 0 success · 1 error · 124 timeout ·
- * 130 cancelled. `done` is emitted exactly once before returning.
+ * 130 cancelled. `done` is emitted exactly once before returning. A turn
+ * that fails on a transient rate limit is retried (agent-exec-retry.ts).
  */
-export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
+export function runAgentExec(opts: AgentExecOptions): Promise<number> {
+  return runWithRateLimitRetry(opts, runAgentExecOnce);
+}
+
+/** One attempt; a later one skips `start` + startup notices (see AttemptContext). */
+export async function runAgentExecOnce(
+  opts: AgentExecOptions,
+  ctx: AttemptContext = { attempt: 1 },
+): Promise<number> {
   const emit = opts.emit;
   const grace = opts.returnGraceMs ?? 5000;
 
@@ -70,8 +79,11 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
     return 2;
   }
 
-  const { access, abort: accessDenied } = resolveAccess(opts, emit); // #355
+  const hasCallerTools = (opts.toolSpecs?.length ?? 0) > 0;
+  const { access, abort: accessDenied } = resolveAccess({ ...opts, hasCallerTools }, emit); // #355
   if (accessDenied) return 2;
+  const sandbox = resolveExecSandbox({ ...opts, access }, emit); // #396
+  if (sandbox.abort) return 2;
   // Tool specs (§4). The bridge itself is constructed below, after
   // terminate() exists (its cancel callback wires into termination).
   const toolSpecs = opts.toolSpecs ?? null;
@@ -80,6 +92,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
     name: t.name,
     description: t.description,
     schema: t.schema ? jsonSchemaToZodShape(t.schema) : {},
+    concurrent: true, // #389: parallel calls go to the caller at once (§4.3)
     handler: (args: Record<string, unknown>) =>
       bridge ? bridge.call(t.name, args) : Promise.resolve({ text: 'ERROR: tools not bridged' }),
   }));
@@ -126,7 +139,8 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
     settleTerminal = r;
   });
 
-  safeEmit({
+  const firstEmit = ctx.attempt === 1 ? safeEmit : () => {}; // rev 20: retries stay quiet
+  firstEmit({
     v: 1,
     type: 'start',
     runtime: opts.runtime,
@@ -135,6 +149,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
     ...(opts.resume ? { resume: opts.resume } : {}),
     pid: process.pid,
     access, // #355
+    ...sandbox.report, // #396: native_sandbox + approvals the CLI really runs with
     // rev 5: lets a caller (e.g. a chat UI) set the user's expectations
     // honestly BEFORE assuming a quiet turn is stuck — see runner-registry.ts's
     // RunnerSpec.streamsIncrementally doc comment and doc/agent-exec-protocol.md
@@ -142,6 +157,9 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
     // failed above for an unknown id) defaults to false, the safe assumption.
     streams_incrementally: runnerSpec(opts.runtime)?.streamsIncrementally ?? false,
   });
+  // rev 19: what a non-claude --settings turn loads, and an ignored --effort.
+  const effortSupported = runnerSpec(opts.runtime)?.effort ?? false;
+  for (const ev of runtimeStartupNotices({ ...opts, effortSupported })) firstEmit(ev);
 
   // Abort hook for the runner (AgentRunArgs.signal): return() alone queues
   // behind a runner blocked in `for await (child.stdout)` and never reaches
@@ -166,7 +184,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
   };
 
   // Coder mode (#356): startup watchdog for `--settings` non-none turns,
-  // claude-only (other runtimes never emit `status`); a no-op otherwise.
+  // claude-only (only claude reports `ready`); a no-op otherwise.
   const statusHandler = createExecStatusHandler({
     enabled: opts.runtime === 'claude' && (opts.settings?.length ?? 0) > 0,
     timeoutMs: opts.startupTimeoutMs ?? 30_000,
@@ -217,35 +235,18 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
   // tool.handler (the stdio bridge that actually emits tool_call/tool_result
   // on the wire) was never reached, since canUseTool denies before it runs.
   const allowedToolNames = new Set(tools.flatMap((t) => [`mcp__org__${t.name}`, t.name]));
-  const bashPrefixes = opts.allowBashPrefixes ?? [];
-  const rawCanUseTool = async (toolName: string, input: Record<string, unknown>) => {
-    if (allowedToolNames.has(toolName)) return { behavior: 'allow' as const, updatedInput: input };
-    if (toolName === 'Bash' && bashPrefixes.length > 0 && typeof input.command === 'string') {
-      const cmd = input.command.trimStart();
-      const matchesPrefix = bashPrefixes.some((p) => cmd === p || cmd.startsWith(`${p} `));
-      if (matchesPrefix && !hasUnsafeShellSyntax(cmd))
-        return { behavior: 'allow' as const, updatedInput: input };
-      if (matchesPrefix)
-        return {
-          behavior: 'deny' as const,
-          message:
-            'Bash command contains shell metacharacters (;, &, |, `, $(, <() — only a single literal invocation is allowed, no chaining/substitution/redirection.',
-        };
-    }
-    return {
-      behavior: 'deny' as const,
-      message:
-        toolName === 'Bash' && bashPrefixes.length > 0
-          ? `Bash is only allowed for commands starting with: ${bashPrefixes.join(', ')}.`
-          : `Tool "${toolName}" was not in the tool list this exec call was given.`,
-    };
-  };
+  const rawCanUseTool =
+    access === 'full'
+      ? null
+      : execCanUseTool(access, allowedToolNames, opts.allowBashPrefixes ?? []); // #388
 
   // #357: tool_activity events (see tool-activity.ts) — observability only.
   const fidelity = runnerSpec(opts.runtime)?.toolActivityFidelity;
-  const toolActivity = new ToolActivityTracker(safeEmit, fidelity);
-  const canUseTool = toolActivity.wrapCanUseTool(rawCanUseTool);
-  const effectiveCanUseTool = access === 'full' ? fullAccessCanUseTool : canUseTool; // #355
+  const synthSubagents = !NATIVE_SUBAGENT_RUNTIMES.has(opts.runtime); // #387 rev 24
+  const toolActivity = new ToolActivityTracker(safeEmit, fidelity, synthSubagents);
+  const effectiveCanUseTool = rawCanUseTool
+    ? toolActivity.wrapCanUseTool(rawCanUseTool)
+    : fullAccessCanUseTool; // #355
 
   // This session's own tool list has no way to reach the real
   // mastermind:createorg skill (no settingSources, no `skills` SDK option,
@@ -267,7 +268,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
         prompt: promptStream,
         systemPrompt,
         model: opts.model,
-        effort: opts.effort, // rev 16: each runner maps or ignores it
+        effort: opts.effort, // rev 16 (+ rev 19/20 runners): each runner maps or ignores it
         cwd: opts.cwd ?? process.cwd(),
         // #365: marks this child as an agent-turn process tree so `monomind
         // org role set-access ... full` (agent-context.ts) refuses to run
@@ -292,9 +293,10 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
         envAuthoritative: false,
         maxTurns: opts.maxTurns,
         resume: opts.resume,
-        settingSources: opts.settings, // coder mode (#356); other runners ignore it
+        settingSources: opts.settings, // coder mode (#356); each runner decides what it loads
         canUseTool: effectiveCanUseTool,
         access,
+        ...(sandbox.mode ? { sandbox: sandbox.mode } : {}), // #396
         signal: abort.signal,
         onProcessSpawned: (info) => {
           getBackgroundSurvivors = info.getBackgroundSurvivors;
@@ -367,14 +369,10 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
           message: `${opts.runtime} CLI not found${spec ? ` — ${spec.installHint}` : ''}`,
         });
       } else {
-        const cls = classifyStderr(e.message ?? String(err));
-        const code: ExecErrorCode = cls.fatal
-          ? /auth/i.test(cls.label ?? '')
-            ? 'auth'
-            : 'quota'
-          : 'runner-error';
-        const spec = runnerSpec(opts.runtime);
         const msg = e.message ?? String(err);
+        const { code, rateLimit } = execErrorCode(err, msg);
+        if (rateLimit) ctx.rateLimit = rateLimit; // rev 20: the wrapper decides
+        const spec = runnerSpec(opts.runtime);
         const login =
           code === 'auth' && spec?.loginHint && !/login|log in/i.test(msg)
             ? ` Run: ${spec.loginHint}`
@@ -467,14 +465,16 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
 
   const isError = lastResult.is_error === true || (lastResult.subtype ?? 'success') !== 'success';
   if (isError) {
-    safeEmit({
-      v: 1,
-      type: 'error',
-      code: 'runner-error',
-      fatal: false,
-      message:
-        (lastResult as { text?: string }).text ?? `turn failed (${lastResult.subtype ?? 'error'})`,
-    });
+    const message =
+      (lastResult as { text?: string }).text ?? `turn failed (${lastResult.subtype ?? 'error'})`;
+    const { code, rateLimit } = execErrorCode(undefined, message);
+    if (rateLimit) {
+      // rev 20: ends like a thrown 429 (error + done, no result) so it can be retried.
+      ctx.rateLimit = rateLimit;
+      safeEmit({ v: 1, type: 'error', code, fatal: true, message });
+      return finish(1);
+    }
+    safeEmit({ v: 1, type: 'error', code: 'runner-error', fatal: false, message });
   }
   // §3.2: result.text is the aggregate final text. Runners rarely put text on
   // their own result message, so derive it from what was streamed: an

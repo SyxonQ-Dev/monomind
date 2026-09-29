@@ -61,9 +61,8 @@ mcp__monomind__memory_pattern-store({
 })
 
 // Analyze patterns
-mcp__monomind__neural_patterns({
-  operation: "error-recovery",
-  outcome: "success"
+mcp__monomind__hooks_intelligence_pattern-search({
+  query: "error-recovery success"
 })
 ```
 
@@ -72,7 +71,7 @@ mcp__monomind__neural_patterns({
 ### MCP Tool Coordination
 ```javascript
 // Initialize self-healing swarm
-mcp__monomind__swarm_init({
+mcp__monomind__monoswarm_init({
   "topology": "star",
   "maxAgents": 4,
   "strategy": "adaptive"
@@ -86,8 +85,8 @@ mcp__monomind__agent_spawn({
 })
 
 // Orchestrate recovery
-mcp__monomind__coordination_orchestrate({
-  task: "recover from error",
+mcp__monomind__task_create({
+  description: "recover from error",
   strategy: "sequential",
   priority: "critical"
 })

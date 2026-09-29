@@ -13,22 +13,41 @@ const CANONICAL_MASTERMIND_SKILLS = MASTERMIND_SKILLS.map((skill) => skill.sourc
  * Skills to copy based on configuration
  */
 export const SKILLS_MAP: Record<string, string[]> = {
+  // The everyday engineering workflows — all `--minimal` installs besides the
+  // memory, github and browser toolkits (GH #411: the listing Claude Code
+  // shows has a fixed budget, and past it every description is dropped).
   core: [
-    'monoswarm',
-    'hooks-automation',
-    'pair-programming',
-    'verification-quality',
-    'skill-builder',
-    'specialagent',
-    'monodesign',
-    'monomotion',
+    'mastermind',
+    'mastermind-design',
+    'mastermind-plan',
+    'mastermind-execute',
+    'mastermind-review',
+    'mastermind-receive-review',
+    'mastermind-debug',
+    'mastermind-research',
+    'mastermind-worktree',
+    // Shared pieces the workflows above read by path.
+    'mastermind-protocol',
+    'mastermind-intake',
+    'mastermind-agent-select',
+    'mastermind-delegation',
     'monolean',
-    'monolean-audit',
-    'monolean-debt',
-    'monolean-help',
+    'monodesign',
     // Read by the marketing agents (CRO, email, competitive content) before
     // they deliver copy.
     'stop-slop',
+    'verification-quality',
+  ],
+  extended: [
+    'monoswarm',
+    'hooks-automation',
+    'pair-programming',
+    'skill-builder',
+    'specialagent',
+    'monomotion',
+    'monolean-audit',
+    'monolean-debt',
+    'monolean-help',
     // The canonical workflow list comes from the manifest. Keep the wildcard
     // for supplementary legacy workflows that continue to ship during M1;
     // copySkills expands and de-duplicates both sources deterministically.
@@ -66,9 +85,7 @@ export const COMMANDS_MAP: Record<string, string[]> = {
   optimization: ['optimization'],
   pair: ['pair'],
   streamChain: ['stream-chain'],
-  training: ['training'],
   truth: ['truth'],
-  verify: ['verify'],
   workflows: ['workflows'],
 };
 
@@ -110,6 +127,26 @@ export const AGENTS_MAP: Record<string, string[]> = {
   templates: ['templates'],
   testing: ['testing'],
 };
+
+/**
+ * True for a file under a shipped commands directory that is not a command:
+ * a README, a `_`-prefixed shared include or anything under `references/`.
+ * Claude Code registers every `.md` under `.claude/commands/` as a slash
+ * command, so installing these added descriptionless entries to the listing
+ * (GH #411).
+ */
+export function isCommandDoc(srcPath: string): boolean {
+  const segs = srcPath.split(/[\\/]/);
+  const base = segs[segs.length - 1];
+  return base === 'README.md' || base.startsWith('_') || segs.includes('references');
+}
+
+/** True for an agent definition whose frontmatter says `deprecated: true`. */
+export function isDeprecatedAgent(srcPath: string): boolean {
+  if (!srcPath.endsWith('.md')) return false;
+  const frontmatter = fs.readFileSync(srcPath, 'utf-8').match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  return !!frontmatter && /^deprecated:\s*true\s*$/m.test(frontmatter[1]);
+}
 
 /**
  * Directory structure to create

@@ -8,7 +8,7 @@ pick: low
 
 # Mastermind Org Settings
 
-This skill is invoked by `mastermind:org-settings` or directly via `/mastermind-org-settings`.
+This skill is invoked directly via `/mastermind-org-settings`.
 
 It edits `.monomind/orgs/<org_name>.json` in place, and only ever touches fields that `OrgDefSchema` (`packages/@monomind/cli/src/orgrt/types.ts`) actually defines — every field listed below is read by the daemon (`org.ts`/`daemon.ts`/`session.ts`) at `monomind org run`/`serve` time. Its primary edit flow targets these fields only: `name`, `goal`, `schedule`, and `run_config` (`budget_tokens`, `memory_namespace`, `max_turns_per_message`). Role edits are not yet supported by this skill's `edit` action — `roles` is shown read-only via `show`.
 

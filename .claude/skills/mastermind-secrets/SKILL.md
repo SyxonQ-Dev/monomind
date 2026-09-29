@@ -1,6 +1,6 @@
 ---
 name: mastermind-secrets
-description: Mastermind secrets — manage org-scoped API keys and secrets consumed by agents. Store, rotate, list, and audit secrets without exposing values in logs or state files.
+description: Mastermind secrets — bookkeeping only — not enforced by the Org Runtime. Keeps org secrets in a local file store plus a metadata registry that no agent or runtime reads. Set, rotate, list, and audit without printing values.
 type: domain-skill
 default_mode: confirm
 pick: low
@@ -8,7 +8,9 @@ pick: low
 
 # Mastermind Secrets
 
-This skill is invoked by `mastermind:secrets` or directly via `/mastermind-secrets`.
+This skill is invoked directly via `/mastermind-secrets`.
+
+**Bookkeeping only — not enforced by the Org Runtime.** It writes `.monomind/orgs/<org>-secrets.json` and `.monomind/orgs/.secrets/<org>/`, which no runtime code reads: org agents never receive these values.
 
 ---
 
@@ -165,9 +167,9 @@ echo "(Audit checks responsibilities text only — review agent prompts manually
 
 ---
 
-## How Agents Access Secrets
+## Reading a Stored Secret
 
-Agents spawned by the boss should read secrets via:
+The Org Runtime does not pass these secrets to agents. Code that needs a stored value must read it itself:
 
 ```bash
 # Read from local storage (not env):

@@ -24,8 +24,15 @@
 
 import type { SqlDriver } from './sql-driver.js';
 
-/** Bumped when the canonical schema changes; stored in PRAGMA user_version. */
-export const SCHEMA_VERSION = 3;
+/**
+ * Bumped when the canonical schema changes; stored in PRAGMA user_version.
+ * A database below this version gets the one-time repair migrations
+ * (namespace+key dedupe, FTS5 row dedupe) on its next open; at or above it
+ * they are skipped (issue #426: they full-scanned the table on every open).
+ * 4 = the version that started gating those repairs, so every existing store
+ * gets them once more under the current code.
+ */
+export const SCHEMA_VERSION = 4;
 
 /**
  * Create the canonical schema. Safe to run repeatedly.
@@ -215,7 +222,7 @@ export function hasFTS5Table(driver: SqlDriver): boolean {
  *
  * Returns true if the FTS5 table is usable after this call.
  */
-export function createFTS5Index(driver: SqlDriver): boolean {
+export function createFTS5Index(driver: SqlDriver, repair = true): boolean {
   const alreadyExists = hasFTS5Table(driver);
 
   if (!alreadyExists) {
@@ -253,7 +260,7 @@ export function createFTS5Index(driver: SqlDriver): boolean {
 
   try {
     ensureFTS5Triggers(driver);
-    if (alreadyExists) dedupeFTS5Rows(driver);
+    if (alreadyExists && repair) dedupeFTS5Rows(driver);
     return true;
   } catch {
     if (!alreadyExists) {
@@ -325,8 +332,8 @@ function ensureFTS5Triggers(driver: SqlDriver): void {
  * the same `entry_id` (fixing the trigger only stops NEW duplicates; it does
  * not retroactively clean up ones already written). Keeps the row with the
  * largest `rowid` per `entry_id` — FTS5 rowids are monotonically increasing
- * on insert, so that is the most-recently-written (current) content; run
- * every `initializeSchema()` call, so it is also a no-op once clean. */
+ * on insert, so that is the most-recently-written (current) content. Run by
+ * `initializeSchema()` only while the stored version is below SCHEMA_VERSION. */
 function dedupeFTS5Rows(driver: SqlDriver): void {
   driver.exec(`
     DELETE FROM memory_entries_fts
@@ -334,16 +341,43 @@ function dedupeFTS5Rows(driver: SqlDriver): void {
   `);
 }
 
+/** The stored PRAGMA user_version, or 0 when unreadable. */
+function readSchemaVersion(driver: SqlDriver): number {
+  try {
+    return Number(driver.get('PRAGMA user_version')?.user_version ?? 0) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function hasNamespaceKeyUniqueIndex(driver: SqlDriver): boolean {
+  try {
+    return (
+      driver.get(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_namespace_key_unique'",
+      ) !== null
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Bring a database to the canonical schema: create tables, migrate legacy
  * inline embeddings, enforce uniqueness, build the FTS5 index, and record
  * the version.
+ *
+ * The dedupe repairs scan every row, so they run only when the stored
+ * version is below SCHEMA_VERSION (an older release that opens the file
+ * writes its own lower version back, so it gets repaired again next time).
+ * The namespace+key repair also re-runs whenever the unique index is missing.
  */
 export function initializeSchema(driver: SqlDriver): MigrationReport {
+  const needsRepair = readSchemaVersion(driver) < SCHEMA_VERSION;
   createCanonicalSchema(driver);
   const report = migrateLegacyInlineEmbeddings(driver);
-  enforceNamespaceKeyUnique(driver);
-  createFTS5Index(driver);
+  if (needsRepair || !hasNamespaceKeyUniqueIndex(driver)) enforceNamespaceKeyUnique(driver);
+  createFTS5Index(driver, needsRepair);
   try {
     driver.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   } catch {

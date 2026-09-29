@@ -54,12 +54,11 @@ worker cancel     Cancel a running worker
 
 ## Real MCP Tools
 
-- `mcp__monomind__hooks_pre_edit` / `hooks_post_edit`
-- `mcp__monomind__hooks_pre_command` / `hooks_post_command`
-- `mcp__monomind__hooks_pre_task` / `hooks_post_task`
-- `mcp__monomind__hooks_session_end` / `hooks_session_restore`
+- `mcp__monomind__hooks_pre-edit` / `hooks_post-edit`
+- `mcp__monomind__hooks_pre-command` / `hooks_post-command`
+- `mcp__monomind__hooks_pre-task` / `hooks_post-task`
+- `mcp__monomind__hooks_session-end` / `hooks_session-restore`
 - `mcp__monomind__hooks_route` / `hooks_explain`
-- `mcp__monomind__hooks_pretrain` / `hooks_build_agents`
+- `mcp__monomind__hooks_pretrain`
 - `mcp__monomind__hooks_metrics` / `hooks_transfer`
-- `mcp__monomind__hooks_intelligence` / `hooks_notify`
-- `mcp__monomind__hooks_worker_list` / `hooks_worker_dispatch` / etc.
+- `mcp__monomind__hooks_intelligence`

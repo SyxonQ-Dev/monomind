@@ -22,8 +22,9 @@
  *   first-pull race regardless of model-thinking latency), assistant text is
  *   yielded as each `agent_message` item lands (codex sends whole items, not
  *   per-token deltas — no accumulation needed, unlike agy), and codex's own
- *   `command_execution` items are forwarded as `tool_use` liveness messages
- *   at their `item.started` boundary. Tool_call fences are still collected
+ *   tool items (command_execution, file_change, mcp_tool_call, web_search,
+ *   todo_list) are forwarded as id-carrying `tool_use` at `item.started`
+ *   and a matched `tool_result` at `item.completed` (codex-runner-tools.ts). Tool_call fences are still collected
  *   from the raw texts and parsed at end of turn (fence parsing needs the
  *   complete text).
  *
@@ -48,10 +49,13 @@
  * format and is explicitly comment-labeled "v1 wire format" (still the
  * live default for `--json`, not a deprecated relic).
  *
- *   - Invocation: `codex exec --json [--model X] [--cd Y]
- *                 [--skip-git-repo-check] [--sandbox <mode>]
+ *   - Invocation: `codex exec --json [--model X] [-c model_reasoning_effort=L]
+ *                 [--cd Y] [--skip-git-repo-check] [--sandbox <mode>]
  *                 [resume <sessionId>] -- -` with the prompt on STDIN
- *     (the sandbox mode follows the role's policy.git level — cli-sandbox.ts)
+ *     (the sandbox mode follows the role's policy.git level — cli-sandbox.ts;
+ *     coder mode, `access: 'full'`, passes
+ *     `--dangerously-bypass-approvals-and-sandbox` instead — see
+ *     codexExecArgs in codex-runner-stream.ts)
  *     (see streamTurn for why argv is not used). `--experimental-json`
  *     (the old flag name) doesn't exist in v0.21.0 — confirmed live
  *     ("unexpected argument '--experimental-json' found"); `--json` is
@@ -156,6 +160,8 @@ export class CodexAgentRunner implements AgentRunner {
   async *run(args: AgentRunArgs): AsyncIterable<AgentMessage> {
     const bin = this.codexBin || process.env.CODEX_CLI_BIN || 'codex';
     let threadId: string | undefined = args.resume;
+    // Per-spawn tool-call id prefix (codex-runner-tools.ts).
+    let spawnSeq = 0;
 
     try {
       for await (const p of args.prompt) {
@@ -190,7 +196,15 @@ export class CodexAgentRunner implements AgentRunner {
           // collected here while the stripped prose streams out live below.
           const rawTexts: string[] = [];
 
-          for await (const ev of streamTurn(bin, promptWithSystem, threadId, args, outcome)) {
+          const idPrefix = `codex_${++spawnSeq}_`;
+          for await (const ev of streamTurn(
+            bin,
+            promptWithSystem,
+            threadId,
+            args,
+            outcome,
+            idPrefix,
+          )) {
             if (ev.threadId) threadId = ev.threadId;
             if (ev.kind === 'assistant' && ev.rawText !== undefined) {
               rawTexts.push(ev.rawText);
@@ -201,11 +215,37 @@ export class CodexAgentRunner implements AgentRunner {
               // turn later exits non-zero — preferable to losing it entirely.
               if (ev.text) yield { type: 'assistant', session_id: threadId, text: ev.text };
             } else if (ev.kind === 'tool') {
-              // Liveness for codex's own tool activity (or the spawn-time
-              // yield): session.ts never renders tool_use as chat — it only
-              // feeds the StateDetector ('tool-call' state) and refreshes
-              // last-activity.
-              yield { type: 'tool_use', session_id: threadId, text: ev.toolName };
+              // Spawn-time liveness: session.ts never renders tool_use as
+              // chat — it only feeds the StateDetector ('tool-call' state)
+              // and refreshes last-activity. No `text`: a label here would
+              // become a bogus unpaired tool_activity start (tool-activity.ts
+              // maps a text-only tool_use for any fidelity but `none`).
+              yield { type: 'tool_use', session_id: threadId };
+            } else if (ev.kind === 'tool_start') {
+              // Codex's own tool call, with a real id and canonical input
+              // (contract §4) — ToolActivityTracker pairs it with the
+              // tool_result below; session.ts sees it as liveness.
+              yield {
+                type: 'tool_use',
+                session_id: threadId,
+                text: ev.toolName,
+                tool_use_id: ev.toolUseId,
+                tool: ev.tool,
+                kind: ev.toolKind,
+                input: ev.input,
+                parent_tool_use_id: null,
+              };
+            } else if (ev.kind === 'tool_end') {
+              yield {
+                type: 'tool_result',
+                session_id: threadId,
+                tool_use_id: ev.toolUseId,
+                tool: ev.tool,
+                is_error: ev.isError === true,
+                text: ev.output ?? '',
+                ...(ev.exitCode !== undefined ? { exit_code: ev.exitCode } : {}),
+                ...(ev.durationMs !== undefined ? { duration_ms: ev.durationMs } : {}),
+              };
             }
           }
           if (outcome.threadId) threadId = outcome.threadId;

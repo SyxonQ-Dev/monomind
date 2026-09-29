@@ -381,6 +381,10 @@ export const cleanupCommand: Command = {
       plan.filter((x) => x.action === 'skip'),
       ctx.flags.verbose === true,
     );
+    for (const e of plan.filter((x) => x.notice)) {
+      output.writeln();
+      output.writeln(output.warning(`  ${e.notice}`));
+    }
 
     output.writeln();
     output.writeln(output.bold('Summary:'));

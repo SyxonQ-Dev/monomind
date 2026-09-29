@@ -1,6 +1,6 @@
 ---
 name: mastermind-invites
-description: Mastermind invites — manage org invitations and join request queue. Create/revoke invites with role assignment, view invite history, review pending join requests (human and agent), and approve or reject them. Merges CompanyInvites and JoinRequestQueue pages.
+description: Mastermind invites — bookkeeping only — not enforced by the Org Runtime. Records org invites and join requests in side files; accepting one grants no access. Create/revoke invites, view history, approve or reject join requests.
 type: domain-skill
 default_mode: confirm
 pick: low
@@ -8,7 +8,9 @@ pick: low
 
 # Mastermind Invites
 
-This skill is invoked by `mastermind:invites` or directly via `/mastermind-invites`.
+This skill is invoked directly via `/mastermind-invites`.
+
+**Bookkeeping only — not enforced by the Org Runtime.** It writes `.monomind/orgs/<org>-members.json`, which no runtime code reads: invites, members, and approved join requests grant no access to anything.
 
 ---
 
