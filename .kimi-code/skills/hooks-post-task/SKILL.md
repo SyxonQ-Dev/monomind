@@ -48,7 +48,7 @@ npx monomind hooks post-task -i task-123 --success true --format json
 ## MCP Tool
 
 ```javascript
-mcp__monomind__hooks_post_task({
+mcp__monomind__hooks_post-task({
   taskId: "task-123",
   success: true,
   quality: 0.95,

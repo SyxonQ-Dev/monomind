@@ -6,6 +6,7 @@
  */
 
 import { output } from '../output.js';
+import { mcpAddHint } from '../platform-adapters/renderers/mcp.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 
 // Quickstart subcommand (P1-15) — one-command setup: init + claude mcp add + verify
@@ -54,7 +55,7 @@ export const quickstartCommand: Command = {
     // Step 2: Register MCP with Claude Code
     output.writeln(output.bold('Step 2/3: Register MCP server'));
     try {
-      execSync('claude mcp add monomind -- npx -y monomind@latest mcp start', {
+      execSync(mcpAddHint(), {
         cwd: ctx.cwd,
         stdio: 'pipe',
         timeout: 10000,
@@ -62,7 +63,7 @@ export const quickstartCommand: Command = {
       output.printSuccess('MCP server registered with Claude Code');
     } catch {
       output.printWarning('Could not auto-register with Claude Code. Run manually:');
-      output.writeln(output.dim('  claude mcp add monomind -- npx -y monomind@latest mcp start'));
+      output.writeln(output.dim(`  ${mcpAddHint()}`));
     }
     output.writeln();
 

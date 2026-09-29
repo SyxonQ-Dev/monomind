@@ -115,6 +115,9 @@ const RUNTIME_KINDS = new Set<string>([
   'pi-rpc',
   'qwen-rpc',
   'hermes',
+  'cline',
+  'aider',
+  'dsh',
 ]);
 
 export interface RespawnInput {

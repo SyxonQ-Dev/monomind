@@ -166,16 +166,18 @@ export class FileGuard {
 
   /** copyDirRecursive through the guard. Returns whether any file inside was
    *  actually written (new or changed) — false when every file already
-   *  existed and matched (or, under `--if-missing`, simply already existed). */
-  copyDir(src: string, dest: string): boolean {
+   *  existed and matched (or, under `--if-missing`, simply already existed).
+   *  `skip` leaves out any source file or directory it returns true for. */
+  copyDir(src: string, dest: string, skip?: (srcPath: string) => boolean): boolean {
     let changed = false;
     for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
       // Skip exFAT/macOS AppleDouble junk files (e.g. "._foo.js").
       if (entry.name.startsWith('._')) continue;
       const from = path.join(src, entry.name);
       const to = path.join(dest, entry.name);
+      if (skip?.(from)) continue;
       if (entry.isDirectory()) {
-        if (this.copyDir(from, to)) changed = true;
+        if (this.copyDir(from, to, skip)) changed = true;
       } else if (this.copyFile(from, to) === 'written') {
         changed = true;
       }

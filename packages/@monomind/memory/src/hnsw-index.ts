@@ -3,7 +3,7 @@
  *
  * Hierarchical Navigable Small World (HNSW) index for approximate
  * nearest-neighbour vector search. SqlBackend switches to it above
- * MONOMIND_HNSW_THRESHOLD (default 5,000 entries); below that, brute-force
+ * MONOMIND_HNSW_THRESHOLD (default 100,000 entries); below that, brute-force
  * cosine is used. No measured speedup figure is claimed here.
  *
  * OPTIMIZATIONS:

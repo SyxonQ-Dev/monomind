@@ -1,76 +1,54 @@
 // packages/@monomind/cli/src/orgrt/pi-runner.ts
 /**
  * PiAgentRunner — AgentRunner impl backed by the Pi coding agent CLI
- * (`pi`, https://github.com/badlogic/pi-mono, package @mariozechner/pi-coding-agent).
+ * (`pi`, https://github.com/earendil-works/pi, package
+ * @earendil-works/pi-coding-agent), one `pi --mode json` process per mailbox
+ * turn / tool round. Target: pi 0.87.1, full coder-mode parity.
  *
- * Architectural pattern: SAME as the other subprocess runners — spawn the
- * CLI, parse its output, normalize to AgentMessage.
+ * Auth: pi's own provider login (`auth.json`, or provider env vars). No env
+ * vars set here.
  *
- * Auth: pi's own provider login (per-provider API key or subscription,
- * configured via `pi` itself). No env vars set here.
+ * Streaming / liveness (#204): stdout is parsed LINE BY LINE as it arrives.
+ * A liveness `tool_use` is yielded the moment the subprocess spawns (wins
+ * session.ts's first-pull watchdog race), assistant text streams per
+ * `text_delta` when `extras.includePartialMessages` is set (agent exec) or
+ * per assistant `message_end` otherwise (the org runtime wants one message
+ * per model message), and `tool_execution_start`/`tool_execution_end`
+ * become matched `tool_use`/`tool_result` pairs by toolCallId.
  *
- * Streaming / liveness — WHY INCREMENTAL (#204):
- *   This runner originally buffered ALL of pi's stdout until the subprocess
- *   exited, then parsed the whole batch. session.ts races the FIRST pull
- *   from this runner against a 4-minute silent-stream watchdog
- *   (SILENT_SESSION_MS), so any turn longer than 4 minutes yielded zero
- *   messages in time — abort, retry, kill, circuit breaker, stalled org.
- *   Same bug class the kimi/antigravity/codex runners had (#204 audit,
- *   fixed for codex in the commit this one mirrors). This runner now parses
- *   stdout LINE BY LINE as data arrives: a liveness `tool_use` message is
- *   yielded the moment the subprocess spawns (deterministically winning the
- *   first-pull race regardless of model-thinking latency), assistant text is
- *   yielded as each `message_end` event lands (pi sends whole messages, not
- *   per-token deltas — no accumulation needed, unlike agy), and pi's own
- *   `tool_execution_start` events are forwarded as `tool_use` liveness
- *   messages at their start boundary. Tool_call fences are still collected
- *   from the raw texts and parsed at end of turn (fence parsing needs the
- *   complete text). Fatal provider errors (auth/quota) are classified via
- *   the shared classifyStderr helper and tagged non-retryable, same as
- *   kimi/antigravity/codex.
+ * Invocation (pi-runner-state.ts's piCliArgs):
+ *   pi --mode json --session-id <id> [--model m] [--thinking E]
+ *      (--approve | --no-approve -ne -ns -np -nc) -- "<prompt>"
+ *   - `--session-id` opens or creates that exact session in pi's own store,
+ *     so nothing is written into the user's project (the old
+ *     `.monomind-pi-session` directory is gone) and resume is by id.
+ *   - `--approve` (trust the project's `.pi/` resources) only with coder
+ *     mode's `--settings` sources; otherwise the isolation flags. pi has no
+ *     per-tool approval and no sandbox (docs/security.md), so it is always
+ *     full access; `--access full` adds the process-group spawn.
  *
- * Subprocess protocol — byte-verified against a running `pi` 0.73.1 binary
- * (2026-08-25, see doc/agent-exec-protocol testing).
- *   - Invocation: `pi --mode json --session-dir <dir> "<prompt>"`. The
- *     prompt is POSITIONAL (matching pi's own interactive-mode CLI shape and
- *     the same convention codex uses) — an earlier revision of this runner
- *     passed it via a `-p` flag, which a second-source cross-check against
- *     another public agentic-CLI wrapper's tool table indicated was wrong;
- *     corrected here. An even earlier revision also passed `--approve`
- *     (meant to accept the cwd as trusted so pi doesn't stop to ask) — that
- *     flag does not exist in 0.73.1's `--help` output at all and made every
- *     turn fail immediately with "Unknown option: --approve"; removed.
- *     `--mode json` alone was confirmed NOT to block on an interactive
- *     trust prompt, so no replacement flag is needed (pi has no single
- *     "yolo" flag; tool auto-approval for individual actions is a separate,
- *     not-yet-wired concern for this runner — org tool calls go through
- *     canUseTool regardless, since they use the tool-fence protocol, not
- *     pi's native tool surface).
- *     (`--session-dir` also gives turn-to-turn continuity: pi persists
- *     sessions in that directory and resumes the latest one by default —
- *     there is no confirmed explicit `--resume <id>` flag for headless use,
- *     so this runner points every turn at the SAME per-run session dir
- *     rather than tracking a session id, and disclaims true cross-process
- *     resume as best-effort).
- *   - Event types seen: `agent_start` (ignored), `message_update` (partial;
- *     carries a cumulative `usage` object — kept as running totals but
- *     superseded by `message_end`), `message_end` (final `content` array
- *     with `{type:'text', text}` / `{type:'toolCall', ...}` items — only
- *     `text` items are surfaced to the bus), `tool_execution_start` /
- *     `tool_execution_end` (org tool calls use the shared tool-fence
- *     protocol, not pi's native tool-call surface, but `tool_execution_start`
- *     is forwarded as `tool_use` liveness — see header note above — while
- *     `tool_execution_end` is still ignored to avoid a duplicate liveness
- *     ping per command).
- *   - Usage field names differ from the other CLIs: `usage.input` /
- *     `usage.output` (not `input_tokens`/`output_tokens`).
+ * Completion: pi exits after `agent_settled`. An `agent_end` with
+ * `willRetry:true` is followed by `auto_retry_*` and a new agent run, and pi
+ * exits 0 even when the last retry failed — the run's failure is read from
+ * the stream (pi-runner-state.ts's PiRunTracker), not the exit code.
+ *
+ * Usage: summed over every assistant `message_end` (input, output,
+ * cacheRead, cacheWrite, cost.total) — a multi-step run has one usage per
+ * assistant message.
+ *
+ * max_turns: pi has no cap, so it is emulated — `turn_start` events are
+ * counted per mailbox message and the process tree is killed at the first
+ * turn past `maxTurns`; the result is `subtype: 'error_max_turns'`.
  *
  * Org tools — FENCE PROTOCOL: same approach as the other subprocess runners.
  */
-import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import type { AgentMessage, AgentRunArgs, AgentRunner } from './agent-runner.js';
+import { NativeToolCalls } from './kimicode-runner-tools.js';
+import { PiRunTracker, PiTextStream, PiTurnBudget } from './pi-runner-state.js';
 import type { TurnOutcome } from './pi-runner-stream.js';
 import { STARTUP_GRACE_MS, streamTurn, turnError } from './pi-runner-stream.js';
+import { withVendorRetries } from './provider-limit.js';
 import {
   buildToolProtocol,
   formatToolResults,
@@ -81,17 +59,29 @@ import {
 export { parsePiEvents } from './pi-runner-parse.js';
 export type { PiStreamEvent } from './pi-runner-stream.js';
 
+/** Install hint for the current pi package (the repo moved to
+ *  earendil-works/pi; @mariozechner/pi-coding-agent is stale). */
+export const PI_INSTALL_HINT =
+  'npm install -g --ignore-scripts @earendil-works/pi-coding-agent (or curl -fsSL https://pi.dev/install.sh | sh)';
+
 export class PiAgentRunner implements AgentRunner {
   constructor(private piBin?: string) {}
 
   async *run(args: AgentRunArgs): AsyncIterable<AgentMessage> {
     const bin = this.piBin || process.env.PI_CLI_BIN || 'pi';
-    // Stable per-run session directory — see file header on why this
-    // substitutes for an explicit resume-by-id flag.
-    const sessionDir = join(args.cwd, '.monomind-pi-session');
+    // pi 0.87 `--session-id <id>` opens that exact session or creates it, in
+    // pi's own store — no directory in the user's project. The runner picks
+    // the id up front (AgentRunArgs.resume seeds it), so every tool round
+    // and every later prompt reopens the same conversation.
+    let sessionId = args.resume || randomUUID();
+    const streamPartials = args.extras?.includePartialMessages === true;
+    const tools = new NativeToolCalls();
+    // pi prices each assistant message; the result carries this run's
+    // running sum (cumulative, like every runner's cost_usd).
+    let runCostUsd: number | undefined;
 
     try {
-      let first = true;
+      let first = !args.resume;
       for await (const p of args.prompt) {
         const text = typeof p === 'string' ? p : (p?.message?.content ?? String(p ?? ''));
         let nextPrompt = first
@@ -100,6 +90,10 @@ export class PiAgentRunner implements AgentRunner {
         first = false;
         let turnInputTokens = 0;
         let turnOutputTokens = 0;
+        let turnCacheRead = 0;
+        let turnCacheWrite = 0;
+        // Emulated max turns, per mailbox message across its tool rounds.
+        const budget = new PiTurnBudget(args.maxTurns);
 
         // runToolRound ends this loop past the round cap (#326).
         for (let round = 0; ; round++) {
@@ -109,46 +103,66 @@ export class PiAgentRunner implements AgentRunner {
             stderrTail: '',
             timedOut: false,
             hangSuspected: false,
-            inputTokens: 0,
-            outputTokens: 0,
           };
+          const tracker = new PiRunTracker();
           // Raw assistant texts (fences intact) for end-of-turn tool-call
           // parsing — fence parsing needs the complete text, so fences are
           // collected here while the stripped prose streams out live below.
           const rawTexts: string[] = [];
 
-          for await (const ev of streamTurn(bin, nextPrompt, sessionDir, args, outcome)) {
-            if (ev.kind === 'assistant' && ev.rawText !== undefined) {
-              rawTexts.push(ev.rawText);
-              // Yield assistant prose AS IT ARRIVES (per message_end event,
-              // not after process exit): a pi turn can run many minutes, and
-              // session.ts's watchdog must see messages DURING the turn.
-              // Note this means partial output may already be yielded when a
-              // turn later exits non-zero — preferable to losing it entirely.
-              if (ev.text) yield { type: 'assistant', text: ev.text };
+          for await (const ev of streamTurn(bin, nextPrompt, sessionId, args, outcome, {
+            tracker,
+            text: new PiTextStream(streamPartials),
+            budget,
+          })) {
+            if (outcome.sessionId) sessionId = outcome.sessionId;
+            if (ev.kind === 'assistant') {
+              if (ev.rawText !== undefined) rawTexts.push(ev.rawText);
+              // Yield assistant prose AS IT ARRIVES (per text_delta when
+              // streaming, else per message_end), not after process exit: a
+              // pi turn can run many minutes, and session.ts's watchdog
+              // must see messages DURING the turn.
+              if (ev.text) yield { type: 'assistant', session_id: sessionId, text: ev.text };
+            } else if (ev.kind === 'native') {
+              // pi's own tool calls, paired by toolCallId.
+              if (ev.toolStart) {
+                const t = ev.toolStart;
+                const m = tools.start(t.id, t.name, t.input, sessionId);
+                if (m) yield m;
+              }
+              if (ev.toolEnd) {
+                yield* tools.end(ev.toolEnd.id, ev.toolEnd.output, ev.toolEnd.isError, sessionId);
+              }
             } else if (ev.kind === 'tool') {
-              // Liveness for pi's own tool activity (or the spawn-time
-              // yield): session.ts never renders tool_use as chat — it only
-              // feeds the StateDetector ('tool-call' state) and refreshes
-              // last-activity.
-              yield { type: 'tool_use', text: ev.toolName };
+              // Spawn-time liveness: session.ts never renders tool_use as
+              // chat — it only feeds the StateDetector ('tool-call' state)
+              // and refreshes last-activity. No label: a bare ping never
+              // becomes a tool_activity event (pi's real calls do, above).
+              yield { type: 'tool_use', session_id: sessionId };
             }
           }
 
           if (outcome.hangSuspected) {
             throw new Error(
               `PiAgentRunner: pi produced no output within ${STARTUP_GRACE_MS / 1000}s and was killed. ` +
-                "This usually means it is stuck on a prompt headless mode has no way to answer — pi's own " +
-                'docs say --mode json should not show a trust prompt, so this is unexpected. Run `pi` once ' +
+                'This usually means it is stuck on a prompt headless mode has no way to answer. Run `pi` once ' +
                 `manually in a real terminal in this project to check, then retry.${outcome.stderrTail ? `\nstderr: ${outcome.stderrTail.slice(-500)}` : ''}`,
             );
           }
-          if (outcome.exitCode !== 0) {
-            throw turnError(outcome, round);
+          // The max-turns abort kills pi, so its exit status is not a failure.
+          if (!budget.hit) {
+            const failure = tracker.failure();
+            if (outcome.exitCode !== 0 || failure)
+              throw withVendorRetries(turnError(outcome, round, failure), tracker.retries);
           }
 
-          turnInputTokens += outcome.inputTokens;
-          turnOutputTokens += outcome.outputTokens;
+          turnInputTokens += tracker.inputTokens;
+          turnOutputTokens += tracker.outputTokens;
+          turnCacheRead += tracker.cacheReadTokens;
+          turnCacheWrite += tracker.cacheWriteTokens;
+          if (outcome.sessionId) sessionId = outcome.sessionId;
+          if (tracker.costUsd !== undefined) runCostUsd = (runCostUsd ?? 0) + tracker.costUsd;
+          if (budget.hit) break;
 
           const malformed: string[] = [];
           const calls = parseToolCalls(rawTexts, (raw, err) =>
@@ -167,17 +181,20 @@ export class PiAgentRunner implements AgentRunner {
 
         yield {
           type: 'result',
-          subtype: 'success',
+          session_id: sessionId,
+          subtype: budget.hit ? 'error_max_turns' : 'success',
           input_tokens: turnInputTokens,
           output_tokens: turnOutputTokens,
+          ...(turnCacheRead ? { cache_read_input_tokens: turnCacheRead } : {}),
+          ...(turnCacheWrite ? { cache_creation_input_tokens: turnCacheWrite } : {}),
+          ...(runCostUsd !== undefined ? { cost_usd: runCostUsd } : {}),
         };
       }
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         throw new Error(
-          'PiAgentRunner requires the Pi coding agent CLI (pi) on PATH. ' +
-            'Install it: npm install -g @mariozechner/pi-coding-agent, then configure a ' +
-            'provider. Or unset the runtime to use Claude.',
+          `PiAgentRunner requires the Pi coding agent CLI (pi) on PATH. Install it: ${PI_INSTALL_HINT}, ` +
+            'then configure a provider. Or unset the runtime to use Claude.',
         );
       }
       throw err;

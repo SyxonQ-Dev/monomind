@@ -24,15 +24,15 @@ Then describe the maintenance task:
 
 ```javascript
 // Initialize maintenance swarm
-mcp__monomind__swarm_init({
+mcp__monomind__monoswarm_init({
   topology: "star",
   maxAgents: 5,
   strategy: "sequential"
 })
 
 // Coordinate maintenance
-mcp__monomind__coordination_orchestrate({
-  task: "update dependencies",
+mcp__monomind__task_create({
+  description: "update dependencies",
   strategy: "sequential"
 })
 ```
@@ -63,14 +63,13 @@ Star topology runs sequentially — each agent completes before the next starts:
 
 ## Security Scanning
 
-```javascript
-// Run security scan via AI defence
-mcp__monomind__aidefence_scan({ target: "./" })
+```bash
+npx monomind@latest security scan
 ```
 
 ## Monitoring
 
 ```javascript
-mcp__monomind__swarm_status({ swarmId: "current" })
+mcp__monomind__monoswarm_status({ swarmId: "current" })
 mcp__monomind__system_health({})
 ```

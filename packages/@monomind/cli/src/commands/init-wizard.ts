@@ -25,7 +25,9 @@ export const wizardCommand: Command = {
     output.writeln();
 
     try {
-      const options: InitOptions = { ...DEFAULT_INIT_OPTIONS, targetDir: ctx.cwd };
+      // Deep copies: the answers below set nested fields (skills, hooks,
+      // runtime), which on a shallow copy wrote into the shared presets.
+      let options: InitOptions = { ...structuredClone(DEFAULT_INIT_OPTIONS), targetDir: ctx.cwd };
 
       const preset = await select({
         message: 'Select configuration preset:',
@@ -38,11 +40,9 @@ export const wizardCommand: Command = {
       });
 
       if (preset === 'minimal') {
-        Object.assign(options, MINIMAL_INIT_OPTIONS);
-        options.targetDir = ctx.cwd;
+        options = { ...structuredClone(MINIMAL_INIT_OPTIONS), targetDir: ctx.cwd };
       } else if (preset === 'full') {
-        Object.assign(options, FULL_INIT_OPTIONS);
-        options.targetDir = ctx.cwd;
+        options = { ...structuredClone(FULL_INIT_OPTIONS), targetDir: ctx.cwd };
       } else if (preset === 'custom') {
         const components = await multiSelect({
           message: 'Select components to initialize:',
@@ -118,7 +118,18 @@ export const wizardCommand: Command = {
           const skillSets = await multiSelect({
             message: 'Select skill sets:',
             options: [
-              { value: 'core', label: 'Core', hint: 'Swarm, memory skills', selected: true },
+              {
+                value: 'core',
+                label: 'Core',
+                hint: 'Mastermind workflows, monolean, monodesign',
+                selected: true,
+              },
+              {
+                value: 'extended',
+                label: 'Extended',
+                hint: 'Mastermind org admin, monoswarm, hooks, monomotion',
+                selected: false,
+              },
               {
                 value: 'memory',
                 label: 'Memory (SQLite)',
@@ -131,12 +142,30 @@ export const wizardCommand: Command = {
                 hint: 'GitHub integration skills',
                 selected: true,
               },
+              {
+                value: 'browser',
+                label: 'Browser',
+                hint: 'Browser testing and automation',
+                selected: true,
+              },
+              {
+                value: 'advanced',
+                label: 'Advanced',
+                hint: 'agentic-jujutsu, performance analysis',
+                selected: false,
+              },
             ],
           });
 
-          options.skills.core = skillSets.includes('core');
-          options.skills.memory = skillSets.includes('memory');
-          options.skills.github = skillSets.includes('github');
+          options.skills = {
+            core: skillSets.includes('core'),
+            extended: skillSets.includes('extended'),
+            memory: skillSets.includes('memory'),
+            github: skillSets.includes('github'),
+            browser: skillSets.includes('browser'),
+            advanced: skillSets.includes('advanced'),
+            all: false,
+          };
         }
 
         if (options.components.settings) {

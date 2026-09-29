@@ -324,7 +324,7 @@ When using with Claude Code:
 
 ```bash
 # Initialize PR-specific swarm with intelligent topology selection
-mcp__monomind__swarm_init { topology: "mesh", maxAgents: 8 }
+mcp__monomind__monoswarm_init { topology: "mesh", maxAgents: 8 }
 mcp__monomind__agent_spawn { type: "coordinator", name: "PR Coordinator" }
 mcp__monomind__agent_spawn { type: "reviewer", name: "Code Reviewer" }
 mcp__monomind__agent_spawn { type: "tester", name: "Test Engineer" }
@@ -332,8 +332,8 @@ mcp__monomind__agent_spawn { type: "analyst", name: "Impact Analyzer" }
 mcp__monomind__agent_spawn { type: "optimizer", name: "Performance Optimizer" }
 
 # Store PR context for swarm coordination
-mcp__monomind__memory_usage {
-  action: "store",
+mcp__monomind__monoswarm_memory {
+  action: "set",
   key: "pr/#{pr_number}/analysis",
   value: {
     diff: "pr_diff_content",
@@ -344,8 +344,8 @@ mcp__monomind__memory_usage {
 }
 
 # Orchestrate comprehensive PR workflow
-mcp__monomind__task_orchestrate {
-  task: "Execute multi-agent PR review and validation workflow",
+mcp__monomind__task_create {
+  description: "Execute multi-agent PR review and validation workflow",
   strategy: "parallel",
   priority: "high",
   dependencies: ["diff_analysis", "test_validation", "security_review"]
@@ -362,11 +362,11 @@ const prPreHook = async (prData) => {
   const topology = complexity > 7 ? "hierarchical" : "mesh";
 
   // Initialize swarm with PR-specific configuration
-  await mcp__monomind__swarm_init({ topology, maxAgents: 8 });
+  await mcp__monomind__monoswarm_init({ topology, maxAgents: 8 });
 
   // Store comprehensive PR context
-  await mcp__monomind__memory_usage({
-    action: "store",
+  await mcp__monomind__monoswarm_memory({
+    action: "set",
     key: `pr/${prData.number}/context`,
     value: {
       pr: prData,
@@ -377,7 +377,7 @@ const prPreHook = async (prData) => {
   });
 
   // Coordinate initial agent synchronization
-  await mcp__monomind__coordination_sync({ swarmId: "current" });
+  await mcp__monomind__monoswarm_status({ swarmId: "current" });
 };
 
 // Post-hook: PR Completion and Metrics
@@ -389,8 +389,8 @@ const prPostHook = async (results) => {
   await updatePRWithResults(report);
 
   // Store completion metrics for future optimization
-  await mcp__monomind__memory_usage({
-    action: "store",
+  await mcp__monomind__monoswarm_memory({
+    action: "set",
     key: `pr/${results.number}/completion`,
     value: {
       completion_time: results.duration,
@@ -406,18 +406,18 @@ const prPostHook = async (results) => {
 
 ```bash
 # Coordinate merge decision with swarm consensus
-mcp__monomind__coordination_sync { swarmId: "pr-review-swarm" }
+mcp__monomind__monoswarm_status { swarmId: "pr-review-swarm" }
 
 # Analyze merge readiness with multiple agents
-mcp__monomind__task_orchestrate {
-  task: "Evaluate PR merge readiness with comprehensive validation",
+mcp__monomind__task_create {
+  description: "Evaluate PR merge readiness with comprehensive validation",
   strategy: "sequential",
   priority: "critical"
 }
 
 # Store merge decision context
-mcp__monomind__memory_usage {
-  action: "store",
+mcp__monomind__monoswarm_memory {
+  action: "set",
   key: "pr/merge_decisions/#{pr_number}",
   value: {
     ready_to_merge: true,

@@ -65,7 +65,7 @@ describe('resolveRoleAccess', () => {
   });
 
   it('declared full on a runtime without full-access support runs scoped, suspended', () => {
-    const d = def({ roles: [{ id: 'builder', runtime: 'codex', policy: { access: 'full' } }] });
+    const d = def({ roles: [{ id: 'builder', runtime: 'hermes', policy: { access: 'full' } }] });
     const r = resolve(d, d.roles[0]);
     expect(r.access).toBe('scoped');
     expect(r.state).toBe('suspended');
@@ -76,6 +76,18 @@ describe('resolveRoleAccess', () => {
     const d = ackedDef();
     const r = resolve(d, d.roles[0]);
     expect(r).toEqual({ access: 'full', declared: 'full', state: 'active' });
+  });
+
+  it('a valid grant does not run full as root (uid 0) on any runtime', () => {
+    for (const runtime of ['claude', 'codex', 'qwen', 'aider']) {
+      const d = ackedDef({ roles: [{ id: 'builder', runtime, policy: { access: 'full' } }] });
+      const r = resolveRoleAccess(d, d.roles[0], { grantKeyDir: keyDir, getuid: () => 0 });
+      expect(r.access, runtime).toBe('scoped');
+      expect(r.state).toBe('suspended');
+      expect(r.reason).toMatch(/root/);
+      const ok = resolveRoleAccess(d, d.roles[0], { grantKeyDir: keyDir, getuid: () => 1000 });
+      expect(ok.access, runtime).toBe('full');
+    }
   });
 
   it('an ack with a hash but no sig is suspended (unsigned)', () => {

@@ -23,15 +23,15 @@ Then describe the testing scope:
 
 ```javascript
 // Initialize testing swarm
-mcp__monomind__swarm_init({
+mcp__monomind__monoswarm_init({
   topology: "star",
   maxAgents: 7,
   strategy: "parallel"
 })
 
 // Coordinate testing
-mcp__monomind__coordination_orchestrate({
-  task: "test application",
+mcp__monomind__task_create({
+  description: "test application",
   strategy: "parallel"
 })
 ```
@@ -67,7 +67,7 @@ npm run test:e2e
 
 ```javascript
 // Check swarm status
-mcp__monomind__swarm_status({ swarmId: "current" })
+mcp__monomind__monoswarm_status({ swarmId: "current" })
 
 // Performance metrics
 mcp__monomind__performance_report({ format: "detailed" })

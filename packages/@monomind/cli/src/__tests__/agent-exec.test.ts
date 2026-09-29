@@ -569,8 +569,15 @@ describe('agent exec: --access full', () => {
     expect(ran).toBe(false);
   });
 
-  it('refuses a non-claude runtime with error {code:"unsupported"}, exit 2', async () => {
+  it('accepts a non-claude runtime whose spec supports full access (codex)', async () => {
     const h = makeHarness({ runtime: 'codex', access: 'full', cwd: scratchDir });
+    const code = await run(h, scriptedRunner([{ type: 'result', subtype: 'success' }]));
+    expect(code).toBe(0);
+    expect(byType(h, 'start')[0]).toMatchObject({ runtime: 'codex', access: 'full' });
+  });
+
+  it('refuses a runtime without full-access support with error {code:"unsupported"}, exit 2', async () => {
+    const h = makeHarness({ runtime: 'hermes', access: 'full', cwd: scratchDir });
     let ran = false;
     const runner: AgentRunner = {
       async *run() {
@@ -581,7 +588,7 @@ describe('agent exec: --access full', () => {
     const code = await run(h, runner);
     expect(code).toBe(2);
     expect(byType(h, 'error')[0]).toMatchObject({ code: 'unsupported', fatal: true });
-    expect(String(byType(h, 'error')[0].message)).toContain('codex');
+    expect(String(byType(h, 'error')[0].message)).toContain('hermes');
     expect(ran).toBe(false);
   });
 

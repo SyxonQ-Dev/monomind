@@ -7,7 +7,7 @@ default_mode: confirm
 
 # Mastermind Diagnose
 
-This skill is invoked by `mastermind:diagnose` or directly via `/mastermind-diagnose`.
+This skill is invoked directly via `/mastermind-diagnose`.
 
 ---
 

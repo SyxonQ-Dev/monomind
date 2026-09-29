@@ -69,7 +69,7 @@ npx monomind monoswarm init --v1-mode
 ## Integration with Claude Code
 
 ```javascript
-mcp__monomind__swarm_init({
+mcp__monomind__monoswarm_init({
   topology: "hierarchical",
   maxAgents: 8,
   strategy: "specialized"

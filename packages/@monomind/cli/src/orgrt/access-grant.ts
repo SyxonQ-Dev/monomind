@@ -46,7 +46,12 @@ export function isUnattendedRun(def: Pick<OrgDef, 'schedule'>): boolean {
 export function resolveRoleAccess(
   def: OrgDef,
   role: OrgRole,
-  opts: { unattended?: boolean; runtimeId?: string; grantKeyDir?: string } = {},
+  opts: {
+    unattended?: boolean;
+    runtimeId?: string;
+    grantKeyDir?: string;
+    getuid?: () => number;
+  } = {},
 ): ResolvedAccess {
   const declared = (role.policy?.access ?? 'scoped') as 'scoped' | 'full';
   if (declared !== 'full') return { access: 'scoped', declared: 'scoped' };
@@ -59,6 +64,18 @@ export function resolveRoleAccess(
       declared: 'full',
       state: 'suspended',
       reason: `runtime "${runtimeId}" does not support full access — running scoped`,
+    };
+  }
+
+  // Same refusal as `agent exec --access full` (agent-exec-access.ts): no
+  // CLI's no-approval mode as root, whichever runtime the role uses.
+  const getuid = opts.getuid ?? process.getuid?.bind(process);
+  if (getuid && getuid() === 0) {
+    return {
+      access: 'scoped',
+      declared: 'full',
+      state: 'suspended',
+      reason: 'the org runs as root (uid 0) — full access refuses root on every runtime',
     };
   }
 

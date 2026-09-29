@@ -1,14 +1,8 @@
 // #365: agent-context.ts's env-marker detection, in isolation.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { detectAgentContextMarker } from '../orgrt/agent-context.js';
+import { AGENT_CONTEXT_ENV_MARKERS, detectAgentContextMarker } from '../orgrt/agent-context.js';
 
-const MARKERS = [
-  'CLAUDECODE',
-  'CLAUDE_CODE_ENTRYPOINT',
-  'MONOMIND_ORG_ROLE',
-  'MONOMIND_SDK_AGENT',
-  'MONOMIND_AGENT_EXEC',
-] as const;
+const MARKERS = AGENT_CONTEXT_ENV_MARKERS;
 
 beforeEach(() => {
   for (const k of MARKERS) vi.stubEnv(k, undefined);
@@ -34,6 +28,21 @@ describe('detectAgentContextMarker', () => {
       expect(detectAgentContextMarker()).toBe(marker);
     });
   }
+
+  it('covers every full-access runtime CLI plus the AI_AGENT convention', () => {
+    for (const k of [
+      'AI_AGENT',
+      'CODEX_THREAD_ID',
+      'OPENCODE',
+      'ANTIGRAVITY_AGENT',
+      'GROK_SESSION_ID',
+      'COPILOT_CLI_BINARY_VERSION',
+      'CRUSH',
+      'PI_CODING_AGENT',
+      'QWEN_CODE',
+    ])
+      expect(MARKERS, k).toContain(k);
+  });
 
   it('works against an injected env object, not just process.env', () => {
     expect(detectAgentContextMarker({ MONOMIND_SDK_AGENT: '1' })).toBe('MONOMIND_SDK_AGENT');
