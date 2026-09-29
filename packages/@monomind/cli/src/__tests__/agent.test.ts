@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { agentCommand } from '../commands/agent.js';
-import { execCommand, scanCommand, testCommand } from '../commands/agent-exec.js';
+import { execCommand, scanCommand } from '../commands/agent-exec.js';
 import {
   listCommand,
   spawnCommand,
@@ -9,6 +9,7 @@ import {
 } from '../commands/agent-lifecycle.js';
 import { modelsCommand } from '../commands/agent-models.js';
 import { healthCommand, metricsCommand, poolCommand } from '../commands/agent-ops.js';
+import { testCommand } from '../commands/agent-test.js';
 import type { CommandContext } from '../types.js';
 
 function makeCtx(overrides: Partial<CommandContext> = {}): CommandContext {

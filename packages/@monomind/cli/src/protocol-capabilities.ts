@@ -24,6 +24,10 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    `version_source` (§6, rev 11)
  *  - `agent-models` — `monomind agent models --runtime <id> --json`: the
  *    runtime's own model list (§12, issue #369)
+ *  - `agent-test-json` — `monomind agent test <id> [--model M] --json`: one
+ *    "reply ok" turn reported as a single object with a `status` (ok,
+ *    ok_unexpected, auth, quota, model_unavailable, timeout, missing_binary,
+ *    error), latency, tokens and cost (rev 18, issue #390)
  *  - `org-json-v1`  — `--json`/`--format json` output on org observe commands (§7)
  *  - `org-tool-providers` — role `tool_providers` (stdio MCP), `policy.approvalTools`,
  *    operator-authenticated `/api/xdeliver` and live `org inbox --format json`
@@ -91,6 +95,7 @@ export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-scan',
   'agent-scan-read-only',
   'agent-models',
+  'agent-test-json',
   'org-json-v1',
   'org-tool-providers',
   'org-decision-attribution',

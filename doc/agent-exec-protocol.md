@@ -1,4 +1,4 @@
-# Agent Exec Protocol — v1 (rev 17)
+# Agent Exec Protocol — v1 (rev 18)
 
 - **Status**: Implemented (Phase 0 of the mono-agent delegation plan — see
   `mono-agent:docs/plans/local-agent-monomind-delegation.md`)
@@ -6,6 +6,13 @@
   the Coder mode threat model, the `--access full` guardrails (root refusal, no transitive
   escalation, env hygiene, audit log), what callers own, and residual risks (issue #360).
 - **Revision history**:
+  - rev 18 (2026-09-29): **per-model test results** (issue #390) — new capability
+    `agent-test-json`: `monomind agent test <id> [--model M] [--timeout 60s] --json` (§13) sends
+    one "Reply with the single word: ok" turn and prints one result object with a `status`
+    (`ok`, `ok_unexpected`, `auth`, `quota`, `model_unavailable`, `timeout`, `missing_binary`,
+    `error`), latency, tokens and cost. `model_unavailable` classifies the runtimes'
+    "unknown model / not available on your plan" errors, which `agent exec` reports as
+    `runner-error`. Without `--json`, `agent test` is unchanged (the NDJSON event stream, §6).
   - rev 17 (2026-09-29): **subagent lifecycle events** (issue #387) — new capability
     `agent-exec-subagent-events` and new `subagent` event (§3.2.1), claude runtime only: a native
     `Task`/`Agent` subagent reports `started → progress* → finished`, joined to the call's
@@ -296,6 +303,7 @@
 | Org live tail | `monomind org events --ndjson` (§7.3) |
 | Workspace init | `monomind init --json` (§11) |
 | Runtime model list | `monomind agent models --runtime <id> --json` (§12) |
+| Runtime/model smoke test | `monomind agent test <id> [--model M] --json` (§13) |
 
 `agent exec`, `agent scan`, and `agent test` join the **existing** `monomind agent` namespace
 (swarm lifecycle: `spawn/list/status/stop/metrics/pool/health`). The name `agent list` is taken
@@ -539,7 +547,8 @@ it never depends on probing the binary, so it's always present even when `instal
 
 `agent scan --installed --json` = installed-only view (the name `agent list` is reserved by the
 pre-existing swarm command, §1). `agent test <id>` = one smoke turn via `agent exec`
-(**rev 4**: it emits the same NDJSON event stream; success = a `result` event with
+and emits the same NDJSON event stream (with `--json`, rev 18: one result object instead — see
+§13); success = a `result` event with
 `subtype:"success"`; auth problems surface as `error {code:"auth", fatal:true}` — so `test`
 doubles as the auth smoke check).
 
@@ -942,3 +951,47 @@ picker shows for the signed-in account (it varies by account and plan); `codex` 
 
 Errors keep the same shape with `models: []` and an `error: {code, message}`: `unknown-runtime`
 (exit 2), `missing-binary` or `list-failed` (the command failed or timed out after 30s; exit 1).
+
+## 13. `monomind agent test --json` (capability `agent-test-json`, rev 18)
+
+`monomind agent test <id> [--model M] [--timeout 60s] --json` checks that one runtime and model
+actually answer (issue #390). It runs one turn through the `agent exec` engine with the prompt
+`Reply with the single word: ok`, max turns 1, no caller tools, `scoped` access and a fresh
+temporary cwd that is removed afterwards, then prints a single JSON object on stdout:
+
+```json
+{"v":1,"runtime":"codex","model":"gpt-5.5","status":"ok","reply":"ok",
+ "latency_first_ms":812,"latency_ms":1430,"input_tokens":12,"output_tokens":1,
+ "cost_usd":0.0001,"cost_estimated":false,"runtime_version":"0.52.0","error":null}
+```
+
+| Field | Meaning |
+|---|---|
+| `model` | The `--model` given, or `null` for the runtime's default |
+| `status` | See below |
+| `reply` | The turn's final text, or `null` |
+| `latency_first_ms` | Time to the first `assistant` text; `null` when none arrived |
+| `latency_ms` | Time for the whole turn |
+| `cost_usd` | The runtime's reported cost; when it reports none, an estimate from monomind's pricing table; `null` when neither exists |
+| `cost_estimated` | `true` when `cost_usd` is the pricing-table estimate |
+| `runtime_version` | From the runtime's install metadata, as `agent scan` reads it (§6); `null` when unknown |
+| `error` | `null`, or `{code, message, login_hint?}` for a failed status. `login_hint` comes with `auth` |
+
+| `status` | Meaning | Exit |
+|---|---|---|
+| `ok` | The reply is `ok` (trimmed, any case, trailing punctuation allowed) | 0 |
+| `ok_unexpected` | The turn succeeded but replied with other text | 0 |
+| `auth` | Not logged in or the key was rejected | 1 |
+| `quota` | Rate limit, usage limit or billing | 1 |
+| `model_unavailable` | The runtime does not know the model, or the account's plan does not include it (`error.code: "model-unavailable"`) | 1 |
+| `timeout` | `--timeout` (default 60s) fired | 124 |
+| `missing_binary` | The runtime's CLI is not installed | 1 |
+| `error` | Anything else; `error.code` keeps the §3.4 code (`runner-error`, `no-runner`, …) | 1 |
+
+A missing runtime id is a usage error (exit 2, no JSON). `model_unavailable` matches the wording
+each runtime uses for a bad model — Claude Code's "issue with the selected model", copilot's
+"from --model flag is not available", pi's and crush's "model … not found", agy's "not
+recognized as a known model", OpenAI's "does not exist", Gemini's `models/… is not found` and
+plan gates — even when the provider answered 403. The classifier is
+`orgrt/agent-error-classify.ts`. Without `--json` the command prints one line, such as
+`codex/gpt-5.5: ok — "ok" in 1430ms, first 812ms, 12→1 tokens, $0.0001`.
