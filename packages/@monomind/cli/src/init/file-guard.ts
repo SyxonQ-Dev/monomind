@@ -153,6 +153,13 @@ export class FileGuard {
     return true;
   }
 
+  /** Record the hash of a file a writer just wrote without the guard (the
+   *  converted .opencode/.kimi-code mirrors), so `cleanup` can prove it is
+   *  an untouched install. Hashed at `finalize`, like everything else. */
+  record(file: string): void {
+    this.touched.add(this.rel(file));
+  }
+
   copyFile(src: string, dest: string): GuardOutcome {
     return this.write(dest, fs.readFileSync(src), fs.statSync(src).mode & 0o777);
   }

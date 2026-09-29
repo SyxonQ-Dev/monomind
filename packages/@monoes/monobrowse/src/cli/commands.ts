@@ -97,6 +97,8 @@ import type { Command, CommandContext, CommandResult } from './types.js';
 // before the subcommands were split out, and the tests import them from here.
 export { deriveBoxOutput } from './commands-page.js';
 export { parseBatchCommandLine } from './commands-script.js';
+// For embedders that do not process.exit() after a subcommand (#408).
+export { disconnectSession } from './session.js';
 
 // ---------------------------------------------------------------------------
 // batch — dispatches over this file's own subcommand catalogue, which is why

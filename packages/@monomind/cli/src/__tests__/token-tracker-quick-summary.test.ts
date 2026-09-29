@@ -142,6 +142,63 @@ describe('quickSummary is cache-first and never blocks (#42)', () => {
   });
 });
 
+// Issue #403: session-restore also called quickSummaryData(), which still ran
+// the full synchronous parse — a half-fix of #42 that blocked SessionStart for
+// tens of seconds on active machines. It must be cache-first too.
+describe('quickSummaryData is cache-first and never blocks (#403)', () => {
+  /** Counts synchronous reads of transcript files while `fn` runs. */
+  function countTranscriptReads(fn: () => unknown) {
+    const fs = require_('node:fs');
+    const orig = fs.readFileSync;
+    let reads = 0;
+    fs.readFileSync = (file: unknown, ...rest: unknown[]) => {
+      if (String(file).endsWith('.jsonl')) reads++;
+      return orig.call(fs, file, ...rest);
+    };
+    try {
+      return { result: fn(), reads };
+    } finally {
+      fs.readFileSync = orig;
+    }
+  }
+
+  it('returns null on a cold cache without parsing any transcript', () => {
+    writeTranscript(join(projects, 'proj-a'), 'a.jsonl', 3, new Date());
+    const tracker = loadTracker();
+
+    const { result, reads } = countTranscriptReads(() => tracker.quickSummaryData());
+    expect(result).toBeNull();
+    expect(reads).toBe(0);
+  });
+
+  it('serves the cached totals, not a fresh parse, over a large fixture', () => {
+    for (let f = 0; f < 20; f++) {
+      writeTranscript(join(projects, `proj-${f % 4}`), `t${f}.jsonl`, 2000, new Date());
+    }
+    // Sentinel figures no parse of the fixture could produce.
+    const totals = { todayCost: 1.23, todayCalls: 7, monthCost: 45.6, monthCalls: 89 };
+    writeFileSync(cachePath(), JSON.stringify({ computedAt: Date.now(), totals }));
+    const tracker = loadTracker();
+
+    const started = Date.now();
+    const { result, reads } = countTranscriptReads(() => tracker.quickSummaryData());
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(reads).toBe(0);
+    expect(result).toEqual(totals);
+  });
+
+  it('serves stale totals rather than recomputing inline', () => {
+    writeTranscript(join(projects, 'proj-a'), 'a.jsonl', 3, new Date());
+    const totals = { todayCost: 1, todayCalls: 1, monthCost: 2, monthCalls: 2 };
+    writeFileSync(cachePath(), JSON.stringify({ computedAt: Date.now() - 60 * 60 * 1000, totals }));
+    const tracker = loadTracker();
+
+    const { result, reads } = countTranscriptReads(() => tracker.quickSummaryData());
+    expect(reads).toBe(0);
+    expect(result).toEqual(totals);
+  });
+});
+
 describe('parseAllSessions skips transcripts older than the window', () => {
   it('ignores a file whose mtime predates dateStart', () => {
     const now = new Date();

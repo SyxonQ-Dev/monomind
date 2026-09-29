@@ -17,6 +17,7 @@ import {
 import {
   blendScore,
   capResultContent,
+  DEFAULT_SEARCH_THRESHOLD,
   entryWeights,
   getAutomemConfig,
   logBridgeError,
@@ -72,7 +73,7 @@ export async function bridgeSearchEntries(options: {
   if (!backend) return null;
 
   try {
-    const { query: queryStr, limit = 10, threshold = 0.3 } = options;
+    const { query: queryStr, limit = 10, threshold = DEFAULT_SEARCH_THRESHOLD } = options;
     // CLI callers pass 'all' as a no-filter sentinel — never treat it as a literal namespace
     const namespace =
       options.namespace && options.namespace !== 'all' ? options.namespace : undefined;

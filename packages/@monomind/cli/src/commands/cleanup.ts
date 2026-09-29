@@ -56,7 +56,8 @@ export const cleanupCommand: Command = {
     {
       name: 'keep-config',
       short: 'k',
-      description: 'Preserve monomind.config.json (.claude/settings.json is always kept)',
+      description:
+        'Preserve monomind.config.json (.claude/settings.json is kept; only hooks and statusLine that run removed helpers are dropped)',
       type: 'boolean',
       default: false,
     },
