@@ -4,7 +4,7 @@
  * when it is a JSON object carrying hookSpecificOutput.additionalContext, so
  * plain console.log hints were invisible — yet they were credited as
  * "$ saved" in the status line. These tests pin the JSON contract, the
- * unchanged graph-gate block output, and the removal of the synthetic "$".
+ * one-time graph nudge (#413), and the removal of the synthetic "$".
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -117,31 +117,18 @@ describe('pre-search / pre-bash hints reach the model (#409)', () => {
     );
   });
 
-  it('folds the graph-gate reminder into the same JSON document', () => {
+  it('folds the one-time graph nudge into the same JSON document as the hint', () => {
     freshGraphProject();
-    const input = {
+    const r = runHook('pre-search', {
       session_id: 's1',
       tool_name: 'Grep',
       tool_input: { pattern: 'computeWidgetScore' },
-    };
-    expect(runHook('pre-search', input).status).toBe(2); // first call: gate block
-    const r = runHook('pre-search', input);
+    });
     expect(r.status).toBe(0);
+    expect(r.stderr).not.toContain('"decision"');
     const ctx = JSON.parse(r.stdout).hookSpecificOutput.additionalContext;
     expect(ctx).toContain('[MONOGRAPH_REMINDER]');
     expect(ctx).toContain('[MONOGRAPH_HINT] computeWidgetScore');
-  });
-
-  it('keeps the graph-gate block decision on stderr with exit 2 and a clean stdout', () => {
-    freshGraphProject();
-    const r = runHook('pre-search', {
-      session_id: 's2',
-      tool_name: 'Grep',
-      tool_input: { pattern: 'computeWidgetScore' },
-    });
-    expect(r.status).toBe(2);
-    expect(r.stdout).toBe('');
-    expect(JSON.parse(r.stderr.trim()).decision).toBe('block');
   });
 
   it('keeps the destructive-ops block on stderr with exit 2 and a clean stdout', () => {
@@ -168,6 +155,107 @@ describe('pre-search / pre-bash hints reach the model (#409)', () => {
     expect(d.graph_assist_search).toBe(1);
     expect(d.tokens_saved).toBeUndefined();
     expect(d.dollars_saved).toBeUndefined();
+  });
+});
+
+// #413: the graph gate used to hard-block the first grep/search of a session
+// until a monograph tool was called. It is now a one-time, non-blocking nudge.
+describe('graph gate is a one-time nudge, never a block (#413)', () => {
+  const grep = (session_id, command) =>
+    runHook('pre-bash', { session_id, tool_name: 'Bash', tool_input: { command } });
+  const nudgeOf = (r) =>
+    r.stdout ? JSON.parse(r.stdout).hookSpecificOutput.additionalContext : '';
+
+  it('first grep with a fresh graph passes (exit 0) and carries the nudge', () => {
+    freshGraphProject();
+    const r = grep('n1', 'grep -rn "noSuchSymbolAnywhere" src');
+    expect(r.status).toBe(0);
+    expect(r.stderr).not.toContain('"decision"');
+    const ctx = nudgeOf(r);
+    expect(ctx).toContain('[MONOGRAPH_REMINDER]');
+    expect(ctx).toContain('monograph_query');
+    expect(ctx).not.toMatch(/block/i);
+  });
+
+  it('shows the nudge only once per session', () => {
+    freshGraphProject();
+    expect(nudgeOf(grep('n2', 'grep -rn "noSuchSymbolAnywhere" src'))).toContain(
+      '[MONOGRAPH_REMINDER]',
+    );
+    const second = grep('n2', 'grep -rn "anotherMissingSymbol" src');
+    expect(second.status).toBe(0);
+    expect(second.stdout).toBe('');
+    const search = runHook('pre-search', {
+      session_id: 'n2',
+      tool_name: 'Grep',
+      tool_input: { pattern: 'anotherMissingSymbol' },
+    });
+    expect(search.status).toBe(0);
+    expect(search.stdout).toBe('');
+  });
+
+  it('never nudges a piped grep, and a piped grep does not use up the nudge', () => {
+    freshGraphProject();
+    const piped = grep('n3', 'git log --oneline | grep "noSuchSymbolAnywhere"');
+    expect(piped.status).toBe(0);
+    expect(piped.stdout).toBe('');
+    expect(nudgeOf(grep('n3', 'grep -rn "noSuchSymbolAnywhere" src'))).toContain(
+      '[MONOGRAPH_REMINDER]',
+    );
+  });
+
+  it('never nudges a search over non-source paths', () => {
+    freshGraphProject();
+    for (const cmd of [
+      'grep -rn "noSuchSymbolAnywhere" node_modules/foo',
+      'grep -n "noSuchSymbolAnywhere" server.log',
+      'grep -rn "noSuchSymbolAnywhere" /var/log',
+      'rg "noSuchSymbolAnywhere" --glob=*.md',
+      'find ~/Downloads -name "noSuchSymbolAnywhere"',
+    ]) {
+      const r = grep('n4', cmd);
+      expect(r.status, cmd).toBe(0);
+      expect(r.stdout, cmd).toBe('');
+    }
+    const search = runHook('pre-search', {
+      session_id: 'n4',
+      tool_name: 'Grep',
+      tool_input: { pattern: 'noSuchSymbolAnywhere', path: 'node_modules/foo' },
+    });
+    expect(search.stdout).toBe('');
+    expect(nudgeOf(grep('n4', 'grep -rn "noSuchSymbolAnywhere" src'))).toContain(
+      '[MONOGRAPH_REMINDER]',
+    );
+  });
+
+  it('does not nudge once monograph has been called this session', () => {
+    freshGraphProject();
+    runHook('post-graph-tool', { session_id: 'n5', tool_name: 'mcp__monomind__monograph_query' });
+    const r = grep('n5', 'grep -rn "noSuchSymbolAnywhere" src');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('');
+  });
+
+  it('does not nudge when the graph is empty', () => {
+    freshGraphProject();
+    const { DatabaseSync } = require('node:sqlite');
+    const db = new DatabaseSync(path.join(tmp, '.monomind', 'monograph.db'));
+    db.exec('DELETE FROM nodes');
+    db.close();
+    const r = grep('n6', 'grep -rn "noSuchSymbolAnywhere" src');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('');
+  });
+
+  it('the security gate still blocks rm -rf in a session that was never nudged', () => {
+    freshGraphProject();
+    const r = runHook('pre-bash', {
+      session_id: 'n7',
+      tool_name: 'Bash',
+      tool_input: { command: 'rm -rf /' },
+    });
+    expect(r.status).toBe(2);
+    expect(r.stdout).toBe('');
   });
 });
 
