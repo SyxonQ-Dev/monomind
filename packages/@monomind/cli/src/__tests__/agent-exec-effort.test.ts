@@ -1,8 +1,9 @@
 /**
- * `agent exec --effort` and the non-claude startup notices (rev 15): flag
- * validation at the command layer, `AgentRunArgs.effort` plumbing in the
- * engine, and `status {phase:"notice"}` for `--settings` / an ignored
- * `--effort` on runtimes other than claude.
+ * `agent exec --effort` (rev 16) and the non-claude startup notices
+ * (rev 19): flag validation at the command layer, `AgentRunArgs.effort`
+ * plumbing in the engine, codex's level mapping, and `status
+ * {phase:"notice"}` for `--settings` / an ignored `--effort` on runtimes
+ * other than claude.
  */
 
 import { mkdtempSync } from 'node:fs';
@@ -13,6 +14,7 @@ import { runExec } from '../commands/agent-exec.js';
 import { type AgentExecOptions, runAgentExec } from '../orgrt/agent-exec.js';
 import { runtimeStartupNotices } from '../orgrt/agent-exec-settings.js';
 import type { AgentRunArgs, AgentRunner } from '../orgrt/agent-runner.js';
+import { codexEffortArgs } from '../orgrt/codex-runner-tools.js';
 import type { CommandContext } from '../types.js';
 
 function capture(): { runner: AgentRunner; seen: AgentRunArgs[] } {
@@ -62,6 +64,11 @@ describe('agent exec --effort', () => {
     expect(events[0].type).toBe('start');
     expect(events[1]).toMatchObject({ type: 'status', phase: 'notice' });
     expect(String(events[1].message)).toMatch(/crush: --effort max ignored/);
+  });
+
+  it('no --effort leaves AgentRunArgs.effort unset', async () => {
+    const { seen } = await exec({});
+    expect(seen[0].effort).toBeUndefined();
   });
 
   it('command layer rejects an unknown level with exit 2', async () => {
@@ -122,5 +129,20 @@ describe('--settings on non-claude runtimes', () => {
     expect(
       runtimeStartupNotices({ runtime: 'codex', settings: [], effortSupported: true }),
     ).toEqual([]);
+  });
+});
+
+describe('codexEffortArgs', () => {
+  it('maps a level onto -c model_reasoning_effort', () => {
+    expect(codexEffortArgs('medium')).toEqual(['-c', 'model_reasoning_effort=medium']);
+    expect(codexEffortArgs('max')).toEqual(['-c', 'model_reasoning_effort=max']);
+  });
+
+  it("maps monomind's off onto codex's none", () => {
+    expect(codexEffortArgs('off')).toEqual(['-c', 'model_reasoning_effort=none']);
+  });
+
+  it('unset → no args', () => {
+    expect(codexEffortArgs(undefined)).toEqual([]);
   });
 });

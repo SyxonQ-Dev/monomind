@@ -39,6 +39,7 @@ const KNOWN_EVENT_TYPES = new Set([
   'tool_call',
   'tool_result',
   'tool_activity',
+  'subagent',
   'usage',
   'result',
   'error',
@@ -56,6 +57,7 @@ describe('agent exec golden fixtures (§8.4)', () => {
     'full-access',
     'full-access-background',
     'tool-activity',
+    'subagent',
   ];
 
   it('every fixture line is v:1 JSON with a known type', () => {
@@ -84,6 +86,7 @@ describe('agent exec golden fixtures (§8.4)', () => {
     expect(load('tool-loop').at(-1)).toMatchObject({ exit_code: 0 });
     expect(load('bad-frame').at(-1)).toMatchObject({ exit_code: 0 });
     expect(load('tool-activity').at(-1)).toMatchObject({ exit_code: 0 });
+    expect(load('subagent').at(-1)).toMatchObject({ exit_code: 0 });
     expect(load('fatal-auth').at(-1)).toMatchObject({ exit_code: 1 });
     expect(load('timeout').at(-1)).toMatchObject({ exit_code: 124 });
     expect(load('cancel').at(-1)).toMatchObject({ exit_code: 130 });
@@ -185,6 +188,27 @@ describe('agent exec golden fixtures (§8.4)', () => {
       (e) => e.type === 'tool_activity' && e.phase === 'end' && e.denied === true,
     )!;
     expect(denied).toMatchObject({ ok: false, denied: true });
+  });
+
+  // #387
+  it('subagent: started → progress* → finished, joined to the Task tool_activity id', () => {
+    const evs = load('subagent');
+    const task = evs.find(
+      (e) => e.type === 'tool_activity' && e.phase === 'start' && e.name === 'Task',
+    )!;
+    const sub = evs.filter((e) => e.type === 'subagent');
+    expect(sub[0].phase).toBe('started');
+    expect(sub.at(-1)!.phase).toBe('finished');
+    expect(sub.slice(1, -1).every((e) => e.phase === 'progress')).toBe(true);
+    for (const e of sub) expect(e).toMatchObject({ id: sub[0].id, tool_use_id: task.id });
+  });
+
+  it('subagent: result.text is only the main agent text; subagent text carries parent_tool_use_id', () => {
+    const evs = load('subagent');
+    const assistant = evs.filter((e) => e.type === 'assistant');
+    const main = assistant.filter((e) => !e.parent_tool_use_id);
+    expect(evs.find((e) => e.type === 'result')!.text).toBe(main.map((e) => e.text).join(''));
+    expect(assistant.some((e) => e.parent_tool_use_id)).toBe(true);
   });
 
   // #359

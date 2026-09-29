@@ -120,7 +120,7 @@ const RUNTIME_LOADS: Record<string, string> = {
 };
 
 /**
- * `status` notices a non-claude turn gets right after `start` (rev 15):
+ * `status` notices a non-claude turn gets right after `start` (rev 19):
  * what `--settings` makes the CLI load, and an `--effort` the runtime does
  * not honor. `phase:"notice"` + `message`; claude's own
  * `initializing`/`ready` pair is unchanged and never produced here.

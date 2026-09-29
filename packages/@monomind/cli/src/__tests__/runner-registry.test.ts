@@ -65,6 +65,8 @@ describe('version handshake (§2)', () => {
         'doctor-read-only',
         'doctor-offline',
         'init-json',
+        'knowledge-profile-captures',
+        'agent-exec-subagent-events',
       ],
     });
     expect(p.capabilities).toContain('agent-exec');
@@ -106,7 +108,7 @@ describe('runner registry', () => {
     expect(isKnownRuntime('cursor')).toBe(false);
   });
 
-  // Rev 16: --access full on every coding runtime; not on vercel/hermes/qwen-rpc.
+  // Rev 20: --access full on every coding runtime; not on vercel/hermes/qwen-rpc.
   it('supportsFullAccess is exactly the coding runtimes', () => {
     const full = RUNNER_SPECS.filter((s) => s.supportsFullAccess)
       .map((s) => s.id)
@@ -131,7 +133,7 @@ describe('runner registry', () => {
     );
   });
 
-  it('every RunnerSpec carries the rev 15 service flags', () => {
+  it('every RunnerSpec carries the rev 19 service flags', () => {
     const byId = new Map(RUNNER_SPECS.map((s) => [s.id, s]));
     for (const s of RUNNER_SPECS) {
       for (const k of ['resume', 'effort', 'maxTurns', 'reportsCost'] as const)
@@ -253,7 +255,7 @@ describe('scanInstalled (§6)', () => {
       install: { kind: 'npm', packages: ['@anthropic-ai/claude-code'] },
       login_hint: 'claude login',
     });
-    // #355 / rev 15: full_access is present per-entry.
+    // #355 / rev 19: full_access is present per-entry.
     expect(byId.get('claude')).toMatchObject({ full_access: true });
     expect(byId.get('codex')).toMatchObject({ full_access: true });
     expect(byId.get('hermes')).toMatchObject({ full_access: false });
@@ -263,7 +265,7 @@ describe('scanInstalled (§6)', () => {
       shell: 'bash',
     });
     expect(byId.get('vercel')?.install).toEqual({ kind: 'manual' });
-    // Rev 16 runtimes: the npm ones are runnable recipes; aider needs uv.
+    // Rev 20 runtimes: the npm ones are runnable recipes; aider needs uv.
     expect(byId.get('pi')?.install).toEqual({
       kind: 'npm',
       packages: ['@earendil-works/pi-coding-agent'],

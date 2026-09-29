@@ -1,6 +1,6 @@
 /**
  * orgrt/tool-kind.ts: the normalized `kind` on tool_activity start events
- * (rev 15) — Claude Code's tool names and common vendor CLI names.
+ * (rev 19) — Claude Code's tool names and common vendor CLI names.
  */
 
 import { describe, expect, it } from 'vitest';

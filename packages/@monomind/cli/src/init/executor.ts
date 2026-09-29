@@ -335,7 +335,7 @@ export async function executeInit(options: InitOptions): Promise<InitResult> {
     }
 
     // aider loads CONVENTIONS.md (written by the aider adapter above) only
-    // through a `read:` entry; cline gets a rule file (rev 16).
+    // through a `read:` entry; cline gets a rule file (rev 20).
     if (options.selectedPlatforms?.includes('aider')) {
       await writeAiderConf(targetDir, options, result);
     }

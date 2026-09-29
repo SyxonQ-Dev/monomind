@@ -2,9 +2,9 @@
 
 > Part of the **Coder mode** epic ([#364](https://github.com/monoes/monomind/issues/364)) — a
 > coding-agent session with full, automated, unrestricted access to the machine, driven through
-> `monomind agent exec --access full` instead of a direct CLI spawn. Since protocol rev 15 this
+> `monomind agent exec --access full` instead of a direct CLI spawn. Since protocol rev 19 this
 > covers every coding runtime with `full_access: true` in `agent scan --json` (claude, codex,
-> opencode, antigravity, kimicode, grok, qwen, copilot, crush, pi; rev 16 adds pi-rpc, cline,
+> opencode, antigravity, kimicode, grok, qwen, copilot, crush, pi; rev 20 adds pi-rpc, cline,
 > aider and dsh), not only Claude Code. This document is the
 > threat model and guardrail record required by
 > [#360](https://github.com/monoes/monomind/issues/360), refined against what was actually built
@@ -41,9 +41,9 @@ invocation, parsed in [`commands/agent-exec.ts`](../../packages/@monomind/cli/sr
 `ClaudeAgentRunner.run()`
 ([`orgrt/agent-runner-claude.ts`](../../packages/@monomind/cli/src/orgrt/agent-runner-claude.ts)),
 the only place `permissionMode: 'bypassPermissions'` + `allowDangerouslySkipPermissions: true`
-get set; for every other full-access runtime (rev 15) it is that runner's own switch to its
+get set; for every other full-access runtime (rev 19) it is that runner's own switch to its
 CLI's no-approval, no-sandbox mode (codex `--dangerously-bypass-approvals-and-sandbox`, opencode
-permission `allow`, the others' yolo flags; rev 16: pi/pi-rpc `--approve`, cline on the user's
+permission `allow`, the others' yolo flags; rev 20: pi/pi-rpc `--approve`, cline on the user's
 own `~/.cline` with `--auto-approve true`, aider's shim answering every confirmation yes, dsh
 `DSH_PERMISSION_MODE=danger-full-access`), taken only on the same literal `'full'`.
 
@@ -59,7 +59,7 @@ Audited (by direct source inspection, and pinned by regression tests in
 | Workflow/routine nodes | **No such node exists.** There is no workflow-script or routine primitive anywhere in this codebase that shells out to `monomind agent exec` or imports the agent-exec engine (verified by the same source scan — no `src/**` file outside `commands/agent-exec.ts` and its own tests calls `runAgentExec`). | Structural. |
 | Local dashboard / extension UI server routes (`src/ui/server-routes-*.mjs`, `src/ui/routes-org-*.mjs`) | **No route touches it.** None of the ~35 UI route modules reference `orgrt/agent-exec`, `resolveExecRunner`, or `runAgentExec` — verified by source scan. Coder mode is deliberately **not** an extension action (epic #364, "out of scope v1"). | Structural. |
 | Hooks (`hooks-*.ts` lifecycle hooks, filesystem `PreToolUse`/etc. hooks a project or `--settings` load installs) | A hook can run arbitrary code as a **side effect** of a tool call (that's what a hook is), including inside a coder-mode turn itself once one is already running under `--access full` — but a hook cannot **initiate** a new `agent exec --access full` invocation with escalated access; it has no privileged entry point into `resolveAccess`/`checkFullAccessGuards` that a plain `agent exec --access full` typed by a human doesn't also have to go through. | Same guard as "any process on this machine can run `monomind agent exec --access full` if a human decided to let it" — see §2.2. |
-| Any org write path — org MCP tools, `create-json`, `import`/`okf-import`, runtime role hiring, or an agent editing the org JSON directly | **Can write the config, cannot make it run with full access.** These paths are not individually filtered; the runtime is the backstop. A role written with `policy.access: 'full'` (and even a copied or hand-written `access_ack`) runs scoped unless `sig` verifies under the machine-local key in the operator-credential directory, which sandboxed roles are denied Read/Edit on. The only command that writes a valid grant, `org role set-access <org> <role> full`, refuses in any agent context (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `MONOMIND_ORG_ROLE`, `MONOMIND_SDK_AGENT`, `MONOMIND_AGENT_EXEC`, and since rev 15 the other CLIs' own markers — see §2.6), even with `--yes-i-understand`. | HMAC-signed human grant + agent-context refusal (#365). |
+| Any org write path — org MCP tools, `create-json`, `import`/`okf-import`, runtime role hiring, or an agent editing the org JSON directly | **Can write the config, cannot make it run with full access.** These paths are not individually filtered; the runtime is the backstop. A role written with `policy.access: 'full'` (and even a copied or hand-written `access_ack`) runs scoped unless `sig` verifies under the machine-local key in the operator-credential directory, which sandboxed roles are denied Read/Edit on. The only command that writes a valid grant, `org role set-access <org> <role> full`, refuses in any agent context (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `MONOMIND_ORG_ROLE`, `MONOMIND_SDK_AGENT`, `MONOMIND_AGENT_EXEC`, and since rev 19 the other CLIs' own markers — see §2.6), even with `--yes-i-understand`. | HMAC-signed human grant + agent-context refusal (#365). |
 
 **A note on "a script/process could just run the CLI itself":** guardrail 1 is about
 monomind not *handing* full access to something that only has agent-level (tool-call) reach —
@@ -83,8 +83,8 @@ tested in `agent-exec.test.ts`'s `"agent exec: --access full"` suite:
 - **Explicit, validated `--cwd`**: required (no silent inherit-the-caller's-cwd), must exist, must
   be a directory — `error {code:"unsafe"}` otherwise.
 - **Runtime allowlist**: only a `RunnerSpec` with `supportsFullAccess: true` may run full access —
-  since rev 15 that is claude, codex, opencode, antigravity, kimicode, grok, qwen, copilot, crush
-  and pi, and since rev 16 also pi-rpc, cline, aider and dsh (`orgrt/runner-specs.ts`, merged
+  since rev 19 that is claude, codex, opencode, antigravity, kimicode, grok, qwen, copilot, crush
+  and pi, and since rev 20 also pi-rpc, cline, aider and dsh (`orgrt/runner-specs.ts`, merged
   into `RUNNER_SPECS`; the exact set is pinned by
   `agent-exec-no-transitive-escalation.test.ts`, so widening it fails a test until this document
   is updated with it). vercel (no native tools), hermes and qwen-rpc get
@@ -172,7 +172,7 @@ Covered by §2.2's runtime allowlist and root/`--cwd` guards: a request that can
 asked fails with a fatal `error` + `done`, never silently substituting `scoped` for a caller who
 asked for `full` (they'd believe they had full access and didn't) or vice versa.
 
-### 2.6 Every runtime, same kill and marker guarantees (rev 15)
+### 2.6 Every runtime, same kill and marker guarantees (rev 19)
 
 - **Process tree**: each full-access subprocess runner spawns its CLI through
   [`orgrt/process-group-spawn.ts`](../../packages/@monomind/cli/src/orgrt/process-group-spawn.ts)
@@ -191,12 +191,12 @@ asked for `full` (they'd believe they had full access and didn't) or vice versa.
   `OPENCODE_PID`; antigravity `ANTIGRAVITY_AGENT`; gemini `GEMINI_CLI`; grok `GROK_SESSION_ID`,
   `GROK_MANAGED_BY_NPM`; copilot `COPILOT_CLI_BINARY_VERSION`, `COPILOT_AGENT_SESSION_ID`; crush
   `CRUSH`; pi `PI_CODING_AGENT`; qwen `QWEN_CODE` (not installed here — unverified). No marker
-  was found for kimi (not installed here). Rev 16: pi's `PI_SESSION_ID` (inside its bash tools),
+  was found for kimi (not installed here). Rev 20: pi's `PI_SESSION_ID` (inside its bash tools),
   dsh `DSH_SHELL`, `DSH_SESSION_ID`; cline and aider export none of their own, so their runners
   set `MONOMIND_CLINE_TURN` (on cline, its hub daemon and every command they run) and
   `MONOMIND_AIDER`. As before, this is a speed bump, not the boundary
   (§4). `MONOMIND_AGENT_EXEC` is still set on every runner's env by `agent exec` itself.
-- **Rev 16 runtime specifics**: cline starts a detached `cline --cline-hub-daemon`; the runner
+- **Rev 20 runtime specifics**: cline starts a detached `cline --cline-hub-daemon`; the runner
   finds the one a turn started (by its per-turn marker or a new hub-lock pid, confirmed by its
   command line) and kills it at turn end and on abort, and never touches a daemon that was
   running before the turn — but when the user already runs one, cline may execute the turn inside
@@ -269,7 +269,7 @@ are never mistaken for oversights:
   its tools in a separate long-lived server it did not spawn itself (e.g. an already-running
   opencode server) is outside the tree too. Full access is not a sandbox.
 - **Weaker observability where fidelity is not `full`**: crush reports no tool events at all
-  (rev 15), and aider's plain-CLI fallback (rev 16, used only when its Python shim cannot import
+  (rev 19), and aider's plain-CLI fallback (rev 20, used only when its Python shim cannot import
   aider) reports tool starts without ends or real inputs, so the caller's journal and the audit
   line's `toolCalls` show less than on claude; the UI labels fidelity instead of pretending.
   Budgets are unenforceable where `reports_cost` is false (dsh, among others).

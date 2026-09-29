@@ -44,7 +44,7 @@
  *    emitted). A `full` runner may still send one for a call it cannot pair.
  *  - `none` (vercel/hermes/qwen-rpc/pi-rpc): no tool_activity at all.
  *
- * Rev 15: every start carries `kind` (tool-kind.ts) — the runner's own
+ * Rev 19: every start carries `kind` (tool-kind.ts) — the runner's own
  * `AgentMessage.kind` when set, else derived from the tool name — and an
  * end carries `exit_code` when the runner reported one.
  */

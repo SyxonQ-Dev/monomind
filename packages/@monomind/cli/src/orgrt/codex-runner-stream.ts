@@ -25,7 +25,7 @@ export const TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours, matching kimi/ant
  * (confirmed live, v0.153.2); `--` ends option parsing so nothing
  * positional is ever mistaken for a flag.
  *
- * Coder mode (`access: 'full'`, rev 15): `--dangerously-bypass-approvals-
+ * Coder mode (`access: 'full'`, rev 19): `--dangerously-bypass-approvals-
  * and-sandbox` (no approvals, no codex sandbox — codex-cli 0.156.1 `exec`
  * and `exec resume` both accept it) replaces the role's `--sandbox`. The
  * user's codex config (`$CODEX_HOME/config.toml`, its MCP servers, project

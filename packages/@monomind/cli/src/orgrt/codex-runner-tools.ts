@@ -1,6 +1,6 @@
 // packages/@monomind/cli/src/orgrt/codex-runner-tools.ts
 /**
- * Coder mode on every runtime (rev 15, contract §4): codex's own tool items
+ * Coder mode on every runtime (rev 19, contract §4): codex's own tool items
  * → matched `tool_use`/`tool_result` start/end pairs with canonical inputs,
  * so ToolActivityTracker (tool-activity.ts) emits `full`-fidelity
  * `tool_activity` for codex the same way it does for claude.

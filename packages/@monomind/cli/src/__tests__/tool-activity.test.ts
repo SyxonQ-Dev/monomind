@@ -430,8 +430,8 @@ describe('ToolActivityTracker.toolCallCount (#360 full-access audit)', () => {
   });
 });
 
-describe('ToolActivityTracker: kind and exit_code (rev 15)', () => {
-  it('a vendor runner\'s rich tool_use pairs with its tool_result, keeping the provided kind and exit_code', () => {
+describe('ToolActivityTracker: kind and exit_code (rev 19)', () => {
+  it("a vendor runner's rich tool_use pairs with its tool_result, keeping the provided kind and exit_code", () => {
     const { events, emit } = collector();
     const t = new ToolActivityTracker(emit, 'full');
     t.onMessage({

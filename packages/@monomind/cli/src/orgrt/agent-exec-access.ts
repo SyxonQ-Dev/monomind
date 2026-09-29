@@ -42,7 +42,7 @@ export interface AccessGuardError {
  *  - refuse root (uid 0) on every runtime — Claude Code itself refuses
  *    bypassPermissions as root, and no other CLI's yolo mode is safer there.
  *  - refuse a runtime whose RunnerSpec doesn't advertise supportsFullAccess
- *    (rev 15: every coding runtime does — see runner-registry.ts).
+ *    (rev 19: every coding runtime does — see runner-registry.ts).
  *  - require an explicit, existing, directory `--cwd` — no silent inherit.
  */
 export function checkFullAccessGuards(opts: {

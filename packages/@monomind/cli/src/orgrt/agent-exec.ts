@@ -142,7 +142,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
     // failed above for an unknown id) defaults to false, the safe assumption.
     streams_incrementally: runnerSpec(opts.runtime)?.streamsIncrementally ?? false,
   });
-  // rev 15: what a non-claude --settings turn loads, and an ignored --effort.
+  // rev 19: what a non-claude --settings turn loads, and an ignored --effort.
   const effortSupported = runnerSpec(opts.runtime)?.effort ?? false;
   for (const ev of runtimeStartupNotices({ ...opts, effortSupported })) safeEmit(ev);
 
@@ -270,7 +270,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
         prompt: promptStream,
         systemPrompt,
         model: opts.model,
-        effort: opts.effort, // rev 15: each runner maps or ignores it
+        effort: opts.effort, // rev 16 (+ rev 19/20 runners): each runner maps or ignores it
         cwd: opts.cwd ?? process.cwd(),
         // #365: marks this child as an agent-turn process tree so `monomind
         // org role set-access ... full` (agent-context.ts) refuses to run
@@ -326,9 +326,11 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
         }
 
         if (m.type === 'assistant' && m.text) {
-          rawTexts.push(m.text);
-          safeEmit({ v: 1, type: 'assistant', text: m.text });
-        } else if (m.type === 'result') {
+          const sub = m.parent_tool_use_id ? { parent_tool_use_id: m.parent_tool_use_id } : {};
+          if (!m.parent_tool_use_id) rawTexts.push(m.text); // #387: subagent text stays out
+          safeEmit({ v: 1, type: 'assistant', text: m.text, ...sub });
+        } else if (m.type === 'subagent') safeEmit({ v: 1, type: 'subagent', ...m.subagent });
+        else if (m.type === 'result') {
           const d = usage.delta(m);
           totals = { in: totals.in + d.in, out: totals.out + d.out, usd: totals.usd + d.usd };
           safeEmit({

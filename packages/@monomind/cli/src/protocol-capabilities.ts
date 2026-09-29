@@ -67,16 +67,30 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    unattended-run gate (`run_config.allow_unattended_full_access`) and
  *    taint checks in `org validate`. `org status --json` gains
  *    `roles_access` (§7.2) for any role that declares it.
+ *  - `knowledge-profile-captures` — a capture envelope naming a `profile`
+ *    ingests into `profile:<id>` (query-string URLs included), its
+ *    `transcript.md`/`summary.md` are their own documents beside
+ *    `readable.md`, and `doc search|cite|related|lookup|list --scope
+ *    profile:<id>` read that store (rev 15)
+ *  - `agent-exec-effort` — `agent exec --effort <level>` maps the turn's
+ *    reasoning effort onto the runtime: claude (SDK `effort`) and codex
+ *    (`-c model_reasoning_effort`) since rev 16; rev 19/20 extend it to the
+ *    other runtimes whose `agent scan --json` entry has `effort: true`, and
+ *    one with `effort: false` emits a `status` notice that it was ignored
+ *    (§3.1)
+ *  - `agent-exec-subagent-events` — claude runtime: `subagent` started/
+ *    progress/finished events for native `Task`/`Agent` subagents, joined to
+ *    the call's `tool_activity` id; a subagent's own text is an `assistant`
+ *    event with `parent_tool_use_id` and stays out of `result.text` (§3.2.1,
+ *    rev 17, issue #387)
  *  - `agent-exec-full-access-any` — `agent exec --access full` on every
  *    runtime whose `agent scan --json` entry has `full_access: true` (not
  *    only claude), with process-group kill, `background_pids` and the audit
  *    line on each; `--settings` on a non-claude runtime leaves the CLI's own
  *    config un-isolated and emits a `status` naming what it loads; scan
  *    entries carry `resume`, `effort`, `max_turns`, `reports_cost`,
- *    `init_target`; `tool_activity` start events carry `kind` (§3, §6)
- *  - `agent-exec-effort` — `agent exec --effort <level>` maps the turn's
- *    reasoning effort onto the runtime (scan's `effort` says where it is
- *    honored; elsewhere a `status` notice says it was ignored) (§3.1)
+ *    `init_target`; `tool_activity` start events carry `kind` (§3, §6,
+ *    rev 19)
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
@@ -100,6 +114,8 @@ export const AGENT_PROTOCOL_CAPABILITIES = [
   'doctor-read-only',
   'doctor-offline',
   'init-json',
+  'knowledge-profile-captures',
+  'agent-exec-subagent-events',
 ] as const;
 
 /** The exact handshake object emitted by `monomind --version --json`. */

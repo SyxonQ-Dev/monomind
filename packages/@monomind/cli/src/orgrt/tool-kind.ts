@@ -1,6 +1,6 @@
 // packages/@monomind/cli/src/orgrt/tool-kind.ts
 /**
- * Normalized tool kind for `tool_activity` start events (rev 15, doc §3.2):
+ * Normalized tool kind for `tool_activity` start events (rev 19, doc §3.2):
  * one vocabulary a caller can render by, whatever the runtime calls its
  * tools. A runner that knows the kind sets `AgentMessage.kind`; otherwise
  * the tool name is looked up in NAME_KINDS below.

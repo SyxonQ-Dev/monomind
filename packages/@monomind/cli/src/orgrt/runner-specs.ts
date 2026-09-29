@@ -39,7 +39,7 @@ export interface RunnerSpec extends RunnerFeatures {
   /**
    * #355: whether `agent exec --access full` (unrestricted native tool
    * access, no approvals, no CLI sandbox) is implemented for this runtime.
-   * Rev 16: every coding runtime (claude, codex, opencode, antigravity,
+   * Rev 20: every coding runtime (claude, codex, opencode, antigravity,
    * kimicode, grok, qwen, copilot, crush, pi, pi-rpc, cline, aider, dsh);
    * the rest (vercel — no native tools; hermes, qwen-rpc — no resume/tool
    * events) reject `--access full` with `error
@@ -88,7 +88,7 @@ export const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     // The runner already yields each one the instant it lands.
     streamsIncrementally: false,
     supportsFullAccess: true,
-    // Rev 15: the runner yields id-carrying tool_use + matched tool_result
+    // Rev 19: the runner yields id-carrying tool_use + matched tool_result
     // from the CLI's own tool start/complete events.
     toolActivityFidelity: 'full',
   },
@@ -106,7 +106,7 @@ export const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     // re-checking before ruling this out permanently.
     streamsIncrementally: false,
     supportsFullAccess: true,
-    // Rev 15: the runner yields id-carrying tool_use + matched tool_result
+    // Rev 19: the runner yields id-carrying tool_use + matched tool_result
     // from the CLI's own tool start/complete events.
     toolActivityFidelity: 'full',
   },
@@ -130,7 +130,7 @@ export const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     // of which runner backs the role.
     streamsIncrementally: true,
     supportsFullAccess: true,
-    // Rev 15: the runner yields id-carrying tool_use + matched tool_result
+    // Rev 19: the runner yields id-carrying tool_use + matched tool_result
     // from the CLI's own tool start/complete events.
     toolActivityFidelity: 'full',
   },
@@ -164,7 +164,7 @@ export const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     // for its chat-bus/state-detector, regardless of which runner backs it.
     streamsIncrementally: true,
     supportsFullAccess: true,
-    // Rev 15: the runner yields id-carrying tool_use + matched tool_result
+    // Rev 19: the runner yields id-carrying tool_use + matched tool_result
     // from the CLI's own tool start/complete events.
     toolActivityFidelity: 'full',
   },
@@ -182,7 +182,7 @@ export const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     // verified live.
     streamsIncrementally: false,
     supportsFullAccess: true,
-    // Rev 15: the runner yields id-carrying tool_use + matched tool_result
+    // Rev 19: the runner yields id-carrying tool_use + matched tool_result
     // from the CLI's own tool start/complete events.
     toolActivityFidelity: 'full',
   },
@@ -197,7 +197,7 @@ export const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     // event, not per-token deltas — confirmed live, #182".
     streamsIncrementally: false,
     supportsFullAccess: true,
-    // Rev 15: the runner yields id-carrying tool_use + matched tool_result
+    // Rev 19: the runner yields id-carrying tool_use + matched tool_result
     // from the CLI's own tool start/complete events.
     toolActivityFidelity: 'full',
   },
@@ -239,7 +239,7 @@ export const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     // arrives; there is no finer granularity available to request.
     streamsIncrementally: false,
     supportsFullAccess: true,
-    // Rev 15: `crush run` prints plain text with no native tool events; its
+    // Rev 19: `crush run` prints plain text with no native tool events; its
     // only tool_use messages are label-free liveness pings, which never
     // become tool_activity.
     toolActivityFidelity: 'none',
@@ -257,7 +257,7 @@ export const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     // before assuming it can never stream.
     streamsIncrementally: false,
     supportsFullAccess: true,
-    // Rev 15: the runner yields id-carrying tool_use + matched tool_result
+    // Rev 19: the runner yields id-carrying tool_use + matched tool_result
     // from the CLI's own tool start/complete events.
     toolActivityFidelity: 'full',
   },
@@ -269,12 +269,12 @@ export const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     // PI_INSTALL_HINT also names --ignore-scripts and pi.dev/install.sh);
     // this plain form stays an `npm` install recipe a caller can run.
     installHint: 'npm install -g @earendil-works/pi-coding-agent',
-    // Rev 16 (#381): message_update's assistantMessageEvent.text_delta
+    // Rev 20 (#381): message_update's assistantMessageEvent.text_delta
     // streams per token when includePartialMessages is set, tool-call fences
     // held back until complete — live-verified against pi 0.87.1.
     streamsIncrementally: true,
     supportsFullAccess: true,
-    // Rev 15: the runner yields id-carrying tool_use + matched tool_result
+    // Rev 19: the runner yields id-carrying tool_use + matched tool_result
     // from pi's tool_execution_start/end (paired by toolCallId).
     toolActivityFidelity: 'full',
   },
@@ -287,10 +287,10 @@ export const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     // text_delta (fence-safely buffered by computeSafeChunk), live-verified
     // against pi 0.87.1 with a free OpenRouter model (#381).
     streamsIncrementally: true,
-    // Rev 16 (#381): spawns through spawnRunnerProcess (process-group kill),
+    // Rev 20 (#381): spawns through spawnRunnerProcess (process-group kill),
     // --approve/--no-approve like the json runner.
     supportsFullAccess: true,
-    // Rev 16: tool_execution_start/end paired by toolCallId, live-verified.
+    // Rev 20: tool_execution_start/end paired by toolCallId, live-verified.
     toolActivityFidelity: 'full',
   },
   {
@@ -326,7 +326,7 @@ export const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     installHint: 'npm install -g cline',
     loginHint:
       'cline auth <provider> -k <key> -m <model> (or export the provider key, e.g. OPENROUTER_API_KEY, plus CLINE_PROVIDER)',
-    // Rev 16 (#382): `cline --json` text events stream as they arrive; a
+    // Rev 20 (#382): `cline --json` text events stream as they arrive; a
     // resumed turn runs over ACP session/prompt chunks.
     streamsIncrementally: true,
     supportsFullAccess: true,
@@ -342,7 +342,7 @@ export const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     // in .aider.conf.yml.
     loginHint:
       'set your provider API key (e.g. OPENAI_API_KEY / OPENROUTER_API_KEY) or api-key: in ~/.aider.conf.yml',
-    // Rev 16 (#383): the Python shim streams text chunks as aider's
+    // Rev 20 (#383): the Python shim streams text chunks as aider's
     // coder.send yields them.
     streamsIncrementally: true,
     // Only through the shim (ShimIO answers explicit_yes_required with yes).

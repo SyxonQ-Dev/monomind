@@ -167,10 +167,12 @@ export async function runExec(
     return usageError('--tools-file/--tool-names require --tools stdio');
   }
 
-  // rev 15: --effort, validated here; the runner maps or ignores it.
+  // rev 16 (+ rev 19 notice): --effort, validated here; the runner maps or ignores it.
   const effortFlag = ctx.flags.effort;
   if (effortFlag !== undefined && !(ORG_EFFORT_LEVELS as readonly unknown[]).includes(effortFlag)) {
-    return usageError(`--effort must be one of ${ORG_EFFORT_LEVELS.join(', ')} (got "${effortFlag}")`);
+    return usageError(
+      `--effort must be one of ${ORG_EFFORT_LEVELS.join(', ')} (got "${effortFlag}")`,
+    );
   }
 
   // Coder mode (#356): none (default) = today's isolated behavior.
@@ -285,7 +287,8 @@ export const execCommand: Command = {
     { name: 'model', short: 'm', description: 'Model override', type: 'string' },
     {
       name: 'effort',
-      description: 'Reasoning effort: off|low|medium|high|xhigh|max (ignored with a notice where unsupported)',
+      description:
+        'Reasoning effort: off|low|medium|high|xhigh|max (mapped per runtime — see agent scan --json effort; ignored with a notice where unsupported)',
       type: 'string',
       choices: [...ORG_EFFORT_LEVELS],
     },

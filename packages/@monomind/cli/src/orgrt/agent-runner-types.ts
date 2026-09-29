@@ -1,5 +1,6 @@
 // packages/@monomind/cli/src/orgrt/agent-runner-types.ts
 import type { z } from 'zod';
+import type { SubagentEvent } from './agent-runner-claude-subagent.js';
 import type { OrgEffortLevel } from './cost-tier.js';
 
 /** A platform-agnostic org tool definition. `schema` is a zod object because
@@ -200,7 +201,7 @@ export function killOnAbort(
  *  `AgentRunArgs.settingSources` is non-empty (coder mode) — see its own
  *  doc comment there and agent-exec-settings.ts's startup watchdog. */
 export interface AgentMessage {
-  type: 'assistant' | 'result' | 'tool_use' | 'tool_result' | 'status';
+  type: 'assistant' | 'result' | 'tool_use' | 'tool_result' | 'status' | 'subagent';
   session_id?: string;
   text?: string; // assistant (prose) / tool_use (short progress label) / tool_result (body)
   phase?: 'initializing' | 'ready'; // status only
@@ -210,17 +211,21 @@ export interface AgentMessage {
   tool_use_id?: string; // tool_use (#357), tool_result
   tool?: string; // tool_use (#357), tool_result
   /** #357: raw tool input as the model sent it (native tool_use only).
-   *  Rev 15: a vendor runner translates its CLI's native shape into the
+   *  Rev 19: a vendor runner translates its CLI's native shape into the
    *  canonical keys for `kind` (doc §3.2); claude keeps its own input. */
   input?: Record<string, unknown>; // tool_use
-  /** Rev 15: normalized tool kind (tool-kind.ts's ToolKind) when the runner
+  /** Rev 19: normalized tool kind (tool-kind.ts's ToolKind) when the runner
    *  knows it; unset = derived from `tool`'s name. */
   kind?: string; // tool_use
-  /** Rev 15: a shell call's exit code, when the CLI reports one. */
+  /** Rev 19: a shell call's exit code, when the CLI reports one. */
   exit_code?: number; // tool_result
   /** #357: non-null when produced inside a Task/Agent subagent's own turn —
    *  lets a caller nest tool_activity events under the subagent's call. */
   parent_tool_use_id?: string | null; // tool_use
+  /** #387: ClaudeAgentRunner only, agent-exec opt-in (see SubagentEvent).
+   *  An `assistant` message with a non-null `parent_tool_use_id` is that
+   *  subagent's own text, not the main agent's. */
+  subagent?: SubagentEvent; // subagent
   duration_ms?: number; // tool_result
   input_tokens?: number; // result, assistant (that turn's own usage)
   output_tokens?: number; // result, assistant (that turn's own usage)

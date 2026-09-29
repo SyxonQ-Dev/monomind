@@ -83,7 +83,7 @@ export function resolveInitOptions(
     'cline',
     'aider',
   ]);
-  // Coder-mode runtimes (rev 16): only on request, so `--target all` (the
+  // Coder-mode runtimes (rev 20): only on request, so `--target all` (the
   // default) writes no .clinerules/ or .aider.conf.yml into every project.
   const optInTargets = new Set(['cline', 'aider']);
   if (!validTargets.has(target)) {

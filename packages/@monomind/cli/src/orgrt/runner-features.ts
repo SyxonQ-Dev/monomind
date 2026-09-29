@@ -1,7 +1,7 @@
 // packages/@monomind/cli/src/orgrt/runner-features.ts
 /**
  * Coder mode on every runtime: the per-runtime service flags `agent scan
- * --json` reports (doc/agent-exec-protocol.md §6, rev 15) so a caller can
+ * --json` reports (doc/agent-exec-protocol.md §6, rev 19) so a caller can
  * say honestly what a runtime gives a coder turn. Kept out of
  * runner-registry.ts (near the 500-line limit) and merged into each
  * `RunnerSpec` there. `Record<RuntimeKind, …>` makes a new runtime a

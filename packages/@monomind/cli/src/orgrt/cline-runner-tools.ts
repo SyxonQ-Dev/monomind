@@ -1,6 +1,6 @@
 // packages/@monomind/cli/src/orgrt/cline-runner-tools.ts
 /**
- * Cline's native tools → contract kind + canonical input (doc §3.2, rev 15).
+ * Cline's native tools → contract kind + canonical input (doc §3.2, rev 19).
  * Tool names and input shapes read from the cline 3.0.65 binary's own zod
  * schemas (2026-09-29):
  *   run_commands      {commands: [string | {command, args?}]} (also a bare
