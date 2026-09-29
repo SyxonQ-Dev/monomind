@@ -1,11 +1,11 @@
 ---
 name: agents:agent-types
-description: Complete guide to all 60+ available agent types in Monomind.
+description: Guide to the core agent types in Monomind and how to list the rest.
 ---
 
 # agent-types
 
-Complete guide to all 60+ available agent types in Monomind.
+`monomind init` installs <!-- doc-count:installed-agents -->20<!-- /doc-count:installed-agents --> agent definitions with the default selection (the core pack; `monomind packs add` adds more). The core ones are below.
 
 ## Core Development Agents
 - `coder` - Implementation specialist

@@ -68,7 +68,7 @@ export const hooksPreEdit: MCPTool = {
 
 export const hooksPostEdit: MCPTool = {
   name: 'hooks_post-edit',
-  description: 'Record editing outcome for learning',
+  description: 'Record an editing outcome in the local feedback log',
   inputSchema: {
     type: 'object',
     properties: {

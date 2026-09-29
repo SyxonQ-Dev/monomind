@@ -1,20 +1,20 @@
 ---
 name: hooks:overview
-description: Self-learning hooks for intelligent workflow automation.
+description: Lifecycle hooks that log edits, outcomes and trajectories to local pattern files and route tasks to agents.
 ---
 
 # Hooks System Overview
 
-Self-learning hooks for intelligent workflow automation. Hooks connect Claude Code tool events to Monomind's pattern learning, agent routing, and session persistence.
+Lifecycle hooks that connect Claude Code tool events to Monomind's outcome logging, agent routing, and session persistence. Hooks log edits, outcomes and trajectories to local JSON pattern files; no model is trained.
 
 ## How It Works
 
 Claude Code fires hook events (PreToolUse, PostToolUse, etc.) which trigger `npx monomind hooks <subcommand>` commands. The hooks system:
 
-1. **Routes** tasks to optimal agents using learned patterns
-2. **Records** outcomes (edits, commands, tasks) for neural pattern learning
+1. **Routes** tasks to agents through the keyword picker (pick stats act as a bounded ranking prior)
+2. **Records** outcomes (edits, commands, tasks) in local JSON pattern files
 3. **Persists** session state across conversations
-4. **Bootstraps** intelligence from repository code
+4. **Scans** the repository (file types, import lines) into the memory store and local pattern log (`hooks pretrain`)
 
 ## CLI Subcommands
 
@@ -24,7 +24,7 @@ All hooks are invoked as `npx monomind hooks <subcommand>`:
 | Subcommand | Purpose |
 |---|---|
 | `pre-edit` | Context + agent suggestions before file edit |
-| `post-edit` | Record edit outcome for learning |
+| `post-edit` | Record edit outcome |
 | `pre-command` | Risk assessment before running a command |
 | `post-command` | Record command outcome |
 | `pre-task` | Register task start, get agent suggestions + model routing |
@@ -37,29 +37,27 @@ All hooks are invoked as `npx monomind hooks <subcommand>`:
 |---|---|
 | `route` | Route task to optimal agent |
 | `explain` | Explain routing decision |
-| `pretrain` | Bootstrap intelligence from repo (4-step pipeline) |
-| `metrics` | View learning metrics dashboard |
+| `pretrain` | Scan the repository (file types, import lines) into the memory store and local pattern log (no model is trained) |
+| `metrics` | View recorded routing/outcome metrics |
 | `model-route` | Route to optimal model (haiku/sonnet/opus) |
 | `model-outcome` | Record model routing result |
 | `model-stats` | View model routing statistics |
 
-### Coverage & Token Tools
+### Coverage Tools
 | Subcommand | Purpose |
 |---|---|
 | `coverage-route` | Route based on test coverage gaps |
 | `coverage-suggest` | Suggest coverage improvements |
 | `coverage-gaps` | List all coverage gaps with priorities |
-| `token-optimize` | Token optimization (30-50% savings) |
 
 ### Workers & Utilities
 | Subcommand | Purpose |
 |---|---|
-| `worker` | Background worker management (12 workers) |
-| `intelligence` | JS trajectory and pattern logging (stats, pattern-*, trajectory-*) |
+| `worker` | Background worker management (<!-- doc-count:workers -->9<!-- /doc-count:workers --> workers; `worker list`, `worker run <name>`) |
+| `intelligence` | JS pattern/trajectory store (train, patterns, predict, optimize, export, import) |
 | `notify` | Send a notification |
 | `statusline` | Generate dynamic statusline display |
 | `list` | List all registered hooks |
-| `progress` | Check v1 implementation progress |
 | `transfer` | Transfer patterns from another local project |
 
 ## Claude Code Integration

@@ -9,8 +9,10 @@
  *     and the inbox signing key kept beside them (inbox.ts);
  *   - the dashboard's human-auth secret (`~/.monomind/dashboard-auth/`), from
  *     which its login link and browser session cookie derive;
- *   - the decision files in each org dir — gates, approvals, questions and
- *     the inbox — which a daemon or the next run reads back.
+ *   - the authority files under `.monomind/orgs/` (org-authority-files.ts):
+ *     the org definitions, which hold every role's own `policy`, and the
+ *     files that record a human's decisions, the daemon's state and its
+ *     control files (#498).
  *
  * Roles below `push` on the Claude runtime already run in the SDK's OS
  * sandbox, and role-sandbox.ts feeds it these paths. Everything else — a
@@ -19,35 +21,41 @@
  * `authorityMaskArgs()`: the whole filesystem as it is, except that the two
  * directories above are replaced by empty tmpfs mounts (so files created
  * there later are hidden too), the dashboard token files read as empty, and
- * the decision files are read-only. No git, network or write restriction
- * beyond that, so a role behaves exactly as before.
+ * the orgs dir is read-only apart from the subdirectories roles work in —
+ * so no org definition, decision or control file can be written, created or
+ * renamed, and the org root and `.monomind` cannot be renamed away. No git,
+ * network or write restriction beyond that.
  *
- * The decision files are defence in depth, not the barrier: a process that
- * can write a file's directory can rename the directory away and plant a new
- * one. The barriers are the daemon holding a running org's gates in memory
+ * The SDK sandbox cannot express that layout (its denyWrite binds come after
+ * its allowWrite binds, so a writable subdirectory of a denied one stays
+ * read-only): there the existing authority files are read-only and the
+ * directories above them are mount points that cannot be renamed, but a NEW
+ * file can still be created in the orgs dir or an org dir. File tools are
+ * refused every authority file by policy.ts on the Claude runtime. The
+ * barriers for a running org are the daemon holding its gates in memory
  * (decisions.ts's gatesFor) and signed inbox entries (inbox.ts).
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { existsSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { dashboardCredentialPaths, operatorDirOverride } from './file-roots.js';
+import { ensureOrgWorkDirs, orgsMaskLayout } from './org-authority-files.js';
+import { realPath } from './policy-paths.js';
 
 /** Under $HOME: the dashboard's human-auth secret (ui/server.mjs). */
 export const DASHBOARD_AUTH_DIR = join('.monomind', 'dashboard-auth');
 /** Under $HOME: the org daemons' operator credentials (broker.ts). */
 export const OPERATOR_DIR = join('.monomind', 'orgrt-operator');
 
-/** Files in `<root>/.monomind/orgs/<org>/` that record a human's decisions. */
-export const DECISION_FILES = ['gates.json', 'approvals.json', 'questions.json', 'inbox.jsonl'];
-
-export function isDecisionFile(p: string): boolean {
-  const orgs = dirname(dirname(p));
-  return (
-    DECISION_FILES.includes(basename(p)) &&
-    basename(orgs) === 'orgs' &&
-    basename(dirname(orgs)) === '.monomind'
-  );
-}
+export {
+  authorityFilePaths,
+  CONTROL_FILES,
+  DECISION_FILES,
+  GIT_GUARD_DIR,
+  isAuthorityFile,
+  ORG_STATE_FILES,
+  RUN_STATE_FILES,
+} from './org-authority-files.js';
 
 /** The directories no role may read. */
 export function authorityDirs(home: string, env: NodeJS.ProcessEnv): string[] {
@@ -73,38 +81,36 @@ export function ensureAuthorityDirs(home: string, env: NodeJS.ProcessEnv): void 
   }
 }
 
-/** Existing decision files of every org under `orgRoot`. */
-export function decisionFilePaths(orgRoot: string | undefined): string[] {
-  if (!orgRoot) return [];
-  const orgs = join(orgRoot, '.monomind', 'orgs');
-  const out: string[] = [];
-  let entries: string[] = [];
-  try {
-    entries = readdirSync(orgs, { withFileTypes: true })
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name);
-  } catch {
-    return out;
-  }
-  for (const org of entries)
-    for (const f of DECISION_FILES) {
-      const p = join(orgs, org, f);
-      if (existsSync(p)) out.push(p);
-    }
-  return out;
-}
-
 /** bubblewrap arguments (before `--`) for the mask; see the module doc. */
 export function authorityMaskArgs(ctx: {
   home: string;
   env: NodeJS.ProcessEnv;
   roots: Array<string | undefined>;
   orgRoot?: string;
+  /** The role's cwd and `policy.fileWrite`, for the work dirs to create. */
+  cwd?: string;
+  fileWrite?: string[];
 }): string[] {
   const args = ['--dev-bind', '/', '/'];
-  for (const d of authorityDirs(ctx.home, ctx.env)) if (existsSync(d)) args.push('--tmpfs', d);
+  // #498: the mask binds only existing work dirs read-write, so create them
+  // first (a `git worktree add … work/src` in a masked role needs `work/`).
+  ensureOrgWorkDirs(ctx.orgRoot, ctx.fileWrite, ctx.cwd ?? ctx.orgRoot);
+  // #498: the org root and its .monomind become mount points, so neither can
+  // be renamed away and replaced by a tree with a forged org definition.
+  if (ctx.orgRoot)
+    for (const d of [ctx.orgRoot, join(ctx.orgRoot, '.monomind')].map(realPath))
+      if (existsSync(d)) args.push('--bind', d, d);
+  // The orgs dir read-only (no new org definition, runfile or decision file,
+  // no rename), the dirs roles work in read-write again, then the authority
+  // files those still hold read-only (org-authority-files.ts).
+  const hidden = authorityDirs(ctx.home, ctx.env);
+  const orgs = orgsMaskLayout(ctx.orgRoot, [ctx.home, ...hidden]);
+  for (const d of orgs.readOnly) args.push('--ro-bind', d, d);
+  for (const d of orgs.writable) args.push('--bind', d, d);
+  for (const f of orgs.files) args.push('--ro-bind', f, f);
+  // Last, so that no bind above can uncover them.
+  for (const d of hidden) if (existsSync(d)) args.push('--tmpfs', d);
   for (const f of dashboardCredentialPaths(ctx.roots)) args.push('--ro-bind', '/dev/null', f);
-  for (const f of decisionFilePaths(ctx.orgRoot)) args.push('--ro-bind', f, f);
   return args;
 }
 

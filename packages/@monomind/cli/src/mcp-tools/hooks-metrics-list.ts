@@ -11,7 +11,7 @@ import { getProjectCwd, type MCPTool } from './types.js';
 
 export const hooksMetrics: MCPTool = {
   name: 'hooks_metrics',
-  description: 'View learning metrics dashboard',
+  description: 'View recorded routing/outcome metrics',
   inputSchema: {
     type: 'object',
     properties: {

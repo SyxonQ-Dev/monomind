@@ -752,7 +752,7 @@ describe('Remaining Built-in Workers', () => {
 // recordRoute()/joinOutcome() (packages/@monomind/cli/src/monovector/
 // route-outcomes.ts) use `measuredSuccess` / `task` / `recommendedAgent` /
 // a numeric `ts`, and never carry an `error` field. The mismatch meant the
-// filter never matched anything and the self-learning loop could never
+// filter never matched anything and the reflexion worker could never
 // fire. These tests feed the worker a real-format JSONL line and assert it
 // actually processes it.
 

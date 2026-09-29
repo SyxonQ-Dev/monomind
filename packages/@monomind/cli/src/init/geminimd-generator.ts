@@ -18,7 +18,10 @@ export function generateGeminiMd(_options: InitOptions): string {
 
 > Monomind extends agy with a codebase knowledge graph (Monograph), persistent
 > cross-session memory, semantic Second Brain document search, and autonomous
-> agent organisations. All data stays local — nothing leaves your machine.
+> agent organisations. Monomind runs locally and keeps its state on this machine;
+> agy itself sends your prompts and code (including any memory or Second Brain
+> excerpts injected into them) to its model provider. See
+> https://github.com/monoes/monomind/blob/main/doc/privacy.md
 
 Behavioral rules live in \`.gemini/rules/monomind.md\` and are always enforced.
 

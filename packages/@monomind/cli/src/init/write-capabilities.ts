@@ -82,9 +82,7 @@ Monomind is a domain-driven design architecture for multi-agent AI coordination 
 | Topology | ${options.runtime.topology} |
 | Max Agents | ${options.runtime.maxAgents} |
 | Memory Backend | ${options.runtime.memoryBackend} |
-| Neural Learning | ${options.runtime.enableNeural ? 'Enabled' : 'Disabled'} |
-| Learning | ${options.runtime.enableLearningBridge ? 'Enabled' : 'Disabled'} |
-| Agent Scopes | ${options.runtime.enableAgentScopes ? 'Enabled (project/local/user)' : 'Disabled'} |
+| \`neural.enabled\` | ${options.runtime.enableNeural ? 'On' : 'Off'} (session start loads the local pattern store only when on; no model is trained) |
 
 ---
 
@@ -149,10 +147,10 @@ Fallback when picking returns nothing — real core agents:
 | \`session\` | ${subcommandCount(sessionCommand)} | Session persistence |
 | \`config\` | ${subcommandCount(configCommand)} | Configuration |
 | \`status\` | ${subcommandCount(statusCommand)} | System monitoring |
-| \`hooks\` | ${subcommandCount(hooksCommand)} | Self-learning hooks + ${hooksAvailable ? `${WORKER_COUNT} ` : ''}background workers${hooksAvailable ? '' : ' (background workers unavailable in this install)'} |
+| \`hooks\` | ${subcommandCount(hooksCommand)} | Edit/outcome logging, agent routing + ${hooksAvailable ? `${WORKER_COUNT} ` : ''}background workers${hooksAvailable ? '' : ' (background workers unavailable in this install)'} |
 
 > Note: there is no \`workflow\`, \`neural\`, \`embeddings\`, \`claims\`, \`migrate\`, or \`process\` CLI command.
-> Neural pattern learning was merged into \`hooks intelligence\`.
+> The old \`neural\` pattern commands live under \`hooks intelligence\` — a local JSON pattern store; no model is trained.
 
 ### Advanced Commands
 | Command | Subcommands | Description |
@@ -196,7 +194,7 @@ The four groups below are a curated highlight, not the full ${subcommandCount(ho
 | \`pre-command\` | Risk assessment |
 | \`post-command\` | Command metrics |
 | \`pre-task\` | Task start + agent suggestions |
-| \`post-task\` | Task completion learning |
+| \`post-task\` | Record task outcome |
 
 #### Session Hooks (4)
 | Hook | Description |
@@ -211,7 +209,7 @@ The four groups below are a curated highlight, not the full ${subcommandCount(ho
 |------|-------------|
 | \`route\` | Optimal agent routing |
 | \`explain\` | Routing decisions |
-| \`pretrain\` | Bootstrap intelligence |
+| \`pretrain\` | Scan the repository (file types, import lines) into the memory store and local pattern log (no training) |
 | \`transfer\` | Pattern transfer |
 
 #### Coverage Hooks (3)
@@ -237,27 +235,12 @@ session start when their output is >6h old; run on demand with
 ### Intelligence System
 - **Keyword routing**: Deterministic task→agent routing with outcome measurement
 - **ANN pattern search**: Indexed vector search via SQLite
-- **ReasoningBank**: Stores learned patterns and trajectories for retrieval
+- **Pattern store**: Hooks log edits, outcomes and trajectories to local JSON pattern files for retrieval
+- **Pick stats**: Pick adherence and subagent outcomes (\`.monomind/pick-stats.json\`) act as a bounded ranking prior on later picks
 - **Int8 Quantization**: ~4x memory reduction for stored embeddings
 
-Routing and learning are JS-only — no native neural engine is required. Route
-and command outcomes are recorded and scored so routing quality is measured.
-
-### Self-Learning Memory (ADR-049)
-
-| Component | Status | Description |
-|-----------|--------|-------------|
-| **Learning** | ${options.runtime.enableLearningBridge ? '✅ Enabled' : '⏸ Disabled'} | Connects insights to the pattern store |
-| **AgentMemoryScope** | ${options.runtime.enableAgentScopes ? '✅ Enabled' : '⏸ Disabled'} | 3-scope agent memory (project/local/user) |
-
-**Learning** — Insights trigger learning trajectories. Confidence evolves: +0.03 on access, -0.005/hour decay.
-
-**AgentMemoryScope** - Maps Claude Code 3-scope directories:
-- \`project\`: \`<gitRoot>/.claude/agent-memory/<agent>/\`
-- \`local\`: \`<gitRoot>/.claude/agent-memory-local/<agent>/\`
-- \`user\`: \`~/.claude/agent-memory/<agent>/\`
-
-High-confidence insights (>0.8) can transfer between agents.
+No model is trained — routing and pattern logging run in JS on local files.
+Route and command outcomes are recorded and scored so routing quality is measured.
 
 ### Memory Commands
 \`\`\`bash
@@ -302,7 +285,7 @@ Monoswarm members are registry agents (any agent \`name\`); common ones:
 |--------|--------|--------|
 | ANN Search | Indexed vector search | ✅ Implemented (SQLite) |
 | Memory Reduction | 50-75% | ✅ Implemented (~4x via Int8 quantization) |
-| Pattern Learning | Recorded + retrievable | ✅ Implemented (ReasoningBank) |
+| Pattern Logging | Recorded + retrievable | ✅ Implemented (local JSON pattern store) |
 | MCP Response | <100ms | ✅ Achieved |
 | CLI Startup | <500ms | ✅ Achieved |
 | Graph Build (1k) | <200ms | ✅ 2.78ms (71.9x headroom) |

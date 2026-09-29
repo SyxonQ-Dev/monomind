@@ -291,7 +291,6 @@ export async function executeUpgrade(
             'hooks.TeammateIdle (removed — not a valid Claude Code hook)',
             'hooks.TaskCompleted (removed — not a valid Claude Code hook)',
             'monomind.agentTeams',
-            'monomind.memory (learningBridge, memoryGraph, agentScopes)',
           ];
         } catch (settingsError) {
           result.errors.push(

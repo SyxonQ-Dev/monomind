@@ -117,7 +117,7 @@ This lists all available slash commands. The most useful starting points:
 
 ### Agents and skills
 
-`monomind init` installs the core pack: <!-- doc-count:installed-agents -->20<!-- /doc-count:installed-agents --> agents under `.claude/agents`, the everyday skills under `.claude/skills` and slash commands under `.claude/commands`. You rarely name one yourself: for each prompt, the hook adds a line such as
+By default, `monomind init` installs the core pack: <!-- doc-count:installed-agents -->20<!-- /doc-count:installed-agents --> agents under `.claude/agents`, the everyday skills under `.claude/skills` and slash commands under `.claude/commands`. You rarely name one yourself: for each prompt, the hook adds a line such as
 
 ```
 [PICK] agent: Security Engineer · skill: /mastermind:review

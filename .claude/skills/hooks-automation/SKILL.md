@@ -12,10 +12,10 @@ Coordinate, validate, and learn from Claude Code operations through the `monomin
 The hooks system records what happens during a session (edits, commands, tasks) and uses that history to suggest agents, assess command risk, and persist session state. It enables:
 
 - **Pre-operation hooks**: context and agent suggestions before an edit, risk assessment before a command, agent suggestions before a task
-- **Post-operation hooks**: record edit, command, and task outcomes so routing can learn from them
+- **Post-operation hooks**: record edit, command, and task outcomes in local logs that routing statistics read
 - **Session management**: persist state at session end and restore it later
 - **Routing**: route a task to the best agent (or model) and explain the decision
-- **Pattern store**: log trajectories and search stored patterns (`hooks intelligence`); `hooks pretrain` consolidates hook activity into JSON state — no model is trained
+- **Pattern store**: log trajectories and search stored patterns (`hooks intelligence`); `hooks pretrain` scans the repository (file types, import lines) into the memory store and local pattern log — no model is trained
 - **Background workers**: run `@monoes/hooks` workers in-process
 
 ## Prerequisites
@@ -110,7 +110,7 @@ There is no `pre-search` CLI subcommand. Search-time context (for Grep/Glob) is 
 
 #### Post-Operation Hooks
 
-**post-edit** - Record editing outcome for learning
+**post-edit** - Record an editing outcome in the local feedback log
 ```bash
 npx monomind hooks post-edit [options]
 
@@ -141,7 +141,7 @@ Examples:
   npx monomind hooks post-command -c "npm test" --success true --duration 4200
 ```
 
-**post-task** - Record task completion for learning
+**post-task** - Record a task outcome against its routed agent
 ```bash
 npx monomind hooks post-task [options]
 
@@ -214,7 +214,7 @@ npx monomind hooks model-stats
 # Route based on test coverage gaps
 npx monomind hooks coverage-gaps --critical-only
 
-# Consolidate hook activity into JSON state (no model is trained)
+# Scan the repository (file types, import lines) into the memory store and local pattern log (no model is trained)
 npx monomind hooks pretrain --depth shallow
 
 # Pattern store: ingest history, list/search patterns
@@ -222,7 +222,7 @@ npx monomind hooks intelligence train
 npx monomind hooks intelligence patterns --query "auth" --limit 5
 npx monomind hooks intelligence status
 
-# Copy learned patterns from another local project
+# Copy recorded patterns from another local project
 npx monomind hooks transfer from-project --source ../other-project
 
 # Metrics dashboard

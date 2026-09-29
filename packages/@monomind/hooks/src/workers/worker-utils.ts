@@ -29,7 +29,7 @@ export const ALLOWED_WORKERS = new Set([
   'map',
   'audit',
   'consolidate',
-  // P2-15: Self-learning from failures (Reflexion pattern)
+  // P2-15: templated notes for failed routed tasks (Reflexion pattern)
   'reflexion',
 ]);
 

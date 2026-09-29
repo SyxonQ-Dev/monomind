@@ -124,7 +124,7 @@ describe('.monomind/config.yaml under --force', () => {
     // Defaults the user's file lacked are filled in, under the right parent.
     expect(after).toMatch(/swarm:\n(?: {2}.*\n)*? {2}maxAgents: \d+/);
     expect(after).toMatch(/^memory:$/m);
-    expect(after).toMatch(/^ {4}enabled: /m); // memory.learningBridge.enabled
+    expect(after).toMatch(/memory:\n(?: {2}.*\n)*? {2}persistPath: /);
   });
 
   it('is idempotent: a second --force run changes nothing', async () => {

@@ -83,7 +83,7 @@ export const hooksIntelligenceReset: MCPTool = {
 // Intelligence trajectory hooks - REAL implementation using activeTrajectories
 export const hooksTrajectoryStart: MCPTool = {
   name: 'hooks_intelligence_trajectory-start',
-  description: 'Begin SONA trajectory for reinforcement learning',
+  description: 'Begin recording a task trajectory (task, agent, steps)',
   inputSchema: {
     type: 'object',
     properties: {
@@ -141,7 +141,7 @@ export const hooksTrajectoryStart: MCPTool = {
 
 export const hooksTrajectoryStep: MCPTool = {
   name: 'hooks_intelligence_trajectory-step',
-  description: 'Record step in trajectory for reinforcement learning',
+  description: 'Record a step in an active trajectory',
   inputSchema: {
     type: 'object',
     properties: {
@@ -203,7 +203,8 @@ export const hooksTrajectoryStep: MCPTool = {
 
 export const hooksTrajectoryEnd: MCPTool = {
   name: 'hooks_intelligence_trajectory-end',
-  description: 'End trajectory and trigger SONA learning with EWC++',
+  description:
+    'End a trajectory: persist it to the trajectories memory namespace and update the SONA keyword-to-agent routing pattern confidence (no model is trained)',
   inputSchema: {
     type: 'object',
     properties: {

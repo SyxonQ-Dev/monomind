@@ -203,7 +203,7 @@ export const CLAUDE_MD_TEMPLATES: Array<{ name: ClaudeMdTemplate; description: s
   },
   {
     name: 'full',
-    description: 'Everything — hooks, learning protocol, intelligence system (~400 lines)',
+    description: 'Everything — hooks, memory protocol, intelligence system (~400 lines)',
   },
   {
     name: 'security',

@@ -91,7 +91,9 @@ function _resolveDbPath() {
   if (_isValidDb(candidate)) return candidate;
   try {
     var { execSync } = require('child_process');
-    var root = execSync('git rev-parse --show-toplevel', { cwd: CWD, encoding: 'utf-8', timeout: 2000 }).trim();
+    // stderr ignored: outside a repo git's "fatal: not a git repository" would
+    // otherwise be inherited into the hook's own stderr (#506).
+    var root = execSync('git rev-parse --show-toplevel', { cwd: CWD, encoding: 'utf-8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     candidate = path.join(root, '.monomind', 'monograph.db');
     if (_isValidDb(candidate)) return candidate;
   } catch (_) {}
@@ -679,11 +681,11 @@ function injectGodNodesContext(CWD) {
         if (lastCommitRow && lastCommitRow.value) {
           var { execFileSync: execSync } = require('child_process');
           var currentHead = '';
-          try { currentHead = execSync('git', ['rev-parse', 'HEAD'], { cwd: CWD, encoding: 'utf-8' }).trim(); } catch (_) {}
+          try { currentHead = execSync('git', ['rev-parse', 'HEAD'], { cwd: CWD, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch (_) {}
           if (currentHead && currentHead !== lastCommitRow.value) {
             var commitsBehind = 0;
             try {
-              var revList = execSync('git', ['rev-list', '--count', lastCommitRow.value + '..' + currentHead], { cwd: CWD, encoding: 'utf-8' }).trim();
+              var revList = execSync('git', ['rev-list', '--count', lastCommitRow.value + '..' + currentHead], { cwd: CWD, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
               commitsBehind = parseInt(revList, 10) || 0;
             } catch (_) {}
             if (commitsBehind > 0) {

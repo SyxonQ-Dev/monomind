@@ -403,16 +403,7 @@
       "maxAgents": 15
     },
     "memory": {
-      "backend": "hybrid",
-      "learningBridge": {
-        "enabled": true
-      },
-      "memoryGraph": {
-        "enabled": true
-      },
-      "agentScopes": {
-        "enabled": true
-      }
+      "backend": "hybrid"
     },
     "neural": {
       "enabled": true

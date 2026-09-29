@@ -419,6 +419,40 @@ describe('claudemd-truth (i-041/i-117)', () => {
     });
   });
 
+  describe('§5 — no self-learning / training claims', () => {
+    // Hooks log edits, outcomes and trajectories to local JSON pattern files;
+    // no model is trained. `--store-results` and `--train-neural` are not
+    // real flags, and the learningBridge confidence numbers were never read.
+    it.each(TEMPLATES)('%s: no "self-learning", phantom flags or training claims', (tmpl) => {
+      const generated = generateClaudeMd(
+        { ...DEFAULT_INIT_OPTIONS, targetDir: process.cwd() },
+        tmpl,
+      );
+      expect(generated).not.toMatch(/self-learning/i);
+      expect(generated).not.toMatch(/Auto-Learning/);
+      expect(generated).not.toContain('--store-results');
+      expect(generated).not.toContain('--train-neural');
+      expect(generated).not.toContain('Neural pattern learning was merged');
+    });
+
+    it('the full template describes routing and pick stats as they are', () => {
+      const generated = generateClaudeMd(
+        { ...DEFAULT_INIT_OPTIONS, targetDir: process.cwd() },
+        'full',
+      );
+      expect(generated).toContain('No model is trained');
+      expect(generated).toContain('bounded ranking prior');
+    });
+
+    it('CAPABILITIES.md makes no self-learning or ReasoningBank claim', async () => {
+      const generated = await generatedCapabilities();
+      expect(generated).not.toMatch(/self-learning/i);
+      expect(generated).not.toContain('ReasoningBank');
+      expect(generated).not.toContain('Confidence evolves');
+      expect(generated).toContain('No model is trained');
+    });
+  });
+
   describe('i-035 regression guard (same worktree, same two generators)', () => {
     it("the honest monoswarm sentence still survives this item's edits", () => {
       // Only swarmOrchestration() ("## Monoswarm Orchestration", full/

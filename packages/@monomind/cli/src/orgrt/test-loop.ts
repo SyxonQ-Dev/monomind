@@ -132,6 +132,8 @@ function runScenario(daemon: OrgDaemon, scenario: TestScenario, root: string): P
         RolePolicySchema.parse(role.policy ?? {}),
         bus,
         root,
+        [],
+        root,
       );
       policies.set(key, engine);
       return engine;
