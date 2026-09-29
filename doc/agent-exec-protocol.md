@@ -306,7 +306,7 @@ by swarm management and is NOT reused by this protocol — the installed-only vi
 
 ```
 $ monomind --version --json
-{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-exec-background-pids","agent-scan","agent-scan-read-only","agent-models","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","org-role-full-access","doctor-json","doctor-read-only","doctor-offline","init-json","knowledge-profile-captures"]}
+{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-exec-background-pids","agent-exec-effort","agent-scan","agent-scan-read-only","agent-models","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","org-role-full-access","doctor-json","doctor-read-only","doctor-offline","init-json","knowledge-profile-captures","agent-exec-subagent-events"]}
 ```
 
 Callers MUST handshake before use and fail with an actionable message (install/upgrade hint)
@@ -665,7 +665,7 @@ Callers may read `<projectRoot>/.monomind/orgs/<name>/runtime.json` and run `bus
 3. Handshake test (`--version --json` shape + capability gating).
 4. Golden NDJSON transcripts published at `doc/agent-exec-protocol/fixtures/*.ndjson` (success,
    tool-loop, fatal auth, timeout, cancel, bad-frame, tool-activity, full-access,
-   full-access-background) so callers can build contract tests without running monomind;
+   full-access-background, subagent) so callers can build contract tests without running monomind;
    mono-agent's Phase 1 gate consumes these.
 5. Two real runners smoke-tested (whatever is installed in CI/dev).
 
