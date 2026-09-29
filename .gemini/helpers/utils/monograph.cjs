@@ -262,7 +262,9 @@ function _recordGraphTelemetry(event) {
     try { d = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch (e) {}
     if (typeof d !== 'object' || d === null) d = {};
     d[event] = (d[event] || 0) + 1;
-    if (event === 'monograph_call' || event === 'preresolve_hit' || event === 'graph_assist_search' || event === 'graph_assist_neighbors') {
+    // Hook hints (graph_assist_*) are not credited: nothing measures whether
+    // the model used them, so they must not inflate "saved" figures (#409).
+    if (event === 'monograph_call' || event === 'preresolve_hit') {
       var saved = (_TOKEN_PER_EVENT.grep_call - _TOKEN_PER_EVENT.monograph_call);
       d.tokens_saved = (d.tokens_saved || 0) + saved;
       d.dollars_saved = (d.tokens_saved / 1000000) * _getDollarRate();

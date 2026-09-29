@@ -66,7 +66,7 @@ Typically fired automatically via `settings.json`:
 ## MCP Tool
 
 ```javascript
-mcp__monomind__hooks_pre_edit({
+mcp__monomind__hooks_pre-edit({
   filePath: "src/auth/login.ts",
   operation: "update",
   context: "Adding JWT refresh logic",

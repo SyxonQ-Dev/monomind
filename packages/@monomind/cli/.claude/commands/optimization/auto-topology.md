@@ -41,16 +41,7 @@ npx monomind monoswarm init --topology hierarchical-mesh --max-agents 12 --strat
 
 ## Optimize Existing Monoswarm Topology
 
-If a monoswarm is already running, optimize its topology via the coordination MCP tool:
-
-```javascript
-mcp__monomind__coordination_topology({
-  swarmId: "current",
-  optimize: true
-})
-```
-
-Or get system-level recommendations from the performance MCP tool:
+Get system-level recommendations from the performance MCP tool:
 
 ```javascript
 // Analyze and recommend optimizations

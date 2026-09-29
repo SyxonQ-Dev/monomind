@@ -80,6 +80,8 @@ claude mcp add monomind -- npx -y monomind@latest mcp start
 
 This tells Claude Code how to reach monomind's MCP tools. The generated Codex, OpenCode, Kimi Code, and Antigravity configurations register the same local server using each platform's native format.
 
+`init` pins the MCP entries it generates (`.mcp.json`, Codex, OpenCode, Kimi Code, Antigravity) to the monomind version that ran it: `npx -y --package=@monoes/monomindcli@<version> monomind mcp start`. A floating `@latest` re-resolves the npm dist-tag on every start (3–4 s), can hang on a cold npx cache, and can change version mid-session. Pass `--pin latest` (or `--no-pin`) to keep `monomind@latest`, or `--pin <version>` for another version; after upgrading monomind, run `monomind init --force` to re-pin (`monomind update` does not rewrite these configs).
+
 ## Step 4: Verify the install
 
 ```bash
@@ -130,8 +132,19 @@ to Claude's context when one agent or skill clearly fits, and Claude uses it. To
 | Code graph (Monograph) | `monomind monograph status` | Automatic (background build) |
 | Memory | `monomind memory list` | Always on (SQLite) |
 | MCP server | `monomind mcp status` | `monomind mcp stop` |
-| Dashboard | Open Claude Code (auto-starts) | Close Claude Code |
+| Dashboard | `curl -s http://localhost:4242/api/identity` | `node .claude/helpers/control-stop.cjs` |
 | Org daemon | `monomind org status` | `monomind org stop <name>` |
+
+### The dashboard
+
+The dashboard (Control Room, `http://localhost:4242`) does not start on its own. Start it when you want it:
+
+```bash
+monomind ui                                  # serves on :4242 until Ctrl+C; --no-open skips the browser
+curl -s http://localhost:4242/api/identity   # prints its pid and project dir when it is up
+```
+
+To have it start at every Claude Code session start in this project, run `monomind init --dashboard` (it writes `{"autostart": true}` to `.monomind/dashboard.json`), or set `MONOMIND_DASHBOARD_AUTOSTART=1` in your environment. `MONOMIND_DASHBOARD_AUTOSTART=0` turns auto-start off even for a project that opted in. An auto-started server keeps running after Claude Code closes; `node .claude/helpers/control-stop.cjs` stops it. While a dashboard is running, the per-prompt Second Brain lookup uses its warm semantic search; without one it falls back to keyword matching.
 
 ## Troubleshooting
 

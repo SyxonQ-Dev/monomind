@@ -4,9 +4,8 @@
  */
 
 import * as fs from 'node:fs';
-import { createRequire } from 'node:module';
 import * as path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { resolveMonographEntryUrl } from './shared.js';
 import type { InitResult } from './types.js';
 
 /**
@@ -16,11 +15,7 @@ import type { InitResult } from './types.js';
  * Uses the same build.lock file as monograph-freshen.cjs — if a session-start
  * hook build is already running, we skip to avoid SQLITE_BUSY.
  */
-export async function initKnowledgeGraph(
-  targetDir: string,
-  result: InitResult,
-  allowInstall: boolean,
-): Promise<void> {
+export async function initKnowledgeGraph(targetDir: string, result: InitResult): Promise<void> {
   const outputDir = path.join(targetDir, '.monomind', 'graph');
   fs.mkdirSync(outputDir, { recursive: true });
 
@@ -41,72 +36,15 @@ export async function initKnowledgeGraph(
     /* no lock — proceed */
   }
 
-  // Resolve @monoes/monograph from the CLI package's own node_modules first
-  // (correct for npm/npx installs), then fall back to user project node_modules.
-  let entryPoint: string | null = null;
-  try {
-    const cliRequire = createRequire(import.meta.url);
-    entryPoint = cliRequire.resolve('@monoes/monograph/dist/src/index.js');
-  } catch {
-    const fallback = path.join(
-      targetDir,
-      'node_modules',
-      '@monoes',
-      'monograph',
-      'dist',
-      'src',
-      'index.js',
+  // #420: resolve through the package's public entry, from the CLI's own
+  // dependencies. Never install into the user's project — if monograph cannot
+  // be loaded, say how to build the graph later and move on.
+  const entryUrl = resolveMonographEntryUrl();
+  if (!entryUrl) {
+    (result.warnings ??= []).push(
+      'Monograph code graph not built (@monoes/monograph could not be loaded) — build it later with `npx monomind monograph build`',
     );
-    if (fs.existsSync(fallback)) entryPoint = fallback;
-  }
-  if (!entryPoint) {
-    // P1-13: --no-install (options.installClaudeCode === false) must actually
-    // gate this install, not just say it does — skip entirely when disallowed.
-    if (!allowInstall) {
-      result.skipped.push(
-        'Monograph code graph: @monoes/monograph not found (auto-install skipped, --no-install)',
-      );
-      return;
-    }
-    // Auto-install @monoes/monograph and retry before giving up.
-    // Disclose the install before running it (consistent with the
-    // claude-code global install disclosure pattern from #131/#132).
-    try {
-      const { execSync } = await import('node:child_process');
-      const { output } = await import('../output.js');
-      output.printInfo(
-        'Installing @monoes/monograph (code graph dependency) — pass --no-install to skip',
-      );
-      execSync('npm install @monoes/monograph', {
-        cwd: targetDir,
-        stdio: 'ignore',
-        timeout: 60000,
-      });
-      try {
-        const cliRequire2 = createRequire(import.meta.url);
-        entryPoint = cliRequire2.resolve('@monoes/monograph/dist/src/index.js');
-      } catch {
-        const fallback2 = path.join(
-          targetDir,
-          'node_modules',
-          '@monoes',
-          'monograph',
-          'dist',
-          'src',
-          'index.js',
-        );
-        if (fs.existsSync(fallback2)) entryPoint = fallback2;
-      }
-    } catch {
-      /* install failed, fall through */
-    }
-    if (!entryPoint) {
-      result.skipped.push(
-        'Monograph code graph: @monoes/monograph not found (auto-install failed)',
-      );
-      return;
-    }
-    result.created.files.push('@monoes/monograph (auto-installed for the code graph)');
+    return;
   }
 
   // Acquire lock before spawning so monograph-freshen.cjs sees it and skips
@@ -126,7 +64,7 @@ export async function initKnowledgeGraph(
   }
 
   const script = `
-import { buildAsync } from ${JSON.stringify(pathToFileURL(entryPoint).href)};
+import { buildAsync } from ${JSON.stringify(entryUrl)};
 import { unlinkSync } from 'fs';
 try { await buildAsync(${JSON.stringify(targetDir)}); } finally {
   try { unlinkSync(${JSON.stringify(lockPath)}); } catch {}

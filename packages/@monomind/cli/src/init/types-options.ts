@@ -117,6 +117,7 @@ export const DEFAULT_INIT_OPTIONS: InitOptions = {
   },
   skills: {
     core: true,
+    extended: true,
     memory: true,
     github: true,
     browser: true,
@@ -209,9 +210,10 @@ export const MINIMAL_INIT_OPTIONS: InitOptions = {
   },
   skills: {
     core: true,
-    memory: false,
-    github: false,
-    browser: false,
+    extended: false,
+    memory: true,
+    github: true,
+    browser: true,
     advanced: false,
 
     all: false,
@@ -268,6 +270,7 @@ export const FULL_INIT_OPTIONS: InitOptions = {
   },
   skills: {
     core: true,
+    extended: true,
     memory: true,
     github: true,
     browser: true,

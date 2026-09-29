@@ -8,7 +8,7 @@ pick: low
 
 # Mastermind Instance
 
-This skill is invoked by `mastermind:instance` or directly via `/mastermind-instance`.
+This skill is invoked directly via `/mastermind-instance`.
 
 ---
 

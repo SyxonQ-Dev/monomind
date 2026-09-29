@@ -1,5 +1,6 @@
 // packages/@monomind/cli/src/orgrt/antigravity-runner-types.ts
 // Split out of antigravity-runner.ts (file-size sweep) — agy wire-shape types.
+import type { AgentMessage } from './agent-runner.js';
 
 // Wire shape (verified against agy 0.35.0 stream-json output): each line is
 // { "event": "init" | "step_update" | "result", ...payload nested under a
@@ -14,7 +15,15 @@ export interface AgyStepUpdatePayload {
   text_delta?: string;
   duration_seconds?: number;
   usage?: AgyUsage;
-  tool_info?: { name: string; args?: Record<string, unknown> };
+  /** Verified live (agy, 2026-09-29): an ACTIVE step carries `name` +
+   *  `parameters`; its DONE step repeats them and adds `output`. The same
+   *  `step_index` identifies both. */
+  tool_info?: {
+    name: string;
+    parameters?: Record<string, unknown>;
+    args?: Record<string, unknown>;
+    output?: unknown;
+  };
   subagent_info?: { name?: string };
 }
 
@@ -49,15 +58,19 @@ export interface AgyEvent {
  *   - 'assistant': rawText is the accumulated agent_response text (fences
  *     intact) for end-of-turn tool-call parsing; text is the fence-stripped
  *     prose, present only when non-empty.
- *   - 'tool':      agy's own tool activity (step_type 'tool' with tool_info)
- *     — forwarded by run() as a `tool_use` liveness AgentMessage (see header).
+ *   - 'tool':      the spawn-time liveness ping — forwarded by run() as a
+ *     `tool_use` AgentMessage (see header).
+ *   - 'native':    agy's own tool steps (step_type 'tool' with tool_info) as
+ *     rich tool_use/tool_result messages (kimicode-runner-tools.ts), paired
+ *     by step_index.
  *   - 'meta':      any other event that only carries a conversation id.
  */
 export interface AgyStreamEvent {
-  kind: 'assistant' | 'tool' | 'meta';
+  kind: 'assistant' | 'tool' | 'native' | 'meta';
   text?: string;
   rawText?: string;
   toolName?: string;
+  native?: AgentMessage[];
   conversationId?: string;
 }
 

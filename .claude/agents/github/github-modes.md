@@ -145,11 +145,11 @@ All GitHub modes can be enhanced with monomind coordination:
 
 ```javascript
 // Initialize swarm for GitHub workflow
-mcp__monomind__swarm_init { topology: "hierarchical", maxAgents: 5 }
+mcp__monomind__monoswarm_init { topology: "hierarchical", maxAgents: 5 }
 mcp__monomind__agent_spawn { type: "coordinator", name: "GitHub Coordinator" }
 mcp__monomind__agent_spawn { type: "reviewer", name: "Code Reviewer" }
 mcp__monomind__agent_spawn { type: "tester", name: "QA Agent" }
 
 // Execute GitHub workflow with coordination
-mcp__monomind__task_orchestrate { task: "GitHub workflow", strategy: "parallel" }
+mcp__monomind__task_create { description: "GitHub workflow", strategy: "parallel" }
 ```

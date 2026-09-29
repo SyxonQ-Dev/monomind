@@ -116,7 +116,7 @@ describe('CLI', () => {
       const output = consoleOutput.join('');
       expect(output).toContain('FEATURES:');
       expect(output).not.toContain('15-agent hierarchical mesh coordination');
-      expect(output).toContain('HNSW ANN index above 5,000 entries');
+      expect(output).toContain('HNSW ANN index above 100,000 entries');
     });
 
     it('should show examples in help', async () => {

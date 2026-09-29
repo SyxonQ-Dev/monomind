@@ -164,7 +164,7 @@ describe('GrokAgentRunner streaming (#204)', () => {
 
     // First message must be the spawn-time liveness yield — this is what
     // deterministically wins session.ts's first-pull watchdog race.
-    expect(messages[0]).toEqual({ type: 'tool_use', session_id: undefined, text: 'turn started' });
+    expect(messages[0]).toEqual({ type: 'tool_use', session_id: undefined });
     expect(times[0] - start).toBeLessThan(300);
 
     const texts = messages.filter((m) => m.type === 'assistant').map((m) => m.text);

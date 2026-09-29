@@ -8,7 +8,7 @@ pick: low
 
 # Mastermind Plugins
 
-This skill is invoked by `mastermind:plugins` or directly via `/mastermind-plugins`.
+This skill is invoked directly via `/mastermind-plugins`.
 
 ---
 

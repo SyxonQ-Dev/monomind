@@ -8,7 +8,7 @@ pick: low
 
 # Mastermind Budgets
 
-This skill is invoked by `mastermind:budgets` or directly via `/mastermind-budgets`.
+This skill is invoked directly via `/mastermind-budgets`.
 
 The Org Runtime enforces exactly three caps, all in the org definition `.monomind/orgs/<org>.json`
 (schemas: `packages/@monomind/cli/src/orgrt/types-role.ts` and `types.ts`; enforcement:

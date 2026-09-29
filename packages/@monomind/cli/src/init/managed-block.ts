@@ -13,6 +13,24 @@ const MARKER_PREFIX = 'monomind-block';
  */
 const MIN_GENERATED_HEADINGS = 3;
 
+const CLAUDE_MD_TITLE = '# Claude Code Configuration - Monomind';
+
+/**
+ * Section headings older CLAUDE.md generators emitted that the current
+ * lean template no longer does (GH #412). Still recognised as generated, so a
+ * pre-delimiter body carrying them is replaced whole on upgrade instead of
+ * leaving its stale tail behind the first retired heading.
+ */
+const RETIRED_GENERATED_HEADINGS = [
+  '## Monoswarm Rules',
+  '## CLI Commands',
+  '## Available Agents (Curated Subset)',
+  '## Memory Commands',
+  '## Quick Setup',
+  '## Claude Code vs CLI Tools',
+  '## Support',
+];
+
 function escapeForBlockMarker(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -95,6 +113,8 @@ function findLegacyUnmarkedRange(
 
   const known = sectionHeadings(generated);
   if (known.size < MIN_GENERATED_HEADINGS) return null;
+  if (title === CLAUDE_MD_TITLE)
+    for (const heading of RETIRED_GENERATED_HEADINGS) known.add(heading);
 
   const start = lines.findIndex((line) => line.trimEnd() === title);
   if (start === -1) return null;

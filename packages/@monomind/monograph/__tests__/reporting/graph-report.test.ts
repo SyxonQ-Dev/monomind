@@ -159,7 +159,7 @@ describe('generateGraphReport', () => {
 
   it('uses default output path when not specified', async () => {
     const result = await generateGraphReport(testDir, undefined, dbPath);
-    expect(result.path).toBe(join(testDir, 'GRAPH_REPORT.md'));
+    expect(result.path).toBe(join(testDir, '.monomind', 'GRAPH_REPORT.md'));
     if (existsSync(result.path)) unlinkSync(result.path);
   });
 });
