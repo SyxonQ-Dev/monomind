@@ -6,7 +6,8 @@ import type { Command, CommandContext, CommandResult } from '../types.js';
 // Pretrain subcommand
 export const pretrainCommand: Command = {
   name: 'pretrain',
-  description: 'Scan hook activity and write consolidated JSON state. No model is trained.',
+  description:
+    'Scan the repository (file types, import lines) into the memory store and local pattern log. No model is trained.',
   options: [
     {
       name: 'path',
@@ -77,7 +78,7 @@ export const pretrainCommand: Command = {
       'ts,js,py,md,json') as string;
 
     output.writeln();
-    output.writeln(output.bold('Indexing hook activity into local JSON state'));
+    output.writeln(output.bold('Scanning the repository into the memory store and pattern log'));
     output.writeln();
 
     const spinner = output.createSpinner({ text: 'Scanning repository...', spinner: 'dots' });

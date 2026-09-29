@@ -161,7 +161,7 @@ The four groups below are a curated highlight, not the full 28 — run `monomind
 |------|-------------|
 | `route` | Optimal agent routing |
 | `explain` | Routing decisions |
-| `pretrain` | Consolidate hook activity into JSON state (no training) |
+| `pretrain` | Scan the repository (file types, import lines) into the memory store and local pattern log (no training) |
 | `transfer` | Pattern transfer |
 
 #### Coverage Hooks (3)

@@ -15,7 +15,7 @@ Claude Code fires hook events (PreToolUse, PostToolUse, etc.) which trigger `npx
 1. **Routes** tasks to agents through the keyword picker (pick stats act as a bounded ranking prior)
 2. **Records** outcomes (edits, commands, tasks) in local JSON pattern files
 3. **Persists** session state across conversations
-4. **Consolidates** hook activity into JSON state (`hooks pretrain`)
+4. **Scans** the repository (file types, import lines) into the memory store and local pattern log (`hooks pretrain`)
 
 ## CLI Subcommands
 
@@ -38,7 +38,7 @@ All hooks are invoked as `npx monomind hooks <subcommand>`:
 |---|---|
 | `route` | Route task to optimal agent |
 | `explain` | Explain routing decision |
-| `pretrain` | Consolidate hook activity into JSON state (no model is trained) |
+| `pretrain` | Scan the repository (file types, import lines) into the memory store and local pattern log (no model is trained) |
 | `metrics` | View recorded routing/outcome metrics |
 | `model-route` | Route to optimal model (haiku/sonnet/opus) |
 | `model-outcome` | Record model routing result |

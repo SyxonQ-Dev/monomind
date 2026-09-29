@@ -29,7 +29,7 @@ session-end       End current session and persist state
 session-restore   Restore a previous session
 route             Route task to an agent through the central picker
 explain           Explain routing decision with transparency
-pretrain          Consolidate hook activity into JSON state (no model is trained)
+pretrain          Scan the repository (file types, import lines) into the memory store and local pattern log (no model is trained)
 metrics           View recorded routing/outcome metrics
 transfer          Copy recorded patterns from another local project
 list              List all registered hooks

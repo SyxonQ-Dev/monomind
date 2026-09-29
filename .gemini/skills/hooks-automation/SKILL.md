@@ -15,7 +15,7 @@ The hooks system records what happens during a session (edits, commands, tasks) 
 - **Post-operation hooks**: record edit, command, and task outcomes so routing can learn from them
 - **Session management**: persist state at session end and restore it later
 - **Routing**: route a task to the best agent (or model) and explain the decision
-- **Pattern store**: log trajectories and search stored patterns (`hooks intelligence`); `hooks pretrain` consolidates hook activity into JSON state — no model is trained
+- **Pattern store**: log trajectories and search stored patterns (`hooks intelligence`); `hooks pretrain` scans the repository (file types, import lines) into the memory store and local pattern log — no model is trained
 - **Background workers**: run `@monoes/hooks` workers in-process
 
 ## Prerequisites
@@ -214,7 +214,7 @@ npx monomind hooks model-stats
 # Route based on test coverage gaps
 npx monomind hooks coverage-gaps --critical-only
 
-# Consolidate hook activity into JSON state (no model is trained)
+# Scan the repository (file types, import lines) into the memory store and local pattern log (no model is trained)
 npx monomind hooks pretrain --depth shallow
 
 # Pattern store: ingest history, list/search patterns

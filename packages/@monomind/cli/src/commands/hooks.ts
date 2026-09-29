@@ -104,7 +104,7 @@ export const hooksCommand: Command = {
     },
     {
       command: 'monomind hooks pretrain',
-      description: 'Consolidate hook activity into JSON state',
+      description: 'Scan the repository into the memory store and pattern log',
     },
     {
       command: 'monomind hooks metrics --v1-dashboard',
@@ -133,7 +133,7 @@ export const hooksCommand: Command = {
       `${output.highlight('session-restore')} - Restore a previous session`,
       `${output.highlight('route')}           - Route tasks to optimal agents`,
       `${output.highlight('explain')}         - Explain routing decisions`,
-      `${output.highlight('pretrain')}        - Consolidate hook activity into JSON state (no training)`,
+      `${output.highlight('pretrain')}        - Scan the repo into the memory store and pattern log (no training)`,
       `${output.highlight('metrics')}         - View recorded routing/outcome metrics`,
       `${output.highlight('transfer')}        - Transfer patterns from another project`,
       `${output.highlight('list')}            - List all registered hooks`,
