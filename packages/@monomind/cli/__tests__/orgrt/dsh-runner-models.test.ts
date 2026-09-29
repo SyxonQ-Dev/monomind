@@ -67,9 +67,9 @@ describe('curated models', () => {
     expect(clampEffort(['off', 'high', 'xhigh'], 'medium')).toBe('high');
     expect(clampEffort(['off', 'high', 'xhigh'], 'max')).toBe('xhigh');
     expect(clampEffort(['off', 'medium', 'high'], 'low')).toBe('medium');
-    // captured live: glm-5.2:free refuses minimal/medium/max
-    expect(dshEffortFor('openrouter', 'z-ai/glm-5.2:free', 'max')).toBe('xhigh');
-    expect(dshEffortFor('openrouter', 'z-ai/glm-5.2:free', 'medium')).toBe('high');
+    // curated: nemotron-3-ultra supports off/medium/high only
+    expect(dshEffortFor('openrouter', 'nvidia/nemotron-3-ultra-550b-a55b:free', 'max')).toBe('high');
+    expect(dshEffortFor('openrouter', 'nvidia/nemotron-3-ultra-550b-a55b:free', 'low')).toBe('medium');
     expect(dshEffortFor('nvidia', 'deepseek-ai/deepseek-v4-flash-0731', 'xhigh')).toBe('max');
     expect(dshEffortFor('openrouter', 'some/uncurated', 'xhigh')).toBe('xhigh');
   });

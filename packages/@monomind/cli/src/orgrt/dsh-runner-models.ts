@@ -121,7 +121,8 @@ const free = (route: string, model: string, label: string, levels: string[]): Ds
   key_env: PI_AI_ROUTE_KEYS[route] as string,
 });
 
-/** Levels are pi-ai's getSupportedThinkingLevels over each catalog entry. */
+/** Levels are pi-ai's getSupportedThinkingLevels over each catalog entry,
+ *  limited to monomind's `--effort` names (pi-ai's `minimal` has none). */
 export const DSH_MODELS: DshModel[] = [
   deepseek('deepseek-flash', 'DeepSeek V4.1 Flash', true),
   deepseek('deepseek-v4-pro', 'DeepSeek V4 Pro'),
@@ -135,21 +136,7 @@ export const DSH_MODELS: DshModel[] = [
     'high',
     'max',
   ]),
-  free('nvidia', 'moonshotai/kimi-k3', 'Kimi K3 via NVIDIA', [
-    'off',
-    'minimal',
-    'low',
-    'medium',
-    'high',
-  ]),
-  free('openrouter', 'z-ai/glm-5.2:free', 'GLM 5.2 via OpenRouter', ['off', 'high', 'xhigh']),
-  free('openrouter', 'minimax/minimax-m3:free', 'MiniMax M3 via OpenRouter', [
-    'off',
-    'minimal',
-    'low',
-    'medium',
-    'high',
-  ]),
+  free('nvidia', 'moonshotai/kimi-k3', 'Kimi K3 via NVIDIA', ['off', 'low', 'medium', 'high']),
   free('openrouter', 'nvidia/nemotron-3-ultra-550b-a55b:free', 'Nemotron 3 Ultra via OpenRouter', [
     'off',
     'medium',
@@ -157,14 +144,12 @@ export const DSH_MODELS: DshModel[] = [
   ]),
   free('openrouter', 'poolside/laguna-s-2.1:free', 'Laguna S 2.1 via OpenRouter', [
     'off',
-    'minimal',
     'low',
     'medium',
     'high',
   ]),
   free('openrouter', 'openrouter/free', 'OpenRouter free-models router', [
     'off',
-    'minimal',
     'low',
     'medium',
     'high',

@@ -127,7 +127,9 @@ describe('listRuntimeModels', () => {
     expect(r).toMatchObject({ supported: true, curated: true });
     expect(r.error).toBeUndefined();
     expect(r.models.find((m) => m.default)?.id).toBe('deepseek-flash');
-    expect(r.models.some((m) => m.id === 'openrouter/z-ai/glm-5.2:free')).toBe(true);
+    expect(r.models.some((m) => m.id === 'openrouter/nvidia/nemotron-3-ultra-550b-a55b:free')).toBe(
+      true,
+    );
   });
 
   it('unknown runtime and missing binary are reported as errors', async () => {

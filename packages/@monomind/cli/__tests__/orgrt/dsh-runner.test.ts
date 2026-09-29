@@ -274,10 +274,10 @@ describe('DshAgentRunner', () => {
       patchText = fs.readFileSync(argv[argv.indexOf('--patch') + 1], 'utf8');
       return mockChild(FREE_SUCCESS);
     }) as any);
-    const msgs = await collect({ model: 'openrouter/z-ai/glm-5.2:free', effort: 'max' });
+    const msgs = await collect({ model: 'openrouter/nvidia/nemotron-3-ultra-550b-a55b:free', effort: 'max' });
     expect(patchText).toContain('provider: "openrouter"');
-    expect(patchText).toContain('model: "z-ai/glm-5.2:free"');
-    expect(patchText).toContain('reasoningEffort: "xhigh"'); // clamped: glm-5.2 has no max
+    expect(patchText).toContain('model: "nvidia/nemotron-3-ultra-550b-a55b:free"');
+    expect(patchText).toContain('reasoningEffort: "high"'); // clamped: nemotron-3-ultra has no max
     expect(patchText).toContain('- id: llm-pi-ai\n  config:\n    providers:\n      "openrouter":\n        apiKeyEnv: "OPENROUTER_API_KEY"');
     expect(msgs.at(-1)).toMatchObject({ type: 'result', subtype: 'success', input_tokens: 120, output_tokens: 7 });
   });
