@@ -12,16 +12,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setAccessAction } from '../commands/org-subcommands-role.js';
 import { resolveRoleAccess } from '../orgrt/access-grant.js';
 import { readFullAccessGrantKey } from '../orgrt/access-grant-key.js';
+import { AGENT_CONTEXT_ENV_MARKERS } from '../orgrt/agent-context.js';
 import { ORG_DIR, OrgDefSchema } from '../orgrt/types.js';
 import type { CommandContext } from '../types.js';
 
-const AGENT_MARKERS = [
-  'CLAUDECODE',
-  'CLAUDE_CODE_ENTRYPOINT',
-  'MONOMIND_ORG_ROLE',
-  'MONOMIND_SDK_AGENT',
-  'MONOMIND_AGENT_EXEC',
-] as const;
+const AGENT_MARKERS = AGENT_CONTEXT_ENV_MARKERS;
 
 let operatorDir: string;
 
@@ -88,10 +83,19 @@ describe('org role set-access', () => {
 
   it('refuses to grant full access on a runtime that does not support it', async () => {
     const c = ctx(['myorg', 'builder', 'full'], { 'yes-i-understand': true });
-    makeOrg(c.cwd, 'myorg', { name: 'myorg', roles: [{ id: 'builder', runtime: 'codex' }] });
+    makeOrg(c.cwd, 'myorg', { name: 'myorg', roles: [{ id: 'builder', runtime: 'hermes' }] });
     const res = await setAccessAction(c);
     expect(res.success).toBe(false);
     expect(res.message).toMatch(/does not support full access/);
+  });
+
+  it('grants full access on a non-claude full-access runtime (codex)', async () => {
+    const c = ctx(['myorg', 'builder', 'full'], { 'yes-i-understand': true });
+    makeOrg(c.cwd, 'myorg', { name: 'myorg', roles: [{ id: 'builder', runtime: 'codex' }] });
+    const res = await setAccessAction(c);
+    expect(res.success).toBe(true);
+    const written = JSON.parse(readFileSync(join(c.cwd, ORG_DIR, 'myorg.json'), 'utf8'));
+    expect(written.roles[0].policy.access).toBe('full');
   });
 
   for (const marker of AGENT_MARKERS) {

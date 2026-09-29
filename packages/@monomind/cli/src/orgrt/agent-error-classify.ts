@@ -16,6 +16,7 @@ import { classifyStderr } from './kimicode-runner-parse.js';
 export type AgentFailureStatus =
   | 'auth'
   | 'quota'
+  | 'rate_limited'
   | 'model_unavailable'
   | 'timeout'
   | 'missing_binary'
@@ -100,6 +101,8 @@ export function classifyAgentError(input: AgentErrorInput): ClassifiedAgentError
   // Codes the engine decided without looking at provider text.
   if (code === 'missing-binary') return { status: 'missing_binary', code };
   if (code === 'timeout') return { status: 'timeout', code };
+  // rev 20: a 429 agent exec retried until it gave up (agent-exec-retry.ts).
+  if (code === 'rate-limited') return { status: 'rate_limited', code };
   if (code !== 'auth' && code !== 'quota' && code !== 'runner-error') {
     return { status: 'error', code };
   }
@@ -116,8 +119,9 @@ export function classifyAgentError(input: AgentErrorInput): ClassifiedAgentError
   if (matchesAny(AUTH_PATTERNS, message)) return { status: 'auth', code: 'auth' };
   const cls = classifyStderr(message);
   if (cls.fatal) {
-    return /auth/i.test(cls.label ?? '')
-      ? { status: 'auth', code: 'auth' }
+    if (/auth/i.test(cls.label ?? '')) return { status: 'auth', code: 'auth' };
+    return cls.rateLimited
+      ? { status: 'rate_limited', code: 'rate-limited' }
       : { status: 'quota', code: 'quota' };
   }
   return { status: 'error', code };

@@ -13,6 +13,9 @@ import {
 } from './agent-tools-store.js';
 import type { MCPTool } from './types.js';
 
+const REGISTERED_NOTE =
+  'Agent recorded in the agent store; no process was started. Run an agent turn with `monomind agent exec`.';
+
 export const agentLifecycleTools: MCPTool[] = [
   {
     name: 'agent_spawn',
@@ -114,8 +117,10 @@ export const agentLifecycleTools: MCPTool[] = [
         agentType: agent.agentType,
         model: agent.model,
         modelRoutedBy: routingResult.routedBy,
-        status: 'spawned',
+        // A store row, not a process (#418).
+        status: 'registered',
         createdAt: agent.createdAt,
+        note: REGISTERED_NOTE,
       };
 
       // Add Agent Booster info if task can skip LLM
@@ -123,7 +128,7 @@ export const agentLifecycleTools: MCPTool[] = [
         response.canSkipLLM = true;
         response.agentBoosterIntent = routingResult.agentBoosterIntent;
         response.tier = routingResult.tier;
-        response.note = `Agent Booster AST routing identified intent "${routingResult.agentBoosterIntent}", but no MCP tool executes it — this agent will run through the normal LLM path.`;
+        response.note = `${REGISTERED_NOTE} Agent Booster AST routing identified intent "${routingResult.agentBoosterIntent}", but no MCP tool executes it — this agent will run through the normal LLM path.`;
       } else if (routingResult.tier) {
         response.tier = routingResult.tier;
       }

@@ -5,7 +5,6 @@
 // that only used `this.emptySkillsDir`; that one field is now an explicit
 // parameter, so the class in kimicode-runner.ts calls it as an imported
 // function — no other behavior changes.
-import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -18,6 +17,7 @@ import {
   extractStderrSessionId,
   parseStreamJsonLine,
 } from './kimicode-runner-parse.js';
+import { spawnRunnerProcess } from './process-group-spawn.js';
 import { omitAnthropicManagedKeys } from './provider.js';
 
 /** How long a single `kimi --print` invocation may run before we kill it (2 hours,
@@ -44,8 +44,8 @@ export async function* streamTurn(
   promptText: string,
   sessionId: string | undefined,
   args: AgentRunArgs,
-  agentFile: string,
-  emptySkillsDir: string,
+  agentFile: string | undefined,
+  emptySkillsDir: string | undefined,
   outcome: TurnOutcome,
 ): AsyncGenerator<KimiStreamEvent> {
   // The prompt goes over STDIN, not `-p <text>`: a single argv element is
@@ -54,16 +54,16 @@ export async function* streamTurn(
   // when no `-p` is given (kimi-cli ui/print: `command is None and not
   // sys.stdin.isatty()` → `sys.stdin.read()`); `--output-format` is only
   // accepted in print mode anyway.
-  const cliArgs: string[] = [
-    '--print',
-    '--output-format',
-    'stream-json',
-    '--skills-dir',
-    emptySkillsDir,
-  ];
+  //
+  // No approval flag: kimi's prompt mode always runs "auto" (never ask) and
+  // rejects --yolo/--auto next to a prompt, so full access needs none.
+  // `emptySkillsDir`/`agentFile` are undefined when the caller keeps the
+  // user's own kimi setup (coder mode: --access full / --settings).
+  const cliArgs: string[] = ['--print', '--output-format', 'stream-json'];
+  if (emptySkillsDir) cliArgs.push('--skills-dir', emptySkillsDir);
   if (sessionId) {
     cliArgs.push('--session', sessionId);
-  } else {
+  } else if (agentFile) {
     // First turn: bind the role's system prompt via --agent-file.
     // (--agent-file and --session/--continue are mutually exclusive.)
     cliArgs.push('--agent-file', agentFile);
@@ -72,26 +72,34 @@ export async function* streamTurn(
   // kimi rejects model changes on resume.
   if (args.model && !sessionId) cliArgs.push('--model', args.model);
 
-  const child = spawn(...maskedCommand(args.authorityMask, bin, cliArgs), {
-    cwd: args.cwd,
-    env: {
-      // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
-      // vendor CLI; an explicit value in args.env still wins below.
-      ...omitAnthropicManagedKeys(process.env),
-      ...args.env,
-      // --agent-file (the role's system prompt) requires kimi's v2
-      // engine; without this the CLI exits 1 with
-      // "--agent-file is only available with the v2 engine".
-      KIMI_CODE_EXPERIMENTAL_FLAG: process.env.KIMI_CODE_EXPERIMENTAL_FLAG || '1',
-      // Org sessions are single-purpose: each resumed turn re-reads the
-      // whole session history, and keeping prior turns' thinking
-      // ("thinkingKeep: all") inflates every request's cache reads.
-      // Org roles don't need reasoning continuity between turns — the
-      // mailbox + session history carry the state.
-      KIMI_MODEL_THINKING_KEEP: process.env.KIMI_MODEL_THINKING_KEEP || 'off',
+  const proc = spawnRunnerProcess(
+    ...maskedCommand(args.authorityMask, bin, cliArgs),
+    {
+      cwd: args.cwd,
+      env: {
+        // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
+        // vendor CLI; an explicit value in args.env still wins below.
+        ...omitAnthropicManagedKeys(process.env),
+        ...args.env,
+        // --agent-file (the role's system prompt) requires kimi's v2
+        // engine; without this the CLI exits 1 with
+        // "--agent-file is only available with the v2 engine".
+        KIMI_CODE_EXPERIMENTAL_FLAG: process.env.KIMI_CODE_EXPERIMENTAL_FLAG || '1',
+        // Org sessions are single-purpose: each resumed turn re-reads the
+        // whole session history, and keeping prior turns' thinking
+        // ("thinkingKeep: all") inflates every request's cache reads.
+        // Org roles don't need reasoning continuity between turns — the
+        // mailbox + session history carry the state. Left to the user's
+        // own config when their setup is kept (no empty skills dir).
+        ...(emptySkillsDir
+          ? { KIMI_MODEL_THINKING_KEEP: process.env.KIMI_MODEL_THINKING_KEEP || 'off' }
+          : {}),
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
     },
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+    args,
+  );
+  const child = proc.child;
   // A CLI that exits before reading stdin (bad args, auth failure) makes
   // this write EPIPE — surfaced via the exit code/stderr below, not as an
   // unhandled stream error.
@@ -109,18 +117,8 @@ export async function* streamTurn(
   const KILL_GRACE_MS = 5000;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
   const killChild = (): void => {
-    try {
-      child.kill('SIGTERM');
-    } catch {
-      /* already gone */
-    }
-    killTimer = setTimeout(() => {
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        /* already gone */
-      }
-    }, KILL_GRACE_MS);
+    proc.target.kill('SIGTERM');
+    killTimer = setTimeout(() => proc.target.kill('SIGKILL'), KILL_GRACE_MS);
     killTimer.unref?.();
   };
 
@@ -131,7 +129,7 @@ export async function* streamTurn(
     timedOut = true;
     killChild();
   }, TURN_TIMEOUT_MS);
-  const unsubscribeAbort = killOnAbort(args.signal, child, KILL_GRACE_MS);
+  const unsubscribeAbort = killOnAbort(args.signal, proc.target, KILL_GRACE_MS);
 
   // Attach the exit promise BEFORE consuming stdout: on a spawn failure
   // (ENOENT, bad binary) the 'error' event fires almost immediately —
@@ -175,6 +173,7 @@ export async function* streamTurn(
   } finally {
     clearTimeout(timer);
     unsubscribeAbort();
+    proc.stop();
     if (child.exitCode === null && child.signalCode === null) {
       // NOT confirmed dead. Either the consumer abandoned this stream
       // mid-turn (session.ts's silent abort calls iterator.return(), the

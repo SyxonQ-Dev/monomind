@@ -176,7 +176,12 @@ async function detectHtml(filePath, options = {}) {
       const tag = el.tagName.toLowerCase();
       const style = window.getComputedStyle(el);
       for (const f of runElementCheck(rule.id, () => rule.run(el, tag, style, window, customPropMap))) {
-        findings.push(finding(f.id, filePath, f.snippet));
+        // Contrast the static cascade can't resolve (translucent colours,
+        // overlays, gradients) is not a definite failure: callers opt in (#424).
+        if (f.unverified && !options?.includeUnverified) continue;
+        const item = finding(f.id, filePath, f.snippet);
+        if (f.unverified) item.unverified = true;
+        findings.push(item);
       }
     }
   }

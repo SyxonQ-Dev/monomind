@@ -1,6 +1,6 @@
 ---
 name: mastermind-plugin-manager
-description: Mastermind plugin-manager — install plugins from npm, uninstall with two-step confirmation, enable/disable installed plugins. Extends mastermind:plugins (listing) and mastermind:plugin-settings (per-plugin config) with the install/uninstall lifecycle. Mirrors PluginManager.tsx.
+description: Mastermind plugin-manager — bookkeeping only — not enforced by the Org Runtime. npm-installs or uninstalls packages and records enabled/disabled state in `.monomind/plugins/registry.json`, which nothing loads. Mirrors PluginManager.tsx.
 type: domain-skill
 default_mode: confirm
 pick: low
@@ -8,7 +8,9 @@ pick: low
 
 # Mastermind Plugin Manager
 
-This skill is invoked by `mastermind:plugin-manager` or directly via `/mastermind-plugin-manager`.
+This skill is invoked directly via `/mastermind-plugin-manager`.
+
+**Bookkeeping only — not enforced by the Org Runtime.** It writes `.monomind/plugins/registry.json`, which no runtime code reads: installing, enabling, or disabling a plugin here does not load or unload anything.
 
 ---
 
@@ -200,7 +202,7 @@ jq --arg id "$plugin_id" --arg ts "$ts" \
   '.plugins = [(.plugins // [])[] | if .id == $id then .status = "disabled" | .disabledAt = $ts else . end]' \
   "$registryFile" > "$tmp" && mv "$tmp" "$registryFile"
 
-echo "Plugin '$plugin_id' DISABLED — will not load on next startup."
+echo "Plugin '$plugin_id' DISABLED (registry entry only)."
 ```
 
 ### check-updates

@@ -53,8 +53,6 @@ IF health.commitsBehind > 0 OR health.status != "fresh":
 **Step 2 — query the fresh index (run after Step 1 completes):**
 ```
 Call mcp__monomind__monograph_god_nodes({})         // load-bearing files — porting near them is dangerous
-Call mcp__monomind__monograph_community({})          // module cluster structure — boundary map
-Call mcp__monomind__monograph_surprises({})          // cross-community connectors — architectural seams
 Call mcp__monomind__monograph_stats({})              // fan-in/out percentile distribution
 Call mcp__monomind__monograph_query({ query: focus_hint OR "core architecture skills commands hooks agents" })
 ```
@@ -537,10 +535,9 @@ Before writing any code:
 
 ### 4A — Snapshot
 
-Generate a timestamp and save it — reuse the exact same value in Phase 5's diff call:
+Record the current commit — reuse the exact same value in Phase 5's diff call:
 ```
-SNAPSHOT_NAME = "pre-techport-" + new Date().toISOString().replace(/[:.]/g, '-').slice(0,19)
-Call mcp__monomind__monograph_snapshot({ name: SNAPSHOT_NAME })
+SNAPSHOT_SHA=$(git rev-parse HEAD)
 ```
 
 ### 4B — Resolve All Collisions First
@@ -704,7 +701,7 @@ cat {written_file} | grep -E "^export class|^export interface|^export function" 
 Call mcp__monomind__monograph_build({ codeOnly: true })
 
 # Show what changed
-Call mcp__monomind__monograph_diff({ from: SNAPSHOT_NAME, to: "live" })
+git diff --stat $SNAPSHOT_SHA
 ```
 
 **Print port summary:**

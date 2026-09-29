@@ -182,7 +182,14 @@ async function printDashboardUrl(cwd: string): Promise<void> {
       const { spawnSync } = await import('node:child_process');
       spawnSync(process.execPath, [controlStartPath], {
         cwd,
-        env: { ...process.env, CLAUDE_PROJECT_DIR: cwd, MONOMIND_HOOK_QUIET: '1' },
+        // #423: the SessionStart hook only starts the dashboard on opt-in;
+        // `org run` asks for it explicitly unless the user turned it off.
+        env: {
+          ...process.env,
+          CLAUDE_PROJECT_DIR: cwd,
+          MONOMIND_HOOK_QUIET: '1',
+          MONOMIND_DASHBOARD_AUTOSTART: process.env.MONOMIND_DASHBOARD_AUTOSTART || '1',
+        },
         timeout: 5000,
         stdio: 'ignore',
       });

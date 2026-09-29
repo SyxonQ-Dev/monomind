@@ -12,13 +12,21 @@
  */
 
 import { statSync } from 'node:fs';
+import { callerToolsWithFullAccess } from './runner-access.js';
 import { type RunnerSpec, runnerSpec } from './runner-registry.js';
+import {
+  resolveSandbox,
+  type SandboxMode,
+  type SandboxReport,
+  sandboxReport,
+} from './runner-sandbox.js';
 
-export type AccessMode = 'scoped' | 'full';
+export type AccessMode = 'scoped' | 'read' | 'full';
 
 /**
- * `canUseTool` for `--access full`: every call is allowed. This is passed to
- * ClaudeAgentRunner exactly like the scoped gate, so it still goes through
+ * `canUseTool` for `--access full`: every call is allowed. Subprocess
+ * runners never consult it for native tools (their CLI runs its own yolo
+ * mode); it is passed to ClaudeAgentRunner exactly like the scoped gate, so it still goes through
  * `coverEveryToolCall`'s PreToolUse hook — every call remains OBSERVED (the
  * hook still fires and could feed #357's tool_activity) even though none are
  * denied.
@@ -38,9 +46,10 @@ export interface AccessGuardError {
 /**
  * Guards checked before a full-access turn starts, regardless of what a
  * caller already validated:
- *  - refuse root (uid 0) — Claude Code itself refuses bypassPermissions as
- *    root, so give a clear message instead of an opaque runner failure.
- *  - refuse a runtime whose RunnerSpec doesn't advertise supportsFullAccess.
+ *  - refuse root (uid 0) on every runtime — Claude Code itself refuses
+ *    bypassPermissions as root, and no other CLI's yolo mode is safer there.
+ *  - refuse a runtime whose RunnerSpec doesn't advertise supportsFullAccess
+ *    (rev 19: every coding runtime does — see runner-registry.ts).
  *  - require an explicit, existing, directory `--cwd` — no silent inherit.
  */
 export function checkFullAccessGuards(opts: {
@@ -54,7 +63,7 @@ export function checkFullAccessGuards(opts: {
     return {
       code: 'unsafe',
       message:
-        '--access full refuses to run as root (uid 0) — the same restriction Claude Code itself applies to bypassPermissions.',
+        '--access full refuses to run as root (uid 0) on any runtime — the same restriction Claude Code itself applies to bypassPermissions.',
     };
   }
   if (!opts.spec?.supportsFullAccess) {
@@ -79,25 +88,89 @@ export function checkFullAccessGuards(opts: {
   return null;
 }
 
+/** #388: `--access read` needs a runtime with a real read-only mode
+ *  (runner-access.ts); anywhere else it is refused, never run as scoped. */
+export function checkReadAccess(
+  runtime: string,
+  spec: RunnerSpec | undefined,
+): AccessGuardError | null {
+  if (spec?.readAccess) return null;
+  return {
+    code: 'unsupported',
+    message: `--access read is not supported by runtime "${runtime}" (no verified read-only mode — see agent scan --json access_modes)`,
+  };
+}
+
+/** #389: caller tools on a runtime that can't take them (in this access
+ *  mode) are refused, never silently dropped. */
+export function checkCallerTools(
+  runtime: string,
+  access: AccessMode,
+  spec: RunnerSpec | undefined,
+): AccessGuardError | null {
+  if (!spec) return null; // unknown runtime: resolveExecRunner already failed
+  if (!spec.callerTools) {
+    return {
+      code: 'unsupported',
+      message: `--tools stdio is not supported by runtime "${runtime}"`,
+    };
+  }
+  if (access === 'full' && !callerToolsWithFullAccess(spec)) {
+    return {
+      code: 'unsupported',
+      message: `--tools stdio with --access full is not supported by runtime "${runtime}" (agent scan --json caller_tools_with_full_access)`,
+    };
+  }
+  return null;
+}
+
 /**
- * Resolves `opts.access` (default `'scoped'`) and, for `'full'`, runs every
- * guard and emits the protocol `error`+`done` pair itself on failure — kept
- * out of agent-exec.ts's own line budget (a file shared with #356/#357).
+ * Resolves `opts.access` (default `'scoped'`), runs the guards for `'read'`
+ * (#388) and `'full'` and, with caller tools, checkCallerTools (#389), and
+ * emits the protocol `error`+`done` pair itself on failure — kept out of
+ * agent-exec.ts's own line budget (a file shared with #356/#357).
  * `abort: true` means the caller must stop and return exit code 2.
  */
 export function resolveAccess(
-  opts: { runtime: string; cwd?: string; access?: AccessMode },
+  opts: { runtime: string; cwd?: string; access?: AccessMode; hasCallerTools?: boolean },
   emit: (ev: Record<string, unknown>) => void,
 ): { access: AccessMode; abort: boolean } {
   const access = opts.access ?? 'scoped';
-  if (access !== 'full') return { access, abort: false };
-  const err = checkFullAccessGuards({
-    runtime: opts.runtime,
-    cwd: opts.cwd,
-    spec: runnerSpec(opts.runtime),
-  });
+  const spec = runnerSpec(opts.runtime);
+  const accessErr =
+    access === 'scoped'
+      ? null
+      : access === 'read'
+        ? checkReadAccess(opts.runtime, spec)
+        : checkFullAccessGuards({ runtime: opts.runtime, cwd: opts.cwd, spec });
+  const err =
+    accessErr ?? (opts.hasCallerTools ? checkCallerTools(opts.runtime, access, spec) : null);
   if (!err) return { access, abort: false };
   emit({ v: 1, type: 'error', code: err.code, fatal: true, message: err.message });
   emit({ v: 1, type: 'done', exit_code: 2 });
   return { access, abort: true };
+}
+
+/**
+ * #396 (rev 23): resolves `--sandbox` into the mode the runner gets (capped
+ * by an org role's git level, never loosened — runner-sandbox.ts) and the
+ * `native_sandbox`/`approvals` the `start` event reports. A mode the runtime
+ * lacks emits `error {code:"unsupported"}` + `done` itself; `abort: true`
+ * means the caller must return exit code 2.
+ */
+export function resolveExecSandbox(
+  opts: {
+    runtime: string;
+    access: AccessMode;
+    sandbox?: SandboxMode;
+    env?: Record<string, string>;
+  },
+  emit: (ev: Record<string, unknown>) => void,
+): { mode?: SandboxMode; report: SandboxReport; abort: boolean } {
+  const { mode, error } = resolveSandbox(opts.runtime, opts.sandbox, [opts.env, process.env]);
+  const report = sandboxReport(opts.runtime, { access: opts.access, sandbox: mode, env: opts.env });
+  if (!error) return { mode, report, abort: false };
+  emit({ v: 1, type: 'error', code: 'unsupported', fatal: true, message: error });
+  emit({ v: 1, type: 'done', exit_code: 2 });
+  return { report, abort: true };
 }

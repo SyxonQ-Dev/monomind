@@ -49,6 +49,7 @@ describe('ToolActivityTracker: native start/end (fidelity "full")', () => {
         id: 'toolu_1',
         phase: 'start',
         name: 'Bash',
+        kind: 'shell',
         input: { command: 'go test ./...', description: 'Run tests' },
         parent_tool_use_id: null,
       },
@@ -347,10 +348,18 @@ describe('ToolActivityTracker: vendor lightweight mapping (fidelity "start-only"
       type: 'tool_activity',
       phase: 'start',
       name: 'shell',
+      kind: 'shell',
       input: null,
       parent_tool_use_id: null,
     });
     expect(typeof (events[0] as any).id).toBe('string');
+  });
+
+  it('a "full" runner may still send a lightweight signal for a call it cannot pair', () => {
+    const { events, emit } = collector();
+    const t = new ToolActivityTracker(emit, 'full');
+    t.onMessage({ type: 'tool_use', text: 'web_search' } as AgentMessage);
+    expect(events[0]).toMatchObject({ phase: 'start', name: 'web_search', kind: 'web' });
   });
 
   it('never emits for a runtime with no real per-tool signal (fidelity "none")', () => {
@@ -418,5 +427,50 @@ describe('ToolActivityTracker.toolCallCount (#360 full-access audit)', () => {
     const t = new ToolActivityTracker(emit, 'none');
     t.onMessage({ type: 'tool_use', text: 'turn started' } as AgentMessage);
     expect(t.toolCallCount).toBe(0);
+  });
+});
+
+describe('ToolActivityTracker: kind and exit_code (rev 19)', () => {
+  it("a vendor runner's rich tool_use pairs with its tool_result, keeping the provided kind and exit_code", () => {
+    const { events, emit } = collector();
+    const t = new ToolActivityTracker(emit, 'full');
+    t.onMessage({
+      type: 'tool_use',
+      tool_use_id: 'item_3',
+      tool: 'command_execution',
+      kind: 'shell',
+      input: { command: 'ls' },
+      parent_tool_use_id: null,
+    } as AgentMessage);
+    t.onMessage({
+      type: 'tool_result',
+      tool_use_id: 'item_3',
+      tool: 'command_execution',
+      is_error: true,
+      text: 'boom',
+      exit_code: 2,
+    } as AgentMessage);
+    expect(events[0]).toMatchObject({ phase: 'start', kind: 'shell', input: { command: 'ls' } });
+    expect(events[1]).toMatchObject({ phase: 'end', id: 'item_3', ok: false, exit_code: 2 });
+  });
+
+  it('an unknown provided kind falls back to the name table', () => {
+    const { events, emit } = collector();
+    const t = new ToolActivityTracker(emit, 'full');
+    t.onMessage({
+      type: 'tool_use',
+      tool_use_id: 'x',
+      tool: 'apply_patch',
+      kind: 'bogus',
+    } as AgentMessage);
+    expect(events[0]).toMatchObject({ kind: 'patch' });
+  });
+
+  it('omits exit_code on an end that has none', () => {
+    const { events, emit } = collector();
+    const t = new ToolActivityTracker(emit, 'full');
+    t.onMessage({ type: 'tool_use', tool_use_id: 'r', tool: 'Read' } as AgentMessage);
+    t.onMessage({ type: 'tool_result', tool_use_id: 'r', tool: 'Read', text: 'x' } as AgentMessage);
+    expect(events[1]).not.toHaveProperty('exit_code');
   });
 });

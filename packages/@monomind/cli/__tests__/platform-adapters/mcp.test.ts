@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { renderMcpArtifacts, mcpCommand, mcpServerEntry } from '../../src/platform-adapters/renderers/mcp.js';
+import { VERSION } from '../../src/index.js';
+import { MCP_FLOATING_PIN, renderMcpArtifacts, mcpCommand, mcpServerEntry } from '../../src/platform-adapters/renderers/mcp.js';
 import { CAPABILITIES, type PlatformAdapter } from '../../src/platform-adapters/types.js';
+
+const PINNED = ['npx', '-y', `--package=@monoes/monomindcli@${VERSION}`, 'monomind', 'mcp', 'start'];
 
 function adapter(overrides: Partial<PlatformAdapter> = {}): PlatformAdapter {
   return {
@@ -24,19 +27,20 @@ function adapter(overrides: Partial<PlatformAdapter> = {}): PlatformAdapter {
 
 describe('MCP renderer', () => {
   it('renders the Monomind command for POSIX and Windows shells', () => {
-    expect(mcpCommand('claude', 'linux')).toEqual(['npx', '-y', 'monomind@latest', 'mcp', 'start']);
-    expect(mcpCommand('claude', 'win32')).toEqual(['cmd', '/c', 'npx', '-y', 'monomind@latest', 'mcp', 'start']);
+    expect(mcpCommand('claude', 'linux')).toEqual(PINNED);
+    expect(mcpCommand('claude', 'win32')).toEqual(['cmd', '/c', ...PINNED]);
+    expect(mcpCommand('claude', 'linux', MCP_FLOATING_PIN)).toEqual(['npx', '-y', 'monomind@latest', 'mcp', 'start']);
   });
 
   it('preserves each target MCP configuration shape', () => {
     expect(mcpServerEntry('claude', { MONOMIND_MODE: 'v1' }, 'linux')).toEqual({
       command: 'npx',
-      args: ['-y', 'monomind@latest', 'mcp', 'start'],
+      args: PINNED.slice(1),
       env: { MONOMIND_MODE: 'v1' },
     });
     expect(mcpServerEntry('opencode', { MONOMIND_MODE: 'v1' }, 'win32')).toEqual({
       type: 'local',
-      command: ['cmd', '/c', 'npx', '-y', 'monomind@latest', 'mcp', 'start'],
+      command: ['cmd', '/c', ...PINNED],
       enabled: true,
       env: { MONOMIND_MODE: 'v1' },
     });
@@ -63,7 +67,7 @@ describe('MCP renderer', () => {
       entryPath: ['mcpServers', 'monomind'],
       content: JSON.stringify({
         command: 'npx',
-        args: ['-y', 'monomind@latest', 'mcp', 'start'],
+        args: PINNED.slice(1),
         env: { MONOMIND_MODE: 'v1' },
       }),
     }]);

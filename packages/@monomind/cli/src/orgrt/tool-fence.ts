@@ -116,6 +116,18 @@ export async function runToolRound(
       results: calls.map(() => roundCapResult(cap)),
       note: `[monomind] tool-call round cap (${cap}) reached — ${calls.length} pending tool call(s) returned unrun; the role gets one wrap-up round`,
     };
+  // #389: a round whose calls all target concurrent tools starts them
+  // together (results stay in call order); any other round runs in order.
+  const concurrent = calls.every(
+    (c) => args.tools.find((t) => t.name === c.name)?.concurrent === true,
+  );
+  if (concurrent) {
+    return {
+      results: await Promise.all(
+        calls.map((call) => executeToolCall(args.tools, call, args.canUseTool)),
+      ),
+    };
+  }
   const results: string[] = [];
   for (const call of calls) results.push(await executeToolCall(args.tools, call, args.canUseTool));
   return { results };

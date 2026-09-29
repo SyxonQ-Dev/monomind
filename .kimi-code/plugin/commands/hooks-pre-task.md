@@ -59,7 +59,7 @@ Then use the agent suggestions to guide your approach.
 ## MCP Tool
 
 ```javascript
-mcp__monomind__hooks_pre_task({
+mcp__monomind__hooks_pre-task({
   taskId: "task-123",
   description: "Implement authentication",
   autoSpawn: false,

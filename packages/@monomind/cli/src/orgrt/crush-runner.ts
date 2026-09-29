@@ -75,7 +75,6 @@
  *
  * Org tools — FENCE PROTOCOL: same approach as the other subprocess runners.
  */
-import { spawn } from 'node:child_process';
 import {
   type AgentMessage,
   type AgentRunArgs,
@@ -84,6 +83,7 @@ import {
 } from './agent-runner.js';
 import { maskedCommand } from './authority-mask.js';
 import { classifyStderr } from './kimicode-runner.js';
+import { spawnRunnerProcess } from './process-group-spawn.js';
 import { omitAnthropicManagedKeys } from './provider.js';
 import {
   buildToolProtocol,
@@ -213,8 +213,10 @@ export class CrushAgentRunner implements AgentRunner {
               yield { type: 'assistant', text: ev.text };
             } else if (ev.kind === 'tool') {
               // Liveness only: session.ts never renders tool_use as chat —
-              // it feeds the StateDetector and refreshes last-activity.
-              yield { type: 'tool_use', text: ev.text };
+              // it feeds the StateDetector and refreshes last-activity. No
+              // label: crush reports no native tool calls, and a bare ping
+              // never becomes a tool_activity event.
+              yield { type: 'tool_use' };
             }
           }
           sessionStarted = true;
@@ -305,6 +307,8 @@ export class CrushAgentRunner implements AgentRunner {
     // (confirmed live: a file-write tool call completed with no prompt),
     // so this isn't a missing-permission gap either — passing it just
     // made every single invocation fail with a non-zero exit. See #180.
+    // Full access needs nothing more for the same reason, and crush
+    // isolates none of the user's config (so `--settings` needs nothing).
     const cliArgs: string[] = ['run', prompt];
     if (args.model) cliArgs.push('--model', args.model);
     if (continueSession) cliArgs.push('--continue');
@@ -321,11 +325,17 @@ export class CrushAgentRunner implements AgentRunner {
     };
     if (proxy && this.usageProxyOpts) env[this.usageProxyOpts.baseUrlEnvVar] = proxy.url();
 
-    const child = spawn(...maskedCommand(args.authorityMask, bin, cliArgs), {
-      cwd: args.cwd,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    // Process-group leader under --access full (process-group-spawn.ts).
+    const proc = spawnRunnerProcess(
+      ...maskedCommand(args.authorityMask, bin, cliArgs),
+      {
+        cwd: args.cwd,
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+      args,
+    );
+    const child = proc.child;
 
     let stderrTail = '';
     child.stderr?.on('data', (c: Buffer) => {
@@ -341,18 +351,8 @@ export class CrushAgentRunner implements AgentRunner {
     const KILL_GRACE_MS = 5000;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     const killChild = (): void => {
-      try {
-        child.kill('SIGTERM');
-      } catch {
-        /* already gone */
-      }
-      killTimer = setTimeout(() => {
-        try {
-          child.kill('SIGKILL');
-        } catch {
-          /* already gone */
-        }
-      }, KILL_GRACE_MS);
+      proc.target.kill('SIGTERM');
+      killTimer = setTimeout(() => proc.target.kill('SIGKILL'), KILL_GRACE_MS);
       killTimer.unref?.();
     };
     const timer = setTimeout(() => {
@@ -367,7 +367,7 @@ export class CrushAgentRunner implements AgentRunner {
     }, STARTUP_GRACE_MS);
     // Abort hook (see AgentRunArgs.signal): kill the child so the stdout
     // loop below unblocks instead of orphaning it on iterator.return().
-    const unsubscribeAbort = killOnAbort(args.signal, child, KILL_GRACE_MS);
+    const unsubscribeAbort = killOnAbort(args.signal, proc.target, KILL_GRACE_MS);
 
     // Attach the exit promise BEFORE consuming stdout: on a spawn failure
     // (ENOENT, bad binary) the 'error' event fires almost immediately — if
@@ -440,6 +440,7 @@ export class CrushAgentRunner implements AgentRunner {
       clearTimeout(timer);
       if (hangTimer) clearTimeout(hangTimer);
       unsubscribeAbort();
+      proc.stop();
       if (child.exitCode === null && child.signalCode === null) {
         // NOT confirmed dead. Either the consumer abandoned this stream
         // mid-turn (session.ts's silent abort calls iterator.return(), the
