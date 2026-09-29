@@ -148,7 +148,7 @@ There is no separate background daemon. All <!-- doc-count:workers -->9<!-- /doc
 | `ddd` | 10 min | Low | Track DDD domain implementation progress |
 | `consolidate` | 6 hours | Low | RAPTOR memory consolidation → `.monomind/metrics/consolidation.json` |
 | `cache` | 1 hour | Background | Clean temp files, old logs, stale cache |
-| `reflexion` | 1 hour | Normal | Self-learning from failures — reflects on failed tasks, stores lessons for future retrieval (disabled by default) |
+| `reflexion` | 1 hour | Normal | Turns failed routed tasks in `route-outcomes.jsonl` into templated notes with keywords in `.monomind/reflexion-store.json`, for keyword lookup later (disabled by default) |
 
 ```bash
 monomind hooks worker list        # list all workers and status
@@ -164,7 +164,7 @@ monomind hooks worker run <name>  # run a worker on demand
 ### Lifecycle hooks (8)
 ```bash
 monomind hooks pre-edit      # Context and suggestions before editing
-monomind hooks post-edit     # Record edit outcome for learning
+monomind hooks post-edit     # Record edit outcome in the local pattern log
 monomind hooks pre-command   # Before bash command
 monomind hooks post-command  # After bash command
 monomind hooks pre-task      # Register task start, get model routing
@@ -177,7 +177,7 @@ monomind hooks session-restore  # Restore previous session
 ```bash
 monomind hooks route           # Route a task to optimal agent
 monomind hooks explain         # Explain routing decision
-monomind hooks pretrain        # Run the 4-step learning pipeline
+monomind hooks pretrain        # Scan hook activity into consolidated JSON state (no model is trained)
 monomind hooks metrics         # Show hook execution metrics
 monomind hooks transfer        # Transfer patterns (local file copy between project checkouts)
 monomind hooks list            # List all registered hooks
@@ -185,7 +185,7 @@ monomind hooks list            # List all registered hooks
 
 ### Workers & output (4)
 ```bash
-monomind hooks intelligence    # Pattern/trajectory logging (stats, pattern-*, trajectory-*) — nests the former `neural` subcommands (train, status, patterns, predict, optimize, export, list, import)
+monomind hooks intelligence    # JS pattern store, not a trained model: logs edit/outcome/trajectory records to local files and lists, searches, exports and imports them — nests the former `neural` subcommands (train, status, patterns, predict, optimize, export, list, import)
 monomind hooks notify          # Send notification
 monomind hooks worker          # Worker management: `worker list`, `worker run <name>`
 monomind hooks statusline      # Generate statusline output
@@ -202,7 +202,7 @@ monomind hooks coverage-gaps    # Show coverage gaps
 Keyword complexity heuristic: `model-route` returns a complexity score and the chosen tier, with no confidence value.
 ```bash
 monomind hooks model-route     # Model tier routing for a task
-monomind hooks model-outcome   # Record model outcome for learning
+monomind hooks model-outcome   # Record model routing outcome
 monomind hooks model-stats     # Show model performance stats
 ```
 

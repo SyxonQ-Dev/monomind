@@ -56,7 +56,7 @@ npx monomind@latest monoswarm init --topology hierarchical-mesh --max-agents 15 
 - At session wrap-up, distill durable insight (entities/relations/rules) once via `memory_kg_ingest` with `originRef` = session id; reuse existing entity names (`memory_kg_stats` with `glossary:true`).
 - Relationship questions → `memory_kg_search`. Bad ingest → `memory_kg_rollback` with the originRef.
 
-## AUTO-LEARNING PROTOCOL
+## PATTERN MEMORY PROTOCOL
 
 ### Before Starting Any Task
 
@@ -67,7 +67,7 @@ Bash("npx monomind@latest memory search --query '[task keywords]' --namespace pa
 # 2. Check if similar task was done before
 Bash("npx monomind@latest memory search --query '[task type]' --namespace tasks")
 
-# 3. Load learned optimizations
+# 3. Ask the central picker for an agent
 Bash("npx monomind@latest hooks route --task '[task description]'")
 ```
 
@@ -77,8 +77,8 @@ Bash("npx monomind@latest hooks route --task '[task description]'")
 # 1. Store successful pattern for future reference
 Bash("npx monomind@latest memory store --namespace patterns --key '[pattern-name]' --value '[what worked]'")
 
-# 2. Train neural patterns on the successful approach
-Bash("npx monomind@latest hooks post-edit --file '[main-file]' --train-neural true")
+# 2. Record the edit outcome in the local pattern log
+Bash("npx monomind@latest hooks post-edit --file '[main-file]' --success true")
 
 # 3. Record task completion with metrics
 Bash("npx monomind@latest hooks post-task --task-id '[id]' --success true --store-results true")
@@ -183,7 +183,7 @@ emitted for new projects by `src/init/claudemd-generator.ts` stops at code 9.
 | `session`   | 6           | Session state management, persistence, and replay (`session replay`)     | Working         |
 | `config`    | 7           | Configuration management and provider setup                              | Working         |
 | `status`    | 3           | System status monitoring with watch mode                                 | Working         |
-| `hooks`     | 28          | Self-learning hooks + <!-- doc-count:workers -->9<!-- /doc-count:workers --> background workers                               | Working         |
+| `hooks`     | 28          | Lifecycle hooks (pattern/outcome logging, agent picking) + <!-- doc-count:workers -->9<!-- /doc-count:workers --> background workers                               | Working         |
 | `org`       | <!-- doc-count:org-subcommands -->37<!-- /doc-count:org-subcommands -->          | SDK org runtime (skills, run [--dry-run], stop, pause, resume, reload, status, serve, supervisor, test-loop, logs, events, watch, report, memory [stats\|search\|rules\|rollback], costs, inbox, flow, questions, approvals, answer, approve, deny, gates, gate-approve, gate-reject, replay, resume-from [resumes live execution from a checkpoint — distinct from replay's debug-only event replay], branch, decisions, create, validate, migrate, list, delete, mark-complete, role) | Working |
 
 ### Advanced Commands
@@ -297,7 +297,7 @@ Full hook list with flags: `npx monomind@latest hooks list`. Worker list: `npx m
 # Core hooks
 npx monomind@latest hooks pre-task --description "[task]"
 npx monomind@latest hooks post-task --task-id "[id]" --success true
-npx monomind@latest hooks post-edit --file "[file]" --train-neural true
+npx monomind@latest hooks post-edit --file "[file]" --success true
 
 # Session management
 npx monomind@latest hooks session-start --session-id "[id]"
@@ -308,7 +308,7 @@ npx monomind@latest hooks session-restore --session-id "[id]"
 npx monomind@latest hooks route --task "[task]"
 npx monomind@latest hooks explain --topic "[topic]"
 
-# Neural learning
+# Scan hook activity into consolidated JSON state (no model is trained)
 npx monomind@latest hooks pretrain --path . --depth medium
 
 # Background workers
@@ -368,13 +368,13 @@ Bash("npx monomind@latest performance benchmark --suite all")
 Bash("npx monomind@latest performance profile --target '[component]'")
 ```
 
-### Session Persistence (Cross-Conversation Learning)
+### Session Persistence (Cross-Conversation Context)
 
 ```bash
 # At session start - restore previous context
 Bash("npx monomind@latest session restore --latest")
 
-# At session end - persist learned patterns
+# At session end - persist logged patterns and session state
 Bash("npx monomind@latest hooks session-end --generate-summary true --persist-state true --export-metrics true")
 ```
 

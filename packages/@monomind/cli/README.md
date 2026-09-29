@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>An open-source MCP server that extends Claude Code with a codebase knowledge graph, persistent memory, and multi-agent coordination.</strong><br/>
-  Apache 2.0 licensed &middot; Your code and memory stay local — see [Trust & Security](#trust--security) for the network calls Monomind does make
+  Apache 2.0 licensed &middot; Monomind keeps its own state on your machine; the AI tools it drives send prompts and code to their model providers — see [Trust & Security](#trust--security)
 </p>
 
 <p align="center">
@@ -40,7 +40,7 @@ Monomind is an **open-source CLI and MCP server** that plugs into Claude Code, [
 - **Reusable slash commands** — <!-- doc-count:mastermind-commands -->42<!-- /doc-count:mastermind-commands --> workflows (plan, execute, review, debug, release, research, worktree) available as `/mastermind:*` commands inside Claude Code.
 
 ```bash
-npm install -g monomind        # Apache 2.0 licensed, runs entirely on your machine
+npm install -g monomind        # Apache 2.0 licensed; runs locally and keeps its state locally
 cd your-project && monomind init
 claude mcp add monomind -- npx -y monomind@latest mcp start
 ```
@@ -98,7 +98,7 @@ Use `monomind init --target codex` (or `--codex`) to initialize only Codex. See 
 | Concern | Answer |
 |---|---|
 | **License** | [Apache 2.0](LICENSE) — use it however you want |
-| **Data privacy** | Your code and memory store stay local. Monomind does make a small number of outbound network calls. See [doc/privacy.md](doc/privacy.md) for the complete list of what's sent, when, and how to opt out of each. |
+| **Data privacy** | Monomind runs locally and stores its state locally: memory, code graph, document index and org state, embedded by a local model. The AI tools it drives (Claude Code, Codex, OpenCode, Kimi Code, Antigravity, and org runners) send your prompts and code to their model providers, including the memory and Second Brain excerpts injected into those prompts. Monomind itself also makes a few outbound calls: the one-time embedding model download, the npm update check, and opt-in features. See [doc/privacy.md](doc/privacy.md) for the complete list of what's sent, when, and how to opt out of each. |
 | **Dependencies** | Standard npm packages, but a large install: a fresh `npm install monomind` (2.18.5, Linux x64) adds 362 packages and 1.3 GB of `node_modules` — mostly `onnxruntime-node` (548 MB, local embeddings), the 232 MB Claude Code binary that `@anthropic-ai/claude-agent-sdk` pulls for Claude-backed org roles, and `onnxruntime-web` (141 MB). Five packages run install scripts, and three of them download binaries: `puppeteer` (about 660 MB of Chrome into `~/.cache/puppeteer`), `onnxruntime-node` (CUDA libraries from NuGet on Linux x64) and `better-sqlite3` (a prebuilt addon from GitHub). `PUPPETEER_SKIP_DOWNLOAD=1 ONNXRUNTIME_NODE_INSTALL=skip` skips the two big downloads. Native addons: better-sqlite3 and onnxruntime-node; tree-sitter (`web-tree-sitter`) and sql.js are WASM. Full breakdown: [doc/privacy.md](doc/privacy.md#install-time-downloads). |
 | **Permissions** | Registers as an MCP server — Claude Code controls what tools are available and prompts you before executing anything sensitive. |
 | **Source** | Fully open. Read every line at [github.com/monoes/monomind](https://github.com/monoes/monomind). |
@@ -157,7 +157,7 @@ monomind org stop content-team      # request a graceful stop
 monomind org list                   # every org + roles, schedule, status
 ```
 
-### Observe, steer, and let it learn
+### Observe, steer, and carry context between runs
 
 ```bash
 monomind org logs content-team --follow      # live event stream in the terminal
@@ -169,7 +169,7 @@ monomind org validate blog                   # schema + structural checks before
 monomind org run blog --dry-run              # preview each role's exact briefing
 ```
 
-Orgs are self-improving: the coordinator records every run's outcome (`org_complete`), the next run is briefed on it, and all agents can query accumulated cross-run memory with `org_recall` — a scheduled org gets smarter every cycle instead of starting cold. Crashed agent sessions restart automatically with backoff.
+Orgs carry context between runs: the coordinator records every run's outcome (`org_complete`), the next run is briefed on it, and all agents can query accumulated cross-run memory with `org_recall` — a scheduled org starts each cycle with what earlier cycles recorded instead of starting cold. Crashed agent sessions restart automatically with backoff.
 
 ### What runs under the hood
 
@@ -253,7 +253,7 @@ monomind org run sample-team      # run your first AI org (init writes a runnabl
 
 ## 📚 Second Brain — Your Documents, Retrieved by Meaning
 
-Drop documents (Markdown, TXT, PDF, DOCX) anywhere in your project and run `monomind init` — the Second Brain activates itself. No flags, no configuration, no accounts. Everything runs on your machine: a local embedding model (`Alibaba-NLP/gte-modernbert-base`, 768-dim, via transformers.js) and a local SQLite vector store. **Your notes never leave your computer.**
+Drop documents (Markdown, TXT, PDF, DOCX) anywhere in your project and run `monomind init` — the Second Brain activates itself. No flags, no configuration, no accounts. Indexing and search run on your machine: a local embedding model (`Alibaba-NLP/gte-modernbert-base`, 768-dim, via transformers.js) and a local SQLite vector store. **Your notes are indexed and stored locally** — but the excerpts search returns are injected into your AI tool's prompts, and go to its model provider with the rest of the prompt.
 
 From then on, every substantive prompt you type in Claude Code is automatically answered *with your own knowledge in context* — a hook retrieves the most relevant excerpts semantically (the always-on dashboard keeps the model warm, ~60ms per lookup) and injects them before Claude starts thinking. Ask "when do new parents get time off" and the parental-leave section of your handbook is already on the table, even though you never used the word "leave".
 
@@ -266,11 +266,11 @@ monomind doc export                # portable OKF bundle — move your brain bet
 
 > **Optional spreadsheet support:** `monomind init` never downloads SheetJS. To extract `.xlsx`, `.xls`, or `.ods` files, install it only when you need it: run `pnpm add xlsx` in a project using a local/npx Monomind install, or `npm install -g xlsx` when Monomind is installed globally. Until then, spreadsheet files are skipped while the rest of document ingestion continues.
 
-**And it follows you across projects.** Ingest a path from *outside* the current project (`monomind doc ingest ~/notes`, or add `--global`) and it lands in your personal global brain at `~/.monomind/global-brain` (override with `MONOMIND_GLOBAL_BRAIN_DIR`) — kept as a sibling of `~/.monomind/projects` specifically so `monomind cleanup --data` can never prune it — searchable from every project on the machine. All retrieval (CLI search, per-prompt injection, the dashboard) merges both stores automatically, with project knowledge winning ties and global hits labeled `[global]`. `doc export --global` moves your whole brain between machines as an OKF bundle — still no cloud, ever.
+**And it follows you across projects.** Ingest a path from *outside* the current project (`monomind doc ingest ~/notes`, or add `--global`) and it lands in your personal global brain at `~/.monomind/global-brain` (override with `MONOMIND_GLOBAL_BRAIN_DIR`) — kept as a sibling of `~/.monomind/projects` specifically so `monomind cleanup --data` can never prune it — searchable from every project on the machine. All retrieval (CLI search, per-prompt injection, the dashboard) merges both stores automatically, with project knowledge winning ties and global hits labeled `[global]`. `doc export --global` moves your whole brain between machines as an OKF bundle — a file you move yourself, with no cloud service involved.
 
 Retrieval quality is a tested invariant, not a hope: a golden-set eval (paraphrase queries against notes written in different vocabulary) runs in CI with an 80% recall bar.
 
-> **Privacy note:** the embedding model (~90MB) is fetched once from HuggingFace's CDN when your first document is indexed, then cached locally forever. That download is the only outbound request the Second Brain ever makes — your documents and queries never leave your machine. Offline at first index? Search degrades gracefully to keyword matching and `monomind doctor` tells you how to warm up later.
+> **Privacy note:** the embedding model (~90MB) is fetched once from HuggingFace's CDN when your first document is indexed, then cached locally forever. That download is the only outbound request the Second Brain's indexing and search make — your documents and queries are processed locally. Excerpts injected into a prompt are a different matter: they go to your AI tool's model provider with that prompt. Offline at first index? Search degrades gracefully to keyword matching and `monomind doctor` tells you how to warm up later.
 
 > **Which model where?** Monomind uses two local embedding models. `Snowflake/snowflake-arctic-embed-xs` (~88MB) serves semantic task routing only. Everything the memory bridge embeds — both the Second Brain document index and the persistent memory store, which share that one bridge — uses `Alibaba-NLP/gte-modernbert-base` (768-dim, ~90MB); there is no separate document model. See [Embeddings](./doc/commands/memory.md#hybrid-search-architecture--options) for the per-subsystem detail.
 
@@ -278,7 +278,7 @@ Retrieval quality is a tested invariant, not a hope: a golden-set eval (paraphra
 
 ## 🧠 Memory That Persists
 
-Every session, every agent, every org writes to a persistent memory store that survives across sessions — text plus embedding vectors in local SQLite (better-sqlite3, pure-WASM fallback), embedded by a local model. No cloud vector database, no API keys, no data transmission. The next time you run anything, Monomind already knows what was built, what failed, and which patterns work.
+Every session, every agent, every org writes to a persistent memory store that survives across sessions — text plus embedding vectors in local SQLite (better-sqlite3, pure-WASM fallback), embedded by a local model. No cloud vector database and no API keys; the store itself uploads nothing. Entries recalled into a prompt go to your AI tool's model provider with that prompt. The next time you run anything, the store holds what earlier sessions recorded about what was built, what failed, and which patterns worked.
 
 ```mermaid
 graph TD
@@ -322,14 +322,14 @@ Before touching any file, Monomind queries **Monograph** — a SQLite-backed kno
 
 ## 🎣 Hooks & Workers
 
-Monomind wires 28 hook subcommands into Claude Code across edit, task, command, and session lifecycle events — logging patterns, routing agents, and feeding the intelligence system.
+Monomind wires 28 hook subcommands into Claude Code across edit, task, command, and session lifecycle events — logging edits and outcomes to local pattern files and picking agents.
 
 ```mermaid
 flowchart LR
     CE["Claude Code\nEvent"] --> H["Hook Router"]
     H --> P["pre-edit\npre-task\npre-command"]
     H --> SS["session-start\nsession-end\nnotify"]
-    H --> I["route\nlearn"]
+    H --> I["route\nlog outcomes"]
     H --> T["teammate-idle\ntask-completed"]
 
     I --> DB[("patterns.json\nmemory store")]
@@ -440,7 +440,7 @@ graph TD
     style ORG fill:#F59E0B22,stroke:#F59E0B
 ```
 
-**Claude Code's Task tool drives in-session multi-agent work; `monomind org run` drives persistent background orgs.** Your code and memory stay local — see [Trust & Security](#trust--security) for the network calls Monomind does make.
+**Claude Code's Task tool drives in-session multi-agent work; `monomind org run` drives persistent background orgs.** Monomind keeps its own state on your machine; the AI tools it drives send prompts and code to their model providers — see [Trust & Security](#trust--security).
 
 ---
 

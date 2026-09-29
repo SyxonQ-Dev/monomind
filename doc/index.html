@@ -521,7 +521,7 @@ code { font-family: var(--ff-m); font-size: 0.85em; background: var(--surface2);
       <tbody>
         <tr><td class="mono">patterns.json / auto-memory-store.json</td><td>Learned patterns, prompt-time recall</td><td>Default hot path. Plain JSON, keyword matching.</td></tr>
         <tr><td class="mono">episodic/episodes.jsonl</td><td>Episodic recall</td><td>Keyword-matched against the prompt; injected as context.</td></tr>
-        <tr><td class="mono">SQLite + local embeddings (default)</td><td>Semantic + keyword search, local vectors</td><td>better-sqlite3 with sql.js WASM fallback; local HF embeddings; no data leaves the machine. LanceDB was removed 2026-07; a dormant pure-JS HNSW index is the scale-up path if needed.</td></tr>
+        <tr><td class="mono">SQLite + local embeddings (default)</td><td>Semantic + keyword search, local vectors</td><td>better-sqlite3 with sql.js WASM fallback; local HF embeddings; the store itself sends nothing off the machine (recalled entries still reach your AI tool's model provider inside prompts). LanceDB was removed 2026-07; a dormant pure-JS HNSW index is the scale-up path if needed.</td></tr>
       </tbody>
     </table>
     </div>
@@ -640,7 +640,7 @@ monomind doc ingest ./their-knowledge -s shared
     <div class="page-header">
       <span class="page-tag">Concepts</span>
       <h1 class="page-title">Hooks &amp; Workers</h1>
-      <p class="page-desc"><!-- doc-count:workers -->9<!-- /doc-count:workers --> background workers, an intelligence pipeline that learns from every edit, task, and session, and hook dispatch through 29 <code>hooks</code> CLI subcommands (a curated 17 shown below) built on 20 internally typed hook events (<code>PreEdit</code>, <code>PostEdit</code>, <code>SessionStart</code>...). Workers run in-process at session start — there is no separate daemon.</p>
+      <p class="page-desc"><!-- doc-count:workers -->9<!-- /doc-count:workers --> background workers, a pattern store that logs edits, task outcomes and session trajectories to local JSON files, and hook dispatch through 29 <code>hooks</code> CLI subcommands (a curated 17 shown below) built on 20 internally typed hook events (<code>PreEdit</code>, <code>PostEdit</code>, <code>SessionStart</code>...). Workers run in-process at session start — there is no separate daemon.</p>
     </div>
     <div class="section-title reveal">Hook Commands</div>
     <p class="reveal" style="color:var(--text2);font-size:13.5px;margin-bottom:12px;max-width:720px">These are <code>hooks</code> CLI subcommands (invoke as <code>npx monomind hooks &lt;name&gt;</code>) — a curated subset of the full 29. They aren't a 1:1 list of the 20 typed <code>HookEvent</code> registry/executor events (e.g. <code>PreEdit</code>/<code>PostEdit</code>); some rows below, like the intelligence and teams commands, are separate CLI/Claude-Code mechanisms rather than registry events.</p>
@@ -653,17 +653,17 @@ monomind doc ingest ./their-knowledge -s shared
         <tr><td class="mono">pre-command</td><td><span class="tag tag-accent">core</span></td><td>Intercept command before execution</td></tr>
         <tr><td class="mono">post-command</td><td><span class="tag tag-accent">core</span></td><td>Record command result</td></tr>
         <tr><td class="mono">pre-task</td><td><span class="tag tag-accent">core</span></td><td>Register task start; get AGENT_BOOSTER_AVAILABLE or TASK_MODEL_RECOMMENDATION</td></tr>
-        <tr><td class="mono">post-task</td><td><span class="tag tag-accent">core</span></td><td>Record completion; train patterns</td></tr>
+        <tr><td class="mono">post-task</td><td><span class="tag tag-accent">core</span></td><td>Record completion in the local outcome log</td></tr>
         <tr><td class="mono">session-start</td><td><span class="tag tag-cyan">session</span></td><td>Restore cross-session context</td></tr>
         <tr><td class="mono">session-end</td><td><span class="tag tag-cyan">session</span></td><td>Persist state; flush working memory</td></tr>
         <tr><td class="mono">session-restore</td><td><span class="tag tag-cyan">session</span></td><td>Replay session state into context</td></tr>
         <tr><td class="mono">notify</td><td><span class="tag tag-cyan">session</span></td><td>Push notification to user or external system</td></tr>
         <tr><td class="mono">route</td><td><span class="tag tag-violet">intelligence</span></td><td>Best registry agent for a task, through the central picker</td></tr>
         <tr><td class="mono">explain</td><td><span class="tag tag-violet">intelligence</span></td><td>Explain the picker's decision for a task</td></tr>
-        <tr><td class="mono">pretrain</td><td><span class="tag tag-violet">intelligence</span></td><td>Pre-training signal ingestion</td></tr>
-        <tr><td class="mono">transfer</td><td><span class="tag tag-violet">intelligence</span></td><td>Transfer learning across tasks</td></tr>
+        <tr><td class="mono">pretrain</td><td><span class="tag tag-violet">intelligence</span></td><td>Scan hook activity into consolidated JSON state (no model is trained)</td></tr>
+        <tr><td class="mono">transfer</td><td><span class="tag tag-violet">intelligence</span></td><td>Copy stored patterns from another local project</td></tr>
         <tr><td class="mono">teammate-idle</td><td><span class="tag tag-amber">teams</span></td><td>Auto-assign task to idle teammate</td></tr>
-        <tr><td class="mono">task-completed</td><td><span class="tag tag-amber">teams</span></td><td>Train patterns; notify team lead</td></tr>
+        <tr><td class="mono">task-completed</td><td><span class="tag tag-amber">teams</span></td><td>Record the outcome; notify team lead</td></tr>
       </tbody>
     </table>
     </div>
@@ -784,7 +784,7 @@ monomind doc ingest ./their-knowledge -s shared
       <div class="cmd-item" data-search="task update status priority"><div class="cmd-name">task update &lt;id&gt;</div><div class="cmd-desc">Update task status, priority, assignee</div></div>
       <div class="cmd-item" data-search="task delete remove"><div class="cmd-name">task delete &lt;id&gt;</div><div class="cmd-desc">Remove a task permanently</div></div>
       <div class="cmd-item" data-search="hooks pre-task before task start"><div class="cmd-name">hooks pre-task</div><div class="cmd-desc">Register task start; get routing recommendation</div></div>
-      <div class="cmd-item" data-search="hooks post-task after task complete"><div class="cmd-name">hooks post-task</div><div class="cmd-desc">Record completion; trigger learning</div></div>
+      <div class="cmd-item" data-search="hooks post-task after task complete"><div class="cmd-name">hooks post-task</div><div class="cmd-desc">Record completion in the local outcome log</div></div>
       <div class="cmd-item" data-search="hooks pre-edit before file edit"><div class="cmd-name">hooks pre-edit</div><div class="cmd-desc">Context suggestions before file edit</div></div>
       <div class="cmd-item" data-search="hooks post-edit after file edit"><div class="cmd-name">hooks post-edit</div><div class="cmd-desc">Record edit outcome for patterns</div></div>
       <div class="cmd-item" data-search="hooks session start begin restore"><div class="cmd-name">hooks session-start</div><div class="cmd-desc">Restore cross-session context</div></div>

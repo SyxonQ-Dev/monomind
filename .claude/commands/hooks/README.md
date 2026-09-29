@@ -4,7 +4,7 @@ name: hooks:README
 
 # Hooks Commands
 
-Self-learning hooks system for intelligent workflow automation. Invoked as `npx monomind hooks <subcommand>`.
+Lifecycle hooks that log edits, outcomes and trajectories to local pattern files and pick agents. No model is trained. Invoked as `npx monomind hooks <subcommand>`.
 
 ## Commands (invoke as slash commands)
 
@@ -27,7 +27,7 @@ pre-task          Register task start and get agent suggestions + model routing
 post-task         Record task completion for learning
 session-end       End current session and persist state
 session-restore   Restore a previous session
-route             Route task to optimal agent using learned patterns
+route             Route task to an agent through the central picker
 explain           Explain routing decision with transparency
 pretrain          Bootstrap intelligence from repository (4-step pipeline + embeddings)
 metrics           View learning metrics dashboard
