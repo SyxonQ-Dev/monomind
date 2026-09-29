@@ -4,9 +4,16 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+## [2.18.4] — 2026-09-29
+
 ### Added
 
 - **`knowledge-profile-captures` capability** (agent-exec protocol rev 15). `monomind --version --json` now advertises the per-profile web capture behaviour that shipped in 2.18.3: profile envelopes ingest into `profile:<id>` (query-string URLs included), `transcript.md` / `summary.md` are indexed beside `readable.md` instead of superseding it, and `doc search|cite|related|lookup|list --scope profile:<id>` read that store. 2.18.3 itself has the behaviour but not the flag, so callers accept version ≥ 2.18.3 **or** the capability.
+
+### Security
+
+- `undici` bumped from 8.10.0 to 8.11.2 (`chore(deps): bump undici in the npm_and_yarn group across 1 directory`, a6e177f00).
+- `ip-address` (transitive) bumped to 10.7.2, closing Dependabot alerts [#245](https://github.com/monoes/monomind/security/dependabot/245) and [#246](https://github.com/monoes/monomind/security/dependabot/246) (`chore(deps): bump transitive ip-address to 10.7.2`, 6ca3f2d42).
 
 ## [2.18.3] — 2026-09-29
 
