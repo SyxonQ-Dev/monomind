@@ -24,6 +24,9 @@
  * send `model: deepseek-v4-pro` and `output_config: {effort: "max"}`. The
  * ACP profile (`dsh --profile acp`) also exposes both, but would mean a
  * second protocol for the same turn; the patch keeps one code path.
+ * `<route>/<model>` picks another route, including free models over the
+ * bundled pi-ai adapter (openrouter `:free`, nvidia) — the patch then also
+ * turns that route on (dsh-runner-models.ts).
  *
  * Events (dsh-headless json-stream): session{sessionId,cwd};
  * status{turn_start|step_start|step_end(+usage)|turn_end(reason)};
@@ -62,11 +65,11 @@ import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentMessage, AgentRunArgs, AgentRunner } from './agent-runner.js';
+import { dshEffortFor, dshPiAiRow, dshSplitModel } from './dsh-runner-models.js';
 import {
   DSH_DEFAULT_SELECTION,
   DSH_INSTALL_HINT,
   DSH_SUPPORTED_RANGE,
-  dshEffort,
   dshFailure,
   dshModelPatchYaml,
   dshVersionSupported,
@@ -143,20 +146,29 @@ export class DshAgentRunner implements AgentRunner {
     env: NodeJS.ProcessEnv,
   ): Promise<{ path: string; dir: string } | undefined> {
     if (!args.model && !args.effort) return undefined;
-    let current: ReturnType<typeof parseDumpedSelection> = {};
+    let dump = '';
     try {
-      current = parseDumpedSelection(
-        await run(bin, ['--profile', 'headless', '--dump-config'], { cwd: args.cwd, env }),
-      );
+      dump = await run(bin, ['--profile', 'headless', '--dump-config'], { cwd: args.cwd, env });
     } catch {
       /* fall back to dsh's shipped default route below */
     }
-    const provider = current.provider ?? DSH_DEFAULT_SELECTION.provider;
-    const yaml = dshModelPatchYaml({
-      provider,
-      model: args.model || current.model || DSH_DEFAULT_SELECTION.model,
-      reasoningEffort: args.effort ? dshEffort(provider, args.effort) : current.reasoningEffort,
-    });
+    const current = parseDumpedSelection(dump);
+    const picked = args.model ? dshSplitModel(args.model) : undefined;
+    const provider = picked?.provider ?? current.provider ?? DSH_DEFAULT_SELECTION.provider;
+    const model = picked?.model || current.model || DSH_DEFAULT_SELECTION.model;
+    const yaml = dshModelPatchYaml(
+      {
+        provider,
+        model,
+        // A new route drops the old route's effort (its levels may not apply).
+        reasoningEffort: args.effort
+          ? dshEffortFor(provider, model, args.effort)
+          : provider === current.provider
+            ? current.reasoningEffort
+            : undefined,
+      },
+      dshPiAiRow(provider, dump),
+    );
     const dir = fs.mkdtempSync(join(tmpdir(), 'monomind-dsh-'));
     const path = join(dir, 'model.patch.yml');
     fs.writeFileSync(path, yaml, { mode: 0o600 });

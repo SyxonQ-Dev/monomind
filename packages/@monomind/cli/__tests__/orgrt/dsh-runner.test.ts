@@ -69,6 +69,28 @@ const MISSING_CREDENTIAL = [
   '{"type":"status","phase":"turn_end","turn":1,"reason":{"kind":"error","error":{"message":"llm-deepseek: no API key for provider route \\"deepseek-official\\"; store DEEPSEEK_API_KEY through the credentials service (the web Models page writes it), or export DEEPSEEK_API_KEY in the launching environment","code":"MISSING_CREDENTIAL"}}}',
   '{"type":"final","text":""}',
 ];
+// Free model over the pi-ai adapter: the real dsh against a local
+// OpenAI-compatible mock standing in for OpenRouter (no key available).
+const FREE_SUCCESS = [
+  '{"type":"session","sessionId":"session-2a1b329b-d689-4378-bdb6-62b98ed5cadb","cwd":"/w"}',
+  '{"type":"status","phase":"turn_start","turn":1}',
+  '{"type":"status","phase":"step_start","turn":1,"step":1}',
+  '{"type":"text","text":"hello from free model"}',
+  '{"type":"status","phase":"step_end","turn":1,"step":1,"usage":{"inputTokens":120,"outputTokens":7,"totalTokens":127}}',
+  '{"type":"status","phase":"turn_end","turn":1,"reason":{"kind":"completed"}}',
+  '{"type":"final","text":"hello from free model"}',
+];
+// Live captures, same setup: no OPENROUTER_API_KEY, and an effort the model lacks.
+const FREE_NO_KEY = [
+  FREE_SUCCESS[0],
+  '{"type":"status","phase":"turn_end","turn":1,"reason":{"kind":"error","error":{"message":"llm-pi-ai: no credential for provider route \\"openrouter\\"; its profile resolves OPENROUTER_API_KEY, which is not set — store OPENROUTER_API_KEY through the credentials service (the web Models page writes it) or export it, and remove apiKeyEnv only if this provider should authenticate from pi-ai\'s own environment discovery","code":"MISSING_CREDENTIAL"}}}',
+  '{"type":"final","text":""}',
+];
+const FREE_BAD_EFFORT = [
+  FREE_SUCCESS[0],
+  '{"type":"status","phase":"turn_end","turn":1,"reason":{"kind":"error","error":{"message":"provider \\"openrouter\\" model \\"z-ai/glm-5.2:free\\" does not support reasoning effort \\"minimal\\"","code":"UNSUPPORTED_REASONING_EFFORT"}}}',
+  '{"type":"final","text":""}',
+];
 const CWD_REFUSAL = [
   '{"type":"error","message":"session \\"session-263f9353-d45f-457f-9b14-ae2fb3a1e453\\" was recorded in \\"/home/u/a\\", not \\"/w\\""}',
 ];
@@ -244,6 +266,35 @@ describe('DshAgentRunner', () => {
     expect(patchText).toContain('provider: "openrouter"');
     expect(patchText).toContain('model: "qwen/qwen3"');
     expect(patchText).toContain('reasoningEffort: "medium"');
+  });
+
+  it('a free model: <route>/<model> selects the route and turns it on in the patch', async () => {
+    let patchText = '';
+    vi.mocked(cp.spawn).mockImplementation(((_b: string, argv: string[]) => {
+      patchText = fs.readFileSync(argv[argv.indexOf('--patch') + 1], 'utf8');
+      return mockChild(FREE_SUCCESS);
+    }) as any);
+    const msgs = await collect({ model: 'openrouter/z-ai/glm-5.2:free', effort: 'max' });
+    expect(patchText).toContain('provider: "openrouter"');
+    expect(patchText).toContain('model: "z-ai/glm-5.2:free"');
+    expect(patchText).toContain('reasoningEffort: "xhigh"'); // clamped: glm-5.2 has no max
+    expect(patchText).toContain('- id: llm-pi-ai\n  config:\n    providers:\n      "openrouter":\n        apiKeyEnv: "OPENROUTER_API_KEY"');
+    expect(msgs.at(-1)).toMatchObject({ type: 'result', subtype: 'success', input_tokens: 120, output_tokens: 7 });
+  });
+
+  it('a free route without its key is a fatal error naming that key', async () => {
+    vi.mocked(cp.spawn).mockReturnValue(mockChild(FREE_NO_KEY, 1));
+    const err = await collect({ model: 'openrouter/z-ai/glm-5.2:free' }).catch((e) => e);
+    expect(err.message).toMatch(/MISSING_CREDENTIAL/);
+    expect(err.message).toMatch(/— export OPENROUTER_API_KEY/);
+    expect(err.fatal).toBe(true);
+  });
+
+  it('an effort the model does not support is a fatal, named error', async () => {
+    vi.mocked(cp.spawn).mockReturnValue(mockChild(FREE_BAD_EFFORT, 1));
+    const err = await collect().catch((e) => e);
+    expect(err.message).toMatch(/UNSUPPORTED_REASONING_EFFORT.*pick another effort or model/);
+    expect(err.fatal).toBe(true);
   });
 
   it('missing credential is a fatal error naming DEEPSEEK_API_KEY', async () => {

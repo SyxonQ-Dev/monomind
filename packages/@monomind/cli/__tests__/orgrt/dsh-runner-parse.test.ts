@@ -3,7 +3,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   dshCanonicalTool,
-  dshEffort,
   dshFailure,
   dshModelPatchYaml,
   dshShellExitCode,
@@ -11,6 +10,7 @@ import {
   parseDshLine,
   parseDumpedSelection,
 } from '../../src/orgrt/dsh-runner-parse.js';
+import { dshEffortFor } from '../../src/orgrt/dsh-runner-models.js';
 import { dshArgs, dshPermissionMode } from '../../src/orgrt/dsh-runner-stream.js';
 
 describe('dshCanonicalTool', () => {
@@ -80,7 +80,7 @@ describe('model + effort patch', () => {
   });
 
   it('maps effort onto DeepSeek levels, verbatim elsewhere', () => {
-    expect(['off', 'low', 'medium', 'high', 'xhigh', 'max'].map((e) => dshEffort('deepseek-official', e as any))).toEqual([
+    expect(['off', 'low', 'medium', 'high', 'xhigh', 'max'].map((e) => dshEffortFor('deepseek-official', 'deepseek-flash', e as any))).toEqual([
       'off',
       'low',
       'high',
@@ -88,8 +88,8 @@ describe('model + effort patch', () => {
       'max',
       'max',
     ]);
-    expect(dshEffort('deepseek-account', 'medium')).toBe('high');
-    expect(dshEffort('openrouter', 'medium')).toBe('medium');
+    expect(dshEffortFor('deepseek-account', 'deepseek-flash', 'medium')).toBe('high');
+    expect(dshEffortFor('openrouter', 'qwen/qwen3', 'medium')).toBe('medium');
   });
 
   it('reads the dumped selection, skipping !!js values', () => {
