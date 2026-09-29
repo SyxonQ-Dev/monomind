@@ -334,8 +334,8 @@ export async function setApproval(
       agent.mailbox.push(
         `[approval] ${action}: ${approved ? 'APPROVED' : 'DENIED'} — ` +
           (approved
-            ? `a human approved your pending ${action} call; repeat that identical call now and it will run.`
-            : `a human refused your pending ${action} call; do not retry it — choose another approach. Your task queue is not stuck.`),
+            ? `a human approved your pending ${action} call(s); repeat the identical call now and it will run.`
+            : `a human refused your pending ${action} call(s); do not retry them — choose another approach. Your task queue is not stuck.`),
       );
     }
 

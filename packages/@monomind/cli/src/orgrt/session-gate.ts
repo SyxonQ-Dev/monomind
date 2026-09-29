@@ -25,7 +25,10 @@ export function approvalDeniedMessage(toolName: string): string {
   return (
     `Tool "${toolName}" was denied by guardrail approval — a human refused this one ${toolName} call. ` +
     `Your task queue is not stuck and your other tools still work. ` +
-    `Do not retry the identical call (it stays denied); choose another approach, or report the blocker via org_send.`
+    `Do not retry the identical call (it stays denied); ` +
+    (toolName === 'org_send'
+      ? `choose another approach, for example record what you needed to send in your task result.`
+      : `choose another approach, or report the blocker via org_send.`)
   );
 }
 
