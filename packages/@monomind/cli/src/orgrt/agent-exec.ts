@@ -70,7 +70,8 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
     return 2;
   }
 
-  const { access, abort: accessDenied } = resolveAccess(opts, emit); // #355
+  const hasCallerTools = (opts.toolSpecs?.length ?? 0) > 0;
+  const { access, abort: accessDenied } = resolveAccess({ ...opts, hasCallerTools }, emit); // #355
   if (accessDenied) return 2;
   // Tool specs (§4). The bridge itself is constructed below, after
   // terminate() exists (its cancel callback wires into termination).
@@ -80,6 +81,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
     name: t.name,
     description: t.description,
     schema: t.schema ? jsonSchemaToZodShape(t.schema) : {},
+    concurrent: true, // #389: parallel calls go to the caller at once (§4.3)
     handler: (args: Record<string, unknown>) =>
       bridge ? bridge.call(t.name, args) : Promise.resolve({ text: 'ERROR: tools not bridged' }),
   }));

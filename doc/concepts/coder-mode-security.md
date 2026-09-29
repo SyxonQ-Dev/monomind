@@ -251,6 +251,15 @@ status`/`git diff`/`git show`; `find` and `rg` read whatever is in the tree. `--
 entries are trusted exactly as in scoped mode. Callers that need no network or no reads outside
 the project should use a runtime sandbox (codex) or run the turn in a container.
 
+### 2.8 Caller tools with full access (rev 22, issue #389)
+
+`--access full --tools stdio` adds the caller's own tools to a full-access turn; it grants nothing
+the caller did not already hold (each call is executed by the caller, which sees every `tool_call`
+frame). On claude the caller tools are marked `readOnlyHint` so Claude Code runs parallel calls
+concurrently. That annotation is a scheduling hint, not a claim monomind relies on for security:
+the caller's tools may well write, and in `scoped`/`read` mode the gate allows them by name
+exactly as before. `--allow-bash-prefix` stays a usage error with `--access full`.
+
 ## 3. What callers own (not monomind's job)
 
 - **mono-agent's coder-mode gating**: off by default, a risk-confirmation dialog before first use,

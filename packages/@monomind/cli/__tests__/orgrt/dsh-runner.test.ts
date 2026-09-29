@@ -15,6 +15,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import type { AgentMessage, AgentRunArgs } from '../../src/orgrt/agent-runner.js';
 import { DshAgentRunner } from '../../src/orgrt/dsh-runner.js';
+import {
+  callerFence,
+  expectAllCallsBeforeResults,
+  expectCallerRoundTrip,
+  rosterResult,
+  runFullAccessToolTurn,
+} from '../../src/__tests__/caller-tool-turn.js';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn(), execFile: vi.fn(), spawnSync: vi.fn() }));
 
@@ -361,5 +368,42 @@ describe('DshAgentRunner', () => {
     }) as any);
     await expect(collect()).rejects.toThrow(/npm i -g @deepseek-ai\/dsh/);
     expect(cp.spawn).not.toHaveBeenCalled();
+  });
+});
+
+describe('#389 dsh: full access + stdio caller tools', () => {
+  beforeEach(() => {
+    vi.mocked(cp.spawn).mockReset();
+    mockExecFile();
+  });
+
+  /** A fresh dsh session whose only reply is `text`, then the resumed round's `done`. */
+  const rounds = (text: string) => {
+    const first = [SUCCESS[0], JSON.stringify({ type: 'text', text }), SUCCESS.at(-2) as string];
+    const second = [SUCCESS[0], '{"type":"text","text":"done"}', ...SUCCESS.slice(-2)];
+    vi.mocked(cp.spawn).mockReturnValueOnce(mockChild(first)).mockReturnValueOnce(mockChild(second));
+  };
+  const stdinOf = (i: number) =>
+    vi.mocked((vi.mocked(cp.spawn).mock.results[i].value as any).stdin.end).mock.calls[0][0] as string;
+
+  it('a full-access turn calls a stdio tool and gets the result back', async () => {
+    rounds(`Checking.\n${callerFence('core')}`);
+    const turn = await runFullAccessToolTurn('dsh', new DshAgentRunner('/bin/dsh'));
+    expectCallerRoundTrip(turn, ['core']);
+    expect(spawnCall(0)[2].env.DSH_PERMISSION_MODE).toBe('danger-full-access');
+    expect(spawnCall(0)[1]).not.toContain('--session-id');
+    expect(spawnCall(1)[1]).toContain(SID);
+    // Tool protocol in the first prompt, the caller's answer in the resumed one.
+    expect(stdinOf(0)).toContain('org_roster');
+    expect(stdinOf(1)).toContain(rosterResult('core'));
+  });
+
+  it('two parallel caller calls: both tool_call frames before either tool_result', async () => {
+    rounds(`Checking both.\n${callerFence('core')}\n${callerFence('qa')}`);
+    const turn = await runFullAccessToolTurn('dsh', new DshAgentRunner('/bin/dsh'), { expectCalls: 2 });
+    expectCallerRoundTrip(turn, ['core', 'qa']);
+    expectAllCallsBeforeResults(turn, 2);
+    expect(stdinOf(1)).toContain(rosterResult('core'));
+    expect(stdinOf(1)).toContain(rosterResult('qa'));
   });
 });

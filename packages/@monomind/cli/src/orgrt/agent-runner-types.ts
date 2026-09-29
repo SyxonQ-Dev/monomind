@@ -19,6 +19,12 @@ export interface OrgToolDef {
    *  (the built-in org tools). `hints` maps a key callers are known to
    *  confuse with a real one to the correction the error names. */
   strict?: { hints?: Record<string, string> };
+  /** #389: calls to this tool made in one assistant message may run at the
+   *  same time (agent exec's caller tools: each is its own stdio round trip,
+   *  matched by id). Fence runners start such a round's calls together;
+   *  ClaudeAgentRunner marks the tool `readOnlyHint`, which is what makes
+   *  Claude Code run MCP calls concurrently. Unset: one after another. */
+  concurrent?: boolean;
   handler: (args: Record<string, unknown>) => Promise<{ text: string }>;
 }
 

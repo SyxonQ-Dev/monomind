@@ -10,6 +10,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentMessage, AgentRunArgs } from '../../src/orgrt/agent-runner.js';
 import { AntigravityAgentRunner } from '../../src/orgrt/antigravity-runner.js';
 import { ToolActivityTracker } from '../../src/orgrt/tool-activity.js';
+import {
+  callerFence,
+  expectAllCallsBeforeResults,
+  expectCallerRoundTrip,
+  rosterResult,
+  runFullAccessToolTurn,
+} from '../../src/__tests__/caller-tool-turn.js';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 
@@ -130,5 +137,50 @@ describe('AntigravityAgentRunner coder mode', () => {
     const [, argv, opts] = vi.mocked(cp.spawn).mock.calls[0] as [string, string[], cp.SpawnOptions];
     expect(argv).toContain('--dangerously-skip-permissions');
     expect(opts.detached).toBe(process.platform !== 'win32');
+  });
+});
+
+// One agy invocation whose single agent_response step says `text`.
+const agyTurn = (text: string) => [
+  JSON.stringify({ event: 'init', conversation_id: CID, init: { cwd: '/w', tools: [] } }),
+  step({ step_index: 1, state: 'DONE', step_type: 'agent_response', text_delta: text }),
+  JSON.stringify({ event: 'result', result: { conversation_id: CID, status: 'SUCCESS' } }),
+];
+
+describe('#389 antigravity: full access + stdio caller tools', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const promptAt = (i: number) => {
+    const argv = vi.mocked(cp.spawn).mock.calls[i][1] as string[];
+    return argv[argv.indexOf('-p') + 1];
+  };
+
+  it('a full-access turn calls a stdio tool and gets the result back', async () => {
+    vi.mocked(cp.spawn)
+      .mockReturnValueOnce(mockChild(agyTurn(`Checking.\n${callerFence('core')}`)))
+      .mockReturnValueOnce(mockChild(agyTurn('done')));
+    const turn = await runFullAccessToolTurn('antigravity', new AntigravityAgentRunner('/bin/agy'));
+    expectCallerRoundTrip(turn, ['core']);
+    const calls = vi.mocked(cp.spawn).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0][1]).toContain('--dangerously-skip-permissions');
+    expect((calls[0][2] as cp.SpawnOptions).detached).toBe(process.platform !== 'win32');
+    // Tool protocol in the first prompt, the caller's answer in the resumed one.
+    expect(promptAt(0)).toContain('org_roster');
+    expect(promptAt(1)).toContain(rosterResult('core'));
+    expect(calls[1][1]).toEqual(expect.arrayContaining(['--conversation', CID]));
+  });
+
+  it('two parallel caller calls: both tool_call frames before either tool_result', async () => {
+    vi.mocked(cp.spawn)
+      .mockReturnValueOnce(mockChild(agyTurn(`${callerFence('core')}\n${callerFence('qa')}`)))
+      .mockReturnValueOnce(mockChild(agyTurn('done')));
+    const turn = await runFullAccessToolTurn('antigravity', new AntigravityAgentRunner('/bin/agy'), {
+      expectCalls: 2,
+    });
+    expectCallerRoundTrip(turn, ['core', 'qa']);
+    expectAllCallsBeforeResults(turn, 2);
+    expect(promptAt(1)).toContain(rosterResult('core'));
+    expect(promptAt(1)).toContain(rosterResult('qa'));
   });
 });

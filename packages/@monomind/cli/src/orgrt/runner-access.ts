@@ -20,6 +20,14 @@
  * deny-by-default `"*": "deny"` overrides every `allow`, while leaving `"*"`
  * out lets unlisted tools (user MCP servers) fall through to opencode's own
  * defaults. No verified read-only mode, so no `read`.
+ *
+ * `callerTools` (#389, rev 22): the runner exposes `--tools stdio` caller
+ * tools to the model and routes each call to its handler (the stdio bridge).
+ * claude and vercel register them as native tools; every other runner
+ * renders the fence protocol (tool-fence.ts) and runs the calls through
+ * `runToolRound`, in every access mode. `callerToolsWithFullAccess` is
+ * derived: callerTools && supportsFullAccess (the full-access path hands
+ * the same tools and the allow-all gate to the same runner code).
  */
 
 import type { RuntimeKind } from './daemon.js';
@@ -27,10 +35,12 @@ import type { RuntimeKind } from './daemon.js';
 export interface RunnerAccess {
   /** `agent exec --access read` is implemented for this runtime. */
   readAccess: boolean;
+  /** `--tools stdio` caller tools reach the model on this runtime. */
+  callerTools: boolean;
 }
 
-const NO_READ: RunnerAccess = { readAccess: false };
-const READ: RunnerAccess = { readAccess: true };
+const NO_READ: RunnerAccess = { readAccess: false, callerTools: true };
+const READ: RunnerAccess = { readAccess: true, callerTools: true };
 
 export const RUNNER_ACCESS: Record<RuntimeKind, RunnerAccess> = {
   claude: READ,
@@ -62,4 +72,12 @@ export function accessModes(spec: {
     ...(spec.readAccess ? (['read'] as const) : []),
     ...(spec.supportsFullAccess ? (['full'] as const) : []),
   ];
+}
+
+/** #389: caller tools together with `--access full` on this runtime. */
+export function callerToolsWithFullAccess(spec: {
+  callerTools: boolean;
+  supportsFullAccess: boolean;
+}): boolean {
+  return spec.callerTools && spec.supportsFullAccess;
 }

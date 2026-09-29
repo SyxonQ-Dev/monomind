@@ -10,6 +10,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import type { AgentMessage, AgentRunArgs } from '../../src/orgrt/agent-runner.js';
 import { PiAgentRunner } from '../../src/orgrt/pi-runner.js';
+import {
+  callerFence,
+  expectAllCallsBeforeResults,
+  expectCallerRoundTrip,
+  rosterResult,
+  runFullAccessToolTurn,
+} from '../../src/__tests__/caller-tool-turn.js';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 
@@ -157,5 +164,43 @@ describe('PiAgentRunner coder mode', () => {
     await collect({ effort: 'xhigh' });
     const a = argvAt(0);
     expect(a[a.indexOf('--thinking') + 1]).toBe('xhigh');
+  });
+});
+
+/** A pi turn with no native tools: the assistant just writes `text`. */
+const TEXT_TURN = (sid: string, text: string) => [
+  j({ type: 'session', version: 3, id: sid, cwd: '/w' }),
+  j({ type: 'agent_start' }),
+  j({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text }], usage: usage(0.01) } }),
+  j({ type: 'agent_end', messages: [] }),
+];
+
+describe('#389 pi: full access + stdio caller tools', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('a full-access turn calls a stdio tool and gets the result back', async () => {
+    vi.mocked(cp.spawn)
+      .mockReturnValueOnce(mockChild(TEXT_TURN('s-389', `Checking.\n${callerFence('core')}`)))
+      .mockReturnValueOnce(mockChild(TEXT_TURN('s-389', 'done')));
+    const turn = await runFullAccessToolTurn('pi', new PiAgentRunner('/bin/pi'));
+    expectCallerRoundTrip(turn, ['core']);
+    expect(vi.mocked(cp.spawn).mock.calls).toHaveLength(2);
+    // Tool protocol in the first prompt, the caller's answer in the resumed one.
+    expect(argvAt(0).at(-1)).toContain('org_roster');
+    expect(argvAt(1).at(-1)).toContain(rosterResult('core'));
+    expect(argvAt(1)[argvAt(1).indexOf('--session-id') + 1]).toBe('s-389');
+    const opts = vi.mocked(cp.spawn).mock.calls[0]?.[2] as cp.SpawnOptions;
+    expect(opts.detached).toBe(process.platform !== 'win32');
+  });
+
+  it('two parallel caller calls: both tool_call frames before either tool_result', async () => {
+    vi.mocked(cp.spawn)
+      .mockReturnValueOnce(mockChild(TEXT_TURN('s-389', `${callerFence('core')}\n${callerFence('qa')}`)))
+      .mockReturnValueOnce(mockChild(TEXT_TURN('s-389', 'done')));
+    const turn = await runFullAccessToolTurn('pi', new PiAgentRunner('/bin/pi'), { expectCalls: 2 });
+    expectCallerRoundTrip(turn, ['core', 'qa']);
+    expectAllCallsBeforeResults(turn, 2);
+    expect(argvAt(1).at(-1)).toContain(rosterResult('core'));
+    expect(argvAt(1).at(-1)).toContain(rosterResult('qa'));
   });
 });

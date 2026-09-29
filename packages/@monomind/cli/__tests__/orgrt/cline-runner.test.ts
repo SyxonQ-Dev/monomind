@@ -6,10 +6,17 @@ import * as cp from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentMessage, AgentRunArgs } from '../../src/orgrt/agent-runner.js';
 import { CLINE_TURN_ENV } from '../../src/orgrt/cline-runner-host.js';
 import { ClineAgentRunner } from '../../src/orgrt/cline-runner.js';
+import {
+  callerFence,
+  expectAllCallsBeforeResults,
+  expectCallerRoundTrip,
+  rosterResult,
+  runFullAccessToolTurn,
+} from '../../src/__tests__/caller-tool-turn.js';
 import {
   MODEL,
   SID,
@@ -313,4 +320,63 @@ it('cleans up the per-turn prompt file', async () => {
   await new Promise((r) => setTimeout(r, 20));
   const argv = spawned()[0][1] as string[];
   expect(existsSync(argv[3])).toBe(false);
+});
+
+describe('#389 cline: full access + stdio caller tools', () => {
+  /** The live json turn with its final reply swapped for `text`. */
+  const replying = (text: string) =>
+    SUCCESS.map((l) => {
+      const o = JSON.parse(l);
+      if (o.event?.contentType === 'text' || o.event?.type === 'done') o.event.text = text;
+      if (o.type === 'run_result') o.text = text;
+      return JSON.stringify(o);
+    });
+
+  /** Round one: a fresh json turn replying `text` (its FIFO prompt kept);
+   *  round two: the caller's answer resumes the session over ACP. The
+   *  history rows move to the turn's own (mkdtemp) cwd once it is known. */
+  function rounds(text: string) {
+    const acp = acpChild(ACP);
+    const rows = [successRow('x'), successRow('x'), successRow('y')];
+    let firstPrompt = '';
+    vi.mocked(cp.spawn)
+      .mockImplementationOnce(((_c: string, argv: string[]) => {
+        firstPrompt = readFileSync(argv[3], 'utf8');
+        for (const row of rows) row.cwd = argv[argv.lastIndexOf('-c') + 1];
+        return jsonChild(replying(text));
+      }) as any)
+      .mockReturnValueOnce(acp);
+    const host = fakeHost({ histories: rows.map((row) => [row]) });
+    const resumedPrompt = () =>
+      acp.written.map((l) => JSON.parse(l)).find((m) => m.method === 'session/prompt')?.params
+        .prompt[0].text as string;
+    return { runner: new ClineAgentRunner('cline', host), firstPrompt: () => firstPrompt, resumedPrompt };
+  }
+
+  beforeEach(() => vi.stubEnv('CLINE_API_KEY', PLACEHOLDER));
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('a full-access turn calls a stdio tool and gets the result back', async () => {
+    const r = rounds(`Checking.\n${callerFence('core')}`);
+    const turn = await runFullAccessToolTurn('cline', r.runner);
+    expectCallerRoundTrip(turn, ['core']);
+    expect(spawned().map((c) => c[0])).toEqual(['/bin/sh', 'cline']);
+    // Full access: auto-approve on the user's own config, in its own process group.
+    const [, argv, opts] = spawned()[0];
+    expect(argv).toEqual(expect.arrayContaining(['--act', '--auto-approve', 'true']));
+    expect(argv).not.toContain('--config');
+    expect((opts as cp.SpawnOptions).detached).toBe(process.platform !== 'win32');
+    // Tool protocol in the first prompt, the caller's answer in the resumed one.
+    expect(r.firstPrompt()).toContain('org_roster');
+    expect(r.resumedPrompt()).toContain(rosterResult('core'));
+  });
+
+  it('two parallel caller calls: both tool_call frames before either tool_result', async () => {
+    const r = rounds(`Checking both.\n${callerFence('core')}\n${callerFence('qa')}`);
+    const turn = await runFullAccessToolTurn('cline', r.runner, { expectCalls: 2 });
+    expectCallerRoundTrip(turn, ['core', 'qa']);
+    expectAllCallsBeforeResults(turn, 2);
+    expect(r.resumedPrompt()).toContain(rosterResult('core'));
+    expect(r.resumedPrompt()).toContain(rosterResult('qa'));
+  });
 });

@@ -17,6 +17,13 @@ import { AIDER_FALLBACK_NOTICE, AiderAgentRunner } from '../../src/orgrt/aider-r
 import { resolveAiderPython, shebangPython } from '../../src/orgrt/aider-runner-resolve.js';
 import { parseCliLine, parseTokenCount } from '../../src/orgrt/aider-runner-stream.js';
 import { classifyStderr } from '../../src/orgrt/kimicode-runner.js';
+import {
+  callerFence,
+  expectAllCallsBeforeResults,
+  expectCallerRoundTrip,
+  rosterResult,
+  runFullAccessToolTurn,
+} from '../../src/__tests__/caller-tool-turn.js';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 
@@ -401,5 +408,39 @@ describe('aider helpers', () => {
     expect(shebangPython('#!/bin/sh', bin)).toBeUndefined();
     expect(resolveAiderPython('aider', { PATH: join(dir, 'nowhere'), HOME: dir })).toBeUndefined();
     expect(resolveAiderPython('aider', { MONOMIND_AIDER_PYTHON: py })).toBe(py);
+  });
+});
+
+describe('#389 aider: full access + stdio caller tools', () => {
+  beforeEach(() => vi.mocked(cp.spawn).mockReset());
+
+  /** Shim round one replies with `text`; the resumed round replies `done`. */
+  const rounds = (text: string) => {
+    const end = j({ stop_reason: 'end_turn', text: '', type: 'result' });
+    vi.mocked(cp.spawn)
+      .mockReturnValueOnce(mockChild([...head('s-389'), ...texts('Checking.\n', text), end]))
+      .mockReturnValueOnce(mockChild([...head('s-389'), ...texts('done'), end]));
+  };
+
+  it('a full-access turn calls a stdio tool and gets the result back', async () => {
+    rounds(callerFence('core'));
+    const turn = await runFullAccessToolTurn('aider', runner());
+    expectCallerRoundTrip(turn, ['core']);
+    expect(call(0)[0]).toBe('/py/python');
+    expect(request(0)).toMatchObject({ access: 'full' });
+    expect(request(0).session_id).toBeUndefined();
+    expect(request(1)).toMatchObject({ access: 'full', session_id: 's-389' });
+    // Tool protocol in the first prompt, the caller's answer in the resumed one.
+    expect(request(0).prompt).toContain('org_roster');
+    expect(request(1).prompt).toContain(rosterResult('core'));
+  });
+
+  it('two parallel caller calls: both tool_call frames before either tool_result', async () => {
+    rounds(`${callerFence('core')}\n${callerFence('qa')}`);
+    const turn = await runFullAccessToolTurn('aider', runner(), { expectCalls: 2 });
+    expectCallerRoundTrip(turn, ['core', 'qa']);
+    expectAllCallsBeforeResults(turn, 2);
+    expect(request(1).prompt).toContain(rosterResult('core'));
+    expect(request(1).prompt).toContain(rosterResult('qa'));
   });
 });
