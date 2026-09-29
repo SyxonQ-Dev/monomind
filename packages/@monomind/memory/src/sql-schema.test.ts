@@ -15,9 +15,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BetterSqliteDriver, type SqlDriver, SqlJsDriver } from './sql-driver.js';
 import {
   createCanonicalSchema,
+  hasFTS5Table,
   hasLegacyInlineEmbedding,
   initializeSchema,
   migrateLegacyInlineEmbeddings,
+  SCHEMA_VERSION,
 } from './sql-schema.js';
 
 /** The pre-unification sql.js schema: one table, embedding stored inline. */
@@ -209,6 +211,93 @@ for (const d of DRIVERS) {
       const rows = driver.all('SELECT id FROM memory_entries WHERE key = ?', ['dup']);
       expect(rows).toHaveLength(1);
       expect(String(rows[0].id)).toBe('new');
+    });
+
+    // Issue #426: the dedupe repairs full-scanned the table on EVERY open.
+    describe('one-time repair migrations (issue #426)', () => {
+      /** Records every exec() so a test can see which repairs ran. */
+      function recordExecs(): string[] {
+        const seen: string[] = [];
+        const exec = driver.exec.bind(driver);
+        driver.exec = (sql: string) => {
+          seen.push(sql);
+          exec(sql);
+        };
+        return seen;
+      }
+      const ranNamespaceDedupe = (seen: string[]) => seen.some((s) => s.includes('ROW_NUMBER()'));
+      const ranFtsDedupe = (seen: string[]) =>
+        seen.some((s) => s.includes('DELETE FROM memory_entries_fts') && s.includes('MAX(rowid)'));
+      const userVersion = () => Number(driver.get('PRAGMA user_version')?.user_version);
+      const hasUniqueIndex = () =>
+        driver.get(
+          "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_namespace_key_unique'",
+        ) !== null;
+      const removeUniqueIndex = () => driver.exec('DROP INDEX idx_namespace_key_unique');
+      const insertRow = (id: string, key: string, updatedAt: number) =>
+        driver.run(
+          `INSERT INTO memory_entries
+            (id, key, content, type, namespace, tags, metadata, owner_id, access_level,
+             created_at, updated_at, expires_at, event_at, version, "references",
+             access_count, last_accessed_at)
+           VALUES (?, ?, ?, 'semantic', 'ns', '[]', '{}', NULL, 'private',
+                   1, ?, NULL, NULL, 1, '[]', 0, 1)`,
+          [id, key, `content ${id}`, updatedAt],
+        );
+
+      it('runs the repairs on first open, records the version, and skips them after', () => {
+        const first = recordExecs();
+        initializeSchema(driver);
+        expect(ranNamespaceDedupe(first)).toBe(true);
+        expect(userVersion()).toBe(SCHEMA_VERSION);
+
+        const second = recordExecs();
+        initializeSchema(driver);
+        expect(ranNamespaceDedupe(second)).toBe(false);
+        expect(ranFtsDedupe(second)).toBe(false);
+        // Uniqueness is still enforced on the skipped path.
+        expect(hasUniqueIndex()).toBe(true);
+      });
+
+      it('migrates an older-version database once (namespace+key and FTS dedupe)', () => {
+        initializeSchema(driver);
+        const fts = hasFTS5Table(driver);
+        // Simulate a store last opened by an older release: no unique index
+        // (so duplicates could accumulate) and a stale duplicate FTS row.
+        removeUniqueIndex();
+        insertRow('a', 'dup', 1);
+        insertRow('b', 'dup', 2);
+        if (fts) {
+          driver.run(
+            "INSERT INTO memory_entries_fts(entry_id, key, content) VALUES ('b', 'dup', 'stale')",
+          );
+        }
+        driver.exec(`PRAGMA user_version = ${SCHEMA_VERSION - 1}`);
+
+        const seen = recordExecs();
+        initializeSchema(driver);
+
+        expect(ranNamespaceDedupe(seen)).toBe(true);
+        const rows = driver.all("SELECT id FROM memory_entries WHERE key = 'dup'");
+        expect(rows.map((r) => String(r.id))).toEqual(['b']);
+        if (fts) {
+          expect(ranFtsDedupe(seen)).toBe(true);
+          expect(
+            driver.all("SELECT rowid FROM memory_entries_fts WHERE entry_id = 'b'"),
+          ).toHaveLength(1);
+        }
+        expect(userVersion()).toBe(SCHEMA_VERSION);
+        expect(hasUniqueIndex()).toBe(true);
+      });
+
+      it('re-runs the namespace+key repair when the unique index is missing at the current version', () => {
+        initializeSchema(driver);
+        removeUniqueIndex();
+        const seen = recordExecs();
+        initializeSchema(driver);
+        expect(ranNamespaceDedupe(seen)).toBe(true);
+        expect(hasUniqueIndex()).toBe(true);
+      });
     });
   });
 }
