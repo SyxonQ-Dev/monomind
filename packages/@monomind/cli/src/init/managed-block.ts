@@ -25,6 +25,7 @@ const RETIRED_GENERATED_HEADINGS = [
   '## Monoswarm Rules',
   '## CLI Commands',
   '## Available Agents (Curated Subset)',
+  '## Auto-Learning Protocol',
   '## Memory Commands',
   '## Quick Setup',
   '## Claude Code vs CLI Tools',

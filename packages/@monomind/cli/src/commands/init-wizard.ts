@@ -253,14 +253,16 @@ export const wizardCommand: Command = {
       options.runtime.memoryBackend = memoryBackend as InitOptions['runtime']['memoryBackend'];
 
       const enableNeural = await confirm({
-        message: 'Set neural.enabled in the config? (flag only — no model is trained)',
+        message:
+          'Load the local pattern store at session start? (sets neural.enabled; no model is trained)',
         default: options.runtime.enableNeural,
       });
       options.runtime.enableNeural = enableNeural;
 
       if (memoryBackend === 'lancedb' || memoryBackend === 'hybrid') {
         const enableSelfLearning = await confirm({
-          message: 'Enable agent memory scopes? (project/local/user)',
+          message:
+            'Record agent memory scopes (project/local/user) in the config? (config flags only; also sets learningBridge when the pattern store is on)',
           default: true,
         });
         options.runtime.enableLearningBridge = enableSelfLearning && enableNeural;
@@ -433,12 +435,12 @@ export const wizardCommand: Command = {
           { setting: 'Max Agents', value: String(options.runtime.maxAgents) },
           { setting: 'Memory Backend', value: options.runtime.memoryBackend },
           {
-            setting: 'neural.enabled flag',
-            value: options.runtime.enableNeural ? 'Enabled' : 'Disabled',
+            setting: 'Pattern store at session start (neural.enabled)',
+            value: options.runtime.enableNeural ? 'Load' : 'Skip',
           },
           {
-            setting: 'Agent Memory Scopes',
-            value: options.runtime.enableAgentScopes ? 'Enabled' : 'Disabled',
+            setting: 'Agent memory scopes flag',
+            value: options.runtime.enableAgentScopes ? 'On' : 'Off',
           },
           {
             setting: 'Embeddings',

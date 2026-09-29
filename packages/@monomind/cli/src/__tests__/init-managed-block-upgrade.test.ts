@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateClaudeMd } from '../init/claudemd-generator.js';
+import { mergeGeneratedBlock } from '../init/managed-block.js';
 import { writeSharedInstructions } from '../init/shared-instructions-generator.js';
 import { DEFAULT_INIT_OPTIONS, detectPlatform, type InitResult } from '../init/types.js';
 import { writeClaudeMd } from '../init/write-claude.js';
@@ -271,5 +272,29 @@ go build ./...
 
     writeSharedInstructions(projectDir, true, freshResult());
     expect(readFileSync(siPath, 'utf-8')).toBe(first);
+  });
+});
+
+// PR #501 renamed `## Auto-Learning Protocol` to `## Memory Protocol`. A
+// pre-delimiter full-template CLAUDE.md still carries the old heading; if the
+// legacy-range scan stopped there, the old tail (Memory Commands, Intelligence
+// System, Support, ...) would survive under the new block, duplicated.
+describe('legacy full-template CLAUDE.md with the retired `## Auto-Learning Protocol` heading', () => {
+  it('is replaced whole on upgrade, with no section duplicated', () => {
+    const generated = generateClaudeMd(
+      { ...DEFAULT_INIT_OPTIONS, targetDir: process.cwd() },
+      'full',
+    );
+    expect(generated).toContain('## Memory Protocol');
+    const legacy = generated.replace('## Memory Protocol', '## Auto-Learning Protocol');
+    expect(legacy).toContain('## Auto-Learning Protocol');
+
+    const merged = mergeGeneratedBlock(legacy, 'claude-md', generated);
+
+    expect(merged).not.toContain('## Auto-Learning Protocol');
+    for (const heading of generated.split('\n').filter((l) => l.startsWith('## '))) {
+      expect(count(merged, `${heading}\n`), heading).toBe(1);
+    }
+    expect(count(merged, '# Claude Code Configuration - Monomind')).toBe(1);
   });
 });

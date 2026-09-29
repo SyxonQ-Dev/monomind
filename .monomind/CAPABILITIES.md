@@ -32,7 +32,7 @@ Monomind is a domain-driven design architecture for multi-agent AI coordination 
 | Topology | hierarchical-mesh |
 | Max Agents | 15 |
 | Memory Backend | hybrid |
-| `neural.enabled` flag | On (config only; no model is trained) |
+| `neural.enabled` | On (session start loads the local pattern store only when on; no model is trained) |
 | `learningBridge` flag | On (config only) |
 | Agent Scopes | Enabled (project/local/user) |
 

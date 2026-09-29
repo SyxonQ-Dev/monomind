@@ -96,7 +96,7 @@ export const metricsCommand: Command = {
       }
 
       // Patterns section
-      output.writeln(output.bold('📊 Pattern Learning'));
+      output.writeln(output.bold('📊 Recorded Patterns'));
       output.printTable({
         columns: [
           { key: 'metric', header: 'Metric', width: 25 },

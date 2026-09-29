@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { WORKER_COUNT, WORKER_ROWS } from '../../src/init/generated-counts.js';
 
 const __dirname_test = dirname(fileURLToPath(import.meta.url));
 const SRC_DIR = join(__dirname_test, '..', '..', 'src');
@@ -172,6 +173,14 @@ describe('P1-19: Command-output-honesty regression (prevents P0-1 to P0-6 recurr
       );
       expect(types).not.toMatch(/self-learning/i);
       expect(types).toContain('templated keyword notes in .monomind/reflexion-store.json');
+    });
+
+    it('the @monoes/hooks package description names every worker, with the derived count', () => {
+      const pkg = JSON.parse(
+        readFileSync(join(SRC_DIR, '..', '..', 'hooks', 'package.json'), 'utf8'),
+      ) as { description: string };
+      expect(pkg.description).toContain(`${WORKER_COUNT} on-demand background workers`);
+      for (const row of WORKER_ROWS) expect(pkg.description).toContain(row.name);
     });
   });
 });
