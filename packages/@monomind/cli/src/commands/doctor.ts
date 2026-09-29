@@ -167,6 +167,10 @@ async function runDoctor(ctx: CommandContext, json: boolean): Promise<CommandRes
   const showFix = ctx.flags.fix as boolean;
   const autoInstall = ctx.flags.install as boolean;
   const component = ctx.flags.component as string;
+  // Internal (init's post-write pass, #425): print only the final warn/fail
+  // lines, after fixes — never a pre-fix line a fix then contradicts.
+  const problemsOnly = ctx.flags.problemsOnly === true;
+  const say = (line?: string) => !problemsOnly && output.writeln(line);
   const mode = resolveDoctorMode(ctx.flags);
   if (mode.error) return doctorError(mode.error);
   const checkPlatforms = async (): Promise<HealthCheck> => {
@@ -182,12 +186,12 @@ async function runDoctor(ctx: CommandContext, json: boolean): Promise<CommandRes
     return { name: 'Platform Adapters', status: 'info', message: lines.join('\n') };
   };
 
-  output.writeln();
-  output.writeln(output.bold('MonoMind Doctor'));
-  output.writeln(output.dim('System diagnostics and health check'));
-  output.writeln(output.dim('─'.repeat(50)));
-  if (modeLabel(mode)) output.writeln(output.dim(modeLabel(mode)));
-  output.writeln();
+  say();
+  say(output.bold('MonoMind Doctor'));
+  say(output.dim('System diagnostics and health check'));
+  say(output.dim('─'.repeat(50)));
+  if (modeLabel(mode)) say(output.dim(modeLabel(mode)));
+  say();
 
   // Capability-aware scoping: skip code-specific checks in non-code directories
   // (e.g. document/media/data-only projects created via `monomind init`).
@@ -347,7 +351,7 @@ async function runDoctor(ctx: CommandContext, json: boolean): Promise<CommandRes
   const spinner = output.createSpinner({ text: 'Running health checks...', spinner: 'dots' });
   // The spinner writes to process.stdout directly; in JSON mode that
   // would corrupt the payload.
-  if (!json) spinner.start();
+  if (!json && !problemsOnly) spinner.start();
 
   try {
     const settled: DoctorResult[] = [];
@@ -372,9 +376,9 @@ async function runDoctor(ctx: CommandContext, json: boolean): Promise<CommandRes
 
     for (const r of settled) {
       results.push(r);
-      output.writeln(formatCheck(r));
-      if (r.fix && r.status === 'fail') output.writeln(output.dim(`  Fix: ${r.fix}`));
-      else if (r.fix && r.status === 'warn') output.writeln(output.dim(`  Hint: ${r.fix}`));
+      say(formatCheck(r));
+      if (r.fix && r.status === 'fail') say(output.dim(`  Fix: ${r.fix}`));
+      else if (r.fix && r.status === 'warn') say(output.dim(`  Hint: ${r.fix}`));
       if (r.fix && (r.status === 'fail' || r.status === 'warn')) fixes.push(`${r.name}: ${r.fix}`);
     }
   } catch {
@@ -407,7 +411,7 @@ async function runDoctor(ctx: CommandContext, json: boolean): Promise<CommandRes
         const fixIdx = fixes.findIndex((f) => f.startsWith(`${name}:`));
         if (fixIdx !== -1 && newCheck.status === 'pass') fixes.splice(fixIdx, 1);
       }
-      output.writeln(formatCheck(newCheck));
+      say(formatCheck(newCheck));
     };
 
     if (autoInstall && needsFix('Claude Code CLI'))
@@ -436,6 +440,15 @@ async function runDoctor(ctx: CommandContext, json: boolean): Promise<CommandRes
   const warnings = results.filter((r) => r.status === 'warn').length;
   const failed = results.filter((r) => r.status === 'fail').length;
   const skipped = results.filter((r) => r.status === 'skipped').length;
+  const data = { passed, warnings, failed, results, fixes: fixOutcomes };
+
+  if (problemsOnly) {
+    for (const r of results.filter((x) => x.status === 'warn' || x.status === 'fail')) {
+      output.writeln(formatCheck(r));
+      if (r.fix) output.writeln(output.dim(`  ${r.status === 'fail' ? 'Fix' : 'Hint'}: ${r.fix}`));
+    }
+    return failed > 0 ? { success: false, exitCode: 1, data } : { success: true, data };
+  }
 
   output.writeln();
   output.writeln(output.dim('─'.repeat(50)));

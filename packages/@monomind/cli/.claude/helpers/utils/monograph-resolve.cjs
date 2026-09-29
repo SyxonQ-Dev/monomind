@@ -102,14 +102,37 @@ function _resolveLocal(projectDir) {
   }
 }
 
+// `npm root -g` costs 60-250 ms per spawn, and the prompt hook resolves on
+// every prompt (#415), so its answer is kept on disk for a day, keyed by what
+// decides it: the node binary, the npm prefix and the PATH that finds npm. A
+// cached root that has since disappeared counts as a miss.
+var NPM_ROOT_TTL_MS = 24 * 3600 * 1000;
+function _npmRootCacheFile() {
+  var home = process.env.MONOMIND_HOME || path.join(os.homedir(), '.monomind');
+  return path.join(home, 'cache', 'npm-root-g.json');
+}
+function _npmRootKey() {
+  return [process.execPath, process.env.npm_config_prefix || '', process.env.PATH || ''].join('|');
+}
+
 var _globalRootCache;
 function npmGlobalRoot() {
   if (_globalRootCache !== undefined) return _globalRootCache;
+  var file = _npmRootCacheFile();
+  var cached = _readJson(file);
+  if (cached && cached.key === _npmRootKey() && Date.now() - cached.at < NPM_ROOT_TTL_MS &&
+      (cached.root === null || (typeof cached.root === 'string' && fs.existsSync(cached.root)))) {
+    return (_globalRootCache = cached.root);
+  }
   try {
     _globalRootCache = execSync('npm root -g', {
       encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'],
     }).trim() || null;
   } catch (_) { _globalRootCache = null; }
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ key: _npmRootKey(), root: _globalRootCache, at: Date.now() }));
+  } catch (_) {}
   return _globalRootCache;
 }
 

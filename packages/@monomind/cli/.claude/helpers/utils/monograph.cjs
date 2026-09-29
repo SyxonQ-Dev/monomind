@@ -34,6 +34,26 @@ function _requireMonograph() {
   } catch (e) { return null; }
 }
 
+// Test-path heuristic for [MONOGRAPH_HINT] lookups (#447). Mirrors isTestPath()
+// in @monoes/monograph (src/health/hotspot-utils.ts), which its node resolver
+// uses to rank non-test definitions first. A leading '/' is prepended so
+// repo-root relative paths like `tests/foo.ts` match too.
+var _TEST_PATH_MARKERS = ['/__tests__/', '/__mocks__/', '/test/', '/tests/', '/e2e/', '.test.', '.spec.'];
+
+function _isTestPath(filePath) {
+  var p = '/' + String(filePath || '').replace(/\\/g, '/');
+  return _TEST_PATH_MARKERS.some(function (m) { return p.indexOf(m) !== -1; });
+}
+
+// SQL twin of _isTestPath: an expression that is 1 for a test path, else 0.
+// Use `AND NOT <expr>` to drop test rows, or `ORDER BY <expr>` to rank them last.
+function _isTestPathSql(col) {
+  var p = "('/' || replace(COALESCE(" + col + ", ''), char(92), '/'))";
+  return '(' + _TEST_PATH_MARKERS.map(function (m) {
+    return 'instr(' + p + ", '" + m + "') > 0";
+  }).join(' OR ') + ')';
+}
+
 // Memoized at module scope — opening monograph.db can take 7-10s.
 // Callers MUST NOT close the returned handle.
 var _cachedMonographDb = undefined;
@@ -282,19 +302,19 @@ function _recordGraphTelemetry(event) {
 // The pre-search/pre-bash heuristic assist above silently resolves Grep/Bash
 // patterns against the graph and counts that as a "graph win" even when the
 // agent never actually called monograph_query — so the graph-usage % can look
-// healthy while zero real monograph_call events ever fire. This gate forces
-// at least one real monograph_query/monograph_suggest call per session before
-// Grep/Glob/bash grep|find are allowed, by hard-blocking (exitCode 2) the
-// first such call each session. Capped at ONE block per session (never a
-// second) so a subagent with no monograph MCP tool access can't deadlock.
+// healthy while zero real monograph_call events ever fire. This gate nudges
+// toward a real monograph_query/monograph_suggest call: the first source-code
+// Grep/Glob/bash grep|find of a session carries a one-time reminder (as
+// PreToolUse additionalContext). It never blocks — a hard block on the first
+// search (#413) cost a round trip and most agents simply retried grep.
 function _graphGateStateFile() {
   return path.join(CWD, '.monomind', 'graph-gate-state.json');
 }
 
-// State is a per-session MAP ({ sessions: { [id]: {queried, blockedOnce, ts} } }).
+// State is a per-session MAP ({ sessions: { [id]: {queried, nudged, ts} } }).
 // It used to be a single {sessionId,...} record — with two Claude sessions open
 // on the same project, each session's grep clobbered the other's latch, so the
-// "once per session" cap ping-ponged into blocking every call in both sessions.
+// "once per session" cap ping-ponged across both sessions.
 // Legacy single-record files are migrated on read; entries are pruned to the
 // 20 most recent so the file can't grow unbounded.
 function _graphGateReadSessions() {
@@ -303,7 +323,7 @@ function _graphGateReadSessions() {
   if (typeof d !== 'object' || d === null) d = {};
   var sessions = (typeof d.sessions === 'object' && d.sessions !== null) ? d.sessions : {};
   if (d.sessionId) { // legacy single-record shape — fold it in
-    sessions[d.sessionId] = { queried: !!d.queried, blockedOnce: !!d.blockedOnce, ts: Date.now() };
+    sessions[d.sessionId] = { queried: !!d.queried, nudged: !!(d.nudged || d.blockedOnce), ts: Date.now() };
   }
   return sessions;
 }
@@ -338,8 +358,8 @@ function _graphGateWriteSessions(sessions) {
 // post-graph-tool's markQueried), each in its own short-lived process. Without
 // a lock, two of them read the same snapshot and the second write erases the
 // first — measured: 12 concurrent writers landed as few as 6 of 12 session
-// records. A lost `queried:true` re-blocks a session that already called
-// monograph; a lost `blockedOnce` can block it a second time.
+// records. A lost `queried:true` re-nudges a session that already called
+// monograph; a lost `nudged` can nudge it a second time.
 //
 // mkdir is the atomic primitive (works on every platform and over network FS).
 // The lock is best-effort: if it can't be taken within the budget, or a stale
@@ -407,7 +427,7 @@ function _graphGateUpdateSession(sessionId, mutate) {
   var release = _graphGateAcquireLock();
   try {
     var sessions = _graphGateReadSessions();
-    var s = sessions[sessionId] || { queried: false, blockedOnce: false };
+    var s = sessions[sessionId] || { queried: false, nudged: false };
     var write = true;
     var out = mutate(s, { noWrite: function () { write = false; } });
     if (!write) return out;
@@ -427,44 +447,75 @@ function _graphGateMarkQueried(sessionId) {
   } catch (e) { /* non-fatal */ }
 }
 
-// Returns 'block' (hard block, exitCode 2), 'warn' (allow but remind), or false (no action).
-function _graphGateShouldBlock(sessionId) {
+// Returns true exactly once per session — the first source search while the
+// graph is fresh and non-empty and monograph has not been called — else false.
+// Callers turn true into a one-time additionalContext nudge; never a block.
+function _graphGateShouldNudge(sessionId) {
   if (String(process.env.MONOMIND_GRAPH_GATE || '').toLowerCase() === 'off') return false;
   // Persistent opt-out: .monomind/guidance/active-gates.json { graphGate: 'off' }
   // (same override file gates-handler.cjs uses for destructive/secret patterns).
-  // Fails open on unreadable/invalid content — hooks never block on config errors.
+  // Fails open on unreadable/invalid content — gate stays on.
   try {
     var gatesPath = path.join(CWD, '.monomind', 'guidance', 'active-gates.json');
     var raw = fs.readFileSync(gatesPath, 'utf-8');
     var cfg = JSON.parse(raw);
     if (cfg && String(cfg.graphGate || '').toLowerCase() === 'off') return false;
   } catch (e) { /* absent or unreadable — gate stays on */ }
-  if (!sessionId || !_isGraphFresh()) return false;
-  // Test-and-set blockedOnce atomically: two concurrent greps in the same
-  // session must not both observe blockedOnce=false and both block.
+  if (!sessionId || !_isGraphFresh() || !(_getNodeCount() > 0)) return false;
+  // Test-and-set `nudged` atomically: two concurrent greps in the same
+  // session must not both observe nudged=false and both nudge.
   try {
     return _graphGateUpdateSession(sessionId, function (s, ctx) {
-      if (s.queried) { ctx.noWrite(); return false; }
-      if (!s.blockedOnce) {
-        s.blockedOnce = true;
-        return 'block';
-      }
-      // Already blocked once but monograph still not called — warn without
-      // blocking so subagents without MCP access don't deadlock.
-      ctx.noWrite();
-      return 'warn';
+      if (s.queried || s.nudged) { ctx.noWrite(); return false; }
+      s.nudged = true;
+      return true;
     });
   } catch (e) {
-    return false; // state unreadable/unwritable — never block on a state error
+    return false; // state unreadable/unwritable — stay quiet
   }
+}
+
+// The nudge is for code exploration only (#413). A piped grep (`… | grep x`)
+// filters another command's output, and a search over dependencies, build
+// output, logs, docs/data files or paths outside the project is not code
+// navigation — neither gets the nudge nor uses it up.
+var _NON_SOURCE_PATH_RE = /(?:^|\/)(?:node_modules|dist|build|coverage|\.git|\.monomind)(?:\/|$)|\.(?:log|txt|md|json|jsonl|lock|csv|ya?ml|env|out|xml|html?)$/i;
+function _isNonSourcePath(p) {
+  p = String(p || '').replace(/^['"]+|['"]+$/g, '');
+  if (!p) return false;
+  if (p[0] === '~' || p.indexOf('$HOME') === 0) return true;
+  if (p[0] === '/' && p !== CWD && p.indexOf(CWD + '/') !== 0) return true;
+  return _NON_SOURCE_PATH_RE.test(p);
+}
+
+function _isSourceSearchCommand(cmd) {
+  cmd = String(cmd || '');
+  if (/(?:^|[^|])\|\s*(?:grep|rg|ag)\b/.test(cmd)) return false;
+  var tokens = cmd.replace(/\d*[<>]+&?\s*\S+/g, ' ').split(/\s+/);
+  for (var i = 0; i < tokens.length; i++) {
+    var t = tokens[i];
+    if (t[0] === '-') {
+      var eq = t.indexOf('=');
+      if (eq < 0) continue;
+      t = t.slice(eq + 1);
+    }
+    if (_isNonSourcePath(t)) return false;
+  }
+  return true;
+}
+
+function _isSourceSearchPaths(paths) {
+  for (var i = 0; i < paths.length; i++) if (_isNonSourcePath(paths[i])) return false;
+  return true;
 }
 
 function _getNodeCount() {
   try {
     var db = _openMonographDb();
     if (!db) return null;
-    try { return db.prepare('SELECT COUNT(*) AS c FROM nodes').get().c; }
-    finally { db.close(); }
+    // No close(): db is the process-wide cached handle that the hint lookups
+    // after this call still use.
+    return db.prepare('SELECT COUNT(*) AS c FROM nodes').get().c;
   } catch (e) { return null; }
 }
 
@@ -691,8 +742,12 @@ module.exports = {
   _injectCompactGraphMap,
   _findAffectedTests,
   _maybeRebuildMonograph,
-  _graphGateShouldBlock,
+  _graphGateShouldNudge,
+  _isSourceSearchCommand,
+  _isSourceSearchPaths,
   _graphGateMarkQueried,
   _getNodeCount,
   injectGodNodesContext,
+  _isTestPath,
+  _isTestPathSql,
 };

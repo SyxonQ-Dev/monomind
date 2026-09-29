@@ -1,6 +1,6 @@
 # Memory Systems
 
-> Monomind has three memory layers that work together: Memory Palace (BM25 verbatim search), a JSON pattern store with episodic recall (the hot path — no vector database involved), and Monograph (code knowledge graph). Each serves a different retrieval pattern.
+> Monomind has two memory layers that work together: a JSON pattern store with episodic recall (the hot path — no vector database involved) and Monograph (code knowledge graph). Each serves a different retrieval pattern.
 
 ---
 
@@ -9,11 +9,6 @@
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         MEMORY ARCHITECTURE                         │
-│                                                                      │
-│  L0 Identity (static)        L1 Story (top-5 scored)               │
-│  .monomind/palace/           .monomind/palace/                      │
-│  identity.md                 drawers.jsonl                           │
-│         ↓ injected at session start                                 │
 │                                                                      │
 │  Pattern store + episodic    Monograph (code graph)                 │
 │  patterns.json,              .monomind/monograph.db                 │
@@ -25,65 +20,9 @@
 
 ---
 
-## 1. Memory Palace
+## 1. Memory Palace (removed)
 
-**Files:** `.monomind/palace/`  
-**Package:** `.claude/helpers/memory-palace.cjs`  
-**Zero AI calls** — entirely deterministic, runs locally.
-
-### Storage Layers
-
-| Layer | File | What | When |
-|---|---|---|---|
-| L0 Identity | `identity.md` | Project name, stack, key packages, working style | Injected on EVERY session start |
-| L1 Story | `drawers.jsonl` (top-5 scored) | Recent high-value task outcomes | Injected on session start |
-| L2 On-demand | `drawers.jsonl` (namespace filter) | `recall(wing, room, limit)` call | Explicit retrieval |
-| L3 Deep search | `drawers.jsonl` (BM25) | `search(query, wing?, room?, limit?)` | Most comprehensive |
-
-### Drawers (Verbatim Chunks)
-
-Every stored content is split into **800-character chunks with 100-character overlap** (step=700):
-
-```json
-{
-  "id": "a3f9b2c1-...",
-  "content": "800 char verbatim slice...",
-  "wing": "tasks|sessions|architecture|debugging|general",
-  "room": "default|archive|active|{agentSlug}",
-  "hall": "2026-04-15|{taskId}|optional-subdomain",
-  "score": 3.5,
-  "ts": "2026-04-15T07:49:00.000Z"
-}
-```
-
-**Score semantics:** Starts at 1.0. Every retrieval bumps the score. High-score drawers rise to L1 (auto-injected). Low-score drawers drift to L3 (deep search only).
-
-**Wing taxonomy:**
-- `tasks` — post-task hook output (what was accomplished)
-- `sessions` — session-end markers and summaries
-- `architecture` — architectural decisions
-- `debugging` — bug fix records
-- `general` — catch-all
-
-### BM25 Search (L3)
-
-Parameters: K1=1.5 (term saturation), B=0.75 (length normalization).
-
-**Closet boost:** Each `closets.jsonl` topic term matching the query adds +0.5 to that drawer's score. Closets are extracted automatically via regex (no AI): markdown headers, action phrases, proper nouns, quoted passages.
-
-### Temporal Knowledge Graph (`kg.json`)
-
-Triples with `valid_from`/`valid_to` for bi-temporal queries:
-
-```json
-{
-  "subject": "session-1713...",
-  "predicate": "ended_at",
-  "object": "2026-04-15T11:30:00Z",
-  "valid_from": "2026-04-15T11:30:00Z",
-  "confidence": 1.0
-}
-```
+The Memory Palace helper (`.claude/helpers/memory-palace.cjs`) was removed in [#417](https://github.com/monoes/monomind/issues/417): nothing ever wrote its drawers, so its session-start injection was always empty. `monomind init` no longer installs it, and nothing reads `.monomind/palace/`. An older project may still have that directory; it is safe to delete.
 
 ---
 ## 2. Memory Subsystem Architecture (v3.0.0 Schema)
@@ -132,7 +71,7 @@ Monomind uses Reciprocal Rank Fusion (RRF) to combine dense vector representatio
 ### 1. Dense Embeddings
 - **Model:** `Alibaba-NLP/gte-modernbert-base` (768 dimensions) ([`memory-bridge-core.ts → BRIDGE_EMBEDDING_MODEL`](packages/@monomind/cli/src/memory/memory-bridge-core.ts#BRIDGE_EMBEDDING_MODEL)).
 - **Engine:** `@xenova/transformers` ONNX feature extraction (`embedding-operations.ts:84-100`).
-- **HNSW (size-gated):** semantic search goes through `SqlBackend.search()` in `@monoes/memory` ([`memory-read.ts → searchEntries`](packages/@monomind/cli/src/memory/memory-read.ts#searchEntries) → `bridgeSearchEntries`). Below `MONOMIND_HNSW_THRESHOLD` (default 5,000 active embedded entries) it uses brute-force cosine; above it, an HNSW ANN index is built once, reused until the entry set changes, and cached next to the SQLite file ([`sql-backend.ts`](packages/@monomind/memory/src/sql-backend.ts)). `memory search --build-hnsw` forces an early build. The old standalone pure-JS HNSW layer in `hnsw-operations.ts` was removed.
+- **HNSW (size-gated):** semantic search goes through `SqlBackend.search()` in `@monoes/memory` ([`memory-read.ts → searchEntries`](packages/@monomind/cli/src/memory/memory-read.ts#searchEntries) → `bridgeSearchEntries`). Below `MONOMIND_HNSW_THRESHOLD` (default 100,000 active embedded entries) it uses brute-force cosine; above it, an HNSW ANN index is built once, reused until the entry set changes, and cached next to the SQLite file ([`sql-backend.ts`](packages/@monomind/memory/src/sql-backend.ts)). `memory search --build-hnsw` forces an early build. The old standalone pure-JS HNSW layer in `hnsw-operations.ts` was removed.
 
 ### 2. Lexical Okapi BM25
 - **Parameters:** `BM25_K1 = 1.2`, `BM25_B = 0.75` ([`bm25-index.ts → BM25_K1`](packages/@monomind/cli/src/memory/bm25-index.ts#BM25_K1)).
@@ -251,7 +190,7 @@ Ingestion produces **chunks and document metadata only**. It does not extract en
 
 ### The two graphs
 
-The two graphs that matter operationally are the **Monograph code graph** and the **memory knowledge graph**. The Second Brain document index is not a third one — it holds chunks, not entities and edges. (A third, smaller graph-shaped store does exist: the Memory Palace's temporal triples in `.monomind/palace/kg.json`, described in [§1](#1-memory-palace). It is a separate helper-level store and is **not** synchronized with the memory knowledge graph — `memory_kg_*` never reads or writes it.)
+The two graphs that matter operationally are the **Monograph code graph** and the **memory knowledge graph**. The Second Brain document index is not a third one — it holds chunks, not entities and edges.
 
 |  | Monograph code graph | Memory knowledge graph |
 |---|---|---|
@@ -340,7 +279,7 @@ monomind doc ingest ./bundle -s shared       # Import
 
 ## 5. Cross-Session Persistence
 
-Cross-session memory capture is handled by the mechanisms already described above — the pattern store / episodic recall in section 2, and the Memory Palace in section 1 — not by a separate `AutoMemoryBridge` class. That class has been removed from source entirely (no file, no export); the only remaining trace is two dead-stub log lines in `helpers-generator.ts` ("Auto memory import/sync skipped — AutoMemoryBridge removed"). Don't reference `AutoMemoryBridge` as a live component.
+Cross-session memory capture is handled by the mechanisms already described above — the pattern store / episodic recall in section 2 — not by a separate `AutoMemoryBridge` class. That class has been removed from source entirely (no file, no export), and so has the `auto-memory-hook.mjs` helper that only printed "skipped" at SessionStart and Stop (#417). Don't reference `AutoMemoryBridge` as a live component.
 
 Memory does **not** all live in the project's `.monomind/`, despite what earlier revisions of this page said. Flat files, the Monograph code graph, and the org runtime's own store live in the project; the SQLite store that backs the *project's* document index, memory knowledge graph, rules, and patterns lives under your home directory, keyed by a hash of the project path. Which store a given operation touches depends on the `dbPath` it was handed.
 
@@ -348,15 +287,9 @@ Memory does **not** all live in the project's `.monomind/`, despite what earlier
 
 ```
 <project>/.monomind/
-├── palace/
-│   ├── identity.md          ← L0: static project identity (edit manually)
-│   ├── drawers.jsonl        ← L1-L3: scored verbatim chunks
-│   ├── closets.jsonl        ← topic index
-│   └── kg.json              ← Memory Palace temporal triples (its own store —
-│                              not synchronized with the memory knowledge graph)
 ├── data/
 │   ├── auto-memory-store.json  ← intelligence patterns
-│   ├── ranked-context.json     ← pre-computed context rankings
+│   ├── ranked-context.json     ← ranked pattern view, written at session start
 │   └── pending-insights.jsonl  ← unsaved edit events (cleared on consolidate)
 ├── episodic/
 │   └── episodes.jsonl       ← episodic memories, keyword-matched at prompt time

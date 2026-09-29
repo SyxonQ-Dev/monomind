@@ -1,10 +1,13 @@
 // packages/@monomind/cli/src/orgrt/runner-resolve.ts
 // Extracted from daemon.ts — which AgentRunner hosts a role's sessions.
 import type { AgentRunner } from './agent-runner.js';
+import { AiderAgentRunner } from './aider-runner.js';
 import { AntigravityAgentRunner } from './antigravity-runner.js';
+import { ClineAgentRunner } from './cline-runner.js';
 import { CodexAgentRunner } from './codex-runner.js';
 import { CopilotAgentRunner } from './copilot-runner.js';
 import { CrushAgentRunner } from './crush-runner.js';
+import { DshAgentRunner } from './dsh-runner.js';
 import { GrokAgentRunner } from './grok-runner.js';
 import { HermesAgentRunner } from './hermes-runner.js';
 import { KimiCodeAgentRunner } from './kimicode-runner.js';
@@ -58,7 +61,16 @@ export type RuntimeKind =
    *  full transcript, and args.resume across mailbox messages cannot be
    *  honored. Docs-only verified, streamsIncrementally: false — see
    *  runner-registry.ts. */
-  | 'hermes';
+  | 'hermes'
+  /** Cline CLI (`cline`): `--json` for a fresh session, ACP session/load for
+   *  resume; kills the hub daemon it starts (cline-runner.ts, #382). */
+  | 'cline'
+  /** Aider (`aider`) through a Python shim run with aider's own interpreter;
+   *  falls back to the plain CLI when aider is not importable (#383). */
+  | 'aider'
+  /** DeepSeek Harness (`dsh --profile headless --json`), developer preview;
+   *  free models via `<route>/<model>` over its pi-ai adapter (#384). */
+  | 'dsh';
 export type ProviderKind =
   | 'subscription'
   | 'api-key'
@@ -112,6 +124,9 @@ export function resolveRunner(
   if (selected === 'pi-rpc') return new PiRpcAgentRunner();
   if (selected === 'qwen-rpc') return new QwenRpcAgentRunner();
   if (selected === 'hermes') return new HermesAgentRunner();
+  if (selected === 'cline') return new ClineAgentRunner();
+  if (selected === 'aider') return new AiderAgentRunner();
+  if (selected === 'dsh') return new DshAgentRunner();
   return undefined;
 }
 

@@ -82,13 +82,29 @@ export function resolveInitOptions(
   const target =
     requestedTarget ||
     (onlyClaude ? 'claude' : legacyTargets.length === 1 ? legacyTargets[0] : 'all');
-  const validTargets = new Set(['all', 'claude', 'antigravity', 'opencode', 'kimicode', 'codex']);
+  const validTargets = new Set([
+    'all',
+    'claude',
+    'antigravity',
+    'opencode',
+    'kimicode',
+    'codex',
+    'cline',
+    'aider',
+    'agents',
+  ]);
+  // Coder-mode runtimes (rev 20): only on request, so `--target all` (the
+  // default) writes no .clinerules/ or .aider.conf.yml into every project.
+  // `agents` (AGENTS.md only) is the opposite of all, never part of it.
+  const optInTargets = new Set(['cline', 'aider', 'agents']);
   if (!validTargets.has(target)) {
     return { ok: false, message: `Unknown init target: ${target}` };
   }
 
   const selectedTargets = new Set(
-    target === 'all' ? [...validTargets].filter((name) => name !== 'all') : [target],
+    target === 'all'
+      ? [...validTargets].filter((name) => name !== 'all' && !optInTargets.has(name))
+      : [target],
   );
   let selectedPlatforms: PlatformId[];
   if (requestedPlatforms) {
@@ -113,6 +129,7 @@ export function resolveInitOptions(
       opencode: 'opencode',
       kimicode: 'kimi',
       codex: 'codex',
+      aider: 'aider',
     };
     selectedPlatforms = [...selectedTargets]
       .map((legacy) => legacyToPlatform[legacy])
@@ -134,6 +151,8 @@ export function resolveInitOptions(
   options.components.opencode = selectedTargets.has('opencode');
   options.components.kimicode = selectedTargets.has('kimicode');
   options.components.codex = selectedTargets.has('codex');
+  options.components.cline = selectedTargets.has('cline');
+  options.components.agentsOnly = selectedTargets.has('agents');
   options.components.mcp = selectedTargets.has('claude') || selectedTargets.has('antigravity');
   if (!selectedTargets.has('claude')) {
     options.components.settings = false;

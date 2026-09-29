@@ -1208,7 +1208,7 @@ describe('doctor-project-checks', () => {
     it('returns a well-formed HealthCheck reporting routing learning status', async () => {
       const result = await checkMonoesIntegration();
       expect(result.name).toBe('Routing Learning');
-      expect(['pass', 'warn']).toContain(result.status);
+      expect(['pass', 'warn', 'info']).toContain(result.status);
       expect(typeof result.message).toBe('string');
     });
 

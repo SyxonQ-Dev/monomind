@@ -35,7 +35,7 @@ Comprehensive pull request management with monomind swarm coordination for autom
 ### 1. Create and Manage PR with Swarm Coordination
 ```javascript
 // Initialize review swarm
-mcp__monomind__swarm_init { topology: "mesh", maxAgents: 4 }
+mcp__monomind__monoswarm_init { topology: "mesh", maxAgents: 4 }
 mcp__monomind__agent_spawn { type: "reviewer", name: "Code Quality Reviewer" }
 mcp__monomind__agent_spawn { type: "tester", name: "Testing Agent" }
 mcp__monomind__agent_spawn { type: "coordinator", name: "PR Coordinator" }
@@ -51,8 +51,8 @@ mcp__github__create_pull_request {
 }
 
 // Orchestrate review process
-mcp__monomind__coordination_orchestrate {
-  task: "Complete PR review with testing and validation",
+mcp__monomind__task_create {
+  description: "Complete PR review with testing and validation",
   agents: ["reviewer", "tester", "coordinator"],
   strategy: "parallel"
 }
@@ -105,7 +105,7 @@ mcp__monomind__memory_pattern-store {
 ```javascript
 [Single Message - Complete PR Management]:
   // Initialize coordination
-  mcp__monomind__swarm_init { topology: "hierarchical", maxAgents: 5 }
+  mcp__monomind__monoswarm_init { topology: "hierarchical", maxAgents: 5 }
   mcp__monomind__agent_spawn { type: "reviewer", name: "Senior Reviewer" }
   mcp__monomind__agent_spawn { type: "tester", name: "QA Engineer" }
   mcp__monomind__agent_spawn { type: "coordinator", name: "Merge Coordinator" }

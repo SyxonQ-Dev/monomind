@@ -38,6 +38,13 @@ export interface InitComponents {
   /** Emit Codex artifacts (.codex/config.toml + AGENTS.md). Opt-in — default
    *  false so standard `monomind init` is unchanged. */
   codex: boolean;
+  /** Emit cline artifacts (.clinerules/monomind.md). Opt-in via `--target
+   *  cline`; absent means false. */
+  cline?: boolean;
+  /** `--target agents`: write AGENTS.md and nothing else (no Claude files,
+   *  no `.monomind/` state) — for runtimes that read AGENTS.md natively.
+   *  Absent means false. */
+  agentsOnly?: boolean;
 }
 
 /**
@@ -58,11 +65,11 @@ export interface HooksConfig {
   userPromptSubmit: boolean;
   /** Enable SessionStart hooks */
   sessionStart: boolean;
-  /** Enable Stop hooks */
+  /** No longer generates a hook (#417); kept so existing option objects stay valid */
   stop: boolean;
   /** Enable PreCompact hooks (context preservation before compaction) */
   preCompact: boolean;
-  /** Enable Notification hooks */
+  /** No longer generates a hook (#417); kept so existing option objects stay valid */
   notification: boolean;
   /** Enable TeammateIdle hooks (agent teams auto-assign) */
   teammateIdle: boolean;
@@ -78,8 +85,10 @@ export interface HooksConfig {
  * Skills configuration
  */
 export interface SkillsConfig {
-  /** Include core skills (swarm, mastermind, monodesign, monomotion) */
+  /** Include core skills (the mastermind engineering workflows, monolean, monodesign) */
   core: boolean;
+  /** Include extended skills (mastermind org admin, monoswarm, hooks, monomotion, …) */
+  extended?: boolean;
   /** Include memory/SQLite skills */
   memory: boolean;
   /** Include GitHub integration skills */
@@ -128,12 +137,8 @@ export interface CommandsConfig {
   pair?: boolean;
   /** Include stream-chain commands */
   streamChain?: boolean;
-  /** Include training commands */
-  training?: boolean;
   /** Include truth commands */
   truth?: boolean;
-  /** Include verify commands */
-  verify?: boolean;
   /** Include workflows commands */
   workflows?: boolean;
   /** Include all commands */

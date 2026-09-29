@@ -32,7 +32,7 @@ Multi-package synchronization and version alignment with Monomind coordination f
 ### 1. Synchronize Package Dependencies
 ```javascript
 // Initialize sync coordination swarm
-mcp__monomind__swarm_init { topology: "hierarchical", maxAgents: 5 }
+mcp__monomind__monoswarm_init { topology: "hierarchical", maxAgents: 5 }
 mcp__monomind__agent_spawn { type: "coordinator", name: "Sync Coordinator" }
 mcp__monomind__agent_spawn { type: "analyst", name: "Dependency Analyzer" }
 mcp__monomind__agent_spawn { type: "coder", name: "Integration Developer" }
@@ -55,8 +55,8 @@ Bash(`gh api repos/:owner/:repo/contents/packages/@monomind/cli/package.json \
   -f sha="$(gh api repos/:owner/:repo/contents/packages/@monomind/cli/package.json?ref=sync/package-alignment --jq '.sha')")`)
 
 // Orchestrate validation
-mcp__monomind__task_orchestrate {
-  task: "Validate package synchronization and run integration tests",
+mcp__monomind__task_create {
+  description: "Validate package synchronization and run integration tests",
   strategy: "parallel",
   priority: "high"
 }
@@ -141,7 +141,7 @@ Bash(`gh pr create \
 ```javascript
 [Single Message - Complete Synchronization]:
   // Initialize comprehensive sync swarm
-  mcp__monomind__swarm_init { topology: "mesh", maxAgents: 6 }
+  mcp__monomind__monoswarm_init { topology: "mesh", maxAgents: 6 }
   mcp__monomind__agent_spawn { type: "coordinator", name: "Master Sync Coordinator" }
   mcp__monomind__agent_spawn { type: "analyst", name: "Package Analyzer" }
   mcp__monomind__agent_spawn { type: "coder", name: "Integration Coder" }
@@ -271,7 +271,7 @@ const testMatrix = {
 
 ### Multi-Agent Coordination Architecture
 ```bash
-mcp__monomind__swarm_init { topology: "hierarchical", maxAgents: 10 }
+mcp__monomind__monoswarm_init { topology: "hierarchical", maxAgents: 10 }
 mcp__monomind__agent_spawn { type: "coordinator", name: "Master Sync Coordinator" }
 mcp__monomind__agent_spawn { type: "analyst", name: "Dependency Analyzer" }
 mcp__monomind__agent_spawn { type: "coder", name: "Integration Developer" }
@@ -279,14 +279,14 @@ mcp__monomind__agent_spawn { type: "tester", name: "Validation Engineer" }
 mcp__monomind__agent_spawn { type: "reviewer", name: "Quality Assurance" }
 mcp__monomind__agent_spawn { type: "monitor", name: "Sync Monitor" }
 
-mcp__monomind__task_orchestrate {
-  task: "Execute comprehensive multi-repository synchronization with validation",
+mcp__monomind__task_create {
+  description: "Execute comprehensive multi-repository synchronization with validation",
   strategy: "adaptive",
   priority: "critical",
   dependencies: ["version_analysis", "dependency_resolution", "integration_testing"]
 }
 
-mcp__monomind__load_balance {
+mcp__monomind__claims_rebalance {
   swarmId: "sync-coordination-swarm",
   tasks: [
     "package_json_sync",
@@ -300,7 +300,7 @@ mcp__monomind__load_balance {
 ### Intelligent Conflict Resolution
 ```javascript
 const syncConflictResolver = async (conflicts) => {
-  await mcp__monomind__swarm_init({ topology: "mesh", maxAgents: 6 });
+  await mcp__monomind__monoswarm_init({ topology: "mesh", maxAgents: 6 });
   await mcp__monomind__agent_spawn({ type: "analyst", name: "Conflict Analyzer" });
   await mcp__monomind__agent_spawn({ type: "coder", name: "Resolution Developer" });
   await mcp__monomind__agent_spawn({ type: "reviewer", name: "Solution Validator" });
@@ -315,8 +315,8 @@ const syncConflictResolver = async (conflicts) => {
     }
   });
 
-  return await mcp__monomind__task_orchestrate({
-    task: "Resolve synchronization conflicts with multi-agent validation",
+  return await mcp__monomind__task_create({
+    description: "Resolve synchronization conflicts with multi-agent validation",
     strategy: "sequential",
     priority: "high"
   });
@@ -327,12 +327,12 @@ const syncConflictResolver = async (conflicts) => {
 
 ### Swarm-Coordinated Error Recovery
 ```bash
-mcp__monomind__swarm_init { topology: "star", maxAgents: 5 }
+mcp__monomind__monoswarm_init { topology: "star", maxAgents: 5 }
 mcp__monomind__agent_spawn { type: "monitor", name: "Error Monitor" }
 mcp__monomind__agent_spawn { type: "analyst", name: "Failure Analyzer" }
 mcp__monomind__agent_spawn { type: "coder", name: "Recovery Developer" }
 
-mcp__monomind__coordination_sync { swarmId: "error-recovery-swarm" }
+mcp__monomind__monoswarm_status { swarmId: "error-recovery-swarm" }
 
 mcp__monomind__memory_pattern-store {
   action: "store",

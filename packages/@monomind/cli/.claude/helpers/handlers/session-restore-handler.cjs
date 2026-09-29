@@ -167,7 +167,7 @@ module.exports = {
         if (bundledDir) {
           var healed = [];
           // Top-level critical files — mirrors executor.ts's `criticalHelpers` list.
-          var helpersToCheck = ['hook-handler.cjs', 'statusline.cjs', 'router.cjs', 'monograph-freshen.cjs', 'control-start.cjs', 'intelligence.cjs', 'auto-memory-hook.mjs', 'build-skill-registry.cjs', 'agent-registry.cjs', 'org-skill-index.cjs', 'jev-picker.cjs', 'jev-catalog.cjs', 'redact-secrets.cjs', 'pick-rank.cjs', 'pick-stats.cjs'];
+          var helpersToCheck = ['hook-handler.cjs', 'statusline.cjs', 'router.cjs', 'monograph-freshen.cjs', 'control-start.cjs', 'intelligence.cjs', 'build-skill-registry.cjs', 'agent-registry.cjs', 'org-skill-index.cjs', 'jev-picker.cjs', 'jev-catalog.cjs', 'redact-secrets.cjs', 'pick-rank.cjs', 'pick-stats.cjs'];
           for (var hi = 0; hi < helpersToCheck.length; hi++) {
             var hName = helpersToCheck[hi];
             var healedName = _healIfStale(
@@ -541,17 +541,6 @@ module.exports = {
         }
       } catch (e2) { /* non-fatal */ }
     }
-
-    // Memory Palace — inject L0 (identity) + L1 (essential story) into session context.
-    try {
-      var palace = require(path.join(helpersDir, 'memory-palace.cjs'));
-      var palaceContext = palace.wakeUp(CWD);
-      if (palaceContext) {
-        // Content injection — NOT gated by QUIET. wakeUp() is called only here;
-        // no other hook or MCP tool exposes L0/L1 palace context to the LLM.
-        console.log(palaceContext);
-      }
-    } catch (e) { /* non-fatal — palace not available */ }
 
     // Periodic Update Check (once per day).
     try {

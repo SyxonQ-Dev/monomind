@@ -387,8 +387,8 @@ describe('gates fail CLOSED when they crash (regression: crash == silent allow)'
     const monoCopy = path.join(helpersCopy, 'utils', 'monograph.cjs');
     const original = fs.readFileSync(monoCopy, 'utf-8');
     const patched = original.replace(
-      'function _graphGateShouldBlock(sessionId) {',
-      'function _graphGateShouldBlock(sessionId) {\n  throw new Error("enrichment boom");',
+      'function _graphGateShouldNudge(sessionId) {',
+      'function _graphGateShouldNudge(sessionId) {\n  throw new Error("enrichment boom");',
     );
     expect(patched).not.toBe(original); // the patch actually applied
     fs.writeFileSync(monoCopy, patched);

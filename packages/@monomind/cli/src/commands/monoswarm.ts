@@ -24,7 +24,8 @@ export { statusCommand } from './monoswarm-status.js';
 // Main swarm command
 export const monoswarmCommand: Command = {
   name: 'monoswarm',
-  description: 'Monoswarm coordination commands',
+  description:
+    'Monoswarm coordination commands (deprecated: records topology/roster/votes in a state file; starts no agents)',
   subcommands: [initCommand, startCommand, statusCommand, stopCommand, scaleCommand],
   options: [],
   examples: [
@@ -37,13 +38,18 @@ export const monoswarmCommand: Command = {
   action: async (_ctx: CommandContext): Promise<CommandResult> => {
     output.writeln();
     output.writeln(output.bold('Monoswarm Coordination Commands'));
+    output.writeln(
+      output.warning(
+        'Deprecated: monoswarm only records state — it starts no agents and topologies change no behaviour.',
+      ),
+    );
     output.writeln();
     output.writeln('Usage: monomind monoswarm <subcommand> [options]');
     output.writeln();
     output.writeln('Subcommands:');
     output.printList([
-      `${output.highlight('init')}        - Initialize a new monoswarm`,
-      `${output.highlight('start')}       - Start monoswarm execution`,
+      `${output.highlight('init')}        - Record a new monoswarm state file`,
+      `${output.highlight('start')}       - Record a monoswarm config (starts no agents)`,
       `${output.highlight('status')}      - Show monoswarm status`,
       `${output.highlight('stop')}        - Stop monoswarm execution`,
       `${output.highlight('scale')}       - Scale monoswarm agent count`,

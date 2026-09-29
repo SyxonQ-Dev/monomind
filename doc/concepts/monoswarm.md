@@ -1,5 +1,16 @@
 # Monoswarm
 
+> **Deprecated.** Monoswarm records state only: `monoswarm init` writes a state
+> file (status `initialized`, empty roster), `monoswarm start` records a config
+> and shows a suggested roster, and `agent spawn` adds a row to the agent store.
+> None of them starts an agent process, and the topology changes no behaviour.
+> `monoswarm status` reports progress only from recorded task files (`n/a` when
+> there are none). To run agents, use Claude Code's Task tool,
+> `monomind agent exec`, or `monomind org run`. The `autopilot` command is
+> deprecated too — nothing in monomind writes its `swarm-tasks` source. Both
+> are scheduled for removal in a later release
+> ([#418](https://github.com/monoes/monomind/issues/418)).
+
 Monoswarm is monomind's multi-agent coordination layer: topology bookkeeping, agent
 roster management, vote-based decisions, and shared state for a group of agents
 working on the same task.

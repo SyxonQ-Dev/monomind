@@ -10,8 +10,10 @@ import * as path from 'node:path';
 import { formatKeptFiles } from '../init/file-guard.js';
 import { DEFAULT_INIT_OPTIONS, executeInit } from '../init/index.js';
 import { reportProjectMemory } from '../init/init-memory.js';
+import { runDoctorFix } from '../init/init-post-steps.js';
 import { formatIndexSummary } from '../init/project-indexes.js';
 import { resolveInitOptions } from '../init/resolve-options.js';
+import { countInitFiles, formatInitFileCounts, snapshotInitFiles } from '../init/written-files.js';
 import { ingestDirectory } from '../knowledge/document-pipeline.js';
 import { output } from '../output.js';
 import { mcpAddHint } from '../platform-adapters/renderers/mcp.js';
@@ -98,11 +100,14 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
     return { success: false, exitCode: 1, message: resolved.message };
   }
   const options = resolved.options;
+  // The doctor pass runs once, below, after every write this action makes (#425).
+  options.deferDoctor = true;
 
   const spinner = output.createSpinner({ text: 'Initializing...' });
   spinner.start();
 
   try {
+    const filesBefore = snapshotInitFiles(cwd);
     const result = await executeInit(options);
 
     if (!result.success) {
@@ -111,6 +116,15 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
         output.printError(error);
       }
       return { success: false, exitCode: 1 };
+    }
+
+    // `--target agents` wrote AGENTS.md alone: no sample org, services or
+    // summary of files it did not create.
+    if (options.components.agentsOnly) {
+      spinner.succeed(
+        result.created.files.length > 0 ? 'Wrote AGENTS.md' : 'AGENTS.md already exists (kept)',
+      );
+      return { success: true, data: result };
     }
 
     spinner.succeed('Monomind initialized successfully!');
@@ -124,6 +138,17 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
     } catch (e) {
       if (process.env.DEBUG || process.env.MONOMIND_DEBUG)
         console.error('[init] sample org emit failed:', e);
+    }
+
+    // #423: the SessionStart hook starts the dashboard only when opted in.
+    if (ctx.flags.dashboard === true) {
+      const monomindDir = path.join(options.targetDir, '.monomind');
+      fs.mkdirSync(monomindDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(monomindDir, 'dashboard.json'),
+        `${JSON.stringify({ autostart: true }, null, 2)}\n`,
+      );
+      output.printInfo('Dashboard auto-start enabled (.monomind/dashboard.json)');
     }
 
     reportProjectMemory(result.memory);
@@ -215,19 +240,8 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
 
     output.writeln();
 
-    const summary: string[] = [];
-
-    if (result.created.directories.length > 0) {
-      summary.push(`Directories: ${result.created.directories.length} created`);
-    }
-
-    if (result.created.files.length > 0) {
-      summary.push(`Files: ${result.created.files.length} created`);
-    }
-
-    if (result.skipped.length > 0) {
-      summary.push(`Skipped: ${result.skipped.length} (already exist)`);
-    }
+    // #420: counted on disk — result.created/skipped list items, not files.
+    const summary = formatInitFileCounts(countInitFiles(cwd, filesBefore));
 
     // o-38: a retirement is a destructive action and must never be folded
     // into "Files: N created" — that is exactly how the original data-loss
@@ -469,6 +483,8 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
         output.writeln();
       }
     }
+
+    await runDoctorFix(options.targetDir, result, options.installClaudeCode !== false);
 
     if (!startAll) {
       output.writeln(output.bold('Next steps:'));

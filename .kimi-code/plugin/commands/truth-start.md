@@ -52,16 +52,16 @@ mcp__monomind__agent_list({})
 mcp__monomind__agent_health({})
 
 // Swarm health (if a swarm is running)
-mcp__monomind__swarm_health({})
-mcp__monomind__swarm_status({ swarmId: "current" })
+mcp__monomind__monoswarm_health({})
+mcp__monomind__monoswarm_status({ swarmId: "current" })
 ```
 
 ### Neural Pattern Quality
 
 ```javascript
 // Pattern confidence scores
-mcp__monomind__neural_status({ verbose: true })
-mcp__monomind__neural_patterns({ action: "list", limit: 10 })
+mcp__monomind__hooks_intelligence_stats({ verbose: true })
+mcp__monomind__hooks_intelligence_pattern-search({ query: "verification", topK: 10 })
 
 // Hooks intelligence stats (routing accuracy)
 mcp__monomind__hooks_intelligence_stats({})
@@ -72,7 +72,7 @@ mcp__monomind__hooks_intelligence_stats({})
 ```javascript
 // Recent task outcomes
 mcp__monomind__task_summary({})
-mcp__monomind__progress_summary({})
+mcp__monomind__task_summary({})
 
 // Memory store health (memory integrity)
 mcp__monomind__memory_health({})
@@ -90,8 +90,8 @@ mcp__monomind__performance_report({ format: "detailed" })
 
 ```javascript
 // AI defence stats
-mcp__monomind__aidefence_stats({})
-mcp__monomind__aidefence_analyze({ content: "recent session summary" })
+mcp__monomind__monofence_stats({})
+mcp__monomind__monofence_analyze({ input: "recent session summary" })
 ```
 
 ---
@@ -104,7 +104,7 @@ When invoked, run these checks in parallel:
 // Batch all checks in one message for speed
 mcp__monomind__system_health({})
 mcp__monomind__agent_health({})
-mcp__monomind__neural_status({ verbose: true })
+mcp__monomind__hooks_intelligence_stats({ verbose: true })
 mcp__monomind__memory_health({})
 mcp__monomind__performance_report({ format: "detailed" })
 ```

@@ -65,8 +65,8 @@ npx monomind task cancel --id <task-id>
 ## Integration with Claude Code
 
 ```javascript
-mcp__monomind__coordination_orchestrate({
-  task: "Implement user authentication",
+mcp__monomind__task_create({
+  description: "Implement user authentication",
   agents: ["architect", "coder", "tester"],
   strategy: "sequential",
   timeout: 300
