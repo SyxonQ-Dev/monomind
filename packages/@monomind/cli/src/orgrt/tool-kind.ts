@@ -96,6 +96,19 @@ const NAME_KINDS: Record<string, ToolKind> = {
   invokesubagent: 'task',
   browsersubagent: 'task',
   updatetodo: 'todo',
+  // cline (the runner already sets kind; names for name-only lookup)
+  runcommands: 'shell',
+  editor: 'edit',
+  readfiles: 'read',
+  searchcodebase: 'search',
+  fetchwebcontent: 'web',
+  spawnagent: 'task',
+  // aider shim / dsh (web_search, bash already above)
+  lint: 'shell',
+  gitcommit: 'other',
+  pwsh: 'shell',
+  subagent: 'task',
+  subagentfork: 'task',
 };
 
 function normalize(name: string): string {

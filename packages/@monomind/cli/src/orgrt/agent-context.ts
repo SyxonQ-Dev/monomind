@@ -37,7 +37,13 @@
  *     `COPILOT_AGENT_SESSION_ID` (GitHub's hosted coding agent).
  *   - crush 0.96: `CRUSH=1`; pi 0.87: `PI_CODING_AGENT=true`.
  *   - qwen: `QWEN_CODE` (its gemini-CLI fork's shell marker — not installed
- *     here, unverified). kimi: none found (not installed here). */
+ *     here, unverified). kimi: none found (not installed here).
+ *   - pi 0.87 also sets `PI_SESSION_ID` inside its bash tools.
+ *   - dsh 0.1.7: `DSH_SHELL=1`, `DSH_SESSION_ID` on the commands it runs
+ *     (not `DSH_HOME`/`DSH_PROFILE`, which a human may export themselves).
+ *   - cline 3.0 and aider export none of their own: monomind's runners set
+ *     `MONOMIND_CLINE_TURN` (on cline, its hub daemon and every command they
+ *     run) and `MONOMIND_AIDER=1` (plus `AI_AGENT=aider`). */
 export const AGENT_CONTEXT_ENV_MARKERS = [
   'CLAUDECODE',
   'CLAUDE_CODE_ENTRYPOINT',
@@ -61,6 +67,11 @@ export const AGENT_CONTEXT_ENV_MARKERS = [
   'CRUSH',
   'PI_CODING_AGENT',
   'QWEN_CODE',
+  'PI_SESSION_ID',
+  'DSH_SHELL',
+  'DSH_SESSION_ID',
+  'MONOMIND_CLINE_TURN',
+  'MONOMIND_AIDER',
 ] as const;
 
 /** The first agent-context marker found set in `env`, or `undefined` when

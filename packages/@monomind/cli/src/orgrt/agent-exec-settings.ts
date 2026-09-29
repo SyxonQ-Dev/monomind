@@ -109,7 +109,14 @@ const RUNTIME_LOADS: Record<string, string> = {
   copilot:
     'user config (~/.copilot, MCP servers incl. built-in GitHub) + project custom instructions (AGENTS.md, .github/copilot-instructions.md)',
   crush: 'user config (~/.config/crush/crush.json) + project crush.json and AGENTS.md',
-  pi: 'user settings (~/.pi/agent) + project AGENTS.md/CLAUDE.md',
+  pi: 'user settings (~/.pi/agent) + project .pi/ (settings, extensions, skills, prompt templates) via --approve + AGENTS.md/CLAUDE.md',
+  'pi-rpc':
+    'user settings (~/.pi/agent) + project .pi/ (settings, extensions, skills, prompt templates) via --approve + AGENTS.md/CLAUDE.md',
+  cline:
+    'user state (~/.cline: provider auth, global MCP servers, hooks) + rules (AGENTS.md, .clinerules, .cline/rules, ~/Documents/Cline/Rules) and workflows (.clinerules/workflows)',
+  aider:
+    'user config (.aider.conf.yml in home, git root and cwd, plus .env files) + project AGENTS.md / CONVENTIONS.md as read-only context; no MCP',
+  dsh: '$DSH_HOME (~/.dsh) headless profile patch (Models-page routes, MCP rows) + credentials.yaml + AGENTS.md/CLAUDE.md chain (project and $DSH_HOME)',
 };
 
 /**

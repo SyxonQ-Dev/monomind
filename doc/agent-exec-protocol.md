@@ -1,4 +1,4 @@
-# Agent Exec Protocol — v1 (rev 15)
+# Agent Exec Protocol — v1 (rev 16)
 
 - **Status**: Implemented (Phase 0 of the mono-agent delegation plan — see
   `mono-agent:docs/plans/local-agent-monomind-delegation.md`)
@@ -6,6 +6,29 @@
   the Coder mode threat model, the `--access full` guardrails (root refusal, no transitive
   escalation, env hygiene, audit log), what callers own, and residual risks (issue #360).
 - **Revision history**:
+  - rev 16 (2026-09-29): **coder mode, wave 2** — three new runtime ids and pi parity. No new
+    capability: a caller discovers them through `agent scan --json` (§6), whose entry set grows.
+    - `cline` (Cline CLI; `--json` for a fresh session, ACP `session/load` for resume; kills the
+      hub daemon a turn starts; `init_target: "cline"`).
+    - `aider` (Aider through a Python shim run with aider's own interpreter, plain-CLI fallback
+      when aider cannot be imported; `init_target: "aider"`; no MCP).
+    - `dsh` (DeepSeek Harness developer preview, `dsh --profile headless --json`; free models
+      via `--model <route>/<model>` on its pi-ai adapter: OpenRouter `:free` models with
+      `OPENROUTER_API_KEY`, NVIDIA's catalog with `NVIDIA_API_KEY`; OpenCode Zen's free tier
+      refuses non-OpenCode clients; `reports_cost: false`).
+    All three report `full_access: true`, `tool_activity_fidelity: "full"`, `resume`, `effort`
+    and `max_turns` (emulated where the CLI has no cap: counted steps, then a kill or abort,
+    overshooting by at most one step). `pi` now streams (`streams_incrementally: true`), enforces
+    `max_turns`, and resumes by a runner-chosen `--session-id`; `pi-rpc` gains full access,
+    tool events, resume, effort, `max_turns` and cost. `--effort` maps to pi/pi-rpc and cline
+    `--thinking`, aider's reasoning effort / thinking tokens, and dsh's generated profile patch
+    (clamped to the levels the model supports). `monomind init --target` accepts `cline`
+    (`.clinerules/monomind.md`; MCP is user-scope in cline, so init names `cline mcp install
+    monomind --yes -- npx -y monomind@latest mcp start` instead of editing `~/.cline`) and `aider`
+    (`CONVENTIONS.md` plus `read: [CONVENTIONS.md]` merged into `.aider.conf.yml`); neither is
+    part of `--target all`. pi and dsh read `AGENTS.md` natively (`init_target: null`).
+    `agent models --runtime dsh` (§12) returns dsh's curated list with `curated: true`.
+    Additive only.
   - rev 15 (2026-09-29): **coder mode on every runtime** — new capabilities
     `agent-exec-full-access-any` and `agent-exec-effort`. `--access full` is accepted for every
     runtime whose `agent scan --json` entry has `full_access: true` — claude, codex, opencode,
@@ -342,7 +365,7 @@ progress go to stderr. A caller must be able to `JSON.parse` every stdout line.
 | `--tools-file <path>` | | Tool definitions as JSON (§4.1); enables native tool wiring where the runner supports it |
 | `--tool-timeout <dur>` | | Max wait for a caller `tool_result` frame (default `120s`) |
 | `--model <id>` | | Model override |
-| `--effort <level>` | | rev 15, capability `agent-exec-effort`. `off\|low\|medium\|high\|xhigh\|max` (anything else → exit 2). Mapped per runtime: claude → the SDK's `effort` (`off` disables thinking); codex → `-c model_reasoning_effort=<level>`; opencode → the model's matching variant; antigravity → `--effort`; grok, copilot → `--reasoning-effort` (each runner clamps levels its CLI lacks). A runtime whose scan entry has `effort: false` ignores it and emits `status {phase:"notice"}` saying so |
+| `--effort <level>` | | rev 15, capability `agent-exec-effort`. `off\|low\|medium\|high\|xhigh\|max` (anything else → exit 2). Mapped per runtime: claude → the SDK's `effort` (`off` disables thinking); codex → `-c model_reasoning_effort=<level>`; opencode → the model's matching variant; antigravity → `--effort`; grok, copilot → `--reasoning-effort`; pi, pi-rpc → `--thinking`; **rev 16**: cline → `--thinking` (fresh turns only; a resumed ACP turn runs without thinking), aider → the model's reasoning effort or thinking tokens (a `status` notice when the model has neither), dsh → its generated profile patch (each runner clamps levels its CLI lacks). A runtime whose scan entry has `effort: false` ignores it and emits `status {phase:"notice"}` saying so |
 | `--cwd <path>` | | Working dir for the agent (default: cwd) |
 | `--resume <sessionId>` | | Resume a prior session/thread/conversation |
 | `--max-turns <n>` | | Cap agent turns (default `25`; the orgrt default is effectively unlimited and is NOT inherited here) |
@@ -493,7 +516,8 @@ One entry per known runner (set grows with monomind releases). Honors `<NAME>_CL
 overrides. Binary probes run in parallel with a 5s per-binary timeout so a hung `--version`
 probe cannot stall the scan. Exit 0 always (detection, not a test). **rev 5**: `streams_incrementally`
 is static per-runtime metadata (`RunnerSpec.streamsIncrementally`, §9) — unlike `installed`/`version`,
-it never depends on probing the binary, so it's always present even when `installed:false`. **rev 12**: `full_access` is likewise static per-runtime metadata (`RunnerSpec.supportsFullAccess`) — whether `agent exec --access full` (§3.1) is implemented for this runtime (**rev 15**: every coding runtime; `false` for vercel, hermes, qwen-rpc, pi-rpc). **rev 12**
+it never depends on probing the binary, so it's always present even when `installed:false`. **rev 12**: `full_access` is likewise static per-runtime metadata (`RunnerSpec.supportsFullAccess`) — whether `agent exec --access full` (§3.1) is implemented for this runtime (**rev 15**: every coding runtime; `false` for vercel, hermes, qwen-rpc, pi-rpc; **rev 16**:
+pi-rpc, cline, aider and dsh are `true`). **rev 12**
 (#357): `tool_activity_fidelity` (`"full"|"start-only"|"none"`) is the same kind of static metadata
 (`RunnerSpec.toolActivityFidelity`) for the §3.2 `tool_activity` event — see §9. **rev 15**:
 five more static fields (`orgrt/runner-features.ts`), each saying what monomind's runner does
@@ -501,8 +525,10 @@ today, not what the vendor CLI could do: `resume` (honors `--resume` and reports
 pass back), `effort` (maps `--effort`), `max_turns` (enforces `--max-turns` on the runtime's own
 loop), `reports_cost` (`result.cost_usd` is a real figure — a runtime without it never trips
 `--budget-usd`), and `init_target` (the `monomind init --target` value that writes this
-runtime's setup files: `claude`, `codex`, `opencode`, `kimicode`, `antigravity`; `null` for the
-rest).
+runtime's setup files: `claude`, `codex`, `opencode`, `kimicode`, `antigravity`, and since
+rev 16 `cline`, `aider`; `null` for the rest — pi and dsh read `AGENTS.md` natively). **rev 16**:
+entries for `cline`, `aider` and `dsh`; `full_access` is `true` for every runtime except vercel,
+hermes and qwen-rpc.
 
 `agent scan --installed --json` = installed-only view (the name `agent list` is reserved by the
 pre-existing swarm command, §1). `agent test <id>` = one smoke turn via `agent exec`
@@ -710,14 +736,15 @@ feature alone:
 - `"full"` — the runner yields a real tool_use id, name, and input, AND later a matching
   `tool_result` for the same id (`claude`, via `ClaudeAgentRunner`'s own
   `'tool_use'`/`'tool_result'` AgentMessages; rev 15: `codex`, `opencode`, `antigravity`,
-  `kimicode`, `grok`, `qwen`, `copilot`, `pi` from their CLIs' own tool start/complete events). `orgrt/tool-activity.ts`'s `ToolActivityTracker`
+  `kimicode`, `grok`, `qwen`, `copilot`, `pi` from their CLIs' own tool start/complete events;
+  rev 16: `pi-rpc`, `cline`, `aider` (through its shim), `dsh`). `orgrt/tool-activity.ts`'s `ToolActivityTracker`
   turns this into a matched start/end pair.
 - `"start-only"` — the runner only yields a lightweight `{type:'tool_use', text: toolName}`
   liveness signal, with no id to correlate an end with (no runtime today). `ToolActivityTracker` maps this to a `tool_activity`
   `"start"` under a locally-minted id, with no matching `"end"` — do not invent one; a fabricated
   `ok`/`duration_ms` a caller can't verify is worse than omitting it.
 - `"none"` — the runner's `AgentMessage` stream carries no tool signal a caller could act on at all,
-  whether because it never yields `'tool_use'` (`vercel`, `qwen-rpc`, `pi-rpc` today; `crush`
+  whether because it never yields `'tool_use'` (`vercel`, `qwen-rpc` today; `crush`
   yields only label-free liveness pings) or
   because what it yields isn't really per-call information (`hermes`'s own `'tool_use'` is a single
   fixed `"turn started"` placeholder ping per turn, not a tool name — mapping it through the
@@ -915,7 +942,11 @@ stays read-only.
 Sources: `claude` — the Agent SDK's `query().supportedModels()`, the list Claude Code's `/model`
 picker shows for the signed-in account (it varies by account and plan); `codex` —
 `codex debug models`, only entries with `visibility: "list"`; `antigravity` — `agy models`;
-`opencode` — `opencode models`. Every other runtime has no listing command:
+`opencode` — `opencode models`. **rev 16**: `dsh` has no listing command either, so the result is
+the runner's own curated list (`orgrt/dsh-runner-models.ts`) with `"curated": true` — DeepSeek's
+own routes plus free OpenRouter/NVIDIA models, each with `effort_levels`, `free` and `key_env`
+(the variable its key comes from); any other `<route>/<model>` still works as free text. Every
+other runtime has no listing command:
 `"supported": false, "models": []`, exit 0 — pass a model id its CLI accepts.
 
 Errors keep the same shape with `models: []` and an `error: {code, message}`: `unknown-runtime`

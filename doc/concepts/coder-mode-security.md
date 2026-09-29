@@ -4,7 +4,8 @@
 > coding-agent session with full, automated, unrestricted access to the machine, driven through
 > `monomind agent exec --access full` instead of a direct CLI spawn. Since protocol rev 15 this
 > covers every coding runtime with `full_access: true` in `agent scan --json` (claude, codex,
-> opencode, antigravity, kimicode, grok, qwen, copilot, crush, pi), not only Claude Code. This document is the
+> opencode, antigravity, kimicode, grok, qwen, copilot, crush, pi; rev 16 adds pi-rpc, cline,
+> aider and dsh), not only Claude Code. This document is the
 > threat model and guardrail record required by
 > [#360](https://github.com/monoes/monomind/issues/360), refined against what was actually built
 > in [#355](https://github.com/monoes/monomind/issues/355) (`--access full`),
@@ -42,7 +43,9 @@ invocation, parsed in [`commands/agent-exec.ts`](../../packages/@monomind/cli/sr
 the only place `permissionMode: 'bypassPermissions'` + `allowDangerouslySkipPermissions: true`
 get set; for every other full-access runtime (rev 15) it is that runner's own switch to its
 CLI's no-approval, no-sandbox mode (codex `--dangerously-bypass-approvals-and-sandbox`, opencode
-permission `allow`, the others' yolo flags), taken only on the same literal `'full'`.
+permission `allow`, the others' yolo flags; rev 16: pi/pi-rpc `--approve`, cline on the user's
+own `~/.cline` with `--auto-approve true`, aider's shim answering every confirmation yes, dsh
+`DSH_PERMISSION_MODE=danger-full-access`), taken only on the same literal `'full'`.
 
 Audited (by direct source inspection, and pinned by regression tests in
 `agent-exec-no-transitive-escalation.test.ts` so a future change fails loudly):
@@ -80,9 +83,10 @@ tested in `agent-exec.test.ts`'s `"agent exec: --access full"` suite:
   be a directory — `error {code:"unsafe"}` otherwise.
 - **Runtime allowlist**: only a `RunnerSpec` with `supportsFullAccess: true` may run full access —
   since rev 15 that is claude, codex, opencode, antigravity, kimicode, grok, qwen, copilot, crush
-  and pi (`orgrt/runner-registry.ts`'s `RUNNER_SPECS`; the exact set is pinned by
+  and pi, and since rev 16 also pi-rpc, cline, aider and dsh (`orgrt/runner-specs.ts`, merged
+  into `RUNNER_SPECS`; the exact set is pinned by
   `agent-exec-no-transitive-escalation.test.ts`, so widening it fails a test until this document
-  is updated with it). vercel (no native tools), hermes, qwen-rpc and pi-rpc get
+  is updated with it). vercel (no native tools), hermes and qwen-rpc get
   `error {code:"unsupported", fatal:true}`, never a silent scoped fallback (guardrail 5, below).
 - **No silent downgrade/upgrade**: `access` is resolved once, before the runner ever starts, and
   is reported honestly on the `start` event (`access: "scoped"|"full"`) — a runtime that can't
@@ -186,8 +190,22 @@ asked for `full` (they'd believe they had full access and didn't) or vice versa.
   `OPENCODE_PID`; antigravity `ANTIGRAVITY_AGENT`; gemini `GEMINI_CLI`; grok `GROK_SESSION_ID`,
   `GROK_MANAGED_BY_NPM`; copilot `COPILOT_CLI_BINARY_VERSION`, `COPILOT_AGENT_SESSION_ID`; crush
   `CRUSH`; pi `PI_CODING_AGENT`; qwen `QWEN_CODE` (not installed here — unverified). No marker
-  was found for kimi (not installed here). As before, this is a speed bump, not the boundary
+  was found for kimi (not installed here). Rev 16: pi's `PI_SESSION_ID` (inside its bash tools),
+  dsh `DSH_SHELL`, `DSH_SESSION_ID`; cline and aider export none of their own, so their runners
+  set `MONOMIND_CLINE_TURN` (on cline, its hub daemon and every command they run) and
+  `MONOMIND_AIDER`. As before, this is a speed bump, not the boundary
   (§4). `MONOMIND_AGENT_EXEC` is still set on every runner's env by `agent exec` itself.
+- **Rev 16 runtime specifics**: cline starts a detached `cline --cline-hub-daemon`; the runner
+  finds the one a turn started (by its per-turn marker or a new hub-lock pid, confirmed by its
+  command line) and kills it at turn end and on abort, and never touches a daemon that was
+  running before the turn — but when the user already runs one, cline may execute the turn inside
+  it, outside the turn's process-group tracker. cline auto-approves in scoped mode too; scoped
+  only isolates its config (`--config`/`--data-dir`, an empty MCP list). aider has no sandbox:
+  scoped mode declines model-suggested shell commands (reported as failed shell calls) and slash
+  commands, full mode runs them; aider always writes its repo-map cache
+  (`.aider.tags.cache.v4/`) into the repo. dsh scoped stays at `workspace-write`. pi and cline
+  full-access resumes run on the user's own provider logins; none of these runners ever starts a
+  login or opens a browser.
 - **Org roles**: `access-grant.ts`, `access-validate.ts` and `org role set-access` accept any
   runtime whose spec supports full access; the grant flow (signed human ack, drift suspension,
   taint, unattended gate) is unchanged.
@@ -249,10 +267,11 @@ are never mistaken for oversights:
   so can one that deliberately detaches under another user or service manager. A CLI that runs
   its tools in a separate long-lived server it did not spawn itself (e.g. an already-running
   opencode server) is outside the tree too. Full access is not a sandbox.
-- **Weaker observability on start-only runtimes** (rev 15): crush and pi report tool starts
-  without ends or real inputs, so the caller's journal and the audit line's
-  `toolCalls` show less than on claude; the UI labels fidelity instead of pretending. Budgets are
-  unenforceable where `reports_cost` is false.
+- **Weaker observability where fidelity is not `full`**: crush reports no tool events at all
+  (rev 15), and aider's plain-CLI fallback (rev 16, used only when its Python shim cannot import
+  aider) reports tool starts without ends or real inputs, so the caller's journal and the audit
+  line's `toolCalls` show less than on claude; the UI labels fidelity instead of pretending.
+  Budgets are unenforceable where `reports_cost` is false (dsh, among others).
 - **Agent-context detection for `org role set-access … full` is a speed bump** (#365): an agent
   with unrestricted Bash can unset the env markers. The boundary is the operator directory: a
   role's SDK sandbox (`denyRead`) or authority mask (`--tmpfs`) overlays it with an empty tmpfs,

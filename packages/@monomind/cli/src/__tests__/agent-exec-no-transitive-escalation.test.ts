@@ -119,7 +119,11 @@ describe('#360: no transitive escalation to --access full', () => {
         'kimicode',
         'opencode',
         'pi',
+        'pi-rpc',
         'qwen',
+        'cline',
+        'aider',
+        'dsh',
       ].sort(),
     );
   });

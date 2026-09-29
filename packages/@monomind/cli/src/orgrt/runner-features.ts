@@ -30,7 +30,15 @@ export interface RunnerFeatures {
   effort: boolean;
   maxTurns: boolean;
   reportsCost: boolean;
-  initTarget: 'claude' | 'codex' | 'opencode' | 'kimicode' | 'antigravity' | null;
+  initTarget:
+    | 'claude'
+    | 'codex'
+    | 'opencode'
+    | 'kimicode'
+    | 'antigravity'
+    | 'cline'
+    | 'aider'
+    | null;
 }
 
 export const RUNNER_FEATURES: Record<RuntimeKind, RunnerFeatures> = {
@@ -77,10 +85,30 @@ export const RUNNER_FEATURES: Record<RuntimeKind, RunnerFeatures> = {
   crush: { resume: false, effort: false, maxTurns: false, reportsCost: false, initTarget: null },
   // copilot: the closing result line carries sessionId; --resume=<id>.
   copilot: { resume: true, effort: true, maxTurns: false, reportsCost: false, initTarget: null },
-  // pi: session header id → --session <id>; effort → --thinking; cost is the
-  // sum of each message's usage.cost.total (0 for models pi cannot price).
-  pi: { resume: true, effort: true, maxTurns: false, reportsCost: true, initTarget: null },
-  'pi-rpc': { resume: false, effort: false, maxTurns: false, reportsCost: false, initTarget: null },
+  // pi / pi-rpc (#381): resume is `--session-id <id>`, an id the runner
+  // picks (sessions stay in pi's own store); effort maps 1:1 to `--thinking
+  // off|low|medium|high|xhigh|max`; maxTurns is emulated (turn_start count,
+  // then kill / rpc `abort`); cost is the sum of every assistant message_end's
+  // cost.total (0 for models pi cannot price). No init target: pi reads
+  // AGENTS.md natively.
+  pi: { resume: true, effort: true, maxTurns: true, reportsCost: true, initTarget: null },
+  'pi-rpc': { resume: true, effort: true, maxTurns: true, reportsCost: true, initTarget: null },
+  // cline (#382): a fresh turn runs `--json` (tokens and cost from
+  // run_result, effort → --thinking); later turns run over ACP session/load
+  // (usage = growth of the `cline history` totals; no effort on resumed
+  // turns); maxTurns is emulated (iteration_start / model steps, then kill;
+  // can overshoot by one step).
+  cline: { resume: true, effort: true, maxTurns: true, reportsCost: true, initTarget: 'cline' },
+  // aider (#383, via the Python shim): per-session JSON history in the state
+  // dir; effort → reasoning_effort / thinking_tokens; maxTurns caps aider's
+  // retry loop; cost from coder.total_cost.
+  aider: { resume: true, effort: true, maxTurns: true, reportsCost: true, initTarget: 'aider' },
+  // dsh (#384): `--session-id`; model and effort go through a generated
+  // --patch over the agent-default-model row (DeepSeek routes use
+  // off|low|high|max; a curated pi-ai model is clamped to its own levels);
+  // maxTurns emulated (step_start count + process-group kill). No USD cost.
+  // No init target: dsh reads AGENTS.md natively.
+  dsh: { resume: true, effort: true, maxTurns: true, reportsCost: false, initTarget: null },
   // hermes reports cost_usd: 0 — not a real figure.
   hermes: { resume: false, effort: false, maxTurns: false, reportsCost: false, initTarget: null },
 };

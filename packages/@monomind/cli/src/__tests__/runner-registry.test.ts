@@ -95,6 +95,10 @@ describe('runner registry', () => {
       'copilot',
       'pi',
       'pi-rpc',
+      'hermes',
+      'cline',
+      'aider',
+      'dsh',
     ]) {
       expect(isKnownRuntime(id), id).toBe(true);
     }
@@ -102,7 +106,7 @@ describe('runner registry', () => {
     expect(isKnownRuntime('cursor')).toBe(false);
   });
 
-  // Rev 15: --access full on every coding runtime; not on vercel/hermes/rpc variants.
+  // Rev 16: --access full on every coding runtime; not on vercel/hermes/qwen-rpc.
   it('supportsFullAccess is exactly the coding runtimes', () => {
     const full = RUNNER_SPECS.filter((s) => s.supportsFullAccess)
       .map((s) => s.id)
@@ -118,7 +122,11 @@ describe('runner registry', () => {
         'kimicode',
         'opencode',
         'pi',
+        'pi-rpc',
         'qwen',
+        'cline',
+        'aider',
+        'dsh',
       ].sort(),
     );
   });
@@ -141,6 +149,11 @@ describe('runner registry', () => {
     expect(byId.get('kimicode')?.initTarget).toBe('kimicode');
     expect(byId.get('antigravity')?.initTarget).toBe('antigravity');
     expect(byId.get('grok')?.initTarget).toBeNull();
+    expect(byId.get('cline')?.initTarget).toBe('cline');
+    expect(byId.get('aider')?.initTarget).toBe('aider');
+    // pi and dsh read AGENTS.md natively: no init target of their own.
+    expect(byId.get('pi')?.initTarget).toBeNull();
+    expect(byId.get('dsh')?.initTarget).toBeNull();
     expect(byId.get('hermes')?.resume).toBe(false);
   });
 
@@ -163,7 +176,11 @@ describe('runner registry', () => {
       qwen: 'full true false false false',
       copilot: 'full true true false false',
       crush: 'none false false false false',
-      pi: 'full true true false true',
+      pi: 'full true true true true',
+      'pi-rpc': 'full true true true true',
+      cline: 'full true true true true',
+      aider: 'full true true true true',
+      dsh: 'full true true true false',
     });
   });
 
@@ -246,6 +263,14 @@ describe('scanInstalled (§6)', () => {
       shell: 'bash',
     });
     expect(byId.get('vercel')?.install).toEqual({ kind: 'manual' });
+    // Rev 16 runtimes: the npm ones are runnable recipes; aider needs uv.
+    expect(byId.get('pi')?.install).toEqual({
+      kind: 'npm',
+      packages: ['@earendil-works/pi-coding-agent'],
+    });
+    expect(byId.get('cline')?.install).toEqual({ kind: 'npm', packages: ['cline'] });
+    expect(byId.get('dsh')?.install).toEqual({ kind: 'npm', packages: ['@deepseek-ai/dsh'] });
+    expect(byId.get('aider')?.install).toEqual({ kind: 'manual' });
     for (const a of result.agents) expect(a.install.kind).toMatch(/^(npm|script|manual)$/);
   });
 
