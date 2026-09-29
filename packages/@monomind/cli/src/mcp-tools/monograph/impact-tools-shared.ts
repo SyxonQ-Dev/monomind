@@ -1,4 +1,4 @@
-import type { MonographNode } from '@monoes/monograph';
+import type { MonographNode, SymbolCandidate } from '@monoes/monograph';
 import type { MCPToolResult } from '../types.js';
 
 /**
@@ -25,4 +25,24 @@ export function textWithData(readable: string, data: unknown, isError = false): 
 export function nodeLocation(node: Pick<MonographNode, 'filePath' | 'startLine'>): string {
   if (!node.filePath) return '';
   return node.startLine != null ? `${node.filePath}:${node.startLine}` : node.filePath;
+}
+
+/**
+ * A name that matched several definitions: list them (non-test first, as the
+ * library ranks them) instead of answering about one. A confident verdict on
+ * the wrong definition — say, a test mock with 0 callers — is worse than asking.
+ */
+export function ambiguityResult(name: string, candidates: SymbolCandidate[]): MCPToolResult {
+  return textWithData(
+    [
+      `"${name}" matches ${candidates.length} definitions — re-run with nodeId (or filePath) to pick one:`,
+      ...candidates.map(
+        (c) =>
+          `  nodeId=${c.id}  [${c.label}] ${c.name}  ${c.filePath ?? '(no path)'}${
+            c.startLine != null ? `:${c.startLine}` : ''
+          }`,
+      ),
+    ].join('\n'),
+    { ambiguous: true, candidates },
+  );
 }
