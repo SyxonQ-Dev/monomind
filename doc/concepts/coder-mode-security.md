@@ -78,7 +78,8 @@ tested in `agent-exec.test.ts`'s `"agent exec: --access full"` suite:
 - **Root refusal**: refuses `--access full` when `process.getuid?.() === 0`, on every runtime —
   the same restriction Claude Code itself applies to `bypassPermissions`, kept for CLIs whose own
   yolo mode would allow root — `error {code:"unsafe", fatal:true}` instead of an opaque runner
-  failure.
+  failure. A granted full-access org role gets the same refusal: under uid 0 it runs scoped
+  (`suspended`, `access-grant.ts`).
 - **Explicit, validated `--cwd`**: required (no silent inherit-the-caller's-cwd), must exist, must
   be a directory — `error {code:"unsafe"}` otherwise.
 - **Runtime allowlist**: only a `RunnerSpec` with `supportsFullAccess: true` may run full access —
@@ -201,8 +202,8 @@ asked for `full` (they'd believe they had full access and didn't) or vice versa.
   running before the turn — but when the user already runs one, cline may execute the turn inside
   it, outside the turn's process-group tracker. cline auto-approves in scoped mode too; scoped
   only isolates its config (`--config`/`--data-dir`, an empty MCP list). aider has no sandbox:
-  scoped mode declines model-suggested shell commands (reported as failed shell calls) and slash
-  commands, full mode runs them; aider always writes its repo-map cache
+  scoped mode declines model-suggested shell commands (reported as failed shell calls), slash
+  commands and file writes outside the turn's cwd or into `.git`, full mode runs them; aider always writes its repo-map cache
   (`.aider.tags.cache.v4/`) into the repo. dsh scoped stays at `workspace-write`. pi and cline
   full-access resumes run on the user's own provider logins; none of these runners ever starts a
   login or opens a browser.
