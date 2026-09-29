@@ -195,12 +195,14 @@ export const monographQueryTool: MCPTool = {
 export const monographSuggestTool: MCPTool = {
   name: 'monograph_suggest',
   description:
-    'Get graph-topology-derived questions to explore the codebase. Pass task= to score by task relevance via BM25/FTS5.',
+    'Suggest where to start. With task=, returns the nodes most relevant to the task (BM25/FTS5-ranked, ' +
+    'with file:line), followed by graph-topology questions about them when any exist. Without task=, ' +
+    'returns graph-topology-derived questions to explore the codebase.',
   inputSchema: {
     type: 'object',
     properties: {
       task: { type: 'string', description: 'Optional task description for task-relevance scoring' },
-      limit: { type: 'number', description: 'Max questions (default 10)' },
+      limit: { type: 'number', description: 'Max nodes and max questions (default 10)' },
       checkStaleness: {
         type: 'boolean',
         description:
@@ -238,6 +240,11 @@ export const monographSuggestTool: MCPTool = {
     const { openDb, closeDb, searchGraph } = await import('@monoes/monograph');
     const db = openDb(dbPath);
     try {
+      // "Run monograph_build" is only true when the graph has no nodes; a
+      // built graph that has no answer for a query must say so instead.
+      const { n: nodeCount } = db.prepare('SELECT COUNT(*) AS n FROM nodes').get() as { n: number };
+      if (nodeCount === 0)
+        return text(`Monograph index is empty. Run monograph_build first.${stalenessAnnotation}`);
       // Cap limit and task: limit is passed directly to SQL LIMIT clause;
       // task is forwarded to searchGraph.
       const MAX_SUGGEST_LIMIT = 1_000;
@@ -276,17 +283,28 @@ export const monographSuggestTool: MCPTool = {
       // nothing once vector retrieval was removed and just left this
       // better-ranked path off unless a caller happened to know about it.
       let hitIds: string[] = [];
+      let nodeLines: string[] = [];
       if (task) {
-        const hits = searchGraph(db, task, { limit: 20 });
+        const hits = searchGraph(db, task, { limit: Math.max(limit, 20) });
         const { SYMBOL_NODE_LABELS } = await import('@monoes/monograph');
         const relevantHits = preferSymbolHits(hits, SYMBOL_NODE_LABELS);
         hitIds = [...new Set(relevantHits.map((h) => h.id))];
         if (hitIds.length === 0) {
           return text(
-            'No suggestions for this task. Run monograph_build first or try a different query.' +
+            `No nodes match this task in the built graph (${nodeCount} nodes). ` +
+              'Try identifiers (camelCase/PascalCase) or filenames from the codebase.' +
               stalenessAnnotation,
           );
         }
+        // The task-ranked nodes are the answer; edge questions are extra.
+        nodeLines = relevantHits.slice(0, limit).map((h) => {
+          const loc = h.filePath
+            ? h.startLine != null
+              ? `${h.filePath}:${h.startLine}`
+              : h.filePath
+            : '';
+          return `  [${h.label}] ${h.name}  ${loc}  (score: ${h.relevance.toFixed(3)})`;
+        });
       }
 
       const taskFilter = hitIds.length
@@ -306,11 +324,16 @@ export const monographSuggestTool: MCPTool = {
       `)
         .all(...hitIds, ...hitIds) as any[];
 
-      const questions = rows.map(formatSuggestion);
-      const fallback = task
-        ? 'No suggestions for this task. Run monograph_build first.'
-        : 'No suggestions. Run monograph_build first.';
-      return text((questions.slice(0, limit).join('\n') || fallback) + stalenessAnnotation);
+      const questions = rows.map(formatSuggestion).slice(0, limit);
+      if (task) {
+        const out = [`Relevant nodes for this task (${nodeLines.length}):`, ...nodeLines];
+        if (questions.length > 0) out.push('', 'Open questions about these nodes:', ...questions);
+        return text(out.join('\n') + stalenessAnnotation);
+      }
+      const fallback =
+        'No open questions: the graph has no AMBIGUOUS/INFERRED edges. ' +
+        'Pass task= to get the nodes relevant to a task.';
+      return text((questions.join('\n') || fallback) + stalenessAnnotation);
     } finally {
       closeDb(db);
     }
