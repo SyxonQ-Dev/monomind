@@ -15,6 +15,7 @@
  *     narrow rules go last.
  */
 
+import { mcpCommand } from '../platform-adapters/renderers/mcp.js';
 import type { InitOptions } from './types.js';
 
 const OPENCODE_SCHEMA = 'https://opencode.ai/config.json';
@@ -27,17 +28,12 @@ export const OPENCODE_MONOMIND_BASH_RULES: Readonly<Record<string, string>> = {
   'npx @monomind/*': 'allow',
 };
 
-function isWindows(): boolean {
-  return process.platform === 'win32';
-}
-
 /**
- * opencode MCP `command` is always a string array. On Windows we prepend
- * `cmd /c` (mirrors mcp-generator.ts' cross-platform handling).
+ * opencode MCP `command` is always a string array (the shared renderer adds
+ * `cmd /c` on Windows and pins the version).
  */
-function monomindCommand(): string[] {
-  const base = ['-y', 'monomind@latest', 'mcp', 'start'];
-  return isWindows() ? ['cmd', '/c', 'npx', ...base] : ['npx', ...base];
+function monomindCommand(pin?: string): string[] {
+  return mcpCommand('opencode', process.platform, pin);
 }
 
 /**
@@ -58,15 +54,10 @@ export function generateOpencodeConfig(options: InitOptions): Record<string, unk
     config.mcp = {
       monomind: {
         type: 'local',
-        command: monomindCommand(),
+        command: monomindCommand(options.mcp.pin),
         enabled: true,
         env: {
           npm_config_update_notifier: 'false',
-          MONOMIND_MODE: 'v1',
-          MONOMIND_HOOKS_ENABLED: 'true',
-          MONOMIND_TOPOLOGY: options.runtime.topology,
-          MONOMIND_MAX_AGENTS: String(options.runtime.maxAgents),
-          MONOMIND_MEMORY_BACKEND: options.runtime.memoryBackend,
         },
       },
     };
@@ -330,10 +321,9 @@ export function generateAgentsMd(): string {
     'exploration. They return file path + line number from a SQLite knowledge graph.',
     'Only fall back to grep if monograph returns nothing or the graph isn’t built.',
     '',
-    'The graph gate enforces this on hook-capable platforms: the first grep/search',
-    'in a session is blocked once until a monograph tool is called, then searches',
-    'pass with a reminder. Opt out: .monomind/guidance/active-gates.json',
-    '{"graphGate": "off"} or MONOMIND_GRAPH_GATE=off.',
+    'On hook-capable platforms the graph gate adds a one-time reminder to the first',
+    'source-code grep/search of a session (it never blocks). Opt out:',
+    '.monomind/guidance/active-gates.json {"graphGate": "off"} or MONOMIND_GRAPH_GATE=off.',
     '',
     '## Memory',
     'Persist insights across sessions: `memory_pattern-store` to save, `memory_pattern-search` to',

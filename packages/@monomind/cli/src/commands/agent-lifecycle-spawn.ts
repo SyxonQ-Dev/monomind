@@ -15,7 +15,7 @@ import {
 
 export const spawnCommand: Command = {
   name: 'spawn',
-  description: 'Spawn a new agent',
+  description: 'Record a new agent in the agent store (starts no process)',
   options: [
     {
       name: 'type',
@@ -100,7 +100,7 @@ export const spawnCommand: Command = {
 
     if (!agentName) agentName = `${agentType}-${Date.now().toString(36)}`;
 
-    output.printInfo(`Spawning ${agentType} agent: ${output.highlight(agentName)}`);
+    output.printInfo(`Recording ${agentType} agent: ${output.highlight(agentName)}`);
     const capabilities = agentCapabilities(root, agentType, requestedType || agentType);
 
     try {
@@ -153,7 +153,12 @@ export const spawnCommand: Command = {
       });
 
       output.writeln();
-      output.printSuccess(`Agent ${agentName} spawned successfully`);
+      output.printSuccess(`Agent ${agentName} recorded in the agent store`);
+      output.writeln(
+        output.dim(
+          '  No process was started. To run an agent turn, use `monomind agent exec -r <runner> -p "<prompt>"`.',
+        ),
+      );
       updateSwarmActivityMetrics(1);
 
       if (ctx.flags.format === 'json') output.printJson(result);

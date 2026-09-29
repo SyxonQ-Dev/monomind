@@ -211,31 +211,30 @@ module.exports = {
     // slash-command expansions) carry no user intent: no pick, no record.
     if (pickCore.isSystemPrompt(prompt)) return;
 
+    // A trivial reply ("thanks", "ok", "continue") gets nothing: no pick, no
+    // record (the session's earlier route still describes the work in
+    // progress), and none of the enrichment below — graph, Second Brain,
+    // banners — whose cost it can't repay (#415).
+    if (pickCore.isTrivialPrompt(prompt)) return;
+
     {
       // ── The pick, in BOTH modes: Jev over the agent registry, else a strong
       //    keyword match over the same registry (bounded by
       //    MONOMIND_JEV_HOOK_TIMEOUT_MS and the failure breaker). Its one
       //    [PICK] line reaches Claude even under MONOMIND_HOOK_QUIET — it is
       //    the hook's answer, not an advisory banner.
-      //    A trivial reply ("thanks", "ok") gets no pick and no record: the
-      //    session's earlier route still describes the work in progress.
-      var result;
-      if (pickCore.isTrivialPrompt(prompt)) {
-        result = { agent: null, agentSlug: null, confidence: null, reason: 'trivial prompt', routingMethod: 'none', skillMatches: [] };
-      } else {
-        var decided = await _decidePick(CWD, prompt);
-        result = decided.result;
-        var pickLine = pickCore.formatPickLine(decided.pick);
-        if (pickLine) console.log(pickLine);
-        try {
-          pickCore.persistRoute(CWD, {
-            pick: decided.pick,
-            prompt: prompt,
-            sessionId: hookInput.session_id || hookInput.sessionId,
-            shown: !!pickLine,
-          });
-        } catch (e) { /* non-fatal */ }
-      }
+      var decided = await _decidePick(CWD, prompt);
+      var result = decided.result;
+      var pickLine = pickCore.formatPickLine(decided.pick);
+      if (pickLine) console.log(pickLine);
+      try {
+        pickCore.persistRoute(CWD, {
+          pick: decided.pick,
+          prompt: prompt,
+          sessionId: hookInput.session_id || hookInput.sessionId,
+          shown: !!pickLine,
+        });
+      } catch (e) { /* non-fatal */ }
 
       // When QUIET: the advisory output is suppressed anyway, so skip ALL the
       // expensive enrichment below (embedding search, second-brain HTTP, monograph
@@ -590,8 +589,7 @@ module.exports = {
         // [AUDIT]) carry identical content until the underlying metrics file
         // changes, so re-injecting them on every prompt is pure token waste.
         // Show each at most once per session per file version, keyed on the
-        // file's mtime — same marker-file pattern as mcp-not-connected-warned.json
-        // below. If the metrics file is rewritten, the banner may fire again.
+        // file's mtime. If the metrics file is rewritten, the banner may fire again.
         var bannerSessId = String((hCtx.hookInput && (hCtx.hookInput.sessionId || hCtx.hookInput.session_id)) || '');
         var bannerShownOnce = function (tag, metricsFilePath) {
           try {
@@ -643,35 +641,6 @@ module.exports = {
           }
           if (mapData && mapData.graphStaleness && mapData.graphStaleness.commitsBehind > 10 && bannerShownOnce('codebase-staleness', mapFile)) {
             advisoryLog('[CODEBASE] Graph index ' + mapData.graphStaleness.commitsBehind + ' commits behind HEAD — run monograph build');
-          }
-        }
-        // Graph gate connectivity nudge — the pre-search/pre-bash gate
-        // (utils/monograph.cjs _graphGateShouldBlock) hard-blocks the first
-        // Grep/Glob/bash-grep-or-find call each session until a real
-        // monograph_query/monograph_suggest call fires. If that block was
-        // never followed by a real graph call, the monomind MCP server is
-        // most likely not connected this session (config present but
-        // unapproved/not started) — surface it once so the user can fix the
-        // actual cause instead of the gate silently degrading to a no-op.
-        var graphGateFile = path.join(CWD, '.monomind', 'graph-gate-state.json');
-        var mcpWarnFile = path.join(CWD, '.monomind', 'mcp-not-connected-warned.json');
-        if (fs.existsSync(graphGateFile) && fs.statSync(graphGateFile).size < 4096) {
-          var gateState = JSON.parse(fs.readFileSync(graphGateFile, 'utf-8'));
-          var gateSessId = String((hCtx.hookInput && (hCtx.hookInput.sessionId || hCtx.hookInput.session_id)) || '');
-          if (gateState && gateState.sessionId === gateSessId && gateState.blockedOnce && !gateState.queried) {
-            var alreadyWarnedMcp = false;
-            if (fs.existsSync(mcpWarnFile)) {
-              try {
-                var mcpWarnData = JSON.parse(fs.readFileSync(mcpWarnFile, 'utf-8'));
-                if (mcpWarnData && mcpWarnData.sessionId === gateSessId) alreadyWarnedMcp = true;
-              } catch (e) { /* corrupt — warn again to be safe */ }
-            }
-            if (!alreadyWarnedMcp) {
-              advisoryLog('[MCP] The graph gate blocked a search but no monograph_query/monograph_suggest call followed — the monomind MCP server is likely not connected this session. Run `claude mcp add monomind -- npx monomind@latest mcp start` (then restart), or approve the .mcp.json trust prompt if one is pending.');
-              try {
-                fs.writeFileSync(mcpWarnFile, JSON.stringify({ sessionId: gateSessId, warnedAt: new Date().toISOString() }));
-              } catch (e) { /* non-fatal */ }
-            }
           }
         }
         // Deep dive findings (god nodes, high-degree files from background analysis)

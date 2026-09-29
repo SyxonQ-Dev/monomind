@@ -132,16 +132,16 @@ plan:
 ### Task Orchestration
 ```javascript
 // Orchestrate complex tasks
-mcp__monomind__task_orchestrate {
-  task: "Implement authentication system",
+mcp__monomind__task_create {
+  description: "Implement authentication system",
   strategy: "parallel",
   priority: "high",
   maxAgents: 5
 }
 
 // Share task breakdown
-mcp__monomind__memory_usage {
-  action: "store",
+mcp__monomind__monoswarm_memory {
+  action: "set",
   key: "swarm/planner/task-breakdown",
   namespace: "coordination",
   value: JSON.stringify({
@@ -165,8 +165,8 @@ mcp__monomind__task_status {
 ### Memory Coordination
 ```javascript
 // Report planning status
-mcp__monomind__memory_usage {
-  action: "store",
+mcp__monomind__monoswarm_memory {
+  action: "set",
   key: "swarm/planner/status",
   namespace: "coordination",
   value: JSON.stringify({

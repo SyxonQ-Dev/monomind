@@ -2,7 +2,8 @@
  * GH-446: the fallback hook-handler.cjs that `generateHookHandler()` emits
  * (used when the full helpers can't be copied) ended with an unconditional
  * `process.exit(0)`, overriding the exit code 2 a PreToolUse gate sets to
- * block, so its blocks never reached Claude Code.
+ * block, so its blocks never reached Claude Code. Since #413 the fallback
+ * graph gate only nudges, so the exit-code guarantee is pinned statically.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -42,11 +43,17 @@ describe('fallback hook-handler exit code (GH-446)', () => {
       timeout: 15_000,
     });
 
-  it('exits 2 with the block reason on stderr for a gated command', () => {
+  it('keeps a gate-set exit code instead of forcing exit 0', () => {
+    // No fallback gate blocks since #413, but a future one must still reach
+    // Claude Code: the script has to exit with process.exitCode.
+    expect(generateHookHandler()).toContain('process.exit(process.exitCode ?? 0)');
+    expect(generateHookHandler()).not.toMatch(/process\.exit\(0\)/);
+  });
+
+  it('does not block a source grep (#413: the graph gate is a nudge now)', () => {
     const res = runPreBash('grep -rn foo src');
-    expect(res.status).toBe(2);
-    expect(res.stderr).toContain('"decision":"block"');
-    expect(res.stderr).toContain('[graph-gate]');
+    expect(res.status).toBe(0);
+    expect(res.stderr).not.toContain('"decision":"block"');
   });
 
   it('exits 0 for a harmless command', () => {

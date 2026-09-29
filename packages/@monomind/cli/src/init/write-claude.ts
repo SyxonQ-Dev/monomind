@@ -4,6 +4,7 @@
  */
 
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { generateClaudeMd } from './claudemd-generator.js';
 import { guardFor } from './file-guard.js';
@@ -221,6 +222,36 @@ export async function writeStatusline(
   guard.flush();
 }
 
+/** Opening delimiter of the managed block, current and legacy forms. */
+const MANAGED_CLAUDE_MD_BLOCK = /<!-- monomind-block:claude-md -->|monomind:start\s+claude-md\b/;
+
+/**
+ * The nearest ancestor CLAUDE.md (walking up from `targetDir`'s parent to the
+ * filesystem root, or to `home` inclusive when `targetDir` is under it) that
+ * already carries monomind's managed block, or null. Claude Code loads every
+ * ancestor CLAUDE.md, so a second block in a nested directory is the same
+ * rules sent twice on every request (GH #412).
+ */
+export function findAncestorManagedClaudeMd(
+  targetDir: string,
+  home: string = os.homedir(),
+): string | null {
+  const stop = path.resolve(home);
+  let dir = path.resolve(targetDir);
+  while (dir !== stop) {
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+    const candidate = path.join(dir, 'CLAUDE.md');
+    try {
+      if (MANAGED_CLAUDE_MD_BLOCK.test(fs.readFileSync(candidate, 'utf-8'))) return candidate;
+    } catch {
+      // absent or unreadable — keep walking
+    }
+  }
+  return null;
+}
+
 /**
  * Write CLAUDE.md with swarm guidance
  */
@@ -235,6 +266,15 @@ export async function writeClaudeMd(
 
   if (exists && (!options.force || options.ifMissing)) {
     result.skipped.push('CLAUDE.md');
+    return;
+  }
+
+  const ancestor = findAncestorManagedClaudeMd(targetDir);
+  if (ancestor) {
+    result.skipped.push('CLAUDE.md (monomind block already in an ancestor CLAUDE.md)');
+    (result.warnings ??= []).push(
+      `CLAUDE.md not written: ${ancestor} already carries the monomind rules, and Claude Code loads it in this directory too.`,
+    );
     return;
   }
 

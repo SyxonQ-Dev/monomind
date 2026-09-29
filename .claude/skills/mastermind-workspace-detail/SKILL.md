@@ -8,7 +8,7 @@ pick: low
 
 # Mastermind Workspace Detail
 
-This skill is invoked by `mastermind:workspace-detail` or directly via `/mastermind-workspace-detail`.
+This skill is invoked directly via `/mastermind-workspace-detail`.
 
 ---
 

@@ -95,13 +95,35 @@ describe('MCP stdio integration (real child process, issue #36 regression)', () 
     expect(toolsResponse.error).toBeUndefined();
     expect(Array.isArray(toolsResponse.result?.tools)).toBe(true);
     expect(toolsResponse.result.tools.length).toBeGreaterThan(0);
-    expect(toolsResponse.result.tools.map((tool: { name: string }) => tool.name)).toContain(
-      'platforms_doctor',
-    );
+    // Lean default roster (#410): core tools advertised, state-file tools hidden.
+    const names = toolsResponse.result.tools.map((tool: { name: string }) => tool.name);
+    expect(names).toContain('monograph_query');
+    expect(names).toContain('monomind_tool_search');
+    expect(names).not.toContain('platforms_doctor');
+    expect(names).not.toContain('agent_spawn');
     for (const tool of toolsResponse.result.tools) {
       expect(typeof tool.name).toBe('string');
       expect(tool.name.length).toBeGreaterThan(0);
     }
+  }, 25000);
+
+  it('still calls a tool hidden from the default tools/list by name (#410)', async () => {
+    child = spawn('node', [CLI_BIN, 'mcp', 'start'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    const responsesPromise = collectResponses(child, 2, 20000);
+
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })}\n`);
+    child.stdin.write(
+      `${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'system_info', arguments: {} } })}\n`,
+    );
+
+    const responses = await responsesPromise;
+    const callResponse = responses.find((r) => r.id === 2);
+    expect(callResponse).toBeDefined();
+    expect(callResponse.error).toBeUndefined();
+    expect(callResponse.result?.isError).not.toBe(true);
   }, 25000);
 
   it('recovers from a malformed JSON-RPC line instead of wedging the connection (2.5.5 regression)', async () => {

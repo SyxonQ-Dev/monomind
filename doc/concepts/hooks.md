@@ -76,6 +76,8 @@ Safety validation — blocks dangerous patterns:
 - `rm -rf /`, `format c:`, `dd if=/dev/zero`, fork bombs
 - Returns `{action: "block", reason}` to Claude Code
 
+It also runs the graph gate (`pre-search` does the same for `Grep`/`Glob`). The gate never blocks. The first source-code grep, rg or find of a session, when the monograph graph is fresh and non-empty and no monograph tool has been called yet, gets a one-time reminder to try `monograph_query`/`monograph_suggest`, delivered as PreToolUse `additionalContext`. Piped greps (`… | grep x`) and searches over dependencies, build output, logs, docs/data files or paths outside the project get no reminder.
+
 ### `PostToolUse(Write|Edit|MultiEdit)` → `post-edit`
 
 Calls `intelligence.recordEdit(file)` — appends to `pending-insights.jsonl` for later consolidation.
@@ -292,7 +294,7 @@ Confirmed read by hooks/helpers source:
 | `MONOMIND_CONTROL_PORT` | Overrides the control-plane port |
 | `MONOMIND_DEBUG` | Verbose hook/helper debug logging |
 | `MONOMIND_JEV_HOOK_TIMEOUT_MS` | How long the `route` hook waits for the Jev decision model, in ms (default 1500; values above 3000 are capped at 3000, values below 100 fall back to the default) |
-| `MONOMIND_GRAPH_GATE` | Set to `off` to disable the monograph gate (`.claude/helpers/utils/monograph.cjs`) |
+| `MONOMIND_GRAPH_GATE` | Set to `off` to disable the monograph gate's one-time reminder (`.claude/helpers/utils/monograph.cjs`) |
 | `MONOMIND_MONOFENCE_GATE` | Set to `off` to disable the monofence threat-scan gate (`.claude/helpers/handlers/gates-handler.cjs`) |
 
 `MONOMIND_LOG_LEVEL` (referenced elsewhere, e.g. `CLAUDE.local.md`) is **not** consumed by this hooks/helpers subsystem's source — it's read by the CLI logger, not the hook dispatch path.

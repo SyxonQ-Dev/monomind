@@ -58,6 +58,7 @@ describe('agent exec golden fixtures (§8.4)', () => {
     'full-access-background',
     'tool-activity',
     'subagent',
+    'subagent-synth',
   ];
 
   it('every fixture line is v:1 JSON with a known type', () => {
@@ -87,6 +88,7 @@ describe('agent exec golden fixtures (§8.4)', () => {
     expect(load('bad-frame').at(-1)).toMatchObject({ exit_code: 0 });
     expect(load('tool-activity').at(-1)).toMatchObject({ exit_code: 0 });
     expect(load('subagent').at(-1)).toMatchObject({ exit_code: 0 });
+    expect(load('subagent-synth').at(-1)).toMatchObject({ exit_code: 0 });
     expect(load('fatal-auth').at(-1)).toMatchObject({ exit_code: 1 });
     expect(load('timeout').at(-1)).toMatchObject({ exit_code: 124 });
     expect(load('cancel').at(-1)).toMatchObject({ exit_code: 130 });
@@ -209,6 +211,28 @@ describe('agent exec golden fixtures (§8.4)', () => {
     const main = assistant.filter((e) => !e.parent_tool_use_id);
     expect(evs.find((e) => e.type === 'result')!.text).toBe(main.map((e) => e.text).join(''));
     expect(assistant.some((e) => e.parent_tool_use_id)).toBe(true);
+  });
+
+  // #387 rev 24: a non-claude runtime's subagent events are synthesized from
+  // its task-kind tool call: started right after the start, finished right
+  // after the end, both keyed by the call's own id; no progress, no usage.
+  it('subagent-synth: started/finished follow the task tool_activity start/end, same id', () => {
+    const evs = load('subagent-synth');
+    expect(evs[0].runtime).not.toBe('claude');
+    const pair = evs.filter((e) => e.type === 'tool_activity' || e.type === 'subagent');
+    expect(pair.map((e) => `${e.type}:${e.phase}`)).toEqual([
+      'tool_activity:start',
+      'subagent:started',
+      'tool_activity:end',
+      'subagent:finished',
+    ]);
+    expect(pair[0]).toMatchObject({ kind: 'task' });
+    for (const e of pair.slice(1)) expect(e).toMatchObject({ id: pair[0].id });
+    for (const e of pair.filter((x) => x.type === 'subagent')) {
+      expect(e.tool_use_id).toBe(pair[0].id);
+      expect(e).not.toHaveProperty('usage');
+    }
+    expect(pair[3]).toMatchObject({ status: 'completed' });
   });
 
   // #359

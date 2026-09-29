@@ -32,9 +32,22 @@ function readOwnBackgroundColor(el, computedStyle) {
   return bg;
 }
 
+// Static mode marks the result `uncertain` when the colour is a guess: a
+// translucent layer was stacked on (or skipped over) the surface we found, a
+// body-level gradient was assumed white, or the walk never reached <body> and
+// fell back to the default white (a fragment's real surface is unknown).
+// Contrast measured against an uncertain surface is reported as unverified.
+function markUncertain(bg, uncertain) {
+  if (!DETECTOR_IS_BROWSER && uncertain) bg.uncertain = true;
+  return bg;
+}
+
 function resolveBackground(el, win, customPropMap) {
   let current = el;
+  let sawTranslucent = false;
+  let sawBody = false;
   while (current && current.nodeType === 1) {
+    if (current.tagName === 'BODY' || current.tagName === 'HTML') sawBody = true;
     const style = DETECTOR_IS_BROWSER ? getComputedStyle(current) : win.getComputedStyle(current);
     const bgImage = style.backgroundImage || '';
     const hasGradientOrUrl = bgImage && bgImage !== 'none' && (/gradient/i.test(bgImage) || /url\s*\(/i.test(bgImage));
@@ -66,8 +79,9 @@ function resolveBackground(el, win, customPropMap) {
     }
 
     if (bg && bg.a > 0.1) {
-      if (DETECTOR_IS_BROWSER || bg.a >= 0.5) return bg;
+      if (DETECTOR_IS_BROWSER || bg.a >= 0.5) return markUncertain(bg, sawTranslucent || bg.a < 1);
     }
+    if (bg && bg.a > 0) sawTranslucent = true;
     // No solid bg-color at this level. If THIS level has a gradient/url
     // with no underlying solid color we can read:
     //   • on body/html: assume white. Body-level gradients are almost
@@ -82,13 +96,13 @@ function resolveBackground(el, win, customPropMap) {
     //     bgs worth checking against).
     if (hasGradientOrUrl) {
       if (current.tagName === 'BODY' || current.tagName === 'HTML') {
-        return { r: 255, g: 255, b: 255, a: 1 };
+        return markUncertain({ r: 255, g: 255, b: 255, a: 1 }, true);
       }
       return null;
     }
     current = current.parentElement;
   }
-  return { r: 255, g: 255, b: 255 };
+  return markUncertain({ r: 255, g: 255, b: 255 }, sawTranslucent || !sawBody);
 }
 
 // Walk parents looking for a gradient background and return its color stops.

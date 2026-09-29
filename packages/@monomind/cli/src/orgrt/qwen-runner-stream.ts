@@ -4,11 +4,11 @@
 // streamTurn does not reference `this` — it was a private method purely for
 // grouping, so moving it to a standalone function changes nothing observable;
 // the class in qwen-runner.ts now calls it as an imported function.
-import { spawn } from 'node:child_process';
 import type { AgentRunArgs } from './agent-runner.js';
 import { killOnAbort } from './agent-runner.js';
 import { maskedCommand } from './authority-mask.js';
 import { classifyStderr } from './kimicode-runner.js';
+import { spawnRunnerProcess } from './process-group-spawn.js';
 import { omitAnthropicManagedKeys } from './provider.js';
 import {
   handleQwenEvent,
@@ -41,17 +41,28 @@ export async function* streamTurn(
   args: AgentRunArgs,
   outcome: TurnOutcome,
 ): AsyncGenerator<QwenStreamEvent> {
+  // --yolo at every access level (a headless run cannot answer approval
+  // prompts), so full access needs nothing more. qwen isolates none of the
+  // user's settings, so `--settings` needs nothing either. No effort flag
+  // (qwen's --effort belongs to its review subcommand) and no per-prompt
+  // turn cap (--max-session-turns counts the whole resumed session).
   const cliArgs: string[] = ['-p', prompt, '--output-format', 'stream-json', '--yolo'];
   if (args.model) cliArgs.push('-m', args.model);
   if (sessionId) cliArgs.push('--resume', sessionId);
 
-  const child = spawn(...maskedCommand(args.authorityMask, bin, cliArgs), {
-    cwd: args.cwd,
-    // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
-    // vendor CLI; an explicit value in args.env still wins below.
-    env: { ...omitAnthropicManagedKeys(process.env), ...args.env },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  // Process-group leader under --access full (process-group-spawn.ts).
+  const proc = spawnRunnerProcess(
+    ...maskedCommand(args.authorityMask, bin, cliArgs),
+    {
+      cwd: args.cwd,
+      // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
+      // vendor CLI; an explicit value in args.env still wins below.
+      env: { ...omitAnthropicManagedKeys(process.env), ...args.env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+    args,
+  );
+  const child = proc.child;
 
   let stderrTail = '';
   child.stderr?.on('data', (c: Buffer) => {
@@ -68,18 +79,8 @@ export async function* streamTurn(
   const KILL_GRACE_MS = 5000;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
   const killChild = (): void => {
-    try {
-      child.kill('SIGTERM');
-    } catch {
-      /* already gone */
-    }
-    killTimer = setTimeout(() => {
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        /* already gone */
-      }
-    }, KILL_GRACE_MS);
+    proc.target.kill('SIGTERM');
+    killTimer = setTimeout(() => proc.target.kill('SIGKILL'), KILL_GRACE_MS);
     killTimer.unref?.();
   };
   const timer = setTimeout(() => {
@@ -94,7 +95,7 @@ export async function* streamTurn(
   }, STARTUP_GRACE_MS);
   // Abort hook (see AgentRunArgs.signal): kill the child so the stdout
   // loop below unblocks instead of orphaning it on iterator.return().
-  const unsubscribeAbort = killOnAbort(args.signal, child, KILL_GRACE_MS);
+  const unsubscribeAbort = killOnAbort(args.signal, proc.target, KILL_GRACE_MS);
 
   // Attach the exit promise BEFORE consuming stdout: on a spawn failure
   // (ENOENT, bad binary) the 'error' event fires almost immediately — if
@@ -161,6 +162,7 @@ export async function* streamTurn(
     clearTimeout(timer);
     if (hangTimer) clearTimeout(hangTimer);
     unsubscribeAbort();
+    proc.stop();
     if (child.exitCode === null && child.signalCode === null) {
       // NOT confirmed dead. Either the consumer abandoned this stream
       // mid-turn (session.ts's silent abort calls iterator.return(), the

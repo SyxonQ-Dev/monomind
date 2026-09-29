@@ -94,7 +94,7 @@ export async function printMainHelp(
 
   output.writeln(output.bold('FEATURES:'));
   output.printList([
-    'Local SQLite memory with on-device embeddings (HNSW ANN index above 5,000 entries)',
+    'Local SQLite memory with on-device embeddings (HNSW ANN index above 100,000 entries)',
     'Monograph codebase knowledge graph (tree-sitter + SQLite)',
     'Org runtime daemon with per-role policy gates (monomind org run)',
     "Monoswarm topology, roster and vote state for your assistant's subagents",

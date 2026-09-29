@@ -63,6 +63,13 @@ describe('SqlBackend ANN (HNSW) fast path', () => {
     await backend.shutdown();
   });
 
+  it('defaults the threshold to 100,000 entries when the env var is unset (issue #426)', async () => {
+    delete process.env.MONOMIND_HNSW_THRESHOLD;
+    vi.resetModules();
+    const { SqlBackend } = await import('./sql-backend.js');
+    expect(SqlBackend.ANN_THRESHOLD).toBe(100_000);
+  });
+
   it('below the threshold, no cache file is written and brute force is used', async () => {
     process.env.MONOMIND_HNSW_THRESHOLD = '1000';
     vi.resetModules();

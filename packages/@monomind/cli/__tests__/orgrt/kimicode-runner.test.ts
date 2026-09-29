@@ -249,14 +249,15 @@ describe('KimiCodeAgentRunner streaming', () => {
 
       // First message must be the spawn-time liveness yield — this is what
       // deterministically wins session.ts's first-pull watchdog race.
-      expect(messages[0]).toEqual({ type: 'tool_use', session_id: undefined, text: 'turn started' });
+      expect(messages[0]).toEqual({ type: 'tool_use', session_id: undefined });
       expect(times[0] - start).toBeLessThan(300);
 
       const types = messages.map((m) => m.type);
       expect(types).toContain('assistant');
-      // Tool progress events arrive as tool_use liveness messages.
+      // A tool progress event with no call id arrives as a (label-free)
+      // tool_use liveness message, after the spawn-time one.
       const toolMsgs = messages.filter((m) => m.type === 'tool_use');
-      expect(toolMsgs.some((m) => m.text === 'Bash(ls)')).toBe(true);
+      expect(toolMsgs.length).toBeGreaterThanOrEqual(2);
 
       const texts = messages.filter((m) => m.type === 'assistant').map((m) => m.text);
       expect(texts).toEqual(['working on it', 'all done']);

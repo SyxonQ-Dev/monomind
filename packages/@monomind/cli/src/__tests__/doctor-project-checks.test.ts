@@ -68,6 +68,7 @@ import {
   fixStaleHelpers,
 } from '../commands/doctor-project-checks.js';
 import { MONOMIND_NEVER_COMMIT } from '../init/never-commit.js';
+import { mcpAddHint } from '../platform-adapters/renderers/mcp.js';
 
 // Env var names built from parts at runtime, not as literal `X_API_KEY`
 // source text — matches the convention already used in terminal-tools.test.ts
@@ -366,14 +367,14 @@ describe('doctor-project-checks', () => {
       const result = await checkMcpServers();
       expect(result.status).toBe('warn');
       expect(result.message).toBe('1 servers (monomind not found)');
-      expect(result.fix).toBe('claude mcp add monomind -- npx -y monomind@latest mcp start');
+      expect(result.fix).toBe(mcpAddHint());
     });
 
     it('warns with the same fix string when no MCP config exists anywhere', async () => {
       const result = await checkMcpServers();
       expect(result.status).toBe('warn');
       expect(result.message).toBe('No MCP config found');
-      expect(result.fix).toBe('claude mcp add monomind -- npx -y monomind@latest mcp start');
+      expect(result.fix).toBe(mcpAddHint());
     });
 
     it('recognizes monomind_alpha as a valid registered server name', async () => {
@@ -1207,7 +1208,7 @@ describe('doctor-project-checks', () => {
     it('returns a well-formed HealthCheck reporting routing learning status', async () => {
       const result = await checkMonoesIntegration();
       expect(result.name).toBe('Routing Learning');
-      expect(['pass', 'warn']).toContain(result.status);
+      expect(['pass', 'warn', 'info']).toContain(result.status);
       expect(typeof result.message).toBe('string');
     });
 

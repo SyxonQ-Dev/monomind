@@ -67,6 +67,11 @@ export interface InitOptions {
    */
   installClaudeCode?: boolean;
   /**
+   * Skip executeInit's own doctor pass because the caller runs it (via
+   * `runDoctorFix`) after its later writes, so the pass sees the final state.
+   */
+  deferDoctor?: boolean;
+  /**
    * Initialize the memory database (`.swarm/memory.db`) the way `monomind
    * memory init` does, keeping an existing one. Runs only with
    * `components.runtime`; undefined is treated as true (`--no-memory` sets false).
@@ -112,6 +117,7 @@ export const DEFAULT_INIT_OPTIONS: InitOptions = {
   },
   skills: {
     core: true,
+    extended: true,
     memory: true,
     github: true,
     browser: true,
@@ -204,9 +210,10 @@ export const MINIMAL_INIT_OPTIONS: InitOptions = {
   },
   skills: {
     core: true,
-    memory: false,
-    github: false,
-    browser: false,
+    extended: false,
+    memory: true,
+    github: true,
+    browser: true,
     advanced: false,
 
     all: false,
@@ -263,6 +270,7 @@ export const FULL_INIT_OPTIONS: InitOptions = {
   },
   skills: {
     core: true,
+    extended: true,
     memory: true,
     github: true,
     browser: true,

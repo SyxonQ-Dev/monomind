@@ -4,19 +4,21 @@
 // streamTurn does not reference `this` — it was a private method purely for
 // grouping, so moving it to a standalone function changes nothing observable;
 // the class in grok-runner.ts now calls it as an imported function.
-import { spawn } from 'node:child_process';
 import type { AgentRunArgs } from './agent-runner.js';
 import { killOnAbort } from './agent-runner.js';
 import { maskedCommand } from './authority-mask.js';
-import { grokSandboxArgs, roleGitLevel } from './cli-sandbox.js';
+import { grokSandboxArgs, grokSandboxModeArgs, roleGitLevel } from './cli-sandbox.js';
+import type { OrgEffortLevel } from './cost-tier.js';
 import {
   extractError,
   extractSessionId,
   extractText,
+  extractToolBlocks,
   extractUsage,
   type GrokStreamEvent,
 } from './grok-runner-parse.js';
 import { classifyStderr } from './kimicode-runner.js';
+import { spawnRunnerProcess } from './process-group-spawn.js';
 import { omitAnthropicManagedKeys } from './provider.js';
 import { TOOL_CALL_RE } from './tool-fence.js';
 
@@ -26,6 +28,17 @@ const TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours, matching the other subpr
  *  Fires only if the process has produced ZERO stdout by this point — any
  *  output at all disarms it, since a slow model response is not a hang. */
 const STARTUP_GRACE_MS = 45_000;
+
+/** `grok --reasoning-effort` levels are low|medium|high|xhigh (the CLI's own
+ *  bundled docs); grok ignores the flag on a model without reasoning. */
+const GROK_EFFORT: Record<OrgEffortLevel, string> = {
+  off: 'low',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'xhigh',
+};
 
 export interface TurnOutcome {
   sessionId?: string;
@@ -37,7 +50,41 @@ export interface TurnOutcome {
   hangSuspected: boolean;
   inputTokens: number;
   outputTokens: number;
+  /** `result.total_cost_usd` of this invocation, when grok reported one. */
+  costUsd?: number;
+  /** The invocation stopped at `--max-turns` (result subtype
+   *  `error_max_turns`). */
+  maxTurnsHit?: boolean;
   error?: string;
+}
+
+/** `grok` argv for one turn (exported for the argv tests). */
+export function grokCliArgs(
+  prompt: string,
+  sessionId: string | undefined,
+  args: AgentRunArgs,
+): string[] {
+  const cliArgs: string[] = [
+    '-p',
+    prompt,
+    '--output-format',
+    'streaming-messages-json',
+    '--always-approve',
+  ];
+  // #263: below policy.git 'push', grok runs in its own `workspace` sandbox
+  // profile (Landlock/Seatbelt) instead of the default `off`. Tool approval
+  // stays automatic — the org gates tools itself. See cli-sandbox.ts.
+  // Full access (`--access full`) is --always-approve with no sandbox at
+  // any git level.
+  // #396: an explicit `agent exec --sandbox` picks the profile, in any access mode.
+  if (args.sandbox && args.sandbox !== 'full') cliArgs.push(...grokSandboxModeArgs(args.sandbox));
+  else if (args.access !== 'full') cliArgs.push(...grokSandboxArgs(roleGitLevel(args.env)));
+  if (args.model) cliArgs.push('--model', args.model);
+  if (args.effort) cliArgs.push('--reasoning-effort', GROK_EFFORT[args.effort]);
+  if (args.maxTurns > 0) cliArgs.push('--max-turns', String(args.maxTurns));
+  cliArgs.push('--cwd', args.cwd);
+  if (sessionId) cliArgs.push('--resume', sessionId);
+  return cliArgs;
 }
 
 /**
@@ -57,28 +104,29 @@ export async function* streamTurn(
 ): AsyncGenerator<GrokStreamEvent> {
   // --output-format, not --format: confirmed against a live v1.0.5
   // install (`npm install -g @xai-official/grok`) — `--format` doesn't
-  // exist ("unexpected argument '--format' found") and would have made
-  // every single invocation fail before even reaching auth. Confirmed
-  // the corrected flag is right: with it, the same invocation (no
-  // XAI_API_KEY available to test past this point) gets to a "Not
-  // signed in" auth error instead of a flag-parsing error, proving the
-  // flag itself is now accepted. See #178.
-  const cliArgs: string[] = ['-p', prompt, '--output-format', 'json', '--always-approve'];
-  // #263: below policy.git 'push', grok runs in its own `workspace` sandbox
-  // profile (Landlock/Seatbelt) instead of the default `off`. Tool approval
-  // stays automatic — the org gates tools itself. See cli-sandbox.ts.
-  cliArgs.push(...grokSandboxArgs(roleGitLevel(args.env)));
-  if (args.model) cliArgs.push('--model', args.model);
-  cliArgs.push('--cwd', args.cwd);
-  if (sessionId) cliArgs.push('--resume', sessionId);
+  // exist ("unexpected argument '--format' found"). See #178.
+  // `streaming-messages-json` rather than `json`: per the docs bundled in
+  // grok 1.0.41, `json` is ONE object {text, stopReason, sessionId,
+  // requestId} at exit (none of this parser's shapes matched its `text`),
+  // while `streaming-messages-json` is NDJSON in the Anthropic Messages
+  // shape — assistant text, tool_use/tool_result blocks with real ids,
+  // `session_id`, and a `result` with usage and total_cost_usd. Its
+  // `system`/`result` envelope was confirmed live (an unsigned-in run);
+  // the assistant/user frames follow the bundled docs.
+  const cliArgs = grokCliArgs(prompt, sessionId, args);
 
-  const child = spawn(...maskedCommand(args.authorityMask, bin, cliArgs), {
-    cwd: args.cwd,
-    // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
-    // vendor CLI; an explicit value in args.env still wins below.
-    env: { ...omitAnthropicManagedKeys(process.env), ...args.env },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  const proc = spawnRunnerProcess(
+    ...maskedCommand(args.authorityMask, bin, cliArgs),
+    {
+      cwd: args.cwd,
+      // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
+      // vendor CLI; an explicit value in args.env still wins below.
+      env: { ...omitAnthropicManagedKeys(process.env), ...args.env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+    args,
+  );
+  const child = proc.child;
 
   let stderrTail = '';
   child.stderr?.on('data', (c: Buffer) => {
@@ -95,18 +143,8 @@ export async function* streamTurn(
   const KILL_GRACE_MS = 5000;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
   const killChild = (): void => {
-    try {
-      child.kill('SIGTERM');
-    } catch {
-      /* already gone */
-    }
-    killTimer = setTimeout(() => {
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        /* already gone */
-      }
-    }, KILL_GRACE_MS);
+    proc.target.kill('SIGTERM');
+    killTimer = setTimeout(() => proc.target.kill('SIGKILL'), KILL_GRACE_MS);
     killTimer.unref?.();
   };
   const timer = setTimeout(() => {
@@ -121,7 +159,7 @@ export async function* streamTurn(
   }, STARTUP_GRACE_MS);
   // Abort hook (see AgentRunArgs.signal): kill the child so the stdout
   // loop below unblocks instead of orphaning it on iterator.return().
-  const unsubscribeAbort = killOnAbort(args.signal, child, KILL_GRACE_MS);
+  const unsubscribeAbort = killOnAbort(args.signal, proc.target, KILL_GRACE_MS);
 
   // Attach the exit promise BEFORE consuming stdout: on a spawn failure
   // (ENOENT, bad binary) the 'error' event fires almost immediately — if
@@ -153,7 +191,16 @@ export async function* streamTurn(
 
     const errMsg = extractError(ev);
     if (errMsg) outcome.error = errMsg;
+    if (ev.type === 'result' && typeof ev.total_cost_usd === 'number') {
+      outcome.costUsd = ev.total_cost_usd;
+    }
+    if (ev.type === 'result' && ev.subtype === 'error_max_turns') outcome.maxTurnsHit = true;
 
+    const { toolUses, toolResults } = extractToolBlocks(ev);
+    const tools = {
+      ...(toolUses.length > 0 ? { toolUses } : {}),
+      ...(toolResults.length > 0 ? { toolResults } : {}),
+    };
     const text = extractText(ev);
     if (text) {
       const stripped = text.replace(TOOL_CALL_RE, '').trim();
@@ -162,7 +209,11 @@ export async function* streamTurn(
         rawText: text,
         text: stripped || undefined,
         sessionId: lastSessionId,
+        ...tools,
       };
+    }
+    if (toolUses.length > 0 || toolResults.length > 0) {
+      return { kind: 'native', sessionId: lastSessionId, ...tools };
     }
     return null;
   };
@@ -213,6 +264,7 @@ export async function* streamTurn(
     clearTimeout(timer);
     if (hangTimer) clearTimeout(hangTimer);
     unsubscribeAbort();
+    proc.stop();
     if (child.exitCode === null && child.signalCode === null) {
       // NOT confirmed dead. Either the consumer abandoned this stream
       // mid-turn (session.ts's silent abort calls iterator.return(), the

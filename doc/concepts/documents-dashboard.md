@@ -29,12 +29,21 @@ known mastermind output directories are scanned, and only `.md` files are ever s
 
 ## 2. How a User Gets There
 
-There's no CLI subcommand that launches this. The dashboard server auto-spawns via a Claude
-Code **SessionStart hook**:
+Start the dashboard server with `monomind ui` (alias `monomind dashboard`; `--no-open` skips the
+browser). Check that it is up with `curl -s http://localhost:4242/api/identity`, which returns its
+pid and project directory.
+
+It can also start with every Claude Code session, but only when the project opted in: run
+`monomind init --dashboard` (writes `{"autostart": true}` to `.monomind/dashboard.json`) or set
+`MONOMIND_DASHBOARD_AUTOSTART=1`. `MONOMIND_DASHBOARD_AUTOSTART=0` turns it off again. Without an
+opt-in the **SessionStart hook** does nothing and prints nothing
+([#423](https://github.com/monoes/monomind/issues/423): one resident server per project piled up).
+The per-prompt Second Brain lookup uses a running dashboard's semantic search and falls back to
+keyword matching when none is running.
 
 - [`.claude/helpers/control-start.cjs → main`](packages/@monomind/cli/.claude/helpers/control-start.cjs#main) — "Called from SessionStart hook — exits
-  immediately after spawning." It checks for an already-running, non-stale server first;
-  otherwise it spawns `server.mjs` detached and writes `.monomind/control.json`.
+  immediately after spawning." When opted in, it checks for an already-running, non-stale server
+  first; otherwise it spawns `server.mjs` detached and writes `.monomind/control.json`.
 - Default port **4242** ([`control-start.cjs → DEFAULT_PORT`](packages/@monomind/cli/.claude/helpers/control-start.cjs#DEFAULT_PORT), [`src/ui/server.mjs → startServer`](packages/@monomind/cli/src/ui/server.mjs#startServer)
   `startServer({ port = 4242, ... })`), auto-incrementing up to 10 times on collision.
 - A user opens `http://localhost:4242` and clicks **Documents** in the sidebar.

@@ -1,6 +1,6 @@
 ---
 name: mastermind-access
-description: Mastermind access — manage org membership roles (owner/admin/operator/viewer), granular permission grants, invite tokens, and pending join requests. Controls who can do what inside an org.
+description: Mastermind access — bookkeeping only — not enforced by the Org Runtime. Records org member roles (owner/admin/operator/viewer), permission grants, invite tokens, and join requests in a side file that nothing checks.
 type: domain-skill
 default_mode: confirm
 pick: low
@@ -8,7 +8,9 @@ pick: low
 
 # Mastermind Access
 
-This skill is invoked by `mastermind:access` or directly via `/mastermind-access`.
+This skill is invoked directly via `/mastermind-access`.
+
+**Bookkeeping only — not enforced by the Org Runtime.** It writes `.monomind/orgs/<org>-members.json`, which no runtime code reads: roles and permission grants recorded here restrict nothing.
 
 ---
 

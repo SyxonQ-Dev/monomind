@@ -118,7 +118,7 @@ describe('CrushAgentRunner streaming (#204)', () => {
 
     // First message must be the spawn-time liveness yield — this is what
     // deterministically wins session.ts's first-pull watchdog race.
-    expect(messages[0]).toEqual({ type: 'tool_use', text: 'turn started' });
+    expect(messages[0]).toEqual({ type: 'tool_use' });
     expect(times[0] - start).toBeLessThan(300);
 
     const texts = messages.filter((m) => m.type === 'assistant').map((m) => m.text);
@@ -165,8 +165,9 @@ describe('CrushAgentRunner streaming (#204)', () => {
 
     // The OrgToolDef handler ran in-process with the fence's arguments…
     expect(handled).toEqual(['hi']);
-    // …the fence's opening line was forwarded as tool_use liveness…
-    expect(messages.some((m) => m.type === 'tool_use' && m.text === 'tool_call')).toBe(true);
+    // …the fence's opening line was forwarded as (label-free) tool_use
+    // liveness, after the spawn-time ping…
+    expect(messages.filter((m) => m.type === 'tool_use').length).toBeGreaterThanOrEqual(2);
     // …and the fence's own lines never leaked into the visible assistant text.
     const texts = messages.filter((m) => m.type === 'assistant').map((m) => m.text);
     expect(texts).toContain('Sending now.');
