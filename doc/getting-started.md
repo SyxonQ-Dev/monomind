@@ -91,7 +91,7 @@ monomind mcp verify
 You should see:
 
 ```
-✓ Tool registry: 66+ tools registered
+✓ Tool registry: 20 tools registered
 ✓ Sample tool (system_info): resolves
 ✓ claude mcp registration: monomind appears in `claude mcp list`
 ```
