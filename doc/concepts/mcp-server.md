@@ -49,6 +49,18 @@ The CLI registers and exports domain tool modules under `packages/@monomind/cli/
 | **Orgs & Monoswarm** | [`task-tools.ts`](packages/@monomind/cli/src/mcp-tools/task-tools.ts), [`system-tools.ts`](packages/@monomind/cli/src/mcp-tools/system-tools.ts), [`monoswarm-tools.ts`](packages/@monomind/cli/src/mcp-tools/monoswarm-tools.ts) | `task_create`, `task_status`, `system_status`, `monoswarm_init` |
 | **Browser & Terminal** | [`browser-tools.ts`](packages/@monomind/cli/src/mcp-tools/browser-tools.ts), [`terminal-tools.ts`](packages/@monomind/cli/src/mcp-tools/terminal-tools.ts) | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, terminal execution |
 
+### Default Advertised Roster
+
+`tools/list` advertises a lean core of 20 tools by default ([`mcp-client-roster.ts`](packages/@monomind/cli/src/mcp-client-roster.ts), `CORE_ADVERTISED_TOOLS`), about 14.6 KB of schema instead of 34.7 KB:
+
+- **Monograph:** `monograph_build`, `monograph_query`, `monograph_suggest`, `monograph_impact`, `monograph_context`, `monograph_neighbors`
+- **Picking and discovery:** `pick`, `org_skill_show`, `monomind_tool_search`
+- **Second Brain:** `knowledge_search`, `knowledge_ingest`, `knowledge_remove`
+- **Monodesign:** `monodesign_detect`, `monodesign_fix`, `monodesign_palette`
+- **Memory:** `memory_pattern-store`, `memory_feedback`, `memory_kg_ingest`, `memory_kg_search`, `memory_kg_stats`. The generated CLAUDE.md, GEMINI.md and AGENTS.md and the session-end KG nudge name these directly.
+
+Every other tool, including the `agent_*`, `task_*`, `session_*`, `config_*`, `system_*`, `guidance_*` and `hooks_*` state-file tools and `mcp_status`, is still registered and callable by name. `monomind_tool_search` finds it and returns its schema. Set `MONOMIND_MCP_FULL=1` on the server to advertise the whole registry (219 tools, about 95 KB).
+
 ---
 
 ## Guidance Tools (`guidance_*`)
@@ -70,6 +82,10 @@ The guidance suite ([src/mcp-tools/guidance-tools.ts](packages/@monomind/cli/src
 ```bash
 claude mcp add monomind -- npx -y monomind@latest mcp start
 ```
+
+### Generated entries are version-pinned
+
+`init` pins the MCP entries it generates (`.mcp.json`, Codex, OpenCode, Kimi Code, Antigravity) to the monomind version that ran it: `npx -y --package=@monoes/monomindcli@<version> monomind mcp start`. A floating `@latest` re-resolves the npm dist-tag on every start (3–4 s), can hang on a cold npx cache, and can change version mid-session. Pass `--pin latest` (or `--no-pin`) to keep `monomind@latest`, or `--pin <version>` for another version; after upgrading monomind, run `monomind init --force` to re-pin (`monomind update` does not rewrite these configs).
 
 ### Explicit HTTP / WebSocket Transports
 

@@ -18,13 +18,17 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentRunArgs, AgentRunner } from '../../src/orgrt/agent-runner.js';
 import { ClaudeAgentRunner } from '../../src/orgrt/agent-runner.js';
+import { AiderAgentRunner } from '../../src/orgrt/aider-runner.js';
 import { AntigravityAgentRunner } from '../../src/orgrt/antigravity-runner.js';
+import { ClineAgentRunner } from '../../src/orgrt/cline-runner.js';
+import { defaultClineHost } from '../../src/orgrt/cline-runner-host.js';
 import { CodexAgentRunner } from '../../src/orgrt/codex-runner.js';
 import { CopilotAgentRunner } from '../../src/orgrt/copilot-runner.js';
 import { CrushAgentRunner } from '../../src/orgrt/crush-runner.js';
+import { DshAgentRunner } from '../../src/orgrt/dsh-runner.js';
 import { GrokAgentRunner } from '../../src/orgrt/grok-runner.js';
 import { HermesAgentRunner } from '../../src/orgrt/hermes-runner.js';
 import { KimiCodeAgentRunner } from '../../src/orgrt/kimicode-runner.js';
@@ -145,6 +149,9 @@ interface RunnerCase {
   teardown?: () => void;
 }
 
+const RUNNER_STATE = mkdtempSync(join(tmpdir(), 'o18-runner-state-'));
+afterAll(() => rmSync(RUNNER_STATE, { recursive: true, force: true }));
+
 const VENDOR_RUNNERS: RunnerCase[] = [
   { name: 'codex', make: () => new CodexAgentRunner(STUB) },
   { name: 'grok', make: () => new GrokAgentRunner(STUB) },
@@ -157,6 +164,18 @@ const VENDOR_RUNNERS: RunnerCase[] = [
   { name: 'pi-rpc', make: () => new PiRpcAgentRunner(STUB) },
   { name: 'antigravity', make: () => new AntigravityAgentRunner(STUB) },
   { name: 'crush', make: () => new CrushAgentRunner({ crushBin: STUB }) },
+  // cline and aider keep state under HOME before spawning; point it at a
+  // writable dir so the fake-HOME case below still reaches the spawn.
+  {
+    name: 'cline',
+    make: () => new ClineAgentRunner(STUB, { ...defaultClineHost, scopedDir: () => RUNNER_STATE }),
+  },
+  // python: null forces the plain-CLI path, so the stub is what spawns.
+  {
+    name: 'aider',
+    make: () => new AiderAgentRunner({ aiderBin: STUB, python: null, stateDir: RUNNER_STATE }),
+  },
+  { name: 'dsh', make: () => new DshAgentRunner(STUB) },
   {
     name: 'opencode',
     make: () => new OpencodeAgentRunner(),

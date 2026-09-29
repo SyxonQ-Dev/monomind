@@ -118,7 +118,7 @@ describe('data-root agreement between the monoswarm CLI and the MCP tools', () =
       status: string;
       topology?: string;
     };
-    expect(mcpStatus.status).toBe('running');
+    expect(mcpStatus.status).toBe('initialized');
     expect(mcpStatus.topology).toBe('hierarchical');
 
     // The CLI's own status reads the same record back.

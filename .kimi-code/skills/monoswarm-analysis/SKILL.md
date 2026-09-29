@@ -24,15 +24,15 @@ Then describe what to analyze:
 
 ```javascript
 // Initialize analysis swarm
-mcp__monomind__swarm_init({
+mcp__monomind__monoswarm_init({
   topology: "mesh",
   maxAgents: 6,
   strategy: "adaptive"
 })
 
 // Coordinate analysis
-mcp__monomind__coordination_orchestrate({
-  task: "analyze system performance",
+mcp__monomind__task_create({
+  description: "analyze system performance",
   strategy: "parallel"
 })
 ```
@@ -64,7 +64,7 @@ mcp__monomind__agent_spawn({ type: "coordinator", capabilities: ["synthesis", "c
 
 ```javascript
 // Check analysis progress
-mcp__monomind__swarm_status({ swarmId: "current" })
+mcp__monomind__monoswarm_status({ swarmId: "current" })
 
 // Performance metrics
 mcp__monomind__performance_report({ format: "detailed" })

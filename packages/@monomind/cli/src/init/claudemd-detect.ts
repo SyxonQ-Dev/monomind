@@ -3,6 +3,8 @@
  * package availability used by the section generators.
  */
 
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { WORKER_COUNT } from './generated-counts.js';
 import { _isOptionalPackageResolvable } from './shared.js';
 import { detectProjectProfile } from './shared-instructions-generator.js';
@@ -14,6 +16,31 @@ export interface StackConventions {
   lint: string;
   srcDir: string;
   testDir: string;
+}
+
+/** The placeholder `npm init` writes for `scripts.test` — always fails. */
+const NPM_INIT_TEST_STUB = /no test specified/;
+
+function readPackageScripts(targetDir: string): Record<string, string> {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(targetDir, 'package.json'), 'utf-8'));
+    const scripts = pkg?.scripts;
+    return scripts && typeof scripts === 'object' ? scripts : {};
+  } catch {
+    return {};
+  }
+}
+
+/** True when `.monomind/capabilities.json` lists `name` as active. */
+export function isCapabilityActive(targetDir: string, name: string): boolean {
+  try {
+    const caps = JSON.parse(
+      fs.readFileSync(path.join(targetDir, '.monomind', 'capabilities.json'), 'utf-8'),
+    );
+    return Array.isArray(caps?.active) && caps.active.includes(name);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -43,10 +70,13 @@ export function detectStackConventions(targetDir: string): StackConventions {
             : profile.packageManager === 'bun'
               ? 'bun'
               : 'npm';
+      // GH #412: only name scripts package.json actually defines — `npm run
+      // lint` in a project without a lint script is a command that fails.
+      const scripts = readPackageScripts(targetDir);
       return {
-        build: `${run} run build`,
-        test: `${run} test`,
-        lint: `${run} run lint`,
+        build: scripts.build ? `${run} run build` : '',
+        test: scripts.test && !NPM_INIT_TEST_STUB.test(scripts.test) ? `${run} test` : '',
+        lint: scripts.lint ? `${run} run lint` : '',
         ...layout,
       };
     }

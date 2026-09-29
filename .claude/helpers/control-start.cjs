@@ -4,6 +4,10 @@
  * Ensures the Monomind Neural Control Room (web UI) is running.
  * Called from SessionStart hook — exits immediately after spawning.
  *
+ * Opt-in (#423): does nothing unless MONOMIND_DASHBOARD_AUTOSTART=1 or
+ * .monomind/dashboard.json has {"autostart": true} (`monomind init --dashboard`).
+ * MONOMIND_DASHBOARD_AUTOSTART=0 turns it off even when the project opted in.
+ *
  * Status written to: .monomind/control.json
  * Port: 4242 (default, auto-increments on collision)
  */
@@ -20,6 +24,18 @@ const CWD = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const STATUS_FILE = path.join(CWD, '.monomind', 'control.json');
 // Overridable for test isolation — production always uses the 4242 default.
 const DEFAULT_PORT = Number(process.env.MONOMIND_CONTROL_PORT) || 4242;
+
+// #423: a resident server per project at every session start piled up
+// (8 servers, two at 0.7–0.9 GB RSS on one machine), so starting it is opt-in.
+function autostartEnabled() {
+  const env = String(process.env.MONOMIND_DASHBOARD_AUTOSTART || '').toLowerCase();
+  if (env === '1' || env === 'true') return true;
+  if (env === '0' || env === 'false') return false;
+  try {
+    const conf = JSON.parse(fs.readFileSync(path.join(CWD, '.monomind', 'dashboard.json'), 'utf-8'));
+    return Boolean(conf && conf.autostart === true);
+  } catch { return false; }
+}
 
 function readStatus() {
   try {
@@ -369,6 +385,10 @@ async function runConfirm({ childPid, port: defaultPort, boundReportPath, isNpxF
 }
 
 async function main() {
+  // Not opted in: start nothing, restart nothing, print nothing — a server
+  // that is already running (e.g. from `monomind ui`) is left as it is.
+  if (!autostartEnabled()) process.exit(0);
+
   // Skip spawning when system memory is critically low
   try {
     const { isMemoryPressureCritical, getMemoryInfo } = require('./utils/system-pressure.cjs');

@@ -166,7 +166,7 @@ describe('cleanup after init leaves no config pointing at removed monomind files
     }
   }, 120000);
 
-  it('never rewrites a git-tracked settings.json', async () => {
+  it('keeps the helpers a git-tracked settings.json runs, with the manual edit (#448)', async () => {
     const init = await initCommand.action!(
       ctx({ force: true, 'no-watch': true, 'no-start-all': true }),
     );
@@ -174,15 +174,42 @@ describe('cleanup after init leaves no config pointing at removed monomind files
     const { execFileSync } = await vi.importActual<typeof import('node:child_process')>(
       'node:child_process',
     );
-    execFileSync('git', ['add', '.claude/settings.json'], { cwd: tmpDir });
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: tmpDir });
+    git('add', '.claude/settings.json');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'settings');
     const before = read('.claude/settings.json');
+    const refs = helperRefs(before);
+    expect(refs).toContain('.claude/helpers/hook-handler.cjs');
 
-    const res = await cleanupCommand.action!(ctx({ force: true, 'purge-data': true }));
-    const plan = (res.data as { plan: CleanupPlanEntry[] }).plan;
+    // The dry run already shows what is kept and the edit left to the user.
+    const lines: string[] = [];
+    const spy = vi.spyOn(output, 'writeln').mockImplementation((t?: string) => {
+      lines.push(String(t ?? ''));
+    });
+    const preview = await cleanupCommand.action!(ctx({ 'purge-data': true }));
+    spy.mockRestore();
+    const plan = (preview.data as { plan: CleanupPlanEntry[] }).plan;
     expect(plan.find((e) => e.path === '.claude/settings.json')).toMatchObject({
       action: 'skip',
       reason: 'tracked by git',
     });
+    const notice = plan.find((e) => e.path === '.claude/settings.json')?.notice ?? '';
+    expect(notice).toContain('.claude/helpers');
+    expect(notice).toContain('.claude/helpers/hook-handler.cjs');
+    expect(lines.join('\n')).toContain(notice);
+    const covering = (ref: string) =>
+      plan.filter((e) => ref === e.path || ref.startsWith(`${e.path}/`));
+    for (const ref of refs) {
+      expect(covering(ref).every((e) => e.action === 'skip'), ref).toBe(true);
+    }
+
+    const res = await cleanupCommand.action!(ctx({ force: true, 'purge-data': true }));
+    expect(res.success).toBe(true);
     expect(read('.claude/settings.json')).toBe(before);
+    for (const ref of refs) {
+      expect(fs.existsSync(abs(ref)), `settings.json runs missing ${ref}`).toBe(true);
+    }
+    // Everything else monomind installed is still removed.
+    expect(fs.existsSync(abs('.monomind'))).toBe(false);
   }, 120000);
 });

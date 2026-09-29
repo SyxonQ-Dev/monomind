@@ -9,6 +9,7 @@ import { formatEvent } from '../orgrt/reporting.js';
 import { type BusEvent, ORG_DIR } from '../orgrt/types.js';
 import { output } from '../output.js';
 import type { CommandContext, CommandResult } from '../types.js';
+import { followUntilDone, tailRun } from './org-follow.js';
 import { orgJson, printOrgJson, resolveRun } from './org-observe-shared.js';
 
 const log = (text: string): void => {
@@ -67,37 +68,15 @@ export const logsAction = async (ctx: CommandContext, name: string): Promise<Com
       `org ${name} — ${run}${roleFilter ? ` (role: ${roleFilter})` : ''}${filterTool ? ` (tool: ${filterTool})` : ''}${filterRole ? ` (filter-role: ${filterRole})` : ''}${auditFilter ? ` (audit-filter: ${auditFilter})` : ''}`,
     ),
   );
-  let seenLines = 0;
+  const tail = tailRun(ctx.cwd, name, run);
   const drain = (): void => {
-    if (!existsSync(file)) return;
-    const lines = readFileSync(file, 'utf8').split('\n').filter(Boolean);
-    for (let i = seenLines; i < lines.length; i++) {
-      try {
-        show(JSON.parse(lines[i]) as BusEvent);
-        seenLines = i + 1;
-      } catch {
-        // Only the FINAL line can be a partial mid-append write worth
-        // retrying; a corrupt interior line would otherwise stall the tail
-        // forever — skip it and keep going.
-        if (i === lines.length - 1) break;
-        seenLines = i + 1;
-      }
-    }
+    for (const e of tail.read()) show(e);
   };
   drain();
   if (ctx.flags.follow !== true) return { success: true };
   log(output.info('following — Ctrl-C to stop'));
-  await new Promise<void>((resolve) => {
-    const iv = setInterval(drain, 500);
-    process.once('SIGINT', () => {
-      clearInterval(iv);
-      resolve();
-    });
-    process.once('SIGTERM', () => {
-      clearInterval(iv);
-      resolve();
-    });
-  });
+  if ((await followUntilDone(drain, tail.closed)) === 'closed')
+    log(output.info(`run ${run} closed — stopped following`));
   return { success: true };
 };
 
@@ -130,7 +109,6 @@ export const watchAction = async (ctx: CommandContext, name: string): Promise<Co
       success: false,
       message: `no runs found for org ${name} — start one with: monomind org run ${name}`,
     };
-  const file = join(ctx.cwd, ORG_DIR, name, run, 'bus.jsonl');
   const verbose = ctx.flags.verbose === true;
   const stats = ctx.flags.stats === true;
 
@@ -164,33 +142,14 @@ export const watchAction = async (ctx: CommandContext, name: string): Promise<Co
       `watching ${name}/${role} — ${run} (Ctrl-C to stop; org logs ${name} --role ${role} --follow for the full event stream)`,
     ),
   );
-  let seenLines = 0;
+  const tail = tailRun(ctx.cwd, name, run);
   const drain = (): void => {
-    if (!existsSync(file)) return;
-    const lines = readFileSync(file, 'utf8').split('\n').filter(Boolean);
-    for (let i = seenLines; i < lines.length; i++) {
-      try {
-        show(JSON.parse(lines[i]) as BusEvent);
-        seenLines = i + 1;
-      } catch {
-        if (i === lines.length - 1) break; // only the final line may be a mid-append partial write
-        seenLines = i + 1;
-      }
-    }
+    for (const e of tail.read()) show(e);
   };
   drain();
   if (ctx.flags.follow === false) return { success: true }; // --follow=false opts out of the default live tail
-  await new Promise<void>((resolve) => {
-    const iv = setInterval(drain, 500);
-    process.once('SIGINT', () => {
-      clearInterval(iv);
-      resolve();
-    });
-    process.once('SIGTERM', () => {
-      clearInterval(iv);
-      resolve();
-    });
-  });
+  if ((await followUntilDone(drain, tail.closed)) === 'closed')
+    log(output.info(`run ${run} closed — stopped watching`));
   return { success: true };
 };
 
@@ -217,18 +176,10 @@ export const eventsAction = async (ctx: CommandContext, name: string): Promise<C
       success: false,
       message: `no runs found for org ${name} — start one with: monomind org run ${name}`,
     };
-  const file = join(ctx.cwd, ORG_DIR, name, run, 'bus.jsonl');
   const since = parseSinceCursor(ctx.flags.since);
 
   let skippedPastId = !since?.id; // true = no id cursor, nothing to skip
-  let seenLines = 0;
-  const emitLine = (line: string): void => {
-    let e: BusEvent;
-    try {
-      e = JSON.parse(line) as BusEvent;
-    } catch {
-      return; // corrupt interior line — skip, same policy as logsAction
-    }
+  const emit = (e: BusEvent): void => {
     if (since?.id) {
       if (!skippedPastId) {
         if (e.id === since.id) skippedPastId = true;
@@ -240,34 +191,16 @@ export const eventsAction = async (ctx: CommandContext, name: string): Promise<C
     process.stdout.write(`${JSON.stringify(e)}\n`);
   };
 
+  // Corrupt lines are skipped and a partial final line waits for the rest of
+  // its write — same policy as logsAction (see tailRun).
+  const tail = tailRun(ctx.cwd, name, run);
   const drain = (): void => {
-    if (!existsSync(file)) return;
-    const lines = readFileSync(file, 'utf8').split('\n').filter(Boolean);
-    for (let i = seenLines; i < lines.length; i++) {
-      // Only the FINAL line can be a partial mid-append write worth retrying.
-      if (i === lines.length - 1) {
-        try {
-          JSON.parse(lines[i]);
-        } catch {
-          break;
-        }
-      }
-      emitLine(lines[i]);
-      seenLines = i + 1;
-    }
+    for (const e of tail.read()) emit(e);
   };
   drain();
   if (ctx.flags.follow !== true) return { success: true };
-  await new Promise<void>((resolve) => {
-    const iv = setInterval(drain, 500);
-    process.once('SIGINT', () => {
-      clearInterval(iv);
-      resolve();
-    });
-    process.once('SIGTERM', () => {
-      clearInterval(iv);
-      resolve();
-    });
-  });
+  // Exits 0 once the run has closed (its final events drained), when stdout's
+  // reader or our parent goes away, or on SIGINT/SIGTERM/SIGHUP (#433).
+  await followUntilDone(drain, tail.closed);
   return { success: true };
 };

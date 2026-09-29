@@ -49,6 +49,7 @@ describe('version handshake (§2)', () => {
         'agent-exec-settings',
         'agent-exec-tool-activity',
         'agent-exec-background-pids',
+        'agent-exec-full-access-any',
         'agent-exec-effort',
         'agent-scan',
         'agent-scan-read-only',
@@ -67,6 +68,10 @@ describe('version handshake (§2)', () => {
         'init-json',
         'knowledge-profile-captures',
         'agent-exec-subagent-events',
+        'agent-exec-rate-limit-retry',
+        'agent-exec-access-read',
+        'agent-exec-full-access-tools',
+        'agent-exec-sandbox',
       ],
     });
     expect(p.capabilities).toContain('agent-exec');
@@ -97,6 +102,10 @@ describe('runner registry', () => {
       'copilot',
       'pi',
       'pi-rpc',
+      'hermes',
+      'cline',
+      'aider',
+      'dsh',
     ]) {
       expect(isKnownRuntime(id), id).toBe(true);
     }
@@ -104,12 +113,92 @@ describe('runner registry', () => {
     expect(isKnownRuntime('cursor')).toBe(false);
   });
 
-  // #355: claude is the only runtime with --access full implemented today.
-  it('supportsFullAccess is true only for claude', () => {
-    const byId = new Map(RUNNER_SPECS.map((s) => [s.id, s.supportsFullAccess]));
-    expect(byId.get('claude')).toBe(true);
-    for (const s of RUNNER_SPECS)
-      if (s.id !== 'claude') expect(s.supportsFullAccess, s.id).toBe(false);
+  // Rev 20: --access full on every coding runtime; not on vercel/hermes/qwen-rpc.
+  it('supportsFullAccess is exactly the coding runtimes', () => {
+    const full = RUNNER_SPECS.filter((s) => s.supportsFullAccess)
+      .map((s) => s.id)
+      .sort();
+    expect(full).toEqual(
+      [
+        'antigravity',
+        'claude',
+        'codex',
+        'copilot',
+        'crush',
+        'grok',
+        'kimicode',
+        'opencode',
+        'pi',
+        'pi-rpc',
+        'qwen',
+        'cline',
+        'aider',
+        'dsh',
+      ].sort(),
+    );
+  });
+
+  it('every RunnerSpec carries the rev 19 service flags', () => {
+    const byId = new Map(RUNNER_SPECS.map((s) => [s.id, s]));
+    for (const s of RUNNER_SPECS) {
+      for (const k of ['resume', 'effort', 'maxTurns', 'reportsCost'] as const)
+        expect(typeof s[k], `${s.id}.${k}`).toBe('boolean');
+    }
+    expect(byId.get('claude')).toMatchObject({
+      resume: true,
+      effort: true,
+      maxTurns: true,
+      reportsCost: true,
+      initTarget: 'claude',
+    });
+    expect(byId.get('codex')).toMatchObject({ effort: true, initTarget: 'codex' });
+    expect(byId.get('opencode')?.initTarget).toBe('opencode');
+    expect(byId.get('kimicode')?.initTarget).toBe('kimicode');
+    expect(byId.get('antigravity')?.initTarget).toBe('antigravity');
+    expect(byId.get('cline')?.initTarget).toBe('cline');
+    expect(byId.get('aider')?.initTarget).toBe('aider');
+    // Runtimes that read AGENTS.md natively get the AGENTS.md-only target.
+    for (const id of [
+      'pi',
+      'pi-rpc',
+      'dsh',
+      'grok',
+      'copilot',
+      'qwen',
+      'qwen-rpc',
+      'crush',
+    ] as const)
+      expect(byId.get(id)?.initTarget, id).toBe('agents');
+    expect(byId.get('vercel')?.initTarget).toBeNull();
+    expect(byId.get('hermes')?.initTarget).toBeNull();
+    expect(byId.get('hermes')?.resume).toBe(false);
+  });
+
+  // Pins what each coding runner implements today (integration of the
+  // per-runner work) so a flag cannot drift from its runner silently.
+  it('service flags match each coding runner', () => {
+    const flags = Object.fromEntries(
+      RUNNER_SPECS.filter((s) => s.supportsFullAccess).map((s) => [
+        s.id,
+        [s.toolActivityFidelity, s.resume, s.effort, s.maxTurns, s.reportsCost].join(' '),
+      ]),
+    );
+    expect(flags).toEqual({
+      claude: 'full true true true true',
+      codex: 'full true true false false',
+      opencode: 'full true true false true',
+      antigravity: 'full true true false false',
+      kimicode: 'full true false false false',
+      grok: 'full true true true true',
+      qwen: 'full true false false false',
+      copilot: 'full true true false false',
+      crush: 'none false false false false',
+      pi: 'full true true true true',
+      'pi-rpc': 'full true true true true',
+      cline: 'full true true true true',
+      aider: 'full true true true true',
+      dsh: 'full true true true false',
+    });
   });
 
   it('resolveExecRunner: unknown ids → null; claude → default runner', async () => {
@@ -127,8 +216,10 @@ describe('runner registry', () => {
     }
     const byId = new Map(RUNNER_SPECS.map((s) => [s.id, s]));
     expect(byId.get('claude')?.toolActivityFidelity).toBe('full');
-    expect(byId.get('codex')?.toolActivityFidelity).toBe('start-only');
-    expect(byId.get('opencode')?.toolActivityFidelity).toBe('none');
+    for (const id of ['codex', 'opencode', 'antigravity', 'kimicode'])
+      expect(byId.get(id as 'codex')?.toolActivityFidelity, id).toBe('full');
+    expect(byId.get('crush')?.toolActivityFidelity).toBe('none');
+    expect(byId.get('vercel')?.toolActivityFidelity).toBe('none');
   });
 });
 
@@ -179,15 +270,24 @@ describe('scanInstalled (§6)', () => {
       install: { kind: 'npm', packages: ['@anthropic-ai/claude-code'] },
       login_hint: 'claude login',
     });
-    // #355: full_access is present per-entry and true only for claude.
+    // #355 / rev 19: full_access is present per-entry.
     expect(byId.get('claude')).toMatchObject({ full_access: true });
-    expect(byId.get('codex')).toMatchObject({ full_access: false });
+    expect(byId.get('codex')).toMatchObject({ full_access: true });
+    expect(byId.get('hermes')).toMatchObject({ full_access: false });
     expect(byId.get('antigravity')?.install).toEqual({
       kind: 'script',
       url: 'https://antigravity.google/cli/install.sh',
       shell: 'bash',
     });
     expect(byId.get('vercel')?.install).toEqual({ kind: 'manual' });
+    // Rev 20 runtimes: the npm ones are runnable recipes; aider needs uv.
+    expect(byId.get('pi')?.install).toEqual({
+      kind: 'npm',
+      packages: ['@earendil-works/pi-coding-agent'],
+    });
+    expect(byId.get('cline')?.install).toEqual({ kind: 'npm', packages: ['cline'] });
+    expect(byId.get('dsh')?.install).toEqual({ kind: 'npm', packages: ['@deepseek-ai/dsh'] });
+    expect(byId.get('aider')?.install).toEqual({ kind: 'manual' });
     for (const a of result.agents) expect(a.install.kind).toMatch(/^(npm|script|manual)$/);
   });
 
@@ -196,10 +296,30 @@ describe('scanInstalled (§6)', () => {
     const result = await scanInstalled({ env: { PATH: '/nonexistent' }, skipVersionProbe: true });
     const byId = new Map(result.agents.map((x) => [x.id, x]));
     expect(byId.get('claude')?.tool_activity_fidelity).toBe('full');
-    expect(byId.get('codex')?.tool_activity_fidelity).toBe('start-only');
-    expect(byId.get('opencode')?.tool_activity_fidelity).toBe('none');
+    expect(byId.get('codex')?.tool_activity_fidelity).toBe('full');
+    expect(byId.get('pi')?.tool_activity_fidelity).toBe('full');
     for (const a of result.agents) {
       expect(['full', 'start-only', 'none'], a.id).toContain(a.tool_activity_fidelity);
+    }
+  });
+
+  it('every scan entry carries resume/effort/max_turns/reports_cost/init_target', async () => {
+    const result = await scanInstalled({ env: { PATH: '/nonexistent' }, skipVersionProbe: true });
+    const byId = new Map(result.agents.map((x) => [x.id, x]));
+    expect(byId.get('claude')).toMatchObject({
+      full_access: true,
+      resume: true,
+      effort: true,
+      max_turns: true,
+      reports_cost: true,
+      init_target: 'claude',
+    });
+    expect(byId.get('codex')).toMatchObject({ full_access: true, init_target: 'codex' });
+    expect(byId.get('crush')).toMatchObject({ full_access: true, init_target: 'agents' });
+    expect(byId.get('hermes')?.init_target).toBeNull();
+    expect(byId.get('vercel')?.full_access).toBe(false);
+    for (const a of result.agents) {
+      expect(a.init_target === null || typeof a.init_target === 'string', a.id).toBe(true);
     }
   });
 

@@ -8,7 +8,7 @@ pick: low
 
 # Mastermind Tree Control
 
-This skill is invoked by `mastermind:tree-control` or directly via `/mastermind-tree-control`.
+This skill is invoked directly via `/mastermind-tree-control`.
 
 ---
 

@@ -362,13 +362,16 @@ describe('graph-status-handler', () => {
     expect(usageLine).toContain('20% grep');
   });
 
-  it('shows saved dollars when dollars_saved > 0', () => {
+  // #409: dollars_saved was a synthetic estimate credited for hook hints the
+  // model never saw — it is no longer shown; the hint count is instead.
+  it('shows the hint count, not saved dollars, even when dollars_saved > 0', () => {
     const metricsDir = path.join(tmpDir, '.monomind', 'metrics');
     fs.mkdirSync(metricsDir, { recursive: true });
     fs.writeFileSync(
       path.join(metricsDir, 'graph-usage.json'),
       JSON.stringify({
         dollars_saved: 1.23,
+        graph_assist_search: 4,
       }),
     );
     const mockDb = {
@@ -383,9 +386,10 @@ describe('graph-status-handler', () => {
         }),
       ),
     );
-    const usageLine = lines.find((l) => l.includes('saved $'));
-    expect(usageLine).toBeTruthy();
-    expect(usageLine).toContain('1.23');
+    expect(lines.find((l) => l.includes('saved $'))).toBeUndefined();
+    const usageLine = lines.find((l) => l.includes('Usage:'));
+    expect(usageLine).toContain('hints=4');
+    expect(usageLine).not.toContain('1.23');
   });
 
   it('does not show saved dollars when dollars_saved is 0 or absent', () => {

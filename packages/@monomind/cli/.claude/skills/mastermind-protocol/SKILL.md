@@ -103,7 +103,7 @@ If `entry_count >= 20` OR `days_since_last_compaction >= 7`:
 4. Archive (do not delete) Tier 1 entries with score < 0.1 by updating their metadata: `{ archived: true }`
 
 **Step 4 — Check graph consolidation trigger:**
-Call `mcp__monomind__monograph_community` for nodes matching `mastermind:<domain>`.
+Call `mcp__monomind__monograph_query` for nodes matching `mastermind:<domain>`.
 If 3+ similar memory nodes are detected in a cluster:
 1. Merge into a single principle via LLM: "Distill these memories into one clear principle in 1-2 sentences"
 2. Store principle: `mcp__monomind__memory_hierarchical-store` namespace `mastermind:principles`

@@ -13,7 +13,7 @@ pick: low
 
 # Mastermind Tasks
 
-This skill is invoked by `mastermind:tasks` or directly via `/mastermind-tasks`.
+This skill is invoked directly via `/mastermind-tasks`.
 
 ---
 

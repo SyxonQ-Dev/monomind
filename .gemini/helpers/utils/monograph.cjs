@@ -34,6 +34,26 @@ function _requireMonograph() {
   } catch (e) { return null; }
 }
 
+// Test-path heuristic for [MONOGRAPH_HINT] lookups (#447). Mirrors isTestPath()
+// in @monoes/monograph (src/health/hotspot-utils.ts), which its node resolver
+// uses to rank non-test definitions first. A leading '/' is prepended so
+// repo-root relative paths like `tests/foo.ts` match too.
+var _TEST_PATH_MARKERS = ['/__tests__/', '/__mocks__/', '/test/', '/tests/', '/e2e/', '.test.', '.spec.'];
+
+function _isTestPath(filePath) {
+  var p = '/' + String(filePath || '').replace(/\\/g, '/');
+  return _TEST_PATH_MARKERS.some(function (m) { return p.indexOf(m) !== -1; });
+}
+
+// SQL twin of _isTestPath: an expression that is 1 for a test path, else 0.
+// Use `AND NOT <expr>` to drop test rows, or `ORDER BY <expr>` to rank them last.
+function _isTestPathSql(col) {
+  var p = "('/' || replace(COALESCE(" + col + ", ''), char(92), '/'))";
+  return '(' + _TEST_PATH_MARKERS.map(function (m) {
+    return 'instr(' + p + ", '" + m + "') > 0";
+  }).join(' OR ') + ')';
+}
+
 // Memoized at module scope — opening monograph.db can take 7-10s.
 // Callers MUST NOT close the returned handle.
 var _cachedMonographDb = undefined;
@@ -262,7 +282,9 @@ function _recordGraphTelemetry(event) {
     try { d = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch (e) {}
     if (typeof d !== 'object' || d === null) d = {};
     d[event] = (d[event] || 0) + 1;
-    if (event === 'monograph_call' || event === 'preresolve_hit' || event === 'graph_assist_search' || event === 'graph_assist_neighbors') {
+    // Hook hints (graph_assist_*) are not credited: nothing measures whether
+    // the model used them, so they must not inflate "saved" figures (#409).
+    if (event === 'monograph_call' || event === 'preresolve_hit') {
       var saved = (_TOKEN_PER_EVENT.grep_call - _TOKEN_PER_EVENT.monograph_call);
       d.tokens_saved = (d.tokens_saved || 0) + saved;
       d.dollars_saved = (d.tokens_saved / 1000000) * _getDollarRate();
@@ -693,4 +715,6 @@ module.exports = {
   _graphGateMarkQueried,
   _getNodeCount,
   injectGodNodesContext,
+  _isTestPath,
+  _isTestPathSql,
 };

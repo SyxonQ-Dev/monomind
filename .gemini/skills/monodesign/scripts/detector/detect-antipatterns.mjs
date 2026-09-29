@@ -31,6 +31,7 @@ export {
   collectStaticDesignSystemFindings,
 } from './design-system.mjs';
 export { detectHtml } from './engines/static-html/detect-html.mjs';
+export { groupFindings } from './findings-group.mjs';
 export { detectUrl, createBrowserDetector } from './engines/browser/detect-url.mjs';
 export { detectText, extractStyleBlocks, extractCSSinJS } from './engines/regex/detect-text.mjs';
 export {

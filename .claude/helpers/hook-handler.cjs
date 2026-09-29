@@ -59,6 +59,11 @@ const {
   _graphGateShouldBlock, _graphGateMarkQueried, _getNodeCount,
 } = monograph;
 
+// #447: hint lookups prefer non-test definitions (same heuristic as the
+// monograph node resolver); symbol hints skip test-only matches entirely.
+const _HINT_NON_TEST = ' AND NOT ' + monograph._isTestPathSql('n.file_path');
+const _HINT_TEST_LAST = ' ORDER BY ' + monograph._isTestPathSql('n.file_path');
+
 const {
   safeRequire,
   _triggerExtractYamlValue, _triggerFinalize, _triggerExtractFromFrontmatter,
@@ -333,6 +338,18 @@ async function main() {
 // fail open: they carry no security signal and must never stop the user.
 var _securityGateCompleted = false;
 
+// pre-bash / pre-search [MONOGRAPH_HINT]/[MONOGRAPH_REMINDER] lines (#409).
+// Claude Code only hands PreToolUse stdout to the model as JSON
+// hookSpecificOutput.additionalContext, so they are collected here and
+// printed as ONE JSON document — never on a block (exit 2 reads stderr).
+var _hookContext = [];
+function _emitHookContext() {
+  if (_hookContext.length === 0 || process.exitCode === 2) return;
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: _hookContext.join('\n') },
+  }) + '\n');
+}
+
 // Build shared hook context — passed to extracted handler modules so they
 // don't need to capture main()-scoped or module-scoped variables via closure.
 var hCtx = {
@@ -477,7 +494,7 @@ const handlers = {
         return;
       }
       if (gateResult === 'warn') {
-        if (String(process.env.MONOMIND_HOOK_QUIET || '') !== '1') console.log('[MONOGRAPH_REMINDER] monograph_query/suggest not yet called this session — graph has ' + (_getNodeCount() || '20k+') + ' indexed nodes. Try monograph first for faster, more precise results.');
+        if (String(process.env.MONOMIND_HOOK_QUIET || '') !== '1') _hookContext.push('[MONOGRAPH_REMINDER] monograph_query/suggest not yet called this session — graph has ' + (_getNodeCount() || '20k+') + ' indexed nodes. Try monograph first for faster, more precise results.');
       }
       var graphAssisted = false;
       if (_isGraphFresh()) {
@@ -510,12 +527,12 @@ const handlers = {
                 if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(pattern) && pattern.length >= 4
                     && !_grepStop[pattern.toLowerCase()]) {
                   var row = db.prepare(
-                    'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                    'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                   ).get(pattern);
                   if (row) {
                     graphAssisted = true;
                     var hint = row.file_path + (row.start_line != null ? ':' + row.start_line : '');
-                    console.log('[MONOGRAPH_HINT] ' + pattern + ' → ' + hint);
+                    _hookContext.push('[MONOGRAPH_HINT] ' + pattern + ' → ' + hint);
                   }
                 }
 
@@ -523,23 +540,23 @@ const handlers = {
                 if (!graphAssisted && /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(pattern) && pattern.length >= 4
                     && !_grepStop[pattern.toLowerCase()]) {
                   var row = db.prepare(
-                    'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                    'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                   ).get(pattern);
                   if (row) {
                     graphAssisted = true;
                     var hint = row.file_path + (row.start_line != null ? ':' + row.start_line : '');
-                    console.log('[MONOGRAPH_HINT] ' + row.name + ' → ' + hint);
+                    _hookContext.push('[MONOGRAPH_HINT] ' + row.name + ' → ' + hint);
                   }
                 }
 
                 // --- Strategy 3: dotted filename (db.ts, orchestrator.ts) → File node lookup ---
                 if (!graphAssisted && /^[a-zA-Z0-9_-]+\.[a-z]{1,4}$/.test(pattern)) {
                   var row = db.prepare(
-                    'SELECT n.name, n.file_path FROM nodes n WHERE n.name = ? AND n.label = \'File\' LIMIT 1'
+                    'SELECT n.name, n.file_path FROM nodes n WHERE n.name = ? AND n.label = \'File\'' + _HINT_TEST_LAST + ' LIMIT 1'
                   ).get(pattern);
                   if (row) {
                     graphAssisted = true;
-                    console.log('[MONOGRAPH_HINT] file ' + pattern + ' → ' + row.file_path);
+                    _hookContext.push('[MONOGRAPH_HINT] file ' + pattern + ' → ' + row.file_path);
                   }
                 }
 
@@ -548,11 +565,11 @@ const handlers = {
                     && pattern.indexOf('-') !== -1) {
                   var pathLike = '%/' + pattern + '%';
                   var row = db.prepare(
-                    'SELECT n.name, n.file_path FROM nodes n WHERE n.label = \'File\' AND n.file_path LIKE ? LIMIT 1'
+                    'SELECT n.name, n.file_path FROM nodes n WHERE n.label = \'File\' AND n.file_path LIKE ?' + _HINT_TEST_LAST + ' LIMIT 1'
                   ).get(pathLike);
                   if (row) {
                     graphAssisted = true;
-                    console.log('[MONOGRAPH_HINT] file ' + pattern + ' → ' + row.file_path);
+                    _hookContext.push('[MONOGRAPH_HINT] file ' + pattern + ' → ' + row.file_path);
                   }
                 }
 
@@ -565,12 +582,12 @@ const handlers = {
                     if (_grepStop[id.toLowerCase()] || tried[id.toLowerCase()]) continue;
                     tried[id.toLowerCase()] = 1;
                     var row2 = db.prepare(
-                      'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                      'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                     ).get(id);
                     if (row2) {
                       graphAssisted = true;
                       var hint2 = row2.file_path + (row2.start_line != null ? ':' + row2.start_line : '');
-                      console.log('[MONOGRAPH_HINT] ' + row2.name + ' → ' + hint2);
+                      _hookContext.push('[MONOGRAPH_HINT] ' + row2.name + ' → ' + hint2);
                     }
                   }
                 }
@@ -584,12 +601,12 @@ const handlers = {
                       'JOIN nodes n ON n.rowid = f.rowid ' +
                       'WHERE nodes_fts MATCH ? ' +
                       'AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') ' +
-                      'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                      'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                     ).get(ftsPattern);
                     if (ftsRow) {
                       graphAssisted = true;
                       var ftsHint = ftsRow.file_path + (ftsRow.start_line != null ? ':' + ftsRow.start_line : '');
-                      console.log('[MONOGRAPH_HINT] ' + ftsRow.name + ' → ' + ftsHint);
+                      _hookContext.push('[MONOGRAPH_HINT] ' + ftsRow.name + ' → ' + ftsHint);
                     }
                   } catch (e) { /* FTS table may not exist */ }
                 }
@@ -601,12 +618,12 @@ const handlers = {
                     var dp = dotParts[di];
                     if (_grepStop[dp.toLowerCase()]) continue;
                     var drow = db.prepare(
-                      'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                      'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                     ).get(dp);
                     if (drow) {
                       graphAssisted = true;
                       var dhint = drow.file_path + (drow.start_line != null ? ':' + drow.start_line : '');
-                      console.log('[MONOGRAPH_HINT] ' + drow.name + ' → ' + dhint);
+                      _hookContext.push('[MONOGRAPH_HINT] ' + drow.name + ' → ' + dhint);
                     }
                   }
                 }
@@ -616,12 +633,12 @@ const handlers = {
                   var camel = pattern.replace(/_([a-z])/g, function(_, c) { return c.toUpperCase(); });
                   if (camel !== pattern && !_grepStop[camel.toLowerCase()]) {
                     var crow = db.prepare(
-                      'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                      'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                     ).get(camel);
                     if (crow) {
                       graphAssisted = true;
                       var chint = crow.file_path + (crow.start_line != null ? ':' + crow.start_line : '');
-                      console.log('[MONOGRAPH_HINT] ' + crow.name + ' → ' + chint);
+                      _hookContext.push('[MONOGRAPH_HINT] ' + crow.name + ' → ' + chint);
                     }
                   }
                 }
@@ -635,12 +652,12 @@ const handlers = {
                   });
                   for (var ai = 0; ai < altParts.length && !graphAssisted; ai++) {
                     var arow = db.prepare(
-                      'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                      'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                     ).get(altParts[ai]);
                     if (arow) {
                       graphAssisted = true;
                       var ahint = arow.file_path + (arow.start_line != null ? ':' + arow.start_line : '');
-                      console.log('[MONOGRAPH_HINT] ' + arow.name + ' → ' + ahint);
+                      _hookContext.push('[MONOGRAPH_HINT] ' + arow.name + ' → ' + ahint);
                     }
                   }
                 }
@@ -660,7 +677,7 @@ const handlers = {
                   ).get('%' + dirPath10 + '/%');
                   if (drow10 && drow10.c > 0) {
                     graphAssisted = true;
-                    console.log('[MONOGRAPH_HINT] grep scope ' + dirPath10 + ' has ' + drow10.c + ' indexed files');
+                    _hookContext.push('[MONOGRAPH_HINT] grep scope ' + dirPath10 + ' has ' + drow10.c + ' indexed files');
                   }
                 }
               }
@@ -672,11 +689,11 @@ const handlers = {
               var db = _openMonographDb();
               if (db) {
                 var row = db.prepare(
-                  'SELECT n.file_path FROM nodes n WHERE n.name = ? AND n.label = \'File\' LIMIT 1'
+                  'SELECT n.file_path FROM nodes n WHERE n.name = ? AND n.label = \'File\'' + _HINT_TEST_LAST + ' LIMIT 1'
                 ).get(fm[1]);
                 if (row) {
                   graphAssisted = true;
-                  console.log('[MONOGRAPH_HINT] file ' + fm[1] + ' → ' + row.file_path);
+                  _hookContext.push('[MONOGRAPH_HINT] file ' + fm[1] + ' → ' + row.file_path);
                 }
               }
             }
@@ -687,11 +704,11 @@ const handlers = {
                 var db = _openMonographDb();
                 if (db) {
                   var wrow = db.prepare(
-                    'SELECT n.name, n.file_path FROM nodes n WHERE n.name LIKE ? AND n.label = \'File\' AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                    'SELECT n.name, n.file_path FROM nodes n WHERE n.name LIKE ? AND n.label = \'File\' AND n.file_path NOT LIKE \'%.md\'' + _HINT_TEST_LAST + ' LIMIT 1'
                   ).get('%' + wm[1] + '%');
                   if (wrow) {
                     graphAssisted = true;
-                    console.log('[MONOGRAPH_HINT] file *' + wm[1] + '* → ' + wrow.file_path);
+                    _hookContext.push('[MONOGRAPH_HINT] file *' + wm[1] + '* → ' + wrow.file_path);
                   }
                 }
               }
@@ -707,7 +724,7 @@ const handlers = {
                   ).get(fdm[1].replace(/\/$/, '') + '/%');
                   if (fdrow && fdrow.c > 0) {
                     graphAssisted = true;
-                    console.log('[MONOGRAPH_HINT] find scope ' + fdm[1] + ' has ' + fdrow.c + ' indexed files');
+                    _hookContext.push('[MONOGRAPH_HINT] find scope ' + fdm[1] + ' has ' + fdrow.c + ' indexed files');
                   }
                 }
               }
@@ -718,6 +735,7 @@ const handlers = {
       if (graphAssisted) _recordGraphTelemetry('graph_assist_search');
       else if (isGrep) _recordGraphTelemetry('bash_grep_call');
       else _recordGraphTelemetry('bash_find_call');
+      _emitHookContext();
     }
   },
 
@@ -742,7 +760,7 @@ const handlers = {
       return;
     }
     if (gateResult === 'warn') {
-      if (String(process.env.MONOMIND_HOOK_QUIET || '') !== '1') console.log('[MONOGRAPH_REMINDER] monograph_query/suggest not yet called this session — try monograph first for faster results.');
+      if (String(process.env.MONOMIND_HOOK_QUIET || '') !== '1') _hookContext.push('[MONOGRAPH_REMINDER] monograph_query/suggest not yet called this session — try monograph first for faster results.');
     }
     var graphResolved = false;
     try {
@@ -763,12 +781,12 @@ const handlers = {
               var row = db.prepare(
                 'SELECT n.name, n.file_path, n.start_line FROM nodes n ' +
                 'WHERE n.name = ? AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') ' +
-                'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
               ).get(grepPattern);
               if (row) {
                 graphResolved = true;
                 var hint = row.file_path + (row.start_line != null ? ':' + row.start_line : '');
-                console.log('[MONOGRAPH_HINT] ' + grepPattern + ' found at ' + hint);
+                _hookContext.push('[MONOGRAPH_HINT] ' + grepPattern + ' found at ' + hint);
               }
             }
 
@@ -777,23 +795,23 @@ const handlers = {
               var row = db.prepare(
                 'SELECT n.name, n.file_path, n.start_line FROM nodes n ' +
                 'WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') ' +
-                'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
               ).get(grepPattern);
               if (row) {
                 graphResolved = true;
                 var hint = row.file_path + (row.start_line != null ? ':' + row.start_line : '');
-                console.log('[MONOGRAPH_HINT] ' + row.name + ' found at ' + hint);
+                _hookContext.push('[MONOGRAPH_HINT] ' + row.name + ' found at ' + hint);
               }
             }
 
             // Strategy 3: dotted filename (db.ts, orchestrator.ts) → File node lookup
             if (!graphResolved && /^[a-zA-Z0-9_-]+\.[a-z]{1,4}$/.test(grepPattern)) {
               var row = db.prepare(
-                'SELECT n.name, n.file_path FROM nodes n WHERE n.name = ? AND n.label = \'File\' LIMIT 1'
+                'SELECT n.name, n.file_path FROM nodes n WHERE n.name = ? AND n.label = \'File\'' + _HINT_TEST_LAST + ' LIMIT 1'
               ).get(grepPattern);
               if (row) {
                 graphResolved = true;
-                console.log('[MONOGRAPH_HINT] file ' + grepPattern + ' found at ' + row.file_path);
+                _hookContext.push('[MONOGRAPH_HINT] file ' + grepPattern + ' found at ' + row.file_path);
               }
             }
 
@@ -802,11 +820,11 @@ const handlers = {
                 && grepPattern.length >= 5 && grepPattern.indexOf('-') !== -1) {
               var pathLike = '%/' + grepPattern + '%';
               var row = db.prepare(
-                'SELECT n.file_path FROM nodes n WHERE n.label = \'File\' AND n.file_path LIKE ? LIMIT 1'
+                'SELECT n.file_path FROM nodes n WHERE n.label = \'File\' AND n.file_path LIKE ?' + _HINT_TEST_LAST + ' LIMIT 1'
               ).get(pathLike);
               if (row) {
                 graphResolved = true;
-                console.log('[MONOGRAPH_HINT] file ' + grepPattern + ' found at ' + row.file_path);
+                _hookContext.push('[MONOGRAPH_HINT] file ' + grepPattern + ' found at ' + row.file_path);
               }
             }
 
@@ -821,12 +839,12 @@ const handlers = {
                 var row2 = db.prepare(
                   'SELECT n.name, n.file_path, n.start_line FROM nodes n ' +
                   'WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') ' +
-                  'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                  'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                 ).get(id);
                 if (row2) {
                   graphResolved = true;
                   var hint2 = row2.file_path + (row2.start_line != null ? ':' + row2.start_line : '');
-                  console.log('[MONOGRAPH_HINT] ' + row2.name + ' found at ' + hint2);
+                  _hookContext.push('[MONOGRAPH_HINT] ' + row2.name + ' found at ' + hint2);
                 }
               }
             }
@@ -840,12 +858,12 @@ const handlers = {
                   'JOIN nodes n ON n.rowid = f.rowid ' +
                   'WHERE nodes_fts MATCH ? ' +
                   'AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') ' +
-                  'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                  'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                 ).get(ftsQ);
                 if (ftsRow) {
                   graphResolved = true;
                   var ftsHint = ftsRow.file_path + (ftsRow.start_line != null ? ':' + ftsRow.start_line : '');
-                  console.log('[MONOGRAPH_HINT] ' + ftsRow.name + ' found at ' + ftsHint);
+                  _hookContext.push('[MONOGRAPH_HINT] ' + ftsRow.name + ' found at ' + ftsHint);
                 }
               } catch (e) { /* FTS table may not exist */ }
             }
@@ -859,12 +877,12 @@ const handlers = {
                 var drow = db.prepare(
                   'SELECT n.name, n.file_path, n.start_line FROM nodes n ' +
                   'WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') ' +
-                  'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                  'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                 ).get(dp);
                 if (drow) {
                   graphResolved = true;
                   var dhint = drow.file_path + (drow.start_line != null ? ':' + drow.start_line : '');
-                  console.log('[MONOGRAPH_HINT] ' + drow.name + ' found at ' + dhint);
+                  _hookContext.push('[MONOGRAPH_HINT] ' + drow.name + ' found at ' + dhint);
                 }
               }
             }
@@ -876,12 +894,12 @@ const handlers = {
                 var crow = db.prepare(
                   'SELECT n.name, n.file_path, n.start_line FROM nodes n ' +
                   'WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') ' +
-                  'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                  'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                 ).get(camel);
                 if (crow) {
                   graphResolved = true;
                   var chint = crow.file_path + (crow.start_line != null ? ':' + crow.start_line : '');
-                  console.log('[MONOGRAPH_HINT] ' + crow.name + ' found at ' + chint);
+                  _hookContext.push('[MONOGRAPH_HINT] ' + crow.name + ' found at ' + chint);
                 }
               }
             }
@@ -897,6 +915,7 @@ const handlers = {
     } else if (tool === 'Glob') {
       _recordGraphTelemetry('glob_call');
     }
+    _emitHookContext();
   },
 
   'post-graph-tool': () => {

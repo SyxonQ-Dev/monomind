@@ -126,6 +126,12 @@ jobs:
       - name: Lint agent and skill references
         run: node scripts/lint-agent-refs.mjs
 
+      # Every mcp__monomind__<tool> in the .claude trees and every tool/command
+      # in the guidance catalog must exist in the full MCP registry / built
+      # CLI, and agent `monomind <cmd>` references must resolve (GH #421).
+      - name: Lint MCP tool and CLI command references
+        run: node scripts/lint-tool-refs.mjs
+
       # `monomind init --force` rewrites the root .claude/ tree (and
       # .agents/skills) in place, wrapping each file it owns in ownership
       # markers, and never touches the other three copies. An init run in a

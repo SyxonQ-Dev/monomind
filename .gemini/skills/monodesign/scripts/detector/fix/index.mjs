@@ -23,6 +23,7 @@ import {
 } from '../../lib/monodesign-config.mjs';
 import { HTML_EXTENSIONS, walkDir } from '../node/file-system.mjs';
 import { UNFIXABLE_REASONS, getFixer, fixableRuleIds, FIXERS } from './fixers.mjs';
+import { unifiedDiff } from './unified-diff.mjs';
 
 // ---------------------------------------------------------------------------
 // Edit application
@@ -55,32 +56,6 @@ function writeFileAtomic(filePath, content) {
   );
   fs.writeFileSync(tmp, content, 'utf-8');
   fs.renameSync(tmp, filePath);
-}
-
-// ---------------------------------------------------------------------------
-// Unified diff (minimal single-hunk implementation for --dry-run)
-// ---------------------------------------------------------------------------
-
-function unifiedDiff(oldText, newText, label) {
-  if (oldText === newText) return '';
-  const a = oldText.split('\n');
-  const b = newText.split('\n');
-  let p = 0;
-  while (p < a.length && p < b.length && a[p] === b[p]) p++;
-  let s = 0;
-  while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
-  const aEnd = a.length - s;
-  const bEnd = b.length - s;
-  const ctxStart = Math.max(0, p - 3);
-  const ctxEnd = Math.min(a.length, aEnd + 3);
-  const oldLen = ctxEnd - ctxStart;
-  const newLen = (p - ctxStart) + (bEnd - p) + (ctxEnd - aEnd);
-  const lines = [`--- a/${label}`, `+++ b/${label}`, `@@ -${ctxStart + 1},${oldLen} +${ctxStart + 1},${newLen} @@`];
-  for (let i = ctxStart; i < p; i++) lines.push(` ${a[i]}`);
-  for (let i = p; i < aEnd; i++) lines.push(`-${a[i]}`);
-  for (let i = p; i < bEnd; i++) lines.push(`+${b[i]}`);
-  for (let i = aEnd; i < ctxEnd; i++) lines.push(` ${a[i]}`);
-  return lines.join('\n');
 }
 
 // ---------------------------------------------------------------------------

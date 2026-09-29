@@ -495,22 +495,22 @@ npx monomind github issue-init 567 \
 ### Multi-Agent Issue Processing
 ```bash
 # Initialize issue-specific swarm with optimal topology
-mcp__monomind__swarm_init { topology: "hierarchical", maxAgents: 8 }
+mcp__monomind__monoswarm_init { topology: "hierarchical", maxAgents: 8 }
 mcp__monomind__agent_spawn { type: "coordinator", name: "Issue Coordinator" }
 mcp__monomind__agent_spawn { type: "analyst", name: "Issue Analyzer" }
 mcp__monomind__agent_spawn { type: "coder", name: "Solution Developer" }
 mcp__monomind__agent_spawn { type: "tester", name: "Validation Engineer" }
 
 # Store issue context in swarm memory
-mcp__monomind__memory_usage {
-  action: "store",
+mcp__monomind__monoswarm_memory {
+  action: "set",
   key: "issue/#{issue_number}/context",
   value: { title: "issue_title", labels: ["labels"], complexity: "high" }
 }
 
 # Orchestrate issue resolution workflow
-mcp__monomind__task_orchestrate {
-  task: "Coordinate multi-agent issue resolution with progress tracking",
+mcp__monomind__task_create {
+  description: "Coordinate multi-agent issue resolution with progress tracking",
   strategy: "adaptive",
   priority: "high"
 }
@@ -522,11 +522,11 @@ mcp__monomind__task_orchestrate {
 const preHook = async (issue) => {
   // Initialize swarm with issue-specific topology
   const topology = determineTopology(issue.complexity);
-  await mcp__monomind__swarm_init({ topology, maxAgents: 6 });
+  await mcp__monomind__monoswarm_init({ topology, maxAgents: 6 });
   
   // Store issue context for swarm agents
-  await mcp__monomind__memory_usage({
-    action: "store",
+  await mcp__monomind__monoswarm_memory({
+    action: "set",
     key: `issue/${issue.number}/metadata`,
     value: { issue, analysis: await analyzeIssue(issue) }
   });
@@ -541,8 +541,8 @@ const postHook = async (results) => {
   await createFollowupTasks(results.remainingWork);
   
   // Store completion metrics
-  await mcp__monomind__memory_usage({
-    action: "store", 
+  await mcp__monomind__monoswarm_memory({
+    action: "set", 
     key: `issue/${issue.number}/completion`,
     value: { metrics: results.metrics, timestamp: Date.now() }
   });
