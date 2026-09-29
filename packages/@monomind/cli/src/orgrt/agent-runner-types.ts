@@ -1,5 +1,6 @@
 // packages/@monomind/cli/src/orgrt/agent-runner-types.ts
 import type { z } from 'zod';
+import type { SubagentEvent } from './agent-runner-claude-subagent.js';
 import type { OrgEffortLevel } from './cost-tier.js';
 
 /** A platform-agnostic org tool definition. `schema` is a zod object because
@@ -197,7 +198,7 @@ export function killOnAbort(
  *  `AgentRunArgs.settingSources` is non-empty (coder mode) — see its own
  *  doc comment there and agent-exec-settings.ts's startup watchdog. */
 export interface AgentMessage {
-  type: 'assistant' | 'result' | 'tool_use' | 'tool_result' | 'status';
+  type: 'assistant' | 'result' | 'tool_use' | 'tool_result' | 'status' | 'subagent';
   session_id?: string;
   text?: string; // assistant (prose) / tool_use (short progress label) / tool_result (body)
   phase?: 'initializing' | 'ready'; // status only
@@ -211,6 +212,10 @@ export interface AgentMessage {
   /** #357: non-null when produced inside a Task/Agent subagent's own turn —
    *  lets a caller nest tool_activity events under the subagent's call. */
   parent_tool_use_id?: string | null; // tool_use
+  /** #387: ClaudeAgentRunner only, agent-exec opt-in (see SubagentEvent).
+   *  An `assistant` message with a non-null `parent_tool_use_id` is that
+   *  subagent's own text, not the main agent's. */
+  subagent?: SubagentEvent; // subagent
   duration_ms?: number; // tool_result
   input_tokens?: number; // result, assistant (that turn's own usage)
   output_tokens?: number; // result, assistant (that turn's own usage)

@@ -65,6 +65,7 @@ describe('version handshake (§2)', () => {
         'doctor-offline',
         'init-json',
         'knowledge-profile-captures',
+        'agent-exec-subagent-events',
       ],
     });
     expect(p.capabilities).toContain('agent-exec');
