@@ -19,6 +19,8 @@ describe('guidance catalog skills', () => {
   const shipped = allShippedSkills(SKILLS_DIR);
 
   it('names only skills that init ships', () => {
+    // Guard against a vacuous pass: the catalog must actually link skills.
+    expect(Object.values(CAPABILITY_CATALOG).some((c) => c.skills.length > 0)).toBe(true);
     const phantom: string[] = [];
     for (const [area, cap] of Object.entries(CAPABILITY_CATALOG)) {
       for (const skill of cap.skills) {

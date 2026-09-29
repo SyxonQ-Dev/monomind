@@ -112,9 +112,8 @@ export function mergeSettingsForUpgrade(
     };
   }
 
-  // 4. Merge monomind settings (preserve existing, add agentTeams + memory)
+  // 4. Merge monomind settings (preserve existing, add agentTeams)
   const existingMonomind = (existing.monomind as Record<string, unknown>) || {};
-  const existingMemory = (existingMonomind.memory as Record<string, unknown>) || {};
   merged.monomind = {
     ...existingMonomind,
     version: existingMonomind.version || '3.0.0',
@@ -135,9 +134,6 @@ export function mergeSettingsForUpgrade(
         taskCompleted: { enabled: true, trainPatterns: true, notifyLead: true },
       },
     },
-    // Kept as-is: learningBridge/memoryGraph/agentScopes from older installs
-    // are carried through untouched, but no longer added (nothing reads them).
-    memory: { ...existingMemory },
   };
 
   return merged;

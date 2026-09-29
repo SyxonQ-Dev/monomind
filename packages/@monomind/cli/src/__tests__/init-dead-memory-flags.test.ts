@@ -55,6 +55,9 @@ describe('dead memory flags', () => {
     for (const key of DEAD) expect(freshMemory).not.toHaveProperty(key);
     expect(freshMemory.backend).toBe('hybrid');
 
+    const none = mergeSettingsForUpgrade({ monomind: { version: '3.0.0' } });
+    expect(none.monomind).not.toHaveProperty('memory');
+
     const legacy = mergeSettingsForUpgrade({
       monomind: { memory: { backend: 'hybrid', learningBridge: { enabled: false } } },
     });

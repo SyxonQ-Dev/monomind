@@ -237,7 +237,8 @@ export const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
     tools: ['embeddings_generate', 'embeddings_compare', 'embeddings_search', 'embeddings_init'],
     commands: [],
     agents: [],
-    skills: ['memory-toolkit'],
+    // No shipped skill covers the embeddings_* tools.
+    skills: [],
     whenToUse:
       'When you need semantic search, document embedding, or vector similarity operations.',
   },
