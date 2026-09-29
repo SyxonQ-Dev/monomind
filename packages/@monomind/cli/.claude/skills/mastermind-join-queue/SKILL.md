@@ -1,6 +1,6 @@
 ---
 name: mastermind-join-queue
-description: Mastermind join-queue — lists pending join requests for an org, approves or rejects them, and filters by request type (human/agent/all) and status. Mirrors JoinRequestQueue.tsx.
+description: Mastermind join-queue — bookkeeping only — not enforced by the Org Runtime. Lists, approves, or rejects join requests recorded in a side file, filtered by type (human/agent/all) and status. Mirrors JoinRequestQueue.tsx.
 type: domain-skill
 default_mode: auto
 pick: low
@@ -8,7 +8,9 @@ pick: low
 
 # Mastermind Join Queue
 
-This skill is invoked by `mastermind:join-queue` or directly via `/mastermind-join-queue`.
+This skill is invoked directly via `/mastermind-join-queue`.
+
+**Bookkeeping only — not enforced by the Org Runtime.** It reads and writes `.monomind/orgs/<org>-join-requests.json`, which no runtime code reads: approving a request grants no access.
 
 ---
 

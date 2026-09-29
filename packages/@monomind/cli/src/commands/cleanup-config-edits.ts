@@ -11,7 +11,6 @@
  *  - `opencode.json`: the bash permission rules init adds for monomind.
  */
 
-import { readFileSync } from 'node:fs';
 import { OPENCODE_MONOMIND_BASH_RULES } from '../init/opencode-generator.js';
 
 type Json = Record<string, unknown>;
@@ -80,67 +79,6 @@ export function stripDanglingHelperRefs(
     if (Object.keys(hooks).length === 0) delete settings.hooks;
   }
   return changed ? renderLike(settings, text) : null;
-}
-
-/**
- * The statusLine and hook commands in settings `text` that run a helper
- * `isGone` reports as removed (GH #448: listed when the file is git-tracked
- * and so cannot be edited). Empty when none, or the text is not JSON.
- */
-export function danglingHelperCommands(text: string, isGone: (rel: string) => boolean): string[] {
-  let settings: unknown;
-  try {
-    settings = JSON.parse(text);
-  } catch {
-    return [];
-  }
-  if (!isObject(settings)) return [];
-  const commands: unknown[] = [];
-  if (isObject(settings.statusLine)) commands.push(settings.statusLine.command);
-  for (const groups of isObject(settings.hooks) ? Object.values(settings.hooks) : []) {
-    for (const group of Array.isArray(groups) ? groups : []) {
-      if (!isObject(group) || !Array.isArray(group.hooks)) continue;
-      for (const h of group.hooks) if (isObject(h)) commands.push(h.command);
-    }
-  }
-  const dangling = commands.filter(
-    (c): c is string => typeof c === 'string' && helperRefs(c).some(isGone),
-  );
-  return [...new Set(dangling)];
-}
-
-/**
- * For a git-tracked settings file at `abs`, which cleanup never edits:
- * `covers` matches the helpers directories its dangling commands run (kept
- * whole, since helpers require their siblings) and any parent of them;
- * `notice` is the manual edit that completes the uninstall. Null when no
- * command runs a removed helper.
- */
-export function helpersToKeep(
-  rel: string,
-  abs: string,
-  isGone: (rel: string) => boolean,
-): { covers: (path: string) => boolean; notice: string } | null {
-  let text = '';
-  try {
-    text = readFileSync(abs, 'utf8');
-  } catch {}
-  const commands = danglingHelperCommands(text, isGone);
-  if (commands.length === 0) return null;
-  const roots = [
-    ...new Set(
-      commands
-        .flatMap((c) => helperRefs(c).filter(isGone))
-        .map((r) => r.replace(/\/helpers\/.*$/, '/helpers')),
-    ),
-  ];
-  const covers = (path: string) =>
-    roots.some((r) => path === r || path.startsWith(`${r}/`) || r.startsWith(`${path}/`));
-  const notice =
-    `${rel} is tracked by git, so cleanup kept ${roots.join(', ')}, which it runs:\n` +
-    commands.map((c) => `    ${c}`).join('\n') +
-    `\n  To fully uninstall, delete those hook entries (and the statusLine, if listed) from ${rel}, commit, then re-run cleanup --force.`;
-  return { covers, notice };
 }
 
 /** A `[table]` / `[[array]]` header line's name, or null. */

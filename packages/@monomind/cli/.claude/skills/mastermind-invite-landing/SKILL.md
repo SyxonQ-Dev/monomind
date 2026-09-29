@@ -1,6 +1,6 @@
 ---
 name: mastermind-invite-landing
-description: Mastermind invite-landing — accept an org invite as a human member or as an agent. Validates the invite token, presents org/role info, and processes join as human (name/email) or as an agent (adapter type, model, agent name, config). Mirrors InviteLanding.tsx.
+description: Mastermind invite-landing — bookkeeping only — not enforced by the Org Runtime. Records accepting an org invite as a human or agent member in a side file; an agent join also appends a role stub. Mirrors InviteLanding.tsx.
 type: domain-skill
 default_mode: confirm
 pick: low
@@ -8,7 +8,9 @@ pick: low
 
 # Mastermind Invite Landing
 
-This skill is invoked by `mastermind:invite-landing` or directly via `/mastermind-invite-landing`.
+This skill is invoked directly via `/mastermind-invite-landing`.
+
+**Bookkeeping only — not enforced by the Org Runtime.** It writes `.monomind/orgs/<org>-members.json`, which no runtime code reads: joining grants no access. An agent join also appends a role stub to the org definition — check it with `monomind org validate` before running the org.
 
 ---
 
@@ -176,7 +178,7 @@ jq --arg token "$token" --arg mid "$agentId" --arg name "$agent_name" \
      "status":"active","joinedAt":$ts}]' \
   "$membersFile" > "$tmp" && mv "$tmp" "$membersFile"
 
-# Also add to org roles file so the agent can run
+# Also append a role stub to the org definition (validate it with `monomind org validate` before running)
 orgFile=".monomind/orgs/${org_name}.json"
 if [ -f "$orgFile" ]; then
   dupCheck=$(jq -r --arg id "$agentId" '[(.roles // [])[] | select(.id == $id)] | length' "$orgFile")

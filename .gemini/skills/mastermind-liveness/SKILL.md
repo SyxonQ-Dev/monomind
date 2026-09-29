@@ -8,7 +8,7 @@ pick: low
 
 # Mastermind Liveness
 
-This skill is invoked by `mastermind:liveness` or directly via `/mastermind-liveness`.
+This skill is invoked directly via `/mastermind-liveness`.
 
 ---
 

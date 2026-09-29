@@ -8,7 +8,7 @@ pick: low
 
 # Mastermind Activity
 
-This skill is invoked by `mastermind:activity` or directly via `/mastermind-activity`.
+This skill is invoked directly via `/mastermind-activity`.
 
 ---
 

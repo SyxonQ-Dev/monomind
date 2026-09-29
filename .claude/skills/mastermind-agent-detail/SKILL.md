@@ -8,7 +8,7 @@ pick: low
 
 # Mastermind Agent Detail
 
-This skill is invoked by `mastermind:agent-detail` or directly via `/mastermind-agent-detail`.
+This skill is invoked directly via `/mastermind-agent-detail`.
 
 ---
 
