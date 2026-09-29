@@ -13,15 +13,6 @@ memory:
   backend: hybrid
   persistPath: .monomind/data
   cacheSize: 100
-  # ADR-049: memory scopes (learningBridge values are config-only; nothing reads them yet)
-  learningBridge:
-    enabled: true
-    confidenceDecayRate: 0.005
-    accessBoostAmount: 0.03
-    consolidationThreshold: 10
-  agentScopes:
-    enabled: true
-    defaultScope: project
 
 neural:
   enabled: true
