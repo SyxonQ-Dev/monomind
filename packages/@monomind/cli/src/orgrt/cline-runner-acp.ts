@@ -211,7 +211,7 @@ export async function* streamAcpTurn(
       // allowed for cline's safe tools and rejected otherwise — so a turn
       // never waits on it. Anything else is refused.
       if (m.method === 'session/request_permission') {
-        const { outcome: answer, denied } = acpPermissionOutcome(m.params, setup.scoped);
+        const { outcome: answer, denied } = acpPermissionOutcome(m.params, setup.scoped, args.cwd);
         const tc = m.params?.toolCall as Record<string, unknown> | undefined;
         if (typeof tc?.toolCallId === 'string') {
           // cline announces this call only as a pending tool_call_update.

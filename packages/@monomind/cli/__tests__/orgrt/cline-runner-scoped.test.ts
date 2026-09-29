@@ -4,7 +4,7 @@
  * Fixture provenance: __tests__/orgrt/cline/fake-cline.ts.
  */
 import * as cp from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -14,9 +14,11 @@ import { ClineAgentRunner, endedOnRefusals } from '../../src/orgrt/cline-runner.
 import {
   acpPermissionOutcome,
   CLINE_SAFE_TOOLS,
+  editAllowedInWorkspace,
   isClineRefusal,
   SCOPED_PLUGIN_FILE,
   SCOPED_REFUSAL,
+  SCOPED_WORKSPACE_ENV,
   scopedPluginSource,
 } from '../../src/orgrt/cline-runner-scoped.js';
 import { ToolActivityTracker } from '../../src/orgrt/tool-activity.js';
@@ -257,5 +259,78 @@ describe('the refusal plugin module', () => {
     expect(isClineRefusal('User rejected the tool call')).toBe(true);
     expect(isClineRefusal('ENOENT: no such file')).toBe(false);
     expect(isClineRefusal(undefined)).toBe(false);
+  });
+});
+
+describe('limited mode allows file edits inside the project only', () => {
+  const ws = realpathSync(mkdtempSync(join(tmpdir(), 'cline-ws-')));
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), 'cline-out-')));
+  mkdirSync(join(ws, 'src'), { recursive: true });
+  symlinkSync(outside, join(ws, 'escape'));
+  const patch = (...lines: string[]) => ({ input: ['*** Begin Patch', ...lines, '*** End Patch'].join('\n') });
+
+  it('editAllowedInWorkspace: inside yes; outside, .git, symlink escape, no workspace no', () => {
+    expect(editAllowedInWorkspace('editor', { path: 'src/a.ts', new_text: 'x' }, ws)).toBe(true);
+    expect(editAllowedInWorkspace('editor', { path: join(ws, 'new/dir/b.ts') }, ws)).toBe(true);
+    expect(editAllowedInWorkspace('apply_patch', patch('*** Add File: src/c.ts', '+hi', '*** Update File: README.md'), ws)).toBe(true);
+    expect(editAllowedInWorkspace('apply_patch', '*** Begin Patch\n*** Delete File: old.txt\n*** End Patch', ws)).toBe(true);
+
+    expect(editAllowedInWorkspace('editor', { path: '../x.txt' }, ws)).toBe(false);
+    expect(editAllowedInWorkspace('editor', { path: join(outside, 'x.txt') }, ws)).toBe(false);
+    expect(editAllowedInWorkspace('editor', { path: '/etc/passwd' }, ws)).toBe(false);
+    expect(editAllowedInWorkspace('editor', { path: 'escape/x.txt' }, ws)).toBe(false);
+    expect(editAllowedInWorkspace('editor', { path: '.git/hooks/pre-commit' }, ws)).toBe(false);
+    expect(editAllowedInWorkspace('editor', { path: '.' }, ws)).toBe(false);
+    expect(editAllowedInWorkspace('apply_patch', patch('*** Update File: src/a.ts', '*** Move to: ../stolen.ts'), ws)).toBe(false);
+    expect(editAllowedInWorkspace('apply_patch', patch('*** Add File: ok.ts', '*** Add File: /tmp/evil.ts'), ws)).toBe(false);
+    expect(editAllowedInWorkspace('apply_patch', { input: 'no patch headers' }, ws)).toBe(false);
+    expect(editAllowedInWorkspace('editor', {}, ws)).toBe(false);
+    expect(editAllowedInWorkspace('editor', { path: 'src/a.ts' }, '')).toBe(false);
+    expect(editAllowedInWorkspace('editor', { path: 'src/a.ts' }, 'relative/dir')).toBe(false);
+    expect(editAllowedInWorkspace('run_commands', { commands: ['ls'] }, ws)).toBe(false);
+  });
+
+  it('the plugin approves project edits and refuses commands and outside edits', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cline-plugin-ws-'));
+    const file = join(dir, 'plugin.mjs');
+    writeFileSync(file, scopedPluginSource());
+    const plugin = (await import(pathToFileURL(file).href)).default;
+    const prev = process.env[SCOPED_WORKSPACE_ENV];
+    process.env[SCOPED_WORKSPACE_ENV] = ws;
+    try {
+      const call = (toolName: string, input: unknown) => plugin.hooks.beforeTool({ toolCall: { toolName }, input });
+      expect(call('editor', { path: 'src/a.ts', new_text: 'x' })).toEqual({ policy: { autoApprove: true } });
+      expect(call('apply_patch', patch('*** Add File: src/c.ts', '+hi'))).toEqual({ policy: { autoApprove: true } });
+      for (const [t, input] of [
+        ['editor', { path: '../x.txt' }],
+        ['editor', { path: '.git/config' }],
+        ['editor', { path: 'escape/x.txt' }],
+        ['apply_patch', patch('*** Add File: /tmp/evil.ts')],
+        ['run_commands', { commands: ['echo hi > x.txt'] }],
+      ] as const) {
+        const r = call(t, input);
+        expect(r.skip).toBe(true);
+        expect(isClineRefusal(r.reason)).toBe(true);
+      }
+      delete process.env[SCOPED_WORKSPACE_ENV];
+      expect(call('editor', { path: 'src/a.ts' }).skip).toBe(true); // no project folder: fail closed
+    } finally {
+      if (prev === undefined) delete process.env[SCOPED_WORKSPACE_ENV];
+      else process.env[SCOPED_WORKSPACE_ENV] = prev;
+    }
+  });
+
+  it('ACP permission answers follow the same rule', () => {
+    const req = (title: string, rawInput: unknown) => ({
+      toolCall: { toolCallId: 't', title, rawInput },
+      options: [
+        { optionId: 'allow_once', kind: 'allow_once' },
+        { optionId: 'reject_once', kind: 'reject_once' },
+      ],
+    });
+    expect(acpPermissionOutcome(req('editor: src/a.ts', { path: 'src/a.ts' }), true, ws).denied).toBe(false);
+    expect(acpPermissionOutcome(req('editor: ../x', { path: '../x' }), true, ws).denied).toBe(true);
+    expect(acpPermissionOutcome(req('editor: src/a.ts', { path: 'src/a.ts' }), true).denied).toBe(true);
+    expect(acpPermissionOutcome(req('run_commands: ls', { commands: ['ls'] }), true, ws).denied).toBe(true);
   });
 });

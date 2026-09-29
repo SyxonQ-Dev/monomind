@@ -19,7 +19,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentRunArgs } from './agent-runner.js';
-import { installScopedPlugin } from './cline-runner-scoped.js';
+import { installScopedPlugin, SCOPED_WORKSPACE_ENV } from './cline-runner-scoped.js';
 import type { ClineHistoryRow, ClineHost } from './cline-runner-types.js';
 import { omitAnthropicManagedKeys } from './provider.js';
 
@@ -165,6 +165,7 @@ export function prepareClineSetup(args: AgentRunArgs, bin: string, host: ClineHo
   delete env.CLINE_TOOL_APPROVAL_DIR;
   env.CLINE_DATA_DIR = dataDir;
   env.CLINE_MCP_SETTINGS_PATH = mcpPath;
+  env[SCOPED_WORKSPACE_ENV] = args.cwd;
   return {
     bin,
     env,
