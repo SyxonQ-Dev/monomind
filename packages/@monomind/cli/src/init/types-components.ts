@@ -194,8 +194,9 @@ export interface MCPConfig {
   port: number;
   /**
    * Exact version to pin the generated MCP entry to (`monomind init --pin`).
-   * Undefined — the default — keeps the floating `monomind@latest` command, so
-   * upgrading monomind never silently freezes an existing project (#312).
+   * Undefined — the default — pins to the running CLI's version (#419);
+   * `latest` keeps the floating `monomind@latest` command. `init --force`
+   * refreshes the pin after an upgrade.
    */
   pin?: string;
 }

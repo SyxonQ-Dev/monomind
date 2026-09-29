@@ -15,21 +15,17 @@
  *     narrow rules go last.
  */
 
+import { mcpCommand } from '../platform-adapters/renderers/mcp.js';
 import type { InitOptions } from './types.js';
 
 const OPENCODE_SCHEMA = 'https://opencode.ai/config.json';
 
-function isWindows(): boolean {
-  return process.platform === 'win32';
-}
-
 /**
- * opencode MCP `command` is always a string array. On Windows we prepend
- * `cmd /c` (mirrors mcp-generator.ts' cross-platform handling).
+ * opencode MCP `command` is always a string array (the shared renderer adds
+ * `cmd /c` on Windows and pins the version).
  */
-function monomindCommand(): string[] {
-  const base = ['-y', 'monomind@latest', 'mcp', 'start'];
-  return isWindows() ? ['cmd', '/c', 'npx', ...base] : ['npx', ...base];
+function monomindCommand(pin?: string): string[] {
+  return mcpCommand('opencode', process.platform, pin);
 }
 
 /**
@@ -50,15 +46,10 @@ export function generateOpencodeConfig(options: InitOptions): Record<string, unk
     config.mcp = {
       monomind: {
         type: 'local',
-        command: monomindCommand(),
+        command: monomindCommand(options.mcp.pin),
         enabled: true,
         env: {
           npm_config_update_notifier: 'false',
-          MONOMIND_MODE: 'v1',
-          MONOMIND_HOOKS_ENABLED: 'true',
-          MONOMIND_TOPOLOGY: options.runtime.topology,
-          MONOMIND_MAX_AGENTS: String(options.runtime.maxAgents),
-          MONOMIND_MEMORY_BACKEND: options.runtime.memoryBackend,
         },
       },
     };

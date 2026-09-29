@@ -1,12 +1,13 @@
 /** Platform-aware rendering of the Monomind stdio MCP server. */
 
+import { VERSION } from '../../index.js';
 import type { ArtifactIntent, InstallScope, PlatformAdapter } from '../types.js';
 
 export interface McpRenderOptions {
   scope: InstallScope;
   os?: NodeJS.Platform;
   env?: Readonly<Record<string, string>>;
-  /** Exact version to pin the MCP server to; omit for floating `@latest`. */
+  /** Exact version to pin the MCP server to (default: the running CLI); `latest` floats. */
   pin?: string;
 }
 
@@ -18,12 +19,18 @@ export interface McpRenderResult {
 /** Canonical scoped package; the unscoped `monomind` is its single-bin alias. */
 export const MCP_SCOPED_PACKAGE = '@monoes/monomindcli';
 
+/** The `pin` value that opts out of pinning (`init --pin latest` / `--no-pin`). */
+export const MCP_FLOATING_PIN = 'latest';
+
 /**
  * The command line is identical across platforms; Windows needs cmd.exe so
  * npm's executable shim is resolved consistently by every supported client.
  *
- * Unpinned (the default) uses the unscoped `monomind@latest`, which declares a
- * single bin, so `npx -y monomind@latest mcp start` resolves. An exact pin has
+ * The default pins to the running CLI's version (issue #419): a floating
+ * `@latest` re-resolves the dist-tag on every start (3–4 s), can hang on a cold
+ * npx cache past the client's startup timeout, and drifts mid-session. Passing
+ * `latest` opts into the unscoped `monomind@latest`, which declares a single
+ * bin, so `npx -y monomind@latest mcp start` resolves. An exact pin has
  * to name the scoped package, and that package declares three bins — npx then
  * refuses with "could not determine executable to run" (issue #312). Selecting
  * the package with `--package=` and the bin positionally is the form that works
@@ -33,11 +40,12 @@ export const MCP_SCOPED_PACKAGE = '@monoes/monomindcli';
 export function mcpCommand(
   _platform: PlatformAdapter['id'],
   os: NodeJS.Platform = process.platform,
-  pin?: string,
+  pin: string = VERSION,
 ): string[] {
-  const command = pin
-    ? ['npx', '-y', `--package=${MCP_SCOPED_PACKAGE}@${pin}`, 'monomind', 'mcp', 'start']
-    : ['npx', '-y', 'monomind@latest', 'mcp', 'start'];
+  const command =
+    pin === MCP_FLOATING_PIN
+      ? ['npx', '-y', 'monomind@latest', 'mcp', 'start']
+      : ['npx', '-y', `--package=${MCP_SCOPED_PACKAGE}@${pin}`, 'monomind', 'mcp', 'start'];
   return os === 'win32' ? ['cmd', '/c', ...command] : command;
 }
 
