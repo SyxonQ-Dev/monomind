@@ -1,6 +1,6 @@
 ---
 name: mastermind-invite-landing
-description: Mastermind invite-landing — bookkeeping only — not enforced by the Org Runtime. Records accepting an org invite as a human or agent member in a side file; an agent join also appends a role stub. Mirrors InviteLanding.tsx.
+description: "Mastermind invite-landing — bookkeeping only — not enforced by the Org Runtime. Records accepting an org invite as a human or agent member in a side file."
 type: domain-skill
 default_mode: confirm
 pick: low

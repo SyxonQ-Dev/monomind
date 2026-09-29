@@ -1,6 +1,6 @@
 ---
 name: mastermind-access
-description: Mastermind access — bookkeeping only — not enforced by the Org Runtime. Records org member roles (owner/admin/operator/viewer), permission grants, invite tokens, and join requests in a side file that nothing checks.
+description: "Mastermind access — bookkeeping only — not enforced by the Org Runtime. Records member roles, permission grants, invite tokens and join requests in a side file nothing checks."
 type: domain-skill
 default_mode: confirm
 pick: low

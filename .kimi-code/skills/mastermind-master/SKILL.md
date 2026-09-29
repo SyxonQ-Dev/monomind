@@ -1,5 +1,5 @@
 ---
-description: Use when starting any conversation or receiving any user request — loads the brain, routes to the right mastermind skill, enforces anti-drift discipline, and spawns domain managers for complex multi-domain work. Single entry point for all mastermind capabilities.
+description: "Single entry point for mastermind: loads the brain, routes a request to the right mastermind skill, keeps work on track, and spawns domain managers for multi-domain work."
 type: flow
 name: mastermind-master
 ---

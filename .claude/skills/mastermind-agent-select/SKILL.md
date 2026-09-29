@@ -1,6 +1,6 @@
 ---
 name: mastermind-agent-select
-description: Shared utility — registry-aware agent selection for mastermind domain skills. Reads .monomind/registry.json and returns ranked agent slugs/names for a given task, prompt, and category filter. Include this logic wherever a domain skill needs to pick the best agent(s) instead of hardcoding types.
+description: "Shared utility: ranks agents from .monomind/registry.json for a task and category, so mastermind skills pick agents instead of hardcoding them."
 type: helper
 ---
 

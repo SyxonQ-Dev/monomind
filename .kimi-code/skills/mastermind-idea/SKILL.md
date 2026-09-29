@@ -1,6 +1,6 @@
 ---
 name: mastermind-idea
-description: Mastermind idea domain — product ideation, feature brainstorming, pivot exploration. Spawns an Idea Manager agent for divergent thinking, then validates, elaborates, and decomposes approved ideas into actionable subtasks on separate dev and ops task boards.
+description: "Product ideation and feature brainstorming: an Idea Manager explores options, then validates approved ideas and splits them into dev and ops tasks."
 type: domain-skill
 default_mode: confirm
 ---

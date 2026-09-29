@@ -110,20 +110,44 @@ This lists all available slash commands. The most useful starting points:
 
 | Command | What it does |
 |---|---|
-| `/mastermind:understand` | Analyze your project with an LLM and enrich the knowledge graph |
+| `/mastermind:understand` | Analyze your project with an LLM and enrich the knowledge graph (extras pack: `monomind packs add extras`) |
 | `/mastermind:debug` | Systematic root-cause debugging protocol |
 | `/mastermind:plan` | Write a comprehensive implementation plan before touching code |
 | `/mastermind:review` | Review the work and auto-fix findings; add `--tillend` to loop until a round comes back clean |
 
 ### Agents and skills
 
-`monomind init` installs <!-- doc-count:installed-agents -->84<!-- /doc-count:installed-agents --> agents under `.claude/agents`, skills under `.claude/skills` and slash commands under `.claude/commands`. You rarely name one yourself: for each prompt, the hook adds a line such as
+`monomind init` installs the core pack: <!-- doc-count:installed-agents -->20<!-- /doc-count:installed-agents --> agents under `.claude/agents`, the everyday skills under `.claude/skills` and slash commands under `.claude/commands`. You rarely name one yourself: for each prompt, the hook adds a line such as
 
 ```
 [PICK] agent: Security Engineer · skill: /mastermind:review
 ```
 
 to Claude's context when one agent or skill clearly fits, and Claude uses it. To see the ranking for any task, run `monomind pick -t "<task>"`. Your own agents and skills are Markdown files in the same folders; [Agents & Skills](concepts/agents-and-skills.md) shows where each kind goes and what to put in its frontmatter.
+
+### Packs
+
+Claude Code lists every installed skill and command with its description, and once that list passes about 1% of the context window it drops descriptions. So `monomind init` installs only the **core** pack; the rest are opt-in:
+
+| Pack | What it adds |
+|---|---|
+| `orgs` | Agent orgs: create, run, stop and inspect them; org tasks, goals and routines |
+| `org-admin` | Org admin bookkeeping: access, invites, plugins, adapters, secrets, backups |
+| `swarm` | Monoswarm, hooks and workflow commands; consensus and optimization agents |
+| `github` | GitHub commands and agents: repo architecture, multi-repo sync, project boards, Actions |
+| `testing` | QA agents: API, accessibility, evidence collection, test analysis |
+| `specialists` | Specialist agents: data, SRE, mobile, embedded, Solidity, WeChat, Feishu, MCP |
+| `business` | Marketing, sales, finance, content and ops workflows; marketing agents |
+| `extras` | Pair programming, monograph commands, monolean audits, skill builders, jj |
+
+```bash
+monomind packs list                    # every pack, installed or not, and its listing size
+monomind packs add orgs github         # add packs to this project
+monomind packs remove business         # remove a pack (files you changed are kept)
+monomind init --packs orgs,github      # or choose at init time; --all-packs installs everything
+```
+
+The wizard (`monomind init wizard`) asks which packs to add. A project initialised before packs existed keeps everything it has: `init` and `init upgrade` never delete a skill, command or agent, and `init upgrade --add-missing` only adds files for the packs the project has. `packs remove` deletes only files that still match what init installed.
 
 ## What's running?
 

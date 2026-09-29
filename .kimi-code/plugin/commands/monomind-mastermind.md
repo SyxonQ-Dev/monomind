@@ -1,6 +1,6 @@
 ---
 name: mastermind
-description: Universal intent router — deeply understands what a prompt is really asking for, matches it against the full monomind capability surface (mastermind commands, monomind CLI/MCP tools, monodesign, monomotion, monograph, orgs, skills), then either executes the best route or hands the user an exact step-by-step playbook
+description: "Intent router: matches a request to the right monomind capability (mastermind commands, CLI/MCP tools, skills, orgs), then runs it or gives exact steps."
 ---
 
 MASTERMIND is the front door to everything in this project. Given any prompt, it figures out what the user actually needs, picks the right capability out of everything installed, and either runs it or teaches the user to run it. It never answers with a generic response when a purpose-built tool exists.

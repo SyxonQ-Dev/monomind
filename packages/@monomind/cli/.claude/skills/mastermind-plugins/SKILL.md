@@ -1,6 +1,6 @@
 ---
 name: mastermind-plugins
-description: Mastermind plugins — install, enable, disable, uninstall, and inspect plugins for an org. Plugins extend agent capabilities with workers, events, and custom tools. Supports npm packages and local paths.
+description: "Mastermind plugins — install, enable, disable, uninstall and inspect an org's plugins (workers, events, custom tools) from npm or local paths."
 type: domain-skill
 default_mode: confirm
 pick: low

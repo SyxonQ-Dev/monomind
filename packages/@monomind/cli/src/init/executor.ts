@@ -26,8 +26,11 @@ import { installPlatform } from '../platform-adapters/operations.js';
 import { DIRECTORIES } from './asset-maps.js';
 import { copyAgents, copyCommands, copySkills } from './copy-assets.js';
 import { finalizeGuard, guardFor, pruneBackups } from './file-guard.js';
+import { recordPacks } from './init-manifest.js';
 import { initProjectMemory, seedProjectMemory } from './init-memory.js';
 import { initKnowledgeGraph, runDoctorFix } from './init-post-steps.js';
+import { installedPacks } from './pack-install.js';
+import { PACK_NAMES } from './packs.js';
 import { wantsAgentsDirs, wantsGeminiDirs } from './platform-dirs.js';
 import { buildProjectIndexes } from './project-indexes.js';
 import {
@@ -268,6 +271,16 @@ export async function executeInit(options: InitOptions): Promise<InitResult> {
     // Copy agents
     if (options.components.agents) {
       await copyAgents(targetDir, options, result);
+    }
+
+    // Remember which opt-in packs the project has, for `packs list` and
+    // `init upgrade --add-missing` (GH #411). Never shrinks here.
+    if (options.components.skills || options.components.commands || options.components.agents) {
+      const all = options.skills.all || options.commands.all || options.agents.all;
+      recordPacks(
+        targetDir,
+        all ? PACK_NAMES : [...installedPacks(targetDir), ...(options.packs ?? [])],
+      );
     }
 
     // Generate helpers

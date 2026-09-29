@@ -1,5 +1,5 @@
 ---
-description: Mastermind — Ingest a prompt, file, or folder, deeply understand it, generate agent-optimized tasks saved to docs/tasks/ (default) or to a monotask board (--monotask flag)
+description: "Turn a prompt, file or folder into agent-ready tasks in docs/tasks/ or a monotask board (--monotask)."
 type: flow
 name: mastermind-createtask
 ---

@@ -6,16 +6,12 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { foldLegacySharedSkills } from '../platform-adapters/shared-surface.js';
 import { refreshBundledAgents } from './agent-refresh.js';
-import {
-  AGENTS_MAP,
-  COMMANDS_MAP,
-  isCommandDoc,
-  isDeprecatedAgent,
-  SKILLS_MAP,
-} from './asset-maps.js';
+import { isCommandDoc, isDeprecatedAgent } from './asset-maps.js';
 import { finalizeGuard, guardFor, pruneBackups } from './file-guard.js';
 import { atomicWriteFile, copyDirRecursive } from './fs-helpers.js';
 import { FORCE_SYNC_GENERATORS, helperFileMode } from './helpers-generator.js';
+import { installedPacks } from './pack-install.js';
+import { CORE_PACK, OPTIONAL_PACKS, packEntries } from './packs.js';
 import { generateSettings } from './settings-generator.js';
 import { findSourceDir, findSourceHelpersDir, MAX_EXEC_FILE_BYTES } from './shared.js';
 import { generateStatuslineScript } from './statusline-generator.js';
@@ -375,26 +371,19 @@ export async function executeUpgradeWithMissing(
       console.log(`  Commands: ${sourceCommandsDir || 'NOT FOUND'}`);
     }
 
+    // Only the packs this project has: core plus the opt-in packs it
+    // installed (GH #411). Nothing is ever deleted here.
+    const installed = installedPacks(targetDir);
+    const packs = [CORE_PACK, ...OPTIONAL_PACKS.filter((p) => installed.includes(p.name))];
+
     // Add missing skills
     if (sourceSkillsDir) {
-      const allSkills = Object.values(SKILLS_MAP)
-        .flat()
-        .flatMap((skill) => {
-          if (!skill.endsWith('*')) return [skill];
-          const prefix = skill.slice(0, -1);
-          return fs
-            .readdirSync(sourceSkillsDir)
-            .filter(
-              (name) =>
-                name.startsWith(prefix) &&
-                fs.existsSync(path.join(sourceSkillsDir, name, 'SKILL.md')),
-            );
-        });
+      const allSkills = packEntries(packs, 'skills');
       const debugMode = process.env.DEBUG || process.env.MONOMIND_DEBUG;
       if (debugMode) {
-        console.log(`[DEBUG] Checking ${allSkills.length} skills from SKILLS_MAP`);
+        console.log(`[DEBUG] Checking ${allSkills.length} skills from the installed packs`);
       }
-      for (const skillName of [...new Set(allSkills)]) {
+      for (const skillName of allSkills) {
         const sourcePath = path.join(sourceSkillsDir, skillName);
         const targetPath = path.join(skillsDir, skillName);
         const sourceExists = fs.existsSync(sourcePath);
@@ -433,13 +422,19 @@ export async function executeUpgradeWithMissing(
 
     // Add missing agents
     if (sourceAgentsDir) {
-      const allAgents = Object.values(AGENTS_MAP).flat();
-      for (const agentCategory of [...new Set(allAgents)]) {
+      for (const agentCategory of packEntries(packs, 'agents')) {
         const sourcePath = path.join(sourceAgentsDir, agentCategory);
         const targetPath = path.join(agentsDir, agentCategory);
 
         if (fs.existsSync(sourcePath) && !fs.existsSync(targetPath)) {
-          copyDirRecursive(sourcePath, targetPath, isDeprecatedAgent);
+          if (fs.statSync(sourcePath).isDirectory()) {
+            copyDirRecursive(sourcePath, targetPath, isDeprecatedAgent);
+          } else if (!isDeprecatedAgent(sourcePath)) {
+            fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+            fs.copyFileSync(sourcePath, targetPath);
+          } else {
+            continue;
+          }
           result.addedAgents.push(agentCategory);
           result.created.push(`.claude/agents/${agentCategory}`);
         }
@@ -448,8 +443,7 @@ export async function executeUpgradeWithMissing(
 
     // Add missing commands
     if (sourceCommandsDir) {
-      const allCommands = Object.values(COMMANDS_MAP).flat();
-      for (const cmdName of [...new Set(allCommands)]) {
+      for (const cmdName of packEntries(packs, 'commands')) {
         const sourcePath = path.join(sourceCommandsDir, cmdName);
         const targetPath = path.join(commandsDir, cmdName);
 
@@ -459,6 +453,7 @@ export async function executeUpgradeWithMissing(
               isCommandDoc(path.relative(sourceCommandsDir, p)),
             );
           } else {
+            fs.mkdirSync(path.dirname(targetPath), { recursive: true });
             fs.copyFileSync(sourcePath, targetPath);
           }
           result.addedCommands.push(cmdName);

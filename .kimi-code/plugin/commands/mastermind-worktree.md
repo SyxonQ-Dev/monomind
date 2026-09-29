@@ -1,5 +1,5 @@
 ---
-description: Use when starting feature work that needs isolation from the current workspace or before executing implementation plans — sets up an isolated git worktree
+description: "Set up an isolated git worktree for feature work or before executing a plan."
 ---
 
 **First — extract repeat flags:** Follow REPEAT PREAMBLE from `mastermind-repeat/SKILL.md`.

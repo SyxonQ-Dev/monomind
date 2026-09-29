@@ -1,6 +1,6 @@
 ---
 name: mastermind-design
-description: "MUST use before any creative work — creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements, and design through collaborative dialogue before any implementation."
+description: "MUST use before creative work (features, components, behavior changes): explores intent, requirements and design with the user before implementation."
 type: domain-skill
 default_mode: confirm
 ---

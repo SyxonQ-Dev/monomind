@@ -1,11 +1,6 @@
 ---
 name: github-toolkit
-description: >
-  GitHub workflow guidance for monomind projects — issues, PRs, releases,
-  repo structure, and multi-package sync. Trigger on "open a PR", "manage
-  issues", "cut a release", "sync packages", or any GitHub Actions/repo
-  automation request. All GitHub operations use the `gh` CLI plus monomind's
-  MCP GitHub tools — the `monomind` CLI has no `github` command group.
+description: "GitHub workflows for monomind projects: issues, PRs, releases, repo structure, multi-package sync, Actions. Uses the gh CLI; monomind has no github command."
 ---
 
 # GitHub Toolkit
@@ -17,17 +12,17 @@ through monomind's MCP GitHub tools when running inside a swarm.
 ## Core operations
 
 - **Issues** — triage, label, and track via `gh issue` or `mcp__monomind__github_issue_track`.
-  See `.claude/commands/github/issue-tracker.md`.
+  See `/github:issue-tracker` (github pack).
 - **Pull requests** — create, review, and merge via `gh pr` or `mcp__monomind__github_pr_manage`.
-  See `.claude/commands/github/pr-manager.md`.
+  See `/github:pr-manager` (github pack).
 - **Releases** — version bump, changelog, tag, and publish coordination.
-  See `.claude/commands/github/release-manager.md`.
+  See `/github:release-manager` (github pack).
 - **Repo structure** — multi-repo layout and package boundary decisions.
-  See `.claude/commands/github/repo-architect.md`.
+  See `/github:repo-architect` (github pack).
 - **Multi-package sync** — version alignment and dependency sync across a monorepo.
-  See `.claude/commands/github/sync-coordinator.md`.
+  See `/github:sync-coordinator` (github pack).
 - **Integration modes overview** — which mode to use for which workflow.
-  See `.claude/commands/github/github-modes.md`.
+  See `/github:github-modes` (github pack).
 
 ## Quick reference
 
@@ -54,7 +49,8 @@ mcp__monomind__github_metrics({ repo: "owner/repo" })
 
 ## When to reach for the full docs
 
-Each linked command file under `.claude/commands/github/` has the complete
-option/flag reference and swarm-coordination patterns for its area — read
-the relevant one before doing multi-step GitHub automation (e.g. spawning
-a `pr-manager` or `release-manager` agent).
+Each `/github:*` command above has the complete option/flag reference and
+swarm-coordination patterns for its area — read the relevant one before doing
+multi-step GitHub automation (e.g. spawning a `pr-manager` or
+`release-manager` agent). They come with the github pack: run
+`monomind packs add github` if `.claude/commands/github/` is missing.

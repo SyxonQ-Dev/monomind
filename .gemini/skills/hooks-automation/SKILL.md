@@ -1,6 +1,6 @@
 ---
 name: hooks-automation
-description: Automated coordination and learning from Claude Code operations using the monomind hooks system. Covers pre/post edit, command and task hooks, session persistence, routing, pattern logging, background workers, Claude Code settings.json wiring, and Git hook integration.
+description: "Set up and use monomind hooks: pre/post edit, command and task hooks, sessions, routing, pattern logging, background workers, settings.json and Git hooks."
 ---
 
 # Hooks Automation

@@ -1,6 +1,6 @@
 ---
 name: monoswarm
-description: Coordinate in-process multi-agent work with monomind — topology selection, agent lifecycle, shared memory, and vote-based consensus. Use when scaling beyond a single agent on tasks with clear decomposition, or when a decision needs a recorded vote before work proceeds.
+description: "Coordinate in-process multi-agent work: topology, agent lifecycle, shared memory and vote-based consensus, for decomposable tasks or decisions that need a recorded vote."
 ---
 
 # Monoswarm

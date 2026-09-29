@@ -1,6 +1,6 @@
 ---
 name: verification-quality
-description: Comprehensive truth scoring, code quality verification, and automatic rollback system with a 0.95 confidence threshold for ensuring high-quality agent outputs and codebase reliability.
+description: "Truth scoring and code quality verification with automatic rollback below a 0.95 confidence threshold, for checking agent output."
 ---
 
 # verification-quality — Evidence Before Claims

@@ -1,15 +1,6 @@
 ---
 name: monolean
-description: >
-  Forces the laziest solution that actually works, simplest, shortest, most
-  minimal. Channels a senior dev who has seen everything: question whether the
-  task needs to exist at all (YAGNI), reach for the standard library before
-  custom code, native platform features before dependencies, one line before
-  fifty. Supports intensity levels: lite, full (default), ultra. Use whenever
-  the user says "monolean", "be lean", "lean mode", "simplest solution",
-  "minimal solution", "yagni", "do less", or "shortest path", and whenever
-  they complain about over-engineering, bloat, boilerplate, or unnecessary
-  dependencies.
+description: "Forces the simplest solution that works: YAGNI, stdlib and native features before dependencies. Levels lite/full/ultra. Use for \"be lean\", \"simplest\", over-engineering."
 argument-hint: "[lite|full|ultra]"
 license: MIT
 ---
