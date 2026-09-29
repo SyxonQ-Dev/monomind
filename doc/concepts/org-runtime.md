@@ -1059,7 +1059,7 @@ shell is not running (`sandbox-fault-exhausted` audit event), and later faults a
 Every role session gets its own temp directory (#480), created by
 [`role-tmpdir.ts → createRoleTmpdir`](packages/@monomind/cli/src/orgrt/role-tmpdir.ts#createRoleTmpdir)
 before the runner starts: `<base>/<org>-<role>-XXXXXX/`, mode 0700, exported to the runner as
-`TMPDIR`, `TMP` and `TEMP`. `<base>` is the TMPDIR the role would have had without it, i.e. the
+`TMPDIR`, `TMP`, `TEMP` and `CLAUDE_CODE_TMPDIR`. `<base>` is the TMPDIR the role would have had without it, i.e. the
 daemon's own (`$TMPDIR`, else `$TMP`/`$TEMP`, else the OS default), so the release org's
 `TMPDIR=$HOME/mrg-tmp` becomes `$HOME/mrg-tmp/release-builder-a1B2c3/`. In role scope the role has
 one for its session's life; with `session_scope: "task"` each task session has its own. Before, every
@@ -1067,6 +1067,14 @@ role shared the base: a bare `mktemp -d` put `tmp.XXXXXXXXXX` straight into it, 
 `rm -rf tmp.*` there deleted the scratch of every other role running at the same time (13 matches
 where 3 were meant, 2.19.0 release run). Each role's prompt now says its `$TMPDIR` is private and
 that a cleanup glob must never run in a directory other roles also use.
+
+`CLAUDE_CODE_TMPDIR` is for the claude runtime (#503). Claude Code reads it before `TMPDIR`, and its
+Bash tool exports it to every command it runs, so an org started from a Claude Code session's Bash
+tool (the release org's QA roles start drill orgs that way) inherited the outer session's value. In
+the 2.20.0 release run a sandboxed claude role's Bash then saw
+`TMPDIR=$HOME/mrg-tmp/claude-1000/claude-1000`, a directory every such role shared. With it set to the
+role's directory, the sandboxed Bash tool gets that directory as `$TMPDIR`, and Claude Code keeps its
+own files in `claude-<uid>/` inside it.
 
 The subdirectory sits under the base, so the OS sandbox's writable temp root and the file-tool
 roots (both built from the base, see `file-roots.ts` above) already cover it. It separates scratch;
