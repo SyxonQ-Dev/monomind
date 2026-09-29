@@ -134,6 +134,23 @@ describe('runAgentTest: statuses', () => {
     expect(r.error?.login_hint).toBeTruthy();
   });
 
+  it.each([
+    // #473: messages from issue #473 (crush) and pi 0.87.1 run without credentials.
+    [
+      'crush',
+      "CrushAgentRunner: crush run failed (exit 1)\nstderr: No providers configured - please run 'crush' to set up a provider interactively.",
+    ],
+    [
+      'pi',
+      'PiAgentRunner: pi failed (exit 1)\nstderr: No API key found for the selected model.\n\nUse /login to log into a provider via OAuth or API key.',
+    ],
+  ])('auth — %s sign-in failure carries its login hint (#473)', async (runtime, message) => {
+    const r = await run(runtime, mockRunner([], { throwAfter: new Error(message) }));
+    expect(r.status).toBe('auth');
+    expect(r.error?.code).toBe('auth');
+    expect(r.error?.login_hint).toBeTruthy();
+  });
+
   it('quota', async () => {
     const r = await run('codex', mockRunner([], { throwAfter: new Error('usage limit reached') }));
     expect(r.status).toBe('quota');
