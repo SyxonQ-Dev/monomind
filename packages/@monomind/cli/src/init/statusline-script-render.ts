@@ -103,12 +103,12 @@ function getDashboardHealth() {
   // separates the two codes; without it they'd concatenate into "200401".
   // curl's own --max-time fires before safeExec's outer timeout so a hung server
   // yields curl's clean empty-string failure instead of an execSync kill.
-  const out = safeExec(
+  const out = cached('dashProbe:' + port, TTL.git, () => safeExec(
     "curl -s --max-time 0.4 --connect-timeout 0.2 -w '%{http_code} '"
     + " -o /dev/null http://127.0.0.1:" + port + "/"
     + " -o /dev/null http://127.0.0.1:" + port + "/api/status",
     900,
-  );
+  ));
   const codes = out.split(' ');
   const back = Number(codes[1]);
   return {
@@ -340,32 +340,9 @@ if (process.argv.includes('--json')) {
     console.log(generateDashboard());
   }
 } else {
-  // Default: respect mode state file — use disk cache to avoid 52+ sync I/O calls per render
-  const CACHE_FILE = path.join(os.homedir(), '.monomind', 'statusline-cache.json');
-  const CACHE_TTL_MS = 5000; // 5 seconds
+  // Default: respect mode state file. Spawning segments come from the
+  // per-project segment cache (see cached()), so this stays cheap.
   const mode = readMode();
-
-  // Try to serve from cache if fresh and same mode
-  let servedFromCache = false;
-  try {
-    const cacheStat = safeStat(CACHE_FILE);
-    if (cacheStat && (Date.now() - cacheStat.mtimeMs) < CACHE_TTL_MS && cacheStat.size <= 512 * 1024) {
-      const cached = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf-8'));
-      if (cached && cached.mode === mode && typeof cached.output === 'string') {
-        console.log(cached.output);
-        servedFromCache = true;
-      }
-    }
-  } catch (err) { if (process.env.MONOMIND_DEBUG) console.error('[statusline]', err); /* cache miss — regenerate */ }
-
-  if (!servedFromCache) {
-    const statusOutput = mode === 'compact' ? generateStatusline() : generateDashboard();
-    console.log(statusOutput);
-    // Persist to cache for subsequent renders within the TTL window
-    try {
-      fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
-      fs.writeFileSync(CACHE_FILE, JSON.stringify({ mode, output: statusOutput }), 'utf-8');
-    } catch (err) { if (process.env.MONOMIND_DEBUG) console.error('[statusline]', err); /* ignore cache write failures */ }
-  }
+  console.log(mode === 'compact' ? generateStatusline() : generateDashboard());
 }
 `;

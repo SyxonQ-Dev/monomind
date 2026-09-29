@@ -1,6 +1,5 @@
 /**
- * Helper script generators: intelligence.cjs stub and auto-memory-hook.mjs
- * fallback content.
+ * Helper script generator: intelligence.cjs stub fallback content.
  */
 
 /**
@@ -14,7 +13,7 @@ export function generateIntelligenceStub(): string {
     '/**',
     ' * Intelligence Layer Stub (ADR-050)',
     ' * Minimal fallback — full version is copied from package source.',
-    ' * Provides: init, getContext, recordEdit, feedback, consolidate',
+    ' * Provides: init, recordEdit, feedback, consolidate',
     ' */',
     "'use strict';",
     '',
@@ -26,8 +25,6 @@ export function generateIntelligenceStub(): string {
     "const STORE_PATH = path.join(DATA_DIR, 'auto-memory-store.json');",
     "const RANKED_PATH = path.join(DATA_DIR, 'ranked-context.json');",
     "const PENDING_PATH = path.join(DATA_DIR, 'pending-insights.jsonl');",
-    "const SESSION_DIR = path.join(process.cwd(), '.monomind', 'sessions');",
-    "const SESSION_FILE = path.join(SESSION_DIR, 'current.json');",
     '',
     'function ensureDir(dir) {',
     '  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });',
@@ -41,22 +38,6 @@ export function generateIntelligenceStub(): string {
     'function writeJSON(p, data) {',
     '  ensureDir(path.dirname(p));',
     '  fs.writeFileSync(p, JSON.stringify(data, null, 2), "utf-8");',
-    '}',
-    '',
-    '// Read session context key',
-    'function sessionGet(key) {',
-    '  var session = readJSON(SESSION_FILE);',
-    '  if (!session) return null;',
-    '  return key ? (session.context || {})[key] : session.context;',
-    '}',
-    '',
-    '// Write session context key',
-    'function sessionSet(key, value) {',
-    '  var session = readJSON(SESSION_FILE);',
-    '  if (!session) return;',
-    '  if (!session.context) session.context = {};',
-    '  session.context[key] = value;',
-    '  writeJSON(SESSION_FILE, session);',
     '}',
     '',
     '// Tokenize text into words',
@@ -141,19 +122,6 @@ export function generateIntelligenceStub(): string {
     '  return bootstrapFromMemoryFiles();',
     '}',
     '',
-    '// Simple keyword match score',
-    'function matchScore(promptWords, entryWords) {',
-    '  if (!promptWords.length || !entryWords.length) return 0;',
-    '  var entrySet = {};',
-    '  for (var i = 0; i < entryWords.length; i++) entrySet[entryWords[i]] = true;',
-    '  var overlap = 0;',
-    '  for (var j = 0; j < promptWords.length; j++) {',
-    '    if (entrySet[promptWords[j]]) overlap++;',
-    '  }',
-    '  var union = Object.keys(entrySet).length + promptWords.length - overlap;',
-    '  return union > 0 ? overlap / union : 0;',
-    '}',
-    '',
     'var cachedEntries = null;',
     '',
     'module.exports = {',
@@ -164,36 +132,6 @@ export function generateIntelligenceStub(): string {
     '    });',
     '    writeJSON(RANKED_PATH, { version: 1, computedAt: Date.now(), entries: ranked });',
     '    return { nodes: cachedEntries.length, edges: 0 };',
-    '  },',
-    '',
-    '  getContext: function(prompt) {',
-    '    if (!prompt) return null;',
-    '    var ranked = readJSON(RANKED_PATH);',
-    '    var entries = (ranked && ranked.entries) || (cachedEntries || []);',
-    '    if (!entries.length) return null;',
-    '    var promptWords = tokenize(prompt);',
-    '    if (!promptWords.length) return null;',
-    '    var scored = entries.map(function(e) {',
-    '      return { entry: e, score: matchScore(promptWords, e.words || tokenize(e.content + " " + e.summary)) };',
-    '    }).filter(function(s) { return s.score > 0.05; });',
-    '    scored.sort(function(a, b) { return b.score - a.score; });',
-    '    var top = scored.slice(0, 5);',
-    '    if (!top.length) return null;',
-    '    var prevMatched = sessionGet("lastMatchedPatterns");',
-    '    var matchedIds = top.map(function(s) { return s.entry.id; });',
-    '    sessionSet("lastMatchedPatterns", matchedIds);',
-    '    if (prevMatched && Array.isArray(prevMatched)) {',
-    '      var newSet = {};',
-    '      for (var i = 0; i < matchedIds.length; i++) newSet[matchedIds[i]] = true;',
-    '    }',
-    '    var lines2 = ["[INTELLIGENCE] Relevant patterns for this task:"];',
-    '    for (var j = 0; j < top.length; j++) {',
-    '      var e = top[j];',
-    '      var conf = e.entry.confidence || 0.5;',
-    '      var summary = (e.entry.summary || e.entry.content || "").substring(0, 80);',
-    '      lines2.push("  * (" + conf.toFixed(2) + ") " + summary);',
-    '    }',
-    '    return lines2.join("\\n");',
     '  },',
     '',
     '  recordEdit: function(file) {',
@@ -221,110 +159,4 @@ export function generateIntelligenceStub(): string {
     '};',
   ];
   return `${lines.join('\n')}\n`;
-}
-
-/**
- * Generate a minimal auto-memory-hook.mjs fallback for fresh installs.
- * This ESM script handles import/sync/status commands gracefully when
- * @monomind/memory is not installed. Gets overwritten when source copy succeeds.
- */
-export function generateAutoMemoryHook(): string {
-  return `#!/usr/bin/env node
-/**
- * Auto Memory Bridge Hook (ADR-048/049) — Minimal Fallback
- * Full version is copied from package source when available.
- *
- * Usage:
- *   node auto-memory-hook.mjs import   # SessionStart
- *   node auto-memory-hook.mjs sync     # SessionEnd / Stop
- *   node auto-memory-hook.mjs status   # Show bridge status
- */
-
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const PROJECT_ROOT = join(__dirname, '../..');
-const DATA_DIR = join(PROJECT_ROOT, '.monomind', 'data');
-const STORE_PATH = join(DATA_DIR, 'auto-memory-store.json');
-
-const DIM = '\\x1b[2m';
-const RESET = '\\x1b[0m';
-const dim = (msg) => console.log(\`  \${DIM}\${msg}\${RESET}\`);
-
-// Ensure data dir
-if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-
-async function loadMemoryPackage() {
-  // Strategy 1: Use createRequire for CJS-style resolution (handles nested node_modules
-  // when installed as a transitive dependency via npx monomind / npx monomind)
-  try {
-    const { createRequire } = await import('module');
-    const require = createRequire(join(PROJECT_ROOT, 'package.json'));
-    return require('@monoes/memory');
-  } catch { /* fall through */ }
-
-  // Strategy 2: ESM import (works when @monomind/memory is a direct dependency)
-  try { return await import('@monoes/memory'); } catch { /* fall through */ }
-
-  // Strategy 3: Walk up from PROJECT_ROOT looking for the package in any node_modules
-  let searchDir = PROJECT_ROOT;
-  const { parse } = await import('path');
-  while (searchDir !== parse(searchDir).root) {
-    const candidate = join(searchDir, 'node_modules', '@monoes', 'memory', 'dist', 'index.js');
-    if (existsSync(candidate)) {
-      try { return await import(\`file://\${candidate}\`); } catch { /* fall through */ }
-    }
-    searchDir = dirname(searchDir);
-  }
-
-  return null;
-}
-
-async function doImport() {
-  dim('Auto memory import skipped — AutoMemoryBridge removed');
-}
-
-async function doSync() {
-  dim('Auto memory sync skipped — AutoMemoryBridge removed');
-}
-
-function doStatus() {
-  console.log('\\n=== Auto Memory Bridge Status ===\\n');
-  console.log('  Package:        Fallback mode (run init --upgrade for full)');
-  console.log(\`  Store:          \${existsSync(STORE_PATH) ? 'Initialized' : 'Not initialized'}\`);
-  console.log('');
-}
-
-// Suppress unhandled rejection warnings ONLY for genuine module-not-found from
-// optional dynamic imports. Previously this swallowed any error whose message
-// contained "Cannot find" (e.g. "Cannot find user with id ..."), masking real
-// failures and security regressions.
-process.on('unhandledRejection', (reason) => {
-  const code = reason && typeof reason === 'object' ? reason.code : undefined;
-  if (code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND') return;
-  if (reason instanceof Error) throw reason;
-  throw new Error(String(reason));
-});
-
-const command = process.argv[2] || 'status';
-
-try {
-  switch (command) {
-    case 'import': await doImport(); break;
-    case 'sync': await doSync(); break;
-    case 'status': doStatus(); break;
-    default:
-      console.log('Usage: auto-memory-hook.mjs <import|sync|status>');
-      process.exit(1);
-  }
-} catch (err) {
-  // Hooks must never crash Claude Code - fail silently
-  dim(\`Error (non-critical): \${err.message}\`);
-}
-// Ensure clean exit for Claude Code hooks (exit 0 = success)
-process.exit(0);
-`;
 }

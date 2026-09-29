@@ -159,6 +159,27 @@ function _persistRunDb() {
   _runDbPersistTimer = setTimeout(_writeRunDbSnapshot, 1000);
 }
 
+/**
+ * Flush the pending snapshot and release the sql.js database (shutdown and a
+ * failed start, #477). The debounce timer it clears would otherwise keep a
+ * process that never bound a port alive for another second, and the WASM heap
+ * holding the database is only returned by close().
+ */
+function _closeRunDb() {
+  clearTimeout(_runDbPersistTimer);
+  _runDbPersistTimer = null;
+  if (!_runDb) return;
+  _writeRunDbSnapshot();
+  try {
+    _runDbInsertStmt?.free();
+  } catch (_) {}
+  try {
+    _runDb.close();
+  } catch (_) {}
+  _runDb = null;
+  _runDbInsertStmt = null;
+}
+
 function _insertRunEvent(ev, source) {
   if (!_runDb || !_runDbInsertStmt) return;
   try {
@@ -184,6 +205,7 @@ function _insertRunEvent(ev, source) {
 }
 
 export {
+  _closeRunDb,
   _initRunDb,
   _insertRunEvent,
   _persistRunDb,

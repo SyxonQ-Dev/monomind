@@ -429,7 +429,7 @@ describe.skipIf(DB_SKIP)('monograph.injectGodNodesContext — with DB', () => {
 });
 
 describe.skipIf(DB_SKIP)('graph-gate persistent opt-out (guidance config)', () => {
-  it('blocks by default with a fresh graph, disabled by active-gates.json graphGate=off', () => {
+  it('nudges by default with a fresh graph, disabled by active-gates.json graphGate=off', () => {
     // Fresh graph: git repo whose HEAD matches index_meta.last_commit_hash.
     execFileSync('git', ['init', '-q'], { cwd: tmpDir });
     fs.writeFileSync(path.join(tmpDir, 'a.txt'), 'x\n');
@@ -444,11 +444,13 @@ describe.skipIf(DB_SKIP)('graph-gate persistent opt-out (guidance config)', () =
 
     const { db } = makeFixtureDb(tmpDir);
     db.prepare("INSERT OR REPLACE INTO index_meta VALUES ('last_commit_hash', ?)").run(head);
+    // The nudge needs a non-empty graph.
+    _mgLib.insertNode(db, { id: 'n1', label: 'Function', name: 'fn', filePath: 'src/a.ts' });
     db.close();
 
-    // Gate active: first search in a session that never called monograph → block.
+    // Gate active: first search in a session that never called monograph → nudge.
     let mg = loadMonograph(tmpDir);
-    expect(mg._graphGateShouldBlock('sess-gate-on')).toBe('block');
+    expect(mg._graphGateShouldNudge('sess-gate-on')).toBe(true);
 
     // Persistent opt-out via .monomind/guidance/active-gates.json.
     const guidanceDir = path.join(tmpDir, '.monomind', 'guidance');
@@ -459,7 +461,7 @@ describe.skipIf(DB_SKIP)('graph-gate persistent opt-out (guidance config)', () =
     );
 
     mg = loadMonograph(tmpDir); // reload: module caches CWD + freshness
-    expect(mg._graphGateShouldBlock('sess-gate-off')).toBe(false);
+    expect(mg._graphGateShouldNudge('sess-gate-off')).toBe(false);
   });
 
   it('ignores an unreadable/invalid active-gates.json (fails open)', () => {
@@ -476,6 +478,8 @@ describe.skipIf(DB_SKIP)('graph-gate persistent opt-out (guidance config)', () =
 
     const { db } = makeFixtureDb(tmpDir);
     db.prepare("INSERT OR REPLACE INTO index_meta VALUES ('last_commit_hash', ?)").run(head);
+    // The nudge needs a non-empty graph.
+    _mgLib.insertNode(db, { id: 'n1', label: 'Function', name: 'fn', filePath: 'src/a.ts' });
     db.close();
 
     const guidanceDir = path.join(tmpDir, '.monomind', 'guidance');
@@ -483,6 +487,6 @@ describe.skipIf(DB_SKIP)('graph-gate persistent opt-out (guidance config)', () =
     fs.writeFileSync(path.join(guidanceDir, 'active-gates.json'), 'not json {{{');
 
     const mg = loadMonograph(tmpDir);
-    expect(mg._graphGateShouldBlock('sess-gate-broken-cfg')).toBe('block');
+    expect(mg._graphGateShouldNudge('sess-gate-broken-cfg')).toBe(true);
   });
 });
