@@ -10,6 +10,8 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 - **monobrowse no longer leaves Chromium profiles in /tmp** ([#395](https://github.com/monoes/monomind/issues/395)). Every browser monobrowse launched got a fresh `--user-data-dir` under `os.tmpdir()` (`monomind-browser-*`, `monomind-browse-*`) that nothing deleted, so they piled up until /tmp ran out of quota. A profile dir monobrowse created is now deleted once its Chrome has exited: on a graceful close, on the kill fallback, on `browse close` from a later process (the session record carries a new `ownsUserDataDir` flag), and when a launch fails. Every launch also sweeps dirs left by a crashed or killed process: only exact monobrowse names directly in tmpdir, real directories (never symlinks), older than 10 minutes, whose owning pid is dead and that no live Chrome still uses (`/proc` command lines on Linux, the profile's `SingletonLock` everywhere). A caller-supplied `userDataDir` is never deleted.
 
+- **`monomind browse …` exits as soon as its output is written** ([#408](https://github.com/monoes/monomind/issues/408)). Every browse subcommand left its CDP websocket open, so the process only ended at the CLI's 5 s force-exit watchdog: `browse get title` took ~5.5 s against 0.3 s through the bare `monobrowse` bin. The command now drops its CDP connection once the subcommand finishes (also when it fails), without touching the browser, so the next command still reuses the session; `get title` now takes ~0.3 s and `open` ~1.6 s instead of ~5.8 s. `@monoes/monobrowse` 1.0.28 exports `disconnectSession()` for this.
+
 ## [2.18.5] — 2026-09-29
 
 ### Added
