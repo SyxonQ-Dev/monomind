@@ -68,7 +68,11 @@ describe('#360: no transitive escalation to --access full', () => {
   });
 
   it('runAgentExec is only ever called from the human-typed CLI layer (commands/agent-exec.ts)', () => {
-    const allowedCallers = new Set([join(SRC_ROOT, 'commands', 'agent-exec.ts')]);
+    const allowedCallers = new Set([
+      join(SRC_ROOT, 'commands', 'agent-exec.ts'),
+      // #390: `agent test`'s engine — scoped-only, CLI-only (next test).
+      join(SRC_ROOT, 'orgrt', 'agent-test.ts'),
+    ]);
     const offenders: string[] = [];
     for (const file of allSourceFiles()) {
       if (file === join(SRC_ROOT, 'orgrt', 'agent-exec.ts')) continue; // the definition itself
@@ -76,6 +80,21 @@ describe('#360: no transitive escalation to --access full', () => {
       if (/\brunAgentExec\(/.test(text) && !allowedCallers.has(file)) offenders.push(file);
     }
     expect(offenders).toEqual([]);
+  });
+
+  it("#390: agent test's engine hardcodes scoped access and only the agent test CLI command imports it", () => {
+    const text = readFileSync(join(SRC_ROOT, 'orgrt', 'agent-test.ts'), 'utf8');
+    expect(text.match(/\baccess\s*:/g)).toEqual(['access:']);
+    expect(text).toMatch(/\baccess: 'scoped',/);
+    const importers = allSourceFiles().filter(
+      (f) =>
+        !f.endsWith(join('orgrt', 'agent-test.ts')) &&
+        /from ['"][^'"]*orgrt\/agent-test\.js['"]|from ['"]\.\/agent-test\.js['"]/.test(
+          readFileSync(f, 'utf8'),
+        ) &&
+        !f.endsWith(join('commands', 'agent.ts')),
+    );
+    expect(importers).toEqual([join(SRC_ROOT, 'commands', 'agent-test.ts')]);
   });
 
   it("the org runtime's AgentRunArgs builder (sessionRunArgs) sets `access` only from the resolved #365 grant", () => {
