@@ -10,6 +10,7 @@ import * as path from 'node:path';
 import { formatKeptFiles } from '../init/file-guard.js';
 import { DEFAULT_INIT_OPTIONS, executeInit } from '../init/index.js';
 import { reportProjectMemory } from '../init/init-memory.js';
+import { runDoctorFix } from '../init/init-post-steps.js';
 import { formatIndexSummary } from '../init/project-indexes.js';
 import { resolveInitOptions } from '../init/resolve-options.js';
 import { ingestDirectory } from '../knowledge/document-pipeline.js';
@@ -97,6 +98,8 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
     return { success: false, exitCode: 1, message: resolved.message };
   }
   const options = resolved.options;
+  // The doctor pass runs once, below, after every write this action makes (#425).
+  options.deferDoctor = true;
 
   const spinner = output.createSpinner({ text: 'Initializing...' });
   spinner.start();
@@ -468,6 +471,8 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
         output.writeln();
       }
     }
+
+    await runDoctorFix(options.targetDir, result, options.installClaudeCode !== false);
 
     if (!startAll) {
       output.writeln(output.bold('Next steps:'));

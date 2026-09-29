@@ -197,9 +197,20 @@ export async function runDoctorFix(
       // `fix: true` keeps the local, no-network fixes (monoes tool shims,
       // gitignore coverage) running even when `install` is false — only the
       // Claude Code CLI's global npm install is gated by `install`.
-      flags: { install, fix: true },
+      // `problemsOnly` (#425): print just the post-fix warnings/failures.
+      flags: { install, fix: true, problemsOnly: true },
       cwd: targetDir,
     } as never);
+    const data = (res as { data?: { passed?: number; warnings?: number; failed?: number } })?.data;
+    if (data) {
+      const { output } = await import('../output.js');
+      output.printInfo(
+        `Health check: ${data.passed ?? 0} passed, ${data.warnings ?? 0} warning(s), ${data.failed ?? 0} failed` +
+          ((data.warnings ?? 0) + (data.failed ?? 0) > 0
+            ? ' — run `monomind doctor` for details'
+            : ''),
+      );
+    }
     if (res && (res as { success?: boolean }).success === false) {
       result.skipped.push('doctor: reported issues (run: monomind doctor for details)');
     } else {
