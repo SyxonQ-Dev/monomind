@@ -4,6 +4,28 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Security: org roles can no longer rewrite their own org definition, decisions or runtime state with file tools** ([#498](https://github.com/monoes/monomind/issues/498)). The file tools refused only the four decision files (`gates.json`, `approvals.json`, `questions.json`, `inbox.jsonl`). A role whose `fileWrite` reached the org root could Write or Edit `.monomind/orgs/<org>.json`, which holds its own `policy` (scopes, git level, `sandbox.allowWrite`), and have that apply on reload or at the next run. It could also rewrite `decisions.jsonl`. This includes the default `fileWrite: ["**"]` when the workspace is the project root. On the Claude runtime, `Write`, `Edit`, `MultiEdit` and `NotebookEdit` are now refused, regardless of scope, root or `allowWrite`, on these files under the org root's `.monomind/orgs/`:
+
+  - every file directly in it (org definitions and their `-state`, `-secrets`, `-runstate`, … files);
+
+  - every file directly in an org dir (decision files, `runtime.json`, `decisions.jsonl`, `history.jsonl`, `idle-watchdog.json`, and the `run`/`stop`/`pause`/`reload` control files);
+
+  - a run dir's `bus.jsonl` and `sessions.json`;
+
+  - anything under `git-guard/`.
+
+  Every path argument of a call is checked. Paths are classified both as written and after resolving symlinks (dangling ones included), and hard links are compared by inode. On macOS and Windows, segments are compared case-insensitively, and on Windows without trailing dots, spaces or `:stream` suffixes. The `.git` write check now compares the same way. `reports/`, `work/`, `workspace/`, `worktree/`, `.mail/` and `<x>-memory/` stay writable, and so does a checkout's own `.monomind/orgs/`.
+
+  For Bash, and for the native file tools of other CLI runtimes (codex `apply_patch`, kimi, …), which never reach that check:
+
+  - The bubblewrap authority mask binds the orgs dir read-only and binds only the role work dirs back read-write. The org root and `.monomind` can't be renamed.
+
+  - The SDK sandbox makes the existing authority files read-only and the orgs tree unrenameable. Bash there can still create a *new* org definition plus its `run` file, which `org serve` would start. `org-runtime.md` ("Authority files") lists this and the other limits.
+
+## [2.20.0] — 2026-09-29
+
 ### Added
 
 - **`agent exec` reports subagents on every runtime, not only claude** ([#387](https://github.com/monoes/monomind/issues/387), capability `agent-exec-subagent-events`, agent-exec protocol rev 24). On any other runtime, a tool call whose `tool_activity` has `kind:"task"` is now followed by a `subagent` `started` event, and its end by `finished` with `status` (`completed`, `failed`, `denied`, or `stopped` on cancel/timeout) and a `summary` of up to 500 characters of its output. `id` and `tool_use_id` are the call's `tool_activity` id. The events are synthesized from `tool_activity`, so they have no `progress` phase and no `usage`. opencode (`task`), cline (`spawn_agent`, `team_*`) and dsh (`subagent`) mark such calls themselves; other runtimes get `task` from the shared tool-name table (`Task`, `Agent`, `spawn_subagent`, `invoke_subagent`, `browser_subagent`, …). claude keeps its SDK-based events and gets no duplicates. New golden fixture `doc/agent-exec-protocol/fixtures/subagent-synth.ndjson`.
@@ -24,17 +46,7 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ### Fixed
 
-- **Security: org roles can no longer rewrite their own org definition, decisions or runtime state with file tools** ([#498](https://github.com/monoes/monomind/issues/498)). The file tools refused only the four decision files (`gates.json`, `approvals.json`, `questions.json`, `inbox.jsonl`). A role whose `fileWrite` reached the org root could Write or Edit `.monomind/orgs/<org>.json`, which holds its own `policy` (scopes, git level, `sandbox.allowWrite`), and have that apply on reload or at the next run. It could also rewrite `decisions.jsonl`. This includes the default `fileWrite: ["**"]` when the workspace is the project root. On the Claude runtime, `Write`, `Edit`, `MultiEdit` and `NotebookEdit` are now refused, regardless of scope, root or `allowWrite`, on these files under the org root's `.monomind/orgs/`:
-  - every file directly in it (org definitions and their `-state`, `-secrets`, `-runstate`, … files);
-  - every file directly in an org dir (decision files, `runtime.json`, `decisions.jsonl`, `history.jsonl`, `idle-watchdog.json`, and the `run`/`stop`/`pause`/`reload` control files);
-  - a run dir's `bus.jsonl` and `sessions.json`;
-  - anything under `git-guard/`.
-
-  Every path argument of a call is checked. Paths are classified both as written and after resolving symlinks (dangling ones included), and hard links are compared by inode. On macOS and Windows, segments are compared case-insensitively, and on Windows without trailing dots, spaces or `:stream` suffixes. The `.git` write check now compares the same way. `reports/`, `work/`, `workspace/`, `worktree/`, `.mail/` and `<x>-memory/` stay writable, and so does a checkout's own `.monomind/orgs/`.
-
-  For Bash, and for the native file tools of other CLI runtimes (codex `apply_patch`, kimi, …), which never reach that check:
-  - The bubblewrap authority mask binds the orgs dir read-only and binds only the role work dirs back read-write. The org root and `.monomind` can't be renamed.
-  - The SDK sandbox makes the existing authority files read-only and the orgs tree unrenameable. Bash there can still create a *new* org definition plus its `run` file, which `org serve` would start. `org-runtime.md` ("Authority files") lists this and the other limits.
+- **The six GitHub agents only tell the model to run commands that exist** ([#421](https://github.com/monoes/monomind/issues/421), follow-up to [#453](https://github.com/monoes/monomind/pull/453)). `monoswarm-code-review`, `monoswarm-issue`, `monoswarm-multi-repo`, `monoswarm-pr`, `project-board-sync` and `workflow-automation` still held about 140 invented `monomind github …`, `monomind actions …` and `monomind swarm …` commands per tree, each a failed call. They are rewritten on the `gh` CLI (`gh pr`, `gh issue`, `gh project`, `gh run`, `gh workflow`, `gh cache`, `gh search`, `gh api`) plus the real `monomind analyze diff`, `analyze complexity`, `security scan`/`secrets`, `memory` and `pick` commands, with subagents doing the review and edit work. Sections that only existed to show an invented command (review dashboards, board "smart move" rules, multi-repo message buses, self-healing and predictive-failure actions, the `SwarmAction` library) are gone. The agents keep their purpose and structure, and fix a few broken snippets (`gh issue create --json`, links to renamed agent files). They also act more carefully: PRs are reviewed in a separate worktree (with a trust check before running a fork's code), multi-repo loops work in a fresh temp clone per repository so a failed clone never commits in your checkout, `/swarm` comment commands are only honoured from owners, members and collaborators, branch protection is appended to rather than replaced, and merging, releasing, pushing fixes, enabling auto-merge and closing stale issues all wait for your confirmation. `KNOWN_BAD_CLI_REFS` is empty, so `scripts/lint-tool-refs.mjs` drops the allowlist: any unresolved `monomind <cmd>` in an agent definition now fails the lint.
 
 - **A role's git guard no longer leaks into repositories its own tests create** ([#481](https://github.com/monoes/monomind/issues/481), follow-up to [#298](https://github.com/monoes/monomind/issues/298)). Roles below `policy.git: 'push'` got `core.hooksPath` and `core.excludesFile` as process-wide `GIT_CONFIG_*` entries, so every git call in the process tree saw them, including a test's throwaway repo in `$TMPDIR`: `git add .claude/settings.json` there failed as ignored by the guard's excludes file (`cleanup-after-init-e2e.test.ts`). The guard now writes both settings to a `gitconfig` file in its state dir and exports only `includeIf.gitdir:<common dir>` and `includeIf.gitdir:<common dir>/worktrees/` entries that include it, so they apply in the org's protected repositories and all their linked worktrees and nowhere else. Inside those repositories the guard is unchanged: pushes and, at `read`/`none`, ref updates are still refused. The transport and credential settings (`protocol.file.allow=never`, the reset `credential.helper`, failing askpass/ssh commands) stay process-wide, so a scratch repository still cannot push.
 

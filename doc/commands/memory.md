@@ -39,9 +39,18 @@ Defined in `packages/@monomind/cli/src/commands/memory.ts` and `memory-transfer.
 1. **Dense Vector Search**: Powered by `Alibaba-NLP/gte-modernbert-base` (768 dimensions).
 2. **Lexical Search**: Okapi BM25 ($k_1=1.2, b=0.75$) with tokenizer parity.
 
+Results below the similarity threshold are dropped; it defaults to `0.3`
+(`DEFAULT_SEARCH_THRESHOLD`,
+[`memory-bridge-core.ts`](../../packages/@monomind/cli/src/memory/memory-bridge-core.ts#DEFAULT_SEARCH_THRESHOLD)),
+loosened from an earlier `0.7` default that missed relevant paraphrases. Override it per call with
+`--threshold <0-1>`.
+
 ```bash
 # Execute hybrid RRF search
 monomind memory search "authentication token expiration handling"
+
+# Search with a stricter threshold than the 0.3 default
+monomind memory search "authentication token expiration handling" --threshold 0.6
 
 # Force-build the HNSW ANN index now (search uses it automatically above 100,000 entries)
 monomind memory search --build-hnsw

@@ -19,6 +19,17 @@ requests at all, and forcing a false row for one (or silently dropping it)
 would be its own kind of inaccuracy. A new, unclassified host anywhere
 fails the check, regardless of the shape it appears in.
 
+**What this page does not cover: the AI runtimes' own traffic.** Monomind
+runs locally and keeps its state on your machine — memory, the code graph,
+the document index and org state, embedded by a local model. The AI
+runtimes it drives (Claude Code, Codex, OpenCode, Kimi Code, Antigravity)
+are separate programs that send your prompts and code to their model
+providers, including the memory and Second Brain excerpts monomind injects.
+Org roles are different: a role on an AI-SDK provider is called by monomind
+itself, so monomind sends that role's prompts (including org memory and
+injected excerpts) to the provider you configured. What a provider
+receives and keeps is set by that runtime and provider, not by monomind.
+
 **Scope, stated rather than implied:** this inventory covers literal
 `https?://` hosts in files that ship **and** (execute **or** are served to
 a client) — `.ts`/`.mjs`/`.js` source and `.html`/`.svg` served/rendered

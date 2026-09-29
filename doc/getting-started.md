@@ -11,7 +11,7 @@ Monomind extends AI coding assistants (Claude Code, Antigravity, OpenCode, Kimi 
 3. **Second Brain** — document RAG (PDF/Office/EPUB ingestion, semantic search, eval-gated)
 4. **Org Runtime** — multi-agent daemon with dashboard, governance, and budgets
 
-Everything runs locally. No cloud LLM or embeddings required.
+Monomind itself runs locally and keeps its state (memory, code graph, document index, org state) on your machine, with local embeddings — no cloud embedding service or extra API key is needed. The AI tool it extends still sends your prompts and code, including memory and Second Brain excerpts injected into them, to its model provider; see [doc/privacy.md](privacy.md) for monomind's own outbound requests.
 
 ## Step 1: Install
 
@@ -117,7 +117,7 @@ This lists all available slash commands. The most useful starting points:
 
 ### Agents and skills
 
-`monomind init` installs <!-- doc-count:pickable-agents -->84<!-- /doc-count:pickable-agents --> pickable agents under `.claude/agents`, skills under `.claude/skills` and slash commands under `.claude/commands`. You rarely name one yourself: for each prompt, the hook adds a line such as
+`monomind init` installs <!-- doc-count:installed-agents -->84<!-- /doc-count:installed-agents --> agents under `.claude/agents`, skills under `.claude/skills` and slash commands under `.claude/commands`. You rarely name one yourself: for each prompt, the hook adds a line such as
 
 ```
 [PICK] agent: Security Engineer · skill: /mastermind:review

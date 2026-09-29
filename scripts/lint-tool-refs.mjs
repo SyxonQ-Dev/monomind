@@ -28,10 +28,6 @@
  * Tools and commands come from the BUILT CLI (packages/@monomind/cli/dist), so
  * build first: `pnpm -r run build`.
  *
- * KNOWN_BAD_CLI_REFS is an explicit, shrinking allowlist of agent CLI
- * references not yet fixed (GH #421). An entry that no longer occurs fails the
- * lint, so fixing a reference forces removing its entry.
- *
  * Run:   node scripts/lint-tool-refs.mjs
  * Exit:  0 when everything resolves, 1 otherwise.
  */
@@ -52,22 +48,6 @@ const MARKDOWN_TREES = [
   '.kimi-code',
 ];
 const AGENT_TREES = ['.claude/agents', 'packages/@monomind/cli/.claude/agents'];
-
-/**
- * GH #421: agent CLI references that name commands the CLI does not have and
- * are not fixed yet — file → the unresolved `monomind <cmd>` keys it still
- * holds. Shrink only: fix the reference, then delete its entry.
- */
-export const KNOWN_BAD_CLI_REFS = new Map(
-  [
-    ['github/monoswarm-code-review.md', ['monomind github']],
-    ['github/monoswarm-issue.md', ['monomind github']],
-    ['github/monoswarm-multi-repo.md', ['monomind github']],
-    ['github/monoswarm-pr.md', ['monomind github', 'monomind swarm']],
-    ['github/project-board-sync.md', ['monomind github']],
-    ['github/workflow-automation.md', ['monomind actions']],
-  ].flatMap(([file, keys]) => AGENT_TREES.map((tree) => [`${tree}/${file}`, new Set(keys)])),
-);
 
 /** Every tool name the MCP server can register (all categories loaded). */
 export async function loadMcpToolNames(root = ROOT) {
@@ -96,11 +76,6 @@ export function extractToolRefs(text) {
     refs.push({ name: m[1], line: text.slice(0, m.index).split('\n').length });
   }
   return refs;
-}
-
-/** The unresolved `monomind <cmd>` key of a CLI reference, as the allowlist spells it. */
-function cliKey(ref, cli) {
-  return cli.has(ref.command) ? `monomind ${ref.command} ${ref.sub}` : `monomind ${ref.command}`;
 }
 
 function walkMarkdown(dir, out = []) {
@@ -155,26 +130,13 @@ async function main() {
   }
 
   // 3. CLI references in agent definitions.
-  const allowedSeen = new Set();
   let cliRefs = 0;
   for (const file of AGENT_TREES.flatMap((t) => walkMarkdown(t))) {
     for (const ref of extractCommandRefs(readFileSync(join(ROOT, file), 'utf8'))) {
       cliRefs++;
       const reason = unresolvedReason(ref, cli);
-      if (!reason) continue;
-      const key = cliKey(ref, cli);
-      const allowed = KNOWN_BAD_CLI_REFS.get(file);
-      if (allowed?.has(key)) allowedSeen.add(`${file}|${key}`);
-      else errors.push(`${file}: '${ref.text}' — ${reason}`);
+      if (reason) errors.push(`${file}: '${ref.text}' — ${reason}`);
     }
-  }
-  for (const [file, keys] of KNOWN_BAD_CLI_REFS) {
-    if (!existsSync(join(ROOT, file))) continue;
-    for (const key of keys)
-      if (!allowedSeen.has(`${file}|${key}`))
-        errors.push(
-          `${file}: allowlisted '${key}' no longer occurs — remove it from KNOWN_BAD_CLI_REFS`,
-        );
   }
 
   if (errors.length) {
