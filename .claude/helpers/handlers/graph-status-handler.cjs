@@ -35,11 +35,10 @@ module.exports = {
                  + safeNum(usage.bash_grep_call) + safeNum(usage.bash_find_call);
       var total = wins + search + safeNum(usage.preresolve_miss);
       var pct = total > 0 ? Math.round((wins / total) * 100) : 0;
-      var saved = safeNum(usage.dollars_saved);
       console.log('Monograph: ' + n.toLocaleString() + ' nodes · ' + e.toLocaleString() + ' edges');
       console.log('Usage: ' + pct + '% graph · ' + (100 - pct) + '% grep · ' +
                   'wins=' + wins + ' search=' + search +
-                  (saved > 0 ? ' · saved $' + saved.toFixed(2) : ''));
+                  ' · hints=' + safeNum(usage.graph_assist_search));
     } catch (err) { console.log('Error: ' + String(err.message || err).slice(0, 200)); }
   },
 };
