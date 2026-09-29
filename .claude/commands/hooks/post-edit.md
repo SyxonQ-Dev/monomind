@@ -64,7 +64,7 @@ Typically fired automatically via `settings.json`:
 ## MCP Tool
 
 ```javascript
-mcp__monomind__hooks_post_edit({
+mcp__monomind__hooks_post-edit({
   filePath: "src/utils.ts",
   success: true,
   outcome: "Added error handling",

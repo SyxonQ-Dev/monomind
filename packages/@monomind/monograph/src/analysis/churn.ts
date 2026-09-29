@@ -127,7 +127,9 @@ export async function analyzeChurn(
   // Cache lookup — keyed by HEAD SHA + window size + a coarse day bucket, so
   // entries naturally invalidate as time passes even at the same HEAD (the
   // recency weighting is time-dependent, not just HEAD-dependent).
-  const cacheDir = join(root, '.monograph', 'cache');
+  // Under .monomind/ with the rest of monograph's state, not a separate
+  // .monograph/ dir in the user's repo (#414).
+  const cacheDir = join(root, '.monomind', 'cache');
   const dateBucket = todayBucket();
   pruneChurnCache(cacheDir);
   let treeHash = '';

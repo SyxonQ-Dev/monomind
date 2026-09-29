@@ -213,8 +213,8 @@ src/
 ### Memory Coordination
 ```javascript
 // Report implementation status
-mcp__monomind__memory_usage {
-  action: "store",
+mcp__monomind__monoswarm_memory {
+  action: "set",
   key: "swarm/coder/status",
   namespace: "coordination",
   value: JSON.stringify({
@@ -227,8 +227,8 @@ mcp__monomind__memory_usage {
 }
 
 // Share code decisions
-mcp__monomind__memory_usage {
-  action: "store",
+mcp__monomind__monoswarm_memory {
+  action: "set",
   key: "swarm/shared/implementation",
   namespace: "coordination",
   value: JSON.stringify({
@@ -240,8 +240,8 @@ mcp__monomind__memory_usage {
 }
 
 // Check dependencies
-mcp__monomind__memory_usage {
-  action: "retrieve",
+mcp__monomind__monoswarm_memory {
+  action: "get",
   key: "swarm/shared/dependencies",
   namespace: "coordination"
 }
@@ -250,13 +250,13 @@ mcp__monomind__memory_usage {
 ### Performance Monitoring
 ```javascript
 // Track implementation metrics
-mcp__monomind__benchmark_run {
+mcp__monomind__performance_benchmark {
   type: "code",
   iterations: 10
 }
 
 // Analyze bottlenecks
-mcp__monomind__bottleneck_analyze {
+mcp__monomind__performance_bottleneck {
   component: "api-endpoint",
   metrics: ["response-time", "memory-usage"]
 }

@@ -31,7 +31,7 @@ Intelligent issue management and project coordination with monomind swarm integr
 ### 1. Create Coordinated Issue with Swarm Tracking
 ```javascript
 // Initialize issue management swarm
-mcp__monomind__swarm_init { topology: "star", maxAgents: 3 }
+mcp__monomind__monoswarm_init { topology: "star", maxAgents: 3 }
 mcp__monomind__agent_spawn { type: "coordinator", name: "Issue Coordinator" }
 mcp__monomind__agent_spawn { type: "researcher", name: "Requirements Analyst" }
 mcp__monomind__agent_spawn { type: "coder", name: "Implementation Planner" }
@@ -59,8 +59,8 @@ mcp__github__create_issue {
 }
 
 // Set up automated tracking
-mcp__monomind__coordination_orchestrate {
-  task: "Monitor and coordinate issue progress with automated updates",
+mcp__monomind__task_create {
+  description: "Monitor and coordinate issue progress with automated updates",
   agents: ["coordinator", "researcher", "coder"],
   strategy: "parallel"
 }
@@ -69,7 +69,8 @@ mcp__monomind__coordination_orchestrate {
 ### 2. Automated Progress Updates
 ```javascript
 // Update issue with progress from swarm memory
-mcp__monomind__memory_retrieve {
+mcp__monomind__monoswarm_memory {
+  action: "get",
   key: "issue/54/progress"
 }
 
@@ -129,7 +130,7 @@ mcp__github__update_issue {
 ```javascript
 [Single Message - Issue Lifecycle Management]:
   // Initialize issue coordination swarm
-  mcp__monomind__swarm_init { topology: "mesh", maxAgents: 4 }
+  mcp__monomind__monoswarm_init { topology: "mesh", maxAgents: 4 }
   mcp__monomind__agent_spawn { type: "coordinator", name: "Issue Manager" }
   mcp__monomind__agent_spawn { type: "analyst", name: "Progress Tracker" }
   mcp__monomind__agent_spawn { type: "researcher", name: "Context Gatherer" }

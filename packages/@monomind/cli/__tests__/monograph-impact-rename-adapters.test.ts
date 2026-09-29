@@ -17,6 +17,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getMonographImpact: vi.fn(),
+  getMonographContext: vi.fn(),
   getMonographRename: vi.fn(),
   openDb: vi.fn(() => ({ __mockDb: true })),
   closeDb: vi.fn(),
@@ -155,6 +156,83 @@ describe('monograph_impact adapter renders the library result', () => {
     });
     const res = await callTool('monograph_impact', { name: 'nope' });
     expect(prose(res)).toContain('No symbol found: nope');
+  });
+});
+
+// ── Ambiguous names (#405) ──────────────────────────────────────────────────
+
+describe('impact/context list candidates when a name matches several definitions', () => {
+  const candidates = [
+    { id: 'real', name: 'bridgeStoreEntry', label: 'Function', filePath: 'src/memory/bridge.ts', startLine: 12 },
+    { id: 'mock', name: 'bridgeStoreEntry', label: 'Function', filePath: 'src/__tests__/bridge.test.ts', startLine: 3 },
+  ];
+  const empty = { node: null, directCallers: [], transitiveCallers: [], affectedFiles: [] };
+
+  it('monograph_impact returns the candidates, not a risk verdict', async () => {
+    mocks.getMonographImpact.mockReturnValue({
+      ...empty,
+      riskScore: 0,
+      riskLevel: 'LOW',
+      ambiguous: true,
+      candidates,
+    });
+    const res = await callTool('monograph_impact', { name: 'bridgeStoreEntry' });
+
+    expect(prose(res)).toContain('"bridgeStoreEntry" matches 2 definitions');
+    expect(prose(res)).toContain('nodeId=real  [Function] bridgeStoreEntry  src/memory/bridge.ts:12');
+    expect(prose(res).indexOf('src/memory/bridge.ts')).toBeLessThan(
+      prose(res).indexOf('bridge.test.ts'),
+    );
+    expect(prose(res)).not.toContain('Risk:');
+    expect(data(res)).toEqual({ ambiguous: true, candidates });
+  });
+
+  it('monograph_impact forwards filePath and nodeId to the library', async () => {
+    mocks.getMonographImpact.mockReturnValue({ ...empty, riskScore: 0, riskLevel: 'LOW' });
+    await callTool('monograph_impact', { name: 'x', filePath: 'src/a.ts', nodeId: 'id1' });
+    expect(mocks.getMonographImpact).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ name: 'x', filePath: 'src/a.ts', nodeId: 'id1' }),
+    );
+  });
+
+  it('monograph_context returns the candidates instead of one symbol', async () => {
+    mocks.getMonographContext.mockReturnValue({
+      node: null,
+      callers: [],
+      callees: [],
+      imports: [],
+      importedBy: [],
+      community: null,
+      inProcesses: [],
+      ambiguous: true,
+      candidates,
+    });
+    const res = await callTool('monograph_context', { name: 'bridgeStoreEntry' });
+
+    expect(prose(res)).toContain('"bridgeStoreEntry" matches 2 definitions');
+    expect(prose(res)).toContain('nodeId=mock  [Function] bridgeStoreEntry  src/__tests__/bridge.test.ts:3');
+    expect(prose(res)).not.toContain('No symbol found');
+  });
+
+  it('monograph_context renders normally when the library resolved one node', async () => {
+    mocks.getMonographContext.mockReturnValue({
+      node: node({ id: 'real', name: 'bridgeStoreEntry', filePath: 'src/memory/bridge.ts', startLine: 12 }),
+      callers: [node({ id: 'c1', name: 'storeA', filePath: 'src/a.ts', startLine: 1 })],
+      callees: [],
+      imports: [],
+      importedBy: [],
+      community: null,
+      inProcesses: [],
+      ambiguous: false,
+      candidates: [],
+    });
+    const res = await callTool('monograph_context', {
+      name: 'bridgeStoreEntry',
+      filePath: 'src/memory/bridge.ts',
+    });
+    expect(prose(res)).toContain('Callers (1):');
+    expect(prose(res)).not.toContain('matches');
   });
 });
 

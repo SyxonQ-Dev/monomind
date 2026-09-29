@@ -85,8 +85,10 @@ export interface HooksConfig {
  * Skills configuration
  */
 export interface SkillsConfig {
-  /** Include core skills (swarm, mastermind, monodesign, monomotion) */
+  /** Include core skills (the mastermind engineering workflows, monolean, monodesign) */
   core: boolean;
+  /** Include extended skills (mastermind org admin, monoswarm, hooks, monomotion, …) */
+  extended?: boolean;
   /** Include memory/SQLite skills */
   memory: boolean;
   /** Include GitHub integration skills */
@@ -135,12 +137,8 @@ export interface CommandsConfig {
   pair?: boolean;
   /** Include stream-chain commands */
   streamChain?: boolean;
-  /** Include training commands */
-  training?: boolean;
   /** Include truth commands */
   truth?: boolean;
-  /** Include verify commands */
-  verify?: boolean;
   /** Include workflows commands */
   workflows?: boolean;
   /** Include all commands */
@@ -201,8 +199,9 @@ export interface MCPConfig {
   port: number;
   /**
    * Exact version to pin the generated MCP entry to (`monomind init --pin`).
-   * Undefined — the default — keeps the floating `monomind@latest` command, so
-   * upgrading monomind never silently freezes an existing project (#312).
+   * Undefined — the default — pins to the running CLI's version (#419);
+   * `latest` keeps the floating `monomind@latest` command. `init --force`
+   * refreshes the pin after an upgrade.
    */
   pin?: string;
 }

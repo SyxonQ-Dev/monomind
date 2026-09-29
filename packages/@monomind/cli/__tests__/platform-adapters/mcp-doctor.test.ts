@@ -4,9 +4,9 @@ import { platformsDoctor } from '../../src/mcp-tools/platforms-tools.js';
 import { runPlatformsDoctor } from '../../src/platform-adapters/operations.js';
 
 describe('platforms MCP doctor', () => {
-  it('is callable and included in the default advertised roster', async () => {
+  it('is callable but not in the default advertised roster (#410)', async () => {
     expect((await getAllMCPTools()).map((tool) => tool.name)).toContain('platforms_doctor');
-    expect((await listMCPTools()).map((tool) => tool.name)).toContain('platforms_doctor');
+    expect((await listMCPTools()).map((tool) => tool.name)).not.toContain('platforms_doctor');
   });
 
   it('returns the same evidence-gated report as the read-only doctor domain API', async () => {

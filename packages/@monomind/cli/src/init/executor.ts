@@ -393,7 +393,7 @@ export async function executeInit(options: InitOptions): Promise<InitResult> {
 
     // Build the Monograph code graph in background (non-blocking) — code-project only
     if (options.components.monograph && (capMgr === null || capMgr.isActive('code'))) {
-      await initKnowledgeGraph(targetDir, result, options.installClaudeCode !== false);
+      await initKnowledgeGraph(targetDir, result);
     } else if (options.components.monograph) {
       result.skipped.push('Monograph code graph: not a code project (skipping indexing)');
     }

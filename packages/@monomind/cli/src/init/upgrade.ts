@@ -6,7 +6,13 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { foldLegacySharedSkills } from '../platform-adapters/shared-surface.js';
 import { refreshBundledAgents } from './agent-refresh.js';
-import { AGENTS_MAP, COMMANDS_MAP, SKILLS_MAP } from './asset-maps.js';
+import {
+  AGENTS_MAP,
+  COMMANDS_MAP,
+  isCommandDoc,
+  isDeprecatedAgent,
+  SKILLS_MAP,
+} from './asset-maps.js';
 import { finalizeGuard, guardFor, pruneBackups } from './file-guard.js';
 import { atomicWriteFile, copyDirRecursive } from './fs-helpers.js';
 import { FORCE_SYNC_GENERATORS, helperFileMode } from './helpers-generator.js';
@@ -433,7 +439,7 @@ export async function executeUpgradeWithMissing(
         const targetPath = path.join(agentsDir, agentCategory);
 
         if (fs.existsSync(sourcePath) && !fs.existsSync(targetPath)) {
-          copyDirRecursive(sourcePath, targetPath);
+          copyDirRecursive(sourcePath, targetPath, isDeprecatedAgent);
           result.addedAgents.push(agentCategory);
           result.created.push(`.claude/agents/${agentCategory}`);
         }
@@ -449,7 +455,9 @@ export async function executeUpgradeWithMissing(
 
         if (fs.existsSync(sourcePath) && !fs.existsSync(targetPath)) {
           if (fs.statSync(sourcePath).isDirectory()) {
-            copyDirRecursive(sourcePath, targetPath);
+            copyDirRecursive(sourcePath, targetPath, (p) =>
+              isCommandDoc(path.relative(sourceCommandsDir, p)),
+            );
           } else {
             fs.copyFileSync(sourcePath, targetPath);
           }

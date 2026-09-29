@@ -26,7 +26,7 @@ Repository structure optimization and multi-repo management with Monomind swarm 
 
 ```javascript
 // Initialize architecture analysis swarm
-mcp__monomind__swarm_init { topology: "mesh", maxAgents: 4 }
+mcp__monomind__monoswarm_init { topology: "mesh", maxAgents: 4 }
 mcp__monomind__agent_spawn { type: "analyst", name: "Structure Analyzer" }
 mcp__monomind__agent_spawn { type: "architect", name: "Repository Architect" }
 mcp__monomind__agent_spawn { type: "optimizer", name: "Structure Optimizer" }
@@ -44,8 +44,8 @@ mcp__github__search_repositories {
 }
 
 // Orchestrate structure optimization
-mcp__monomind__task_orchestrate {
-  task: "Analyze and optimize repository structure for scalability and maintainability",
+mcp__monomind__task_create {
+  description: "Analyze and optimize repository structure for scalability and maintainability",
   strategy: "adaptive",
   priority: "medium"
 }
@@ -162,7 +162,7 @@ jobs:
 ```javascript
 [Single Message - Repository Architecture Review]:
   // Initialize comprehensive architecture swarm
-  mcp__monomind__swarm_init { topology: "hierarchical", maxAgents: 6 }
+  mcp__monomind__monoswarm_init { topology: "hierarchical", maxAgents: 6 }
   mcp__monomind__agent_spawn { type: "architect", name: "Senior Architect" }
   mcp__monomind__agent_spawn { type: "analyst", name: "Structure Analyst" }
   mcp__monomind__agent_spawn { type: "optimizer", name: "Performance Optimizer" }
