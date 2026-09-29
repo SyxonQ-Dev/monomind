@@ -452,4 +452,68 @@ describe('route-handler second-brain gate', () => {
     );
     expect(fs.existsSync(telemetry(tmpDir))).toBe(false);
   });
+
+  // #402: the prompt is POSTed to control.json's url, so that url must be
+  // loopback or a tampered control.json would exfiltrate every prompt.
+  const controlUrl = (cwd, url) => {
+    fs.mkdirSync(path.join(cwd, '.monomind'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, '.monomind', 'control.json'), JSON.stringify({ url }));
+  };
+  const knowledgeCalls = (spy) =>
+    spy.mock.calls.filter((c) => String(c[0]).includes('/api/knowledge/search'));
+
+  it.each(['http://evil.example:4242', 'http://10.0.0.5', 'http://127.0.0.1.evil.com'])(
+    'does not send the prompt to non-loopback %s',
+    async (url) => {
+      controlUrl(tmpDir, url);
+      writeKnowledge(tmpDir, 'doc-metadata.jsonl');
+      const fetchSpy = vi.fn(async () => new Response('{}', { status: 404 }));
+      vi.stubGlobal('fetch', fetchSpy);
+      await loadRH().handle(
+        makeHCtx({ prompt: PROMPT, router: router(), _buildKnowledgeSearchFn: searchFn() }),
+      );
+      vi.unstubAllGlobals();
+      expect(knowledgeCalls(fetchSpy)).toHaveLength(0);
+      expect(fs.existsSync(telemetry(tmpDir))).toBe(true);
+    },
+  );
+
+  it('sends the prompt to a loopback control url', async () => {
+    controlUrl(tmpDir, 'http://127.0.0.1:4242');
+    writeKnowledge(tmpDir, 'doc-metadata.jsonl');
+    const fetchSpy = vi.fn(async () => new Response('{}', { status: 404 }));
+    vi.stubGlobal('fetch', fetchSpy);
+    await loadRH().handle(
+      makeHCtx({ prompt: PROMPT, router: router(), _buildKnowledgeSearchFn: searchFn() }),
+    );
+    vi.unstubAllGlobals();
+    const calls = knowledgeCalls(fetchSpy);
+    expect(calls).toHaveLength(1);
+    expect(String(calls[0][0])).toBe('http://127.0.0.1:4242/api/knowledge/search');
+  });
+});
+
+describe('route-handler isLoopbackUrl', () => {
+  it.each([
+    'http://evil.example:4242',
+    'http://10.0.0.5',
+    'http://127.0.0.1.evil.com',
+    'http://localhost.evil.com:4242',
+    'http://user@localhost:4242',
+    'ftp://localhost',
+    'file:///etc/passwd',
+    'not a url',
+    '',
+  ])('rejects %s', (url) => {
+    expect(loadRH().isLoopbackUrl(url)).toBe(false);
+  });
+
+  it.each([
+    'http://127.0.0.1:4242',
+    'http://localhost:4242',
+    'http://[::1]:4242',
+    'https://localhost',
+  ])('accepts %s', (url) => {
+    expect(loadRH().isLoopbackUrl(url)).toBe(true);
+  });
 });
