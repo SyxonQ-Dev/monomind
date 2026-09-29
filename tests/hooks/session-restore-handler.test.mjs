@@ -387,3 +387,83 @@ describe('session-restore skill registry refresh', () => {
     expect(reg.skills.map((s) => s.skill)).toContain('alpha-skill');
   });
 });
+
+// ── Token summary stays off the hot path (#403) ─────────────────────────────
+
+describe('session-restore token summary (#403)', () => {
+  let tmp;
+  const savedConfigDir = process.env.CLAUDE_CONFIG_DIR;
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'srh-tokens-'));
+  });
+  afterEach(() => {
+    if (savedConfigDir !== undefined) process.env.CLAUDE_CONFIG_DIR = savedConfigDir;
+    else delete process.env.CLAUDE_CONFIG_DIR;
+    fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  });
+
+  it('writes token-summary.json from the cache without reading any transcript', async () => {
+    // A large transcript tree: parsing it synchronously is what hung SessionStart.
+    const home = path.join(tmp, 'claude-home');
+    const now = new Date().toISOString();
+    const lines = [
+      JSON.stringify({ type: 'user', timestamp: now, message: { role: 'user', content: 'hi' } }),
+    ];
+    for (let i = 0; i < 2000; i++) {
+      lines.push(
+        JSON.stringify({
+          type: 'assistant',
+          timestamp: now,
+          message: {
+            id: `m${i}`,
+            model: 'claude-sonnet-4-5',
+            usage: { input_tokens: 100, output_tokens: 50 },
+            content: [{ type: 'text', text: 'x' }],
+          },
+        }),
+      );
+    }
+    for (let f = 0; f < 20; f++) {
+      const dir = path.join(home, 'projects', `proj-${f % 4}`);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, `t${f}.jsonl`), `${lines.join('\n')}\n`);
+    }
+    const totals = { todayCost: 1.23, todayCalls: 7, monthCost: 45.6, monthCalls: 89 };
+    fs.writeFileSync(
+      path.join(home, '.monomind-token-summary.json'),
+      JSON.stringify({ computedAt: Date.now(), totals }),
+    );
+    process.env.CLAUDE_CONFIG_DIR = home;
+
+    // Only the real token tracker in helpersDir, so nothing else is pulled in.
+    const helpersDir = path.join(tmp, 'helpers');
+    fs.mkdirSync(helpersDir);
+    fs.copyFileSync(
+      path.resolve(__dirname, '../../.claude/helpers/token-tracker.cjs'),
+      path.join(helpersDir, 'token-tracker.cjs'),
+    );
+    const cwd = path.join(tmp, 'project');
+    fs.mkdirSync(path.join(cwd, '.monomind'), { recursive: true });
+
+    let transcriptReads = 0;
+    const cjsFs = require('node:fs');
+    const cjsOrig = cjsFs.readFileSync;
+    cjsFs.readFileSync = (file, ...rest) => {
+      if (String(file).endsWith('.jsonl')) transcriptReads++;
+      return cjsOrig.call(cjsFs, file, ...rest);
+    };
+    const started = Date.now();
+    try {
+      await runCapture(makeHCtx({ CWD: cwd, helpersDir }));
+    } finally {
+      cjsFs.readFileSync = cjsOrig;
+    }
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(transcriptReads).toBe(0);
+
+    const written = JSON.parse(
+      fs.readFileSync(path.join(cwd, '.monomind', 'metrics', 'token-summary.json'), 'utf-8'),
+    );
+    expect(written).toMatchObject(totals);
+  });
+});
