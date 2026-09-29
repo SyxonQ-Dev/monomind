@@ -4,6 +4,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { guardFor } from './file-guard.js';
 import {
   atomicWriteFile,
   extractFmName,
@@ -97,8 +98,10 @@ export async function writeKimiFiles(
     isSafeConversionTarget(destAgents, claudeDir, result, '.kimi-code/agents')
   ) {
     fs.mkdirSync(destAgents, { recursive: true });
+    const guard = guardFor(targetDir, options, result);
     for (const [file, content] of tree.agents) {
       atomicWriteFile(path.join(destAgents, file), content);
+      guard.record(path.join(destAgents, file));
     }
   }
   const agentCount = tree.agents.size;
@@ -216,6 +219,8 @@ export async function writeKimiFiles(
   if (!fs.existsSync(manifestPath) || options.force) {
     fs.mkdirSync(pluginDir, { recursive: true });
     atomicWriteFile(manifestPath, generateKimiPluginManifest(options));
+    // Recorded so cleanup removes it along with the hooks/ and commands/ it names.
+    guardFor(targetDir, options, result).record(manifestPath);
     result.created.files.push('.kimi-code/plugin/kimi.plugin.json');
   } else {
     result.skipped.push('.kimi-code/plugin/kimi.plugin.json');

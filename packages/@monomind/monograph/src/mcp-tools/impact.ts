@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { getNodesByIds, rowToNode } from '../storage/node-store.js';
 import type { MonographNode } from '../types.js';
+import { resolveNodeByName, type SymbolCandidate } from './resolve-node.js';
 
 // ── Risk level ─────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,10 @@ export interface MonographImpactResult {
   affectedFiles: string[];
   riskScore: number;
   riskLevel: RiskLevel;
+  /** True when `name` matched several nodes and nothing narrowed it to one. */
+  ambiguous?: boolean;
+  /** Populated when ambiguous (non-test first) — re-query with `nodeId` or `filePath`. */
+  candidates?: SymbolCandidate[];
 }
 
 // ── Reverse BFS on CALLS edges ────────────────────────────────────────────────
@@ -87,21 +92,20 @@ function reverseBfs(
 
 export function getMonographImpact(
   db: Database.Database,
-  input: { name: string; filePath?: string; depth?: number },
+  input: { name: string; filePath?: string; nodeId?: string; depth?: number },
 ): MonographImpactResult {
   const maxDepth = Math.min(input.depth ?? 3, 6);
 
-  // Find the node
-  let nodeRow: Record<string, unknown> | undefined;
-  if (input.filePath) {
-    nodeRow = db
-      .prepare('SELECT * FROM nodes WHERE name = ? AND file_path = ? LIMIT 1')
-      .get(input.name, input.filePath) as Record<string, unknown> | undefined;
-  } else {
-    nodeRow = db.prepare('SELECT * FROM nodes WHERE name = ? LIMIT 1').get(input.name) as
-      | Record<string, unknown>
-      | undefined;
-  }
+  // Find the node. Several same-named definitions (say, a test mock) are not
+  // silently narrowed to one — a wrong "0 callers, LOW" is worse than asking.
+  const { row: nodeRow, candidates } = input.nodeId
+    ? {
+        row: db.prepare('SELECT * FROM nodes WHERE id = ?').get(input.nodeId) as
+          | Record<string, unknown>
+          | undefined,
+        candidates: [],
+      }
+    : resolveNodeByName(db, input.name, input.filePath);
 
   if (!nodeRow) {
     return {
@@ -111,6 +115,8 @@ export function getMonographImpact(
       affectedFiles: [],
       riskScore: 0,
       riskLevel: 'LOW',
+      ambiguous: candidates.length > 1,
+      candidates,
     };
   }
 
@@ -119,7 +125,7 @@ export function getMonographImpact(
 
   // Reverse BFS to find all callers (depth 0 = start node)
   const visited = reverseBfs(nodeId, db, maxDepth, {});
-  return { node, ...extractCallerResult(db, nodeId, visited) };
+  return { node, ...extractCallerResult(db, nodeId, visited), ambiguous: false, candidates: [] };
 }
 
 // ── Shared helper: turn a visited map into structured caller lists ─────────────
