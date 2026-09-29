@@ -7,7 +7,7 @@ import { STRATEGIES } from './monoswarm-state.js';
 // Start swarm execution
 export const startCommand: Command = {
   name: 'start',
-  description: 'Start swarm execution',
+  description: 'Record a swarm config and show a suggested roster (starts no agents)',
   options: [
     {
       name: 'objective',
@@ -65,10 +65,11 @@ export const startCommand: Command = {
     output.printInfo(`Starting swarm with objective: ${output.highlight(objective)}`);
     output.writeln();
 
-    // Compute agent deployment plan based on strategy
+    // Compute the suggested roster for this strategy. Display-only: nothing
+    // here starts an agent (#418).
     const agentPlan = getAgentPlan(strategy);
 
-    output.writeln(output.bold('Agent Deployment Plan'));
+    output.writeln(output.bold('Suggested Agent Roster (not started)'));
     output.printTable({
       columns: [
         { key: 'role', header: 'Role', width: 20 },
@@ -82,7 +83,7 @@ export const startCommand: Command = {
     // Confirm execution
     if (ctx.interactive) {
       const confirmed = await confirm({
-        message: `Deploy ${agentPlan.reduce((sum, a) => sum + a.count, 0)} agents?`,
+        message: `Record monoswarm config for ${agentPlan.reduce((sum, a) => sum + a.count, 0)} agent slots?`,
         default: true,
       });
 
@@ -136,7 +137,7 @@ export const startCommand: Command = {
 
     output.writeln();
     output.printSuccess(
-      `Monoswarm ${resolvedSwarmId} config written (${totalAgents} agent slots reserved). No agents are running — use 'agent spawn' to dispatch Task-tool agents.`,
+      `Monoswarm ${resolvedSwarmId} config written (${totalAgents} agent slots reserved). No agents are started — launch them yourself (Claude Code Task tool, or 'monomind agent exec').`,
     );
     output.writeln(output.dim(`  Monitor: monomind monoswarm status ${resolvedSwarmId}`));
 

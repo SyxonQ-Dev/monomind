@@ -6,7 +6,7 @@
  * `../src/mcp-client.js` mock. This file goes further:
  *
  *  - getAgentPlan(): pure function, exercised via `monoswarm start`'s printed
- *    "Agent Deployment Plan" table (captured through the mocked `output.printTable`),
+ *    "Suggested Agent Roster" table (captured through the mocked `output.printTable`),
  *    checked against the roles CLAUDE.md's "Agent Routing" table implies
  *    (coordinator/architect/coder/tester/reviewer for a development-style build).
  *  - monoswarm init / start: `monoswarm_init` is mocked here (this file mocks the
@@ -196,7 +196,7 @@ function lastPrintTableData(): Array<Record<string, unknown>> {
 // getAgentPlan (via `monoswarm start`, the only place it's driven from)
 // ---------------------------------------------------------------------------
 // monoswarm.ts's getAgentPlan() is an unexported pure function keyed by
-// strategy name. `monoswarm start` renders it as the "Agent Deployment Plan"
+// strategy name. `monoswarm start` renders it as the "Suggested Agent Roster"
 // table (via output.printTable) and folds its total into the CommandResult's
 // `agents` count — so we assert against both.
 
