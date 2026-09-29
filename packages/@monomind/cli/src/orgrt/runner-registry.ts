@@ -243,9 +243,10 @@ const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     // arrives; there is no finer granularity available to request.
     streamsIncrementally: false,
     supportsFullAccess: true,
-    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
-    // signal with no id — best-effort, start-only tool_activity mapping.
-    toolActivityFidelity: 'start-only',
+    // Rev 15: `crush run` prints plain text with no native tool events; its
+    // only tool_use messages are label-free liveness pings, which never
+    // become tool_activity.
+    toolActivityFidelity: 'none',
   },
   {
     id: 'copilot',
@@ -275,9 +276,9 @@ const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
     // binary.
     streamsIncrementally: false,
     supportsFullAccess: true,
-    // #357: yields a lightweight {type:'tool_use', text: toolName} liveness
-    // signal with no id — best-effort, start-only tool_activity mapping.
-    toolActivityFidelity: 'start-only',
+    // Rev 15: the runner yields id-carrying tool_use + matched tool_result
+    // from pi's tool_execution_start/end (paired by toolCallId).
+    toolActivityFidelity: 'full',
   },
   {
     id: 'pi-rpc',

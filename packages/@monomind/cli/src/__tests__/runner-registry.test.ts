@@ -102,7 +102,7 @@ describe('runner registry', () => {
     expect(isKnownRuntime('cursor')).toBe(false);
   });
 
-  // Rev 13: --access full on every coding runtime; not on vercel/hermes/rpc variants.
+  // Rev 15: --access full on every coding runtime; not on vercel/hermes/rpc variants.
   it('supportsFullAccess is exactly the coding runtimes', () => {
     const full = RUNNER_SPECS.filter((s) => s.supportsFullAccess)
       .map((s) => s.id)
@@ -123,7 +123,7 @@ describe('runner registry', () => {
     );
   });
 
-  it('every RunnerSpec carries the rev 13 service flags', () => {
+  it('every RunnerSpec carries the rev 15 service flags', () => {
     const byId = new Map(RUNNER_SPECS.map((s) => [s.id, s]));
     for (const s of RUNNER_SPECS) {
       for (const k of ['resume', 'effort', 'maxTurns', 'reportsCost'] as const)
@@ -144,6 +144,29 @@ describe('runner registry', () => {
     expect(byId.get('hermes')?.resume).toBe(false);
   });
 
+  // Pins what each coding runner implements today (integration of the
+  // per-runner work) so a flag cannot drift from its runner silently.
+  it('service flags match each coding runner', () => {
+    const flags = Object.fromEntries(
+      RUNNER_SPECS.filter((s) => s.supportsFullAccess).map((s) => [
+        s.id,
+        [s.toolActivityFidelity, s.resume, s.effort, s.maxTurns, s.reportsCost].join(' '),
+      ]),
+    );
+    expect(flags).toEqual({
+      claude: 'full true true true true',
+      codex: 'full true true false false',
+      opencode: 'full true true false true',
+      antigravity: 'full true true false false',
+      kimicode: 'full true false false false',
+      grok: 'full true true true true',
+      qwen: 'full true false false false',
+      copilot: 'full true true false false',
+      crush: 'none false false false false',
+      pi: 'full true true false true',
+    });
+  });
+
   it('resolveExecRunner: unknown ids → null; claude → default runner', async () => {
     expect(await resolveExecRunner('definitely-not')).toBeNull();
     const claude = await resolveExecRunner('claude');
@@ -161,7 +184,7 @@ describe('runner registry', () => {
     expect(byId.get('claude')?.toolActivityFidelity).toBe('full');
     for (const id of ['codex', 'opencode', 'antigravity', 'kimicode'])
       expect(byId.get(id as 'codex')?.toolActivityFidelity, id).toBe('full');
-    expect(byId.get('crush')?.toolActivityFidelity).toBe('start-only');
+    expect(byId.get('crush')?.toolActivityFidelity).toBe('none');
     expect(byId.get('vercel')?.toolActivityFidelity).toBe('none');
   });
 });
@@ -232,7 +255,7 @@ describe('scanInstalled (§6)', () => {
     const byId = new Map(result.agents.map((x) => [x.id, x]));
     expect(byId.get('claude')?.tool_activity_fidelity).toBe('full');
     expect(byId.get('codex')?.tool_activity_fidelity).toBe('full');
-    expect(byId.get('pi')?.tool_activity_fidelity).toBe('start-only');
+    expect(byId.get('pi')?.tool_activity_fidelity).toBe('full');
     for (const a of result.agents) {
       expect(['full', 'start-only', 'none'], a.id).toContain(a.tool_activity_fidelity);
     }

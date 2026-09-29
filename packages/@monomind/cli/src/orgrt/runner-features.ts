@@ -1,7 +1,7 @@
 // packages/@monomind/cli/src/orgrt/runner-features.ts
 /**
  * Coder mode on every runtime: the per-runtime service flags `agent scan
- * --json` reports (doc/agent-exec-protocol.md §6, rev 13) so a caller can
+ * --json` reports (doc/agent-exec-protocol.md §6, rev 15) so a caller can
  * say honestly what a runtime gives a coder turn. Kept out of
  * runner-registry.ts (near the 500-line limit) and merged into each
  * `RunnerSpec` there. `Record<RuntimeKind, …>` makes a new runtime a
@@ -61,15 +61,25 @@ export const RUNNER_FEATURES: Record<RuntimeKind, RunnerFeatures> = {
     reportsCost: false,
     initTarget: 'kimicode',
   },
-  grok: { resume: true, effort: true, maxTurns: false, reportsCost: false, initTarget: null },
+  // grok: --max-turns per invocation; cost is result.total_cost_usd, which
+  // grok's docs say falls back to 0 when it cannot price the turn.
+  grok: { resume: true, effort: true, maxTurns: true, reportsCost: true, initTarget: null },
   qwen: { resume: true, effort: false, maxTurns: false, reportsCost: false, initTarget: null },
   // Resume is per-process only (the rpc session lives as long as the child).
-  'qwen-rpc': { resume: false, effort: false, maxTurns: false, reportsCost: false, initTarget: null },
+  'qwen-rpc': {
+    resume: false,
+    effort: false,
+    maxTurns: false,
+    reportsCost: false,
+    initTarget: null,
+  },
   // crush resumes with --continue inside one run only; no id to hand back.
   crush: { resume: false, effort: false, maxTurns: false, reportsCost: false, initTarget: null },
   // copilot: the closing result line carries sessionId; --resume=<id>.
   copilot: { resume: true, effort: true, maxTurns: false, reportsCost: false, initTarget: null },
-  pi: { resume: false, effort: false, maxTurns: false, reportsCost: false, initTarget: null },
+  // pi: session header id → --session <id>; effort → --thinking; cost is the
+  // sum of each message's usage.cost.total (0 for models pi cannot price).
+  pi: { resume: true, effort: true, maxTurns: false, reportsCost: true, initTarget: null },
   'pi-rpc': { resume: false, effort: false, maxTurns: false, reportsCost: false, initTarget: null },
   // hermes reports cost_usd: 0 — not a real figure.
   hermes: { resume: false, effort: false, maxTurns: false, reportsCost: false, initTarget: null },
