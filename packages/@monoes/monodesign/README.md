@@ -101,7 +101,7 @@ Source: [`cli/engine/registry/antipatterns.mjs`](packages/@monoes/monodesign/cli
 |---|---|---|
 | `regex` | Source text / CSS-in-JS scan | none |
 | `static-html` | HTMLparser2 static DOM parse | none |
-| `browser` | Puppeteer live-page scan | `puppeteer` (optional) |
+| `browser` | Live-page scan | `@monoes/monobrowse` (optional) with an installed Chrome, Chromium or Edge, else a `puppeteer` you install yourself |
 | `visual` | Visual contrast analysis | `@monoes/monobrowse` (optional) |
 
 ### Auto-Fix
@@ -198,7 +198,7 @@ Search order: `DESIGN.md` → `.agents/context/DESIGN.md` → `docs/DESIGN.md`.
 ```
 
 **Dependencies:** `css-select`, `css-tree`, `domutils`, `fflate`, `htmlparser2`, `marked`  
-**Optional:** `@monoes/monobrowse` (browser detection), `puppeteer` (live URL scanning)
+**Optional:** `@monoes/monobrowse` (browser detection and live URL scanning). `puppeteer` is no longer a dependency; install it yourself only for URL scans on a machine with no Chrome, Chromium or Edge. Through `monomind design detect`, monomind downloads a Chrome on first use instead.
 
 ---
 

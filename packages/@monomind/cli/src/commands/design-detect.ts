@@ -10,6 +10,7 @@ import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ensureManagedChrome } from '../browser/managed-chrome.js';
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { paletteSubcommand } from './design-palette.js';
@@ -68,9 +69,10 @@ export function resolveMonodesignCli(): string | null {
   return null;
 }
 
-function runMonodesign(cliPath: string, args: string[]): Promise<number> {
+function runMonodesign(cliPath: string, args: string[], env?: NodeJS.ProcessEnv): Promise<number> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [cliPath, ...args], {
+      env,
       stdio: 'inherit',
       shell: false,
     });
@@ -84,6 +86,29 @@ function runMonodesign(cliPath: string, args: string[]): Promise<number> {
       resolve(code ?? 0);
     });
   });
+}
+
+/**
+ * A URL scan needs a browser. #428 dropped the Chrome that puppeteer used to
+ * download at install time, so without an installed one, fetch monomind's
+ * own and point the detector's monobrowse driver at it. Undefined (inherit the
+ * environment) when a browser is installed or the download is not possible;
+ * the detector then reports what is missing itself.
+ */
+async function urlScanEnv(): Promise<NodeJS.ProcessEnv | undefined> {
+  const { findChrome } = await import('@monoes/monobrowse');
+  try {
+    findChrome();
+    return undefined;
+  } catch {
+    // no installed browser
+  }
+  try {
+    return { ...process.env, MONOBROWSE_CHROME_PATH: await ensureManagedChrome() };
+  } catch (err) {
+    output.writeln(output.warning((err as Error).message));
+    return undefined;
+  }
 }
 
 function printEngineMissing(): void {
@@ -154,7 +179,8 @@ const detectSubcommand: Command = {
     if (ctx.flags['no-group']) forwardArgs.push('--no-group');
     if (ctx.flags['include-unverified']) forwardArgs.push('--include-unverified');
 
-    const exitCode = await runMonodesign(cliPath, forwardArgs);
+    const env = /^https?:\/\//i.test(target) ? await urlScanEnv() : undefined;
+    const exitCode = await runMonodesign(cliPath, forwardArgs, env);
 
     return { success: exitCode === 0, exitCode };
   },

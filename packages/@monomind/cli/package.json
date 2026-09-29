@@ -97,13 +97,13 @@
     "publish:all": "./scripts/publish.sh"
   },
   "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.226",
     "chokidar": "^3.6.0",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.4"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.226",
     "@monoes/monobrowse": "workspace:*",
     "@monoes/monodesign": "workspace:*",
     "@monoes/monograph": "workspace:*",

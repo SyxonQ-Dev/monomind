@@ -1,7 +1,8 @@
 // packages/@monomind/cli/src/orgrt/agent-runner-claude.ts
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { createSdkMcpServer, query, tool } from '@anthropic-ai/claude-agent-sdk';
+import type { query } from '@anthropic-ai/claude-agent-sdk';
+import { ensureOptionalDependency } from '../utils/optional-deps.js';
 import { fullAccessClaudeSpawn } from './agent-runner-claude-fullaccess.js';
 import { resolveClaudeSettingsOverrides } from './agent-runner-claude-settings.js';
 import { createSubagentTracker } from './agent-runner-claude-subagent.js';
@@ -13,6 +14,24 @@ import { type DescendantTracker, trackDescendants } from './process-tree.js';
 import { omitAnthropicManagedKeys } from './provider.js';
 import { toolInputSchema } from './tool-fence.js';
 import { toolResultSpillHook } from './tool-spill.js';
+
+type ClaudeSdk = Pick<
+  typeof import('@anthropic-ai/claude-agent-sdk'),
+  'createSdkMcpServer' | 'query' | 'tool'
+>;
+
+let claudeSdk: Promise<ClaudeSdk> | undefined;
+
+/** The Claude Agent SDK, installed into ~/.monomind/deps on first use
+ *  (#428); it is not a dependency of the published package. Loaded once per
+ *  process; a failure is not cached, so a later session retries. */
+export const loadClaudeSdk = (): Promise<ClaudeSdk> =>
+  (claudeSdk ??= ensureOptionalDependency<ClaudeSdk>('@anthropic-ai/claude-agent-sdk').catch(
+    (err) => {
+      claudeSdk = undefined;
+      throw err;
+    },
+  ));
 
 /** Launch the Claude Code process inside the authority mask. Same stdio as the
  *  SDK's own spawn; stderr is drained (an unread pipe would stall the CLI once
@@ -42,13 +61,18 @@ function maskedClaudeSpawn(mask: string[]) {
  * Default runner — wraps the Claude Agent SDK. This is the previous inline
  * logic of runOneSession, extracted verbatim:
  *   - convert OrgToolDef[] → SDK tool() calls → createSdkMcpServer
- *   - call queryFn({ prompt, options }) (queryFn injectable for tests)
+ *   - call queryFn({ prompt, options }) (queryFn and the SDK loader injectable for tests)
  *   - normalize the raw stream into AgentMessage
  */
 export class ClaudeAgentRunner implements AgentRunner {
-  constructor(private queryFn: typeof query = query) {}
+  constructor(
+    private queryFn?: typeof query,
+    private loadSdk: () => Promise<ClaudeSdk> = loadClaudeSdk,
+  ) {}
 
   async *run(args: AgentRunArgs): AsyncIterable<AgentMessage> {
+    const { createSdkMcpServer, query, tool } = await this.loadSdk();
+    const queryFn = this.queryFn ?? query;
     // Wrap each OrgToolDef handler ({ text }) into the Claude SDK's
     // { content: [{ type: 'text', text }] } return shape.
     const sdkTools = args.tools.map((t) =>
@@ -140,7 +164,7 @@ export class ClaudeAgentRunner implements AgentRunner {
     });
     if (settingSources.length > 0) yield { type: 'status', phase: 'initializing' };
 
-    const stream = this.queryFn({
+    const stream = queryFn({
       prompt: args.prompt,
       options: {
         systemPrompt: settingsOverrides.systemPrompt,
