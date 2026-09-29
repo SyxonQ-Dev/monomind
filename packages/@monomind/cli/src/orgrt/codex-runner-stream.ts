@@ -4,6 +4,7 @@ import type { AgentRunArgs } from './agent-runner.js';
 import { killOnAbort } from './agent-runner.js';
 import { maskedCommand } from './authority-mask.js';
 import { codexSandboxArgs, roleGitLevel } from './cli-sandbox.js';
+import { codexEffortArgs } from './codex-runner-tools.js';
 import type { CodexEvent, CodexStreamEvent, TurnOutcome } from './codex-runner-types.js';
 import { classifyStderr } from './kimicode-runner.js';
 import { omitAnthropicManagedKeys } from './provider.js';
@@ -27,7 +28,7 @@ export async function* streamTurn(
   outcome: TurnOutcome,
 ): AsyncGenerator<CodexStreamEvent> {
   // ARG ORDER — see file header for the live-verified citation:
-  //   codex exec --json [--model X] [--cd Y]
+  //   codex exec --json [--model X] [-c model_reasoning_effort=L] [--cd Y]
   //              [--skip-git-repo-check] [--sandbox <mode>]
   //              [resume <threadId>] -- -
   // The prompt goes over STDIN, not argv: a single argv element is capped
@@ -38,6 +39,7 @@ export async function* streamTurn(
   // positional is ever mistaken for a flag.
   const cliArgs: string[] = ['exec', '--json'];
   if (args.model) cliArgs.push('--model', args.model);
+  cliArgs.push(...codexEffortArgs(args.effort));
   cliArgs.push('--cd', args.cwd);
   cliArgs.push('--skip-git-repo-check');
   // #263: codex's own sandbox follows the role's policy.git level — only a

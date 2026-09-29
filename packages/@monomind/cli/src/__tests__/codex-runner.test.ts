@@ -125,6 +125,61 @@ describe('CodexAgentRunner', () => {
     expect(spawnArgs[1]).toContain('--skip-git-repo-check');
   });
 
+  it('--effort maps to -c model_reasoning_effort before --cd; off → none', async () => {
+    for (const [effort, level] of [
+      ['high', 'high'],
+      ['off', 'none'],
+    ] as const) {
+      vi.mocked(cp.spawn).mockReturnValue(
+        makeMockChild([
+          JSON.stringify({ type: 'session_configured', session_id: 't1', thread_id: 't1' }),
+          JSON.stringify(TOKEN_COUNT),
+        ]),
+      );
+      const gen = runner.run({
+        tools: [],
+        prompt: (async function* () {
+          yield 'hello';
+        })(),
+        systemPrompt: '',
+        model: 'gpt-5.6-terra',
+        effort,
+        cwd: '/tmp',
+        env: {},
+        maxTurns: 5,
+      });
+      for await (const _m of gen) {
+        /* consume */
+      }
+      const argv = vi.mocked(cp.spawn).mock.calls.at(-1)?.[1] as string[];
+      const i = argv.indexOf('-c');
+      expect(argv[i + 1]).toBe(`model_reasoning_effort=${level}`);
+      expect(i).toBeGreaterThan(argv.indexOf('gpt-5.6-terra'));
+      expect(i).toBeLessThan(argv.indexOf('--cd'));
+    }
+  });
+
+  it('no --effort: no -c flag', async () => {
+    vi.mocked(cp.spawn).mockReturnValue(
+      makeMockChild([
+        JSON.stringify({ type: 'session_configured', session_id: 't1', thread_id: 't1' }),
+      ]),
+    );
+    for await (const _m of runner.run({
+      tools: [],
+      prompt: (async function* () {
+        yield 'hello';
+      })(),
+      systemPrompt: '',
+      cwd: '/tmp',
+      env: {},
+      maxTurns: 5,
+    })) {
+      /* consume */
+    }
+    expect(vi.mocked(cp.spawn).mock.calls[0][1]).not.toContain('-c');
+  });
+
   it('captures session id from session_configured event', async () => {
     vi.mocked(cp.spawn).mockReturnValue(
       makeMockChild([
