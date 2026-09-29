@@ -845,6 +845,7 @@ Constructs system prompt containing:
 - Responsibilities list from org config
 - Pinned skills and the on-demand skill catalog (§6.6)
 - Communication protocol (org_send usage)
+- That the role's `$TMPDIR` is private and cleanup globs must never run on a shared parent (see Private TMPDIR per Session below)
 - org_complete instructions (boss only)
 - Entity glossary
 
@@ -1048,6 +1049,45 @@ process builds a new sandbox — and the same session is resumed (in task scope,
 with a continuation message saying why (`sandbox-restart` status). This happens at most twice per
 task session; after that the role's `reports_to` coordinator is sent one message saying the role's
 shell is not running (`sandbox-fault-exhausted` audit event), and later faults are only audited.
+
+### Private TMPDIR per Session
+
+Every role session gets its own temp directory (#480), created by
+[`role-tmpdir.ts → createRoleTmpdir`](packages/@monomind/cli/src/orgrt/role-tmpdir.ts#createRoleTmpdir)
+before the runner starts: `<base>/<org>-<role>-XXXXXX/`, mode 0700, exported to the runner as
+`TMPDIR`, `TMP` and `TEMP`. `<base>` is the TMPDIR the role would have had without it, i.e. the
+daemon's own (`$TMPDIR`, else `$TMP`/`$TEMP`, else the OS default), so the release org's
+`TMPDIR=$HOME/mrg-tmp` becomes `$HOME/mrg-tmp/release-builder-a1B2c3/`. In role scope the role has
+one for its session's life; with `session_scope: "task"` each task session has its own. Before, every
+role shared the base: a bare `mktemp -d` put `tmp.XXXXXXXXXX` straight into it, and one role's
+`rm -rf tmp.*` there deleted the scratch of every other role running at the same time (13 matches
+where 3 were meant, 2.19.0 release run). Each role's prompt now says its `$TMPDIR` is private and
+that a cleanup glob must never run in a directory other roles also use.
+
+The subdirectory sits under the base, so the OS sandbox's writable temp root and the file-tool
+roots (both built from the base, see `file-roots.ts` above) already cover it. It separates scratch;
+it is not a security boundary: every role can still read and write the base, and so each other's
+directories.
+
+Cleanup removes only what the runtime created, by exact path, after checking the path is directly
+in the base, carries this org's and role's `<org>-<role>-` prefix and is a real directory, not a
+symlink
+([`removeRoleTmpdir`](packages/@monomind/cli/src/orgrt/role-tmpdir.ts#removeRoleTmpdir)). A task
+session's directory goes once its task is closed; the rest go when the role's session ends, and
+anything left when the org stops
+([`releaseRunTmpdirs`](packages/@monomind/cli/src/orgrt/role-tmpdir.ts#releaseRunTmpdirs)). On start
+the org sweeps what a killed daemon left behind
+([`sweepStaleRoleTmpdirs`](packages/@monomind/cli/src/orgrt/role-tmpdir.ts#sweepStaleRoleTmpdirs),
+`role-tmpdir-sweep` audit event): each directory holds a `.monomind-role-tmpdir.json` marker with its
+org, role, run, project root and owner pid, and only a directory whose marker names this org and
+project root and whose owner process is gone (or is this process, for an earlier run) is removed. A
+directory without a readable marker, of another org or project, or owned by a live process is left.
+A daemon crash-restart of one role starts it with a fresh directory.
+
+An explicit value wins: a `TMPDIR` set by a role-specific env overlay applied after the inherited
+environment (the git guard, cost tier or provider env) is kept as it is. There is no per-role `env`
+field in the org schema; to give a whole run a different base, set `TMPDIR` for `monomind org run`.
+If the base does not exist or is not writable, the role runs with the shared base as before.
 
 ### Tool Permission Channel
 
