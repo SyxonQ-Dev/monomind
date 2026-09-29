@@ -3,7 +3,6 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   browserIdOf,
@@ -16,7 +15,12 @@ import {
   readDevToolsActivePort,
 } from './browser-discovery.js';
 import { reapIdleLaunchedBrowser } from './browser-lifecycle.js';
-import { launchedPids, launchedUserDataDirs } from './browser-state.js';
+import { launchedPids, launchedUserDataDirs, ownedUserDataDirPorts } from './browser-state.js';
+import {
+  launchProfileDirPath,
+  removeOwnedProfileDir,
+  sweepStaleProfileDirs,
+} from './profile-dir.js';
 import type { BrowserConfig } from './types.js';
 
 const DEFAULT_PORT = 9222;
@@ -52,6 +56,10 @@ export async function launchBrowser(config: BrowserConfig = {}): Promise<number>
   // is no daemon to do it on a timer. Bounded and non-throwing; a stale
   // instance on the port we are about to use is freed before we probe it.
   await reapIdleLaunchedBrowser();
+  // Same reasoning for temp profile dirs (#395): a process that crashed or
+  // was killed never deleted the one its browser used. Only dead, idle,
+  // unused dirs of our own naming go — see sweepStaleProfileDirs.
+  await sweepStaleProfileDirs();
 
   if (rawPort === 0) return launchOnFreePort(config, 0);
 
@@ -157,9 +165,10 @@ async function launchOnFreePort(config: BrowserConfig, port: number): Promise<nu
   // otherwise share one profile directory (lock files, preferences, the
   // DevToolsActivePort file itself) — including two launches from the same
   // process, where a pid suffix alone is identical.
-  const userDataDir =
-    config.userDataDir ??
-    join(tmpdir(), `monomind-browser-${port}-${process.pid}-${randomUUID().slice(0, 8)}`);
+  const userDataDir = config.userDataDir ?? launchProfileDirPath(port, randomUUID().slice(0, 8));
+  // A dir we created is deleted once its browser is gone (#395); a
+  // caller-supplied one only when the caller says it made it for us.
+  const ownsUserDataDir = config.userDataDir === undefined || config.ownsUserDataDir === true;
   const activePortFile = join(userDataDir, 'DevToolsActivePort');
   // A reused profile dir may hold a previous run's file naming a port some
   // other process now owns.
@@ -257,6 +266,8 @@ async function launchOnFreePort(config: BrowserConfig, port: number): Promise<nu
     if (!child.pid) return;
     launchedPids.set(boundPort, child.pid);
     launchedUserDataDirs.set(boundPort, userDataDir);
+    if (ownsUserDataDir) ownedUserDataDirPorts.add(boundPort);
+    else ownedUserDataDirPorts.delete(boundPort);
   };
   // Tracked only once Chrome is CONFIRMED up on `boundPort`, not right after
   // spawn(). For port !== 0 this used to track(port) unconditionally the
@@ -291,6 +302,7 @@ async function launchOnFreePort(config: BrowserConfig, port: number): Promise<nu
 
   const launchTimeout = config.launchTimeoutMs ?? LAUNCH_TIMEOUT;
   const deadline = Date.now() + launchTimeout;
+  let launched = false;
   try {
     while (Date.now() < deadline) {
       if (earlyFailure) throw earlyFailure;
@@ -302,6 +314,7 @@ async function launchOnFreePort(config: BrowserConfig, port: number): Promise<nu
         if (identity === 'chrome') {
           if (await isOwnEndpoint(boundPort)) {
             track(boundPort);
+            launched = true;
             return boundPort;
           }
           // Some Chrome answers on the port, but not the one we started: a
@@ -350,6 +363,10 @@ async function launchOnFreePort(config: BrowserConfig, port: number): Promise<nu
     throw new Error(`Chrome failed to start on port ${port} within ${launchTimeout}ms`);
   } finally {
     child.stderr?.destroy();
+    // A failed launch (lost port race, refusal, timeout) is never tracked,
+    // so no close will ever clean its profile — and the port-scan retry in
+    // launchBrowser can make several of these per call.
+    if (!launched && ownsUserDataDir) await removeOwnedProfileDir(userDataDir, { pid: child.pid });
   }
 }
 

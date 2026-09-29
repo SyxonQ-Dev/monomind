@@ -118,6 +118,9 @@ export interface SessionRecord {
   launched: boolean;
   pid?: number;
   userDataDir?: string;
+  /** true = monobrowse created `userDataDir` itself, so closing this session
+   *  deletes it (#395). Absent for a caller-supplied or older record. */
+  ownsUserDataDir?: boolean;
   savedAt?: number;
   /** Set by `--session <name>`: only commands naming it resolve this session,
    *  and commands naming none never land on it. */
@@ -142,6 +145,7 @@ export async function saveSessionRecord(
     launched?: boolean;
     pid?: number;
     userDataDir?: string;
+    ownsUserDataDir?: boolean;
     savedAt?: number;
     name?: string;
   },
@@ -161,6 +165,7 @@ export async function saveSessionRecord(
         launched: opts?.launched !== false,
         pid: opts?.pid,
         userDataDir: opts?.userDataDir,
+        ownsUserDataDir: opts?.ownsUserDataDir === true || undefined,
         savedAt: opts?.savedAt ?? Date.now(),
         name: opts?.name,
       }),
@@ -247,6 +252,7 @@ function parseSessionRecord(raw: string): SessionRecord | null {
     launched?: unknown;
     pid?: unknown;
     userDataDir?: unknown;
+    ownsUserDataDir?: unknown;
     savedAt?: unknown;
     name?: unknown;
   };
@@ -266,6 +272,7 @@ function parseSessionRecord(raw: string): SessionRecord | null {
         ? data.pid
         : undefined,
     userDataDir: typeof data.userDataDir === 'string' ? data.userDataDir : undefined,
+    ownsUserDataDir: data.ownsUserDataDir === true || undefined,
     savedAt: typeof data.savedAt === 'number' ? data.savedAt : undefined,
     name: typeof data.name === 'string' && SESSION_NAME_RE.test(data.name) ? data.name : undefined,
   };
