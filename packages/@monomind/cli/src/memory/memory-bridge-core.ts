@@ -54,6 +54,9 @@ export const BRIDGE_MAX_KEY_LEN = 4 * 1024;
 export const BRIDGE_MAX_VALUE_LEN = 16 * 1024;
 export const MAX_TAGS = 32;
 export const MAX_TAG_LEN = 64;
+// Default minimum similarity for memory search. The bundled embedding model
+// scores correct matches around 0.55-0.61, so a higher default hides them.
+export const DEFAULT_SEARCH_THRESHOLD = 0.3;
 // Search results serve the head of the stored content only — full values bloat
 // every MCP payload. Entries needing the full text can read the entry by key.
 const BRIDGE_RESULT_CONTENT_CAP = 500;

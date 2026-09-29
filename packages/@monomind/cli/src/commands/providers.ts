@@ -5,9 +5,17 @@
  * github.com/monoes/monomind
  */
 
+import { spawnSync } from 'node:child_process';
 import { output } from '../output.js';
 import { configManager } from '../services/config-file-manager.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
+
+/** True when `file` is inside a git work tree and not ignored. `git
+ *  check-ignore` exits 0 when ignored, 1 when not, 128 outside a repo. */
+function isGitTrackable(cwd: string, file: string): boolean {
+  const res = spawnSync('git', ['check-ignore', '-q', file], { cwd, stdio: 'ignore' });
+  return res.status === 1;
+}
 
 // Configure subcommand
 const configureCommand: Command = {
@@ -69,6 +77,17 @@ const configureCommand: Command = {
 
       agents.providers = providers;
       configManager.set(cwd, 'agents.providers', providers);
+      const configPath = configManager.getConfigPath();
+      if (apiKey && configPath) {
+        output.writeln(output.dim(`  API key written to ${configPath}`));
+        if (isGitTrackable(cwd, configPath)) {
+          output.writeln(
+            output.warning(
+              `  Warning: ${configPath} is not gitignored — add it to .gitignore (or run \`monomind doctor --fix\`) so the key is never committed.`,
+            ),
+          );
+        }
+      }
 
       output.writeln();
       output.writeln(output.bold(`Configured: ${provider}`));
