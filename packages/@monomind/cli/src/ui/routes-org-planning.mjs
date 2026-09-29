@@ -5,7 +5,7 @@ import path from 'node:path';
 // Registered, in order, by handleOrgRoutes in routes-org.mjs.
 export async function handleOrgPlanningRoutes(req, res, url, corsOrigin, ctx) {
   // GET /api/org/:name/budgets — org and per-agent budget data
-  // Returns: { org_budget: {limit_tokens, limit_usd}, agent_budgets: {agentId: {limit_usd}}, agents: [{id, title, tokens_in, tokens_out, total_cost_usd}] }
+  // Returns: { org_budget: {limit_tokens}, agent_budgets: {agentId: {limit_usd, limit_tokens}}, agents: [{id, title, tokens_in, tokens_out, total_cost_usd}] }
   if (req.method === 'GET' && url.match(/^\/api\/org\/[a-z0-9][a-z0-9_-]{0,63}\/budgets$/i)) {
     try {
       const orgName = decodeURIComponent(url.split('/')[3]);
@@ -20,11 +20,23 @@ export async function handleOrgPlanningRoutes(req, res, url, corsOrigin, ctx) {
         '.monomind',
         'orgs',
       );
-      let budgetData = { org_budget: {}, agent_budgets: {}, period: 'monthly', currency: 'USD' };
+      // #400: limits are the caps the org runtime enforces, read from the org
+      // definition (roles[].budget_usd / budget_tokens, run_config.budget_tokens)
+      // — not a side-car <org>-budgets.json that nothing enforces. There is no
+      // org-wide USD cap, so org_budget.limit_usd is never set.
+      const budgetData = { org_budget: {}, agent_budgets: {}, period: 'run', currency: 'USD' };
       try {
-        budgetData = JSON.parse(
-          fs.readFileSync(path.join(base, `${orgName}-budgets.json`), 'utf8'),
-        );
+        const def = JSON.parse(fs.readFileSync(path.join(base, `${orgName}.json`), 'utf8'));
+        budgetData.org_budget.limit_tokens = def.run_config?.budget_tokens ?? 1_000_000;
+        for (const r of def.roles || []) {
+          const limitUsd = r.policy?.maxUsd ?? r.budget_usd;
+          const limitTokens = r.policy?.maxTokens ?? r.budget_tokens;
+          if (limitUsd == null && limitTokens == null) continue;
+          budgetData.agent_budgets[r.id] = {
+            ...(limitUsd != null ? { limit_usd: limitUsd } : {}),
+            ...(limitTokens != null ? { limit_tokens: limitTokens } : {}),
+          };
+        }
       } catch (_) {}
       // Enrich with per-agent spend from state file.
       // State file format: { agents: { "<role_id>": { tokens_in, tokens_out, ... } } }
