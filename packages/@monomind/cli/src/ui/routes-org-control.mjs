@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as hil from './org-hil.mjs';
+import { writeSse } from './sse-manager.mjs';
 
 // Org dashboard routes: mark-complete, current-run stream and chat.
 // Registered, in order, by handleOrgRoutes in routes-org.mjs.
@@ -63,13 +64,7 @@ export async function handleOrgControlRoutes(req, res, url, corsOrigin, ctx) {
       const _mcFwdClients = ctx.runStreamClients.get(_mcOrgName);
       if (_mcFwdClients && _mcFwdClients.size > 0) {
         const _mcLine = `data: ${JSON.stringify(_mcEvent)}\n\n`;
-        for (const _cl of _mcFwdClients) {
-          try {
-            _cl.write(_mcLine);
-          } catch (_) {
-            _mcFwdClients.delete(_cl);
-          }
-        }
+        for (const _cl of _mcFwdClients) writeSse(_cl, _mcLine, _mcFwdClients);
       }
       res.writeHead(200, {
         'Content-Type': 'application/json',
@@ -270,13 +265,7 @@ export async function handleOrgControlRoutes(req, res, url, corsOrigin, ctx) {
       const _chFwdClients = ctx.runStreamClients.get(_chOrgName);
       if (_chFwdClients && _chFwdClients.size > 0) {
         const _chLine = `data: ${JSON.stringify(_chEvent)}\n\n`;
-        for (const _cl of _chFwdClients) {
-          try {
-            _cl.write(_chLine);
-          } catch (_) {
-            _chFwdClients.delete(_cl);
-          }
-        }
+        for (const _cl of _chFwdClients) writeSse(_cl, _chLine, _chFwdClients);
       }
       res.writeHead(200, {
         'Content-Type': 'application/json',

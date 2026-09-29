@@ -68,8 +68,12 @@ const zeroUsage = () => ({
   legacy_tokens: 0,
 });
 
-// A run's bus.jsonl reaches tens of MB; parse each version once.
+// A run's bus.jsonl reaches tens of MB; parse each version once. Keyed by file,
+// so it used to gain an entry for every run of every org the dashboard ever
+// showed; kept to the most recently read RUN_CACHE_MAX runs (#477).
 const runCache = new Map();
+export const RUN_CACHE_MAX = 64;
+export const runCacheSize = () => runCache.size;
 
 /** Per-role usage, last activity and the runtime audit trail of one run. */
 export function readRunDigest(root, org, run) {
@@ -81,7 +85,11 @@ export function readRunDigest(root, org, run) {
     return null;
   }
   const cached = runCache.get(file);
-  if (cached && cached.size === st.size && cached.mtimeMs === st.mtimeMs) return cached.digest;
+  if (cached && cached.size === st.size && cached.mtimeMs === st.mtimeMs) {
+    runCache.delete(file); // re-insert: Map order is the LRU order
+    runCache.set(file, cached);
+    return cached.digest;
+  }
   const usage = {};
   const lastActivity = {};
   const audit = [];
@@ -124,7 +132,9 @@ export function readRunDigest(root, org, run) {
     }
   }
   const digest = { startedAt, usage, lastActivity, audit: audit.reverse() };
+  runCache.delete(file);
   runCache.set(file, { size: st.size, mtimeMs: st.mtimeMs, digest });
+  if (runCache.size > RUN_CACHE_MAX) runCache.delete(runCache.keys().next().value);
   return digest;
 }
 

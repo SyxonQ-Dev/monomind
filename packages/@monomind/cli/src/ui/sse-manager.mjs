@@ -18,6 +18,63 @@ const sseClients = new Set();
 /** Connected clients for the /api/mastermind-stream SSE endpoint. */
 const mmSseClients = new Set();
 
+/**
+ * Most bytes a client may have queued and unsent before it is dropped (#477).
+ * res.write() does not throw for a peer that stopped reading (a suspended
+ * laptop, a frozen tab), so every broadcast used to queue on its socket in this
+ * process's memory for as long as the connection stayed open.
+ */
+export const MAX_SSE_BACKLOG_BYTES = 1024 * 1024;
+
+/**
+ * Write one SSE message to `client`, dropping it from `registry` (and closing
+ * it) when it is gone, the write fails, or it has more than
+ * MAX_SSE_BACKLOG_BYTES unsent.
+ * @param {import('http').ServerResponse} client
+ * @param {string} msg
+ * @param {Set<import('http').ServerResponse>} registry
+ * @returns {boolean} false when the client was dropped
+ */
+export function writeSse(client, msg, registry) {
+  try {
+    if (client.destroyed || client.writableEnded) throw new Error('closed');
+    if (client.writableLength > MAX_SSE_BACKLOG_BYTES) {
+      client.destroy();
+      throw new Error('backlog');
+    }
+    client.write(msg);
+    return true;
+  } catch {
+    registry.delete(client);
+    return false;
+  }
+}
+
+/** End every response in `registry` and empty it. */
+function endAll(registry) {
+  for (const client of registry) {
+    try {
+      client.end();
+    } catch {
+      // Already ended
+    }
+  }
+  registry.clear();
+}
+
+/**
+ * Close every SSE connection in this process: the general and mastermind
+ * streams plus the per-org registries passed in (runStreamClients' Sets).
+ * shutdown() used to end only the general stream; the still-open mastermind
+ * and org streams kept server.close() from ever finishing (#477).
+ * @param {Iterable<Set<import('http').ServerResponse>>} [extraRegistries]
+ */
+export function closeAllSseClients(extraRegistries = []) {
+  endAll(sseClients);
+  endAll(mmSseClients);
+  for (const registry of extraRegistries) endAll(registry);
+}
+
 // ── General SSE (sseClients) ──────────────────────────────────────────────────
 
 /**
@@ -43,13 +100,7 @@ export function removeSseClient(res) {
  */
 export function broadcast(data) {
   const msg = `data: ${JSON.stringify(data)}\n\n`;
-  for (const client of sseClients) {
-    try {
-      client.write(msg);
-    } catch {
-      sseClients.delete(client);
-    }
-  }
+  for (const client of sseClients) writeSse(client, msg, sseClients);
 }
 
 /**
@@ -64,14 +115,7 @@ export function getSseClientCount() {
  * Close all general SSE connections (called on server shutdown).
  */
 export function closeSseClients() {
-  for (const client of sseClients) {
-    try {
-      client.end();
-    } catch {
-      // Already ended
-    }
-  }
-  sseClients.clear();
+  endAll(sseClients);
 }
 
 // ── Mastermind SSE (mmSseClients) ─────────────────────────────────────────────
@@ -101,13 +145,7 @@ export function removeMmClient(res) {
 export function broadcastMm(lineOrData) {
   const line = typeof lineOrData === 'string' ? lineOrData : JSON.stringify(lineOrData);
   const msg = `data: ${line}\n\n`;
-  for (const c of mmSseClients) {
-    try {
-      c.write(msg);
-    } catch {
-      mmSseClients.delete(c);
-    }
-  }
+  for (const c of mmSseClients) writeSse(c, msg, mmSseClients);
 }
 
 /**
