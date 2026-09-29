@@ -44,9 +44,10 @@
     runtimes need no new capability: a caller discovers them through `agent scan --json` (§6),
     whose entry set grows.
     - `cline` (Cline CLI; `--json` for a fresh session, ACP `session/load` for resume; kills the
-      hub daemon a turn starts; `init_target: "cline"`). Scoped cline refuses every tool call
-      that needs approval (commands, edits, subagents, MCP tools) instead of approving it, and
-      never waits for an answer: the refused call's `tool_activity` ends `ok:false,
+      hub daemon a turn starts; `init_target: "cline"`). Scoped cline allows file edits
+      inside the project (`--cwd`, not `.git`) and refuses every other tool call that needs
+      approval (commands, edits outside the project, subagents, MCP tools), and never waits for
+      an answer: the refused call's `tool_activity` ends `ok:false,
       denied:true` and the turn continues.
     - `aider` (Aider through a Python shim run with aider's own interpreter, plain-CLI fallback
       when aider cannot be imported; `init_target: "aider"`; no MCP).

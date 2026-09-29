@@ -32,6 +32,14 @@ if (!canRebuild) {
   process.exit(0);
 }
 
+// #414: without git there is no HEAD to compare the index against, so every
+// session would rebuild from scratch (a non-git workspace parent grew to
+// 3.4 GB this way). Leave the build to the user.
+if (!isGitWorkTree(projectDir)) {
+  if (!quiet) console.log('[graph] not a git repository — skipping automatic graph build; run `monomind monograph build` to build it manually');
+  process.exit(0);
+}
+
 // Skip if index is already fresh — don't waste CPU on every session start
 const dbPath = path.join(projectDir, '.monomind', 'monograph.db');
 if (fs.existsSync(dbPath) && mg.commitsBehind(projectDir, mg.readIndexedCommit(dbPath)) === 0) {
@@ -48,6 +56,16 @@ if (fs.existsSync(dbPath) && mg.commitsBehind(projectDir, mg.readIndexedCommit(d
 // control-start.cjs's spawn lock (see P2-25) — a lock older than 5 minutes
 // is treated as abandoned and safely reclaimed, and so is one whose build
 // process has exited.
+// #414: at most one automatic full build per project every 10 minutes, so
+// sessions started back to back don't each rebuild an index that is only
+// "stale" because HEAD can't be compared (e.g. a repo with no commits yet).
+const lastAutoBuildPath = path.join(graphDir, 'last-auto-build');
+const AUTO_BUILD_INTERVAL_MS = 10 * 60 * 1000;
+if (Date.now() - readLastAutoBuild(lastAutoBuildPath) < AUTO_BUILD_INTERVAL_MS) {
+  if (!quiet) console.log('[graph] automatic build ran less than 10 min ago — skipping');
+  process.exit(0);
+}
+
 const lockPath = path.join(graphDir, 'build.lock');
 if (!mg.claimRebuildLock(lockPath, 0, 5 * 60 * 1000)) {
   if (!quiet) console.log('[graph] build already in progress — skipping');
@@ -59,9 +77,26 @@ if (!mg.claimRebuildLock(lockPath, 0, 5 * 60 * 1000)) {
 const pidPath = path.join(graphDir, 'build.pid');
 const started = mg.startRebuild(projectDir, { resolved, lockPath, cleanup: [pidPath], vacuum: true });
 
+try { fs.writeFileSync(lastAutoBuildPath, String(Date.now()), 'utf-8'); } catch { /* best-effort */ }
+
 // Track PID so control-stop.cjs can kill it on session exit
 try {
   if (started.pid) fs.writeFileSync(pidPath, String(started.pid), 'utf-8');
 } catch { /* best-effort */ }
 
 if (!quiet) console.log('[graph] background build started for ' + projectDir);
+
+function isGitWorkTree(dir) {
+  try {
+    return require('child_process').execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
+      cwd: dir, encoding: 'utf-8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim() === 'true';
+  } catch { return false; }
+}
+
+function readLastAutoBuild(file) {
+  try {
+    const t = parseInt(fs.readFileSync(file, 'utf-8'), 10);
+    return Number.isFinite(t) ? t : 0;
+  } catch { return 0; }
+}

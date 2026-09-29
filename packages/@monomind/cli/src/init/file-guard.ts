@@ -153,22 +153,31 @@ export class FileGuard {
     return true;
   }
 
+  /** Record the hash of a file a writer just wrote without the guard (the
+   *  converted .opencode/.kimi-code mirrors), so `cleanup` can prove it is
+   *  an untouched install. Hashed at `finalize`, like everything else. */
+  record(file: string): void {
+    this.touched.add(this.rel(file));
+  }
+
   copyFile(src: string, dest: string): GuardOutcome {
     return this.write(dest, fs.readFileSync(src), fs.statSync(src).mode & 0o777);
   }
 
   /** copyDirRecursive through the guard. Returns whether any file inside was
    *  actually written (new or changed) — false when every file already
-   *  existed and matched (or, under `--if-missing`, simply already existed). */
-  copyDir(src: string, dest: string): boolean {
+   *  existed and matched (or, under `--if-missing`, simply already existed).
+   *  `skip` leaves out any source file or directory it returns true for. */
+  copyDir(src: string, dest: string, skip?: (srcPath: string) => boolean): boolean {
     let changed = false;
     for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
       // Skip exFAT/macOS AppleDouble junk files (e.g. "._foo.js").
       if (entry.name.startsWith('._')) continue;
       const from = path.join(src, entry.name);
       const to = path.join(dest, entry.name);
+      if (skip?.(from)) continue;
       if (entry.isDirectory()) {
-        if (this.copyDir(from, to)) changed = true;
+        if (this.copyDir(from, to, skip)) changed = true;
       } else if (this.copyFile(from, to) === 'written') {
         changed = true;
       }

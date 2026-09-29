@@ -26,7 +26,7 @@ Automated release coordination and deployment with Monomind swarm orchestration 
 
 ```javascript
 // Initialize release management swarm
-mcp__monomind__swarm_init { topology: "hierarchical", maxAgents: 6 }
+mcp__monomind__monoswarm_init { topology: "hierarchical", maxAgents: 6 }
 mcp__monomind__agent_spawn { type: "coordinator", name: "Release Coordinator" }
 mcp__monomind__agent_spawn { type: "tester", name: "QA Engineer" }
 mcp__monomind__agent_spawn { type: "reviewer", name: "Release Reviewer" }
@@ -42,8 +42,8 @@ mcp__github__create_branch {
 }
 
 // Orchestrate release preparation
-mcp__monomind__task_orchestrate {
-  task: "Prepare release v1.8.0 with comprehensive testing and validation",
+mcp__monomind__task_create {
+  description: "Prepare release v1.8.0 with comprehensive testing and validation",
   strategy: "sequential",
   priority: "critical"
 }
@@ -142,7 +142,7 @@ mcp__github__create_pull_request {
 ```javascript
 [Single Message - Complete Release Management]:
   // Initialize comprehensive release swarm
-  mcp__monomind__swarm_init { topology: "star", maxAgents: 8 }
+  mcp__monomind__monoswarm_init { topology: "star", maxAgents: 8 }
   mcp__monomind__agent_spawn { type: "coordinator", name: "Release Director" }
   mcp__monomind__agent_spawn { type: "tester", name: "QA Lead" }
   mcp__monomind__agent_spawn { type: "reviewer", name: "Senior Reviewer" }

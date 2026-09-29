@@ -3,29 +3,17 @@
  * File-size sweep: split out of kimi-generator.ts.
  */
 
+import { mcpServerEntry } from '../platform-adapters/renderers/mcp.js';
 import type { InitOptions } from './types.js';
 
-function isWindows(): boolean {
-  return process.platform === 'win32';
-}
-
-/** Platform-specific npx invocation, mirrors mcp-generator.ts. */
-function monomindMcpEntry(env: Record<string, string>): Record<string, unknown> {
-  const base = ['-y', 'monomind@latest', 'mcp', 'start'];
-  return isWindows()
-    ? { command: 'cmd', args: ['/c', 'npx', ...base], env }
-    : { command: 'npx', args: base, env };
-}
-
-function monomindEnv(options: InitOptions): Record<string, string> {
-  return {
-    npm_config_update_notifier: 'false',
-    MONOMIND_MODE: 'v1',
-    MONOMIND_HOOKS_ENABLED: 'true',
-    MONOMIND_TOPOLOGY: options.runtime.topology,
-    MONOMIND_MAX_AGENTS: String(options.runtime.maxAgents),
-    MONOMIND_MEMORY_BACKEND: options.runtime.memoryBackend,
-  };
+/** Platform-specific pinned npx invocation, shared with mcp-generator.ts. */
+function monomindMcpEntry(options: InitOptions): Record<string, unknown> {
+  return mcpServerEntry(
+    'kimi',
+    { npm_config_update_notifier: 'false' },
+    process.platform,
+    options.mcp.pin,
+  );
 }
 
 /**
@@ -35,9 +23,7 @@ function monomindEnv(options: InitOptions): Record<string, string> {
 export function generateKimiMcpConfig(options: InitOptions): Record<string, unknown> {
   const config: Record<string, unknown> = { mcpServers: {} };
   if (options.mcp.monomind) {
-    (config.mcpServers as Record<string, unknown>).monomind = monomindMcpEntry(
-      monomindEnv(options),
-    );
+    (config.mcpServers as Record<string, unknown>).monomind = monomindMcpEntry(options);
   }
   return config;
 }
@@ -61,7 +47,7 @@ export function mergeKimiMcpJson(existing: string, options: InitOptions): string
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
   const servers = (parsed.mcpServers ?? {}) as Record<string, unknown>;
   if (typeof servers !== 'object' || servers === null || Array.isArray(servers)) return null;
-  if (options.mcp.monomind) servers.monomind = monomindMcpEntry(monomindEnv(options));
+  if (options.mcp.monomind) servers.monomind = monomindMcpEntry(options);
   parsed.mcpServers = servers;
   return `${JSON.stringify(parsed, null, 2)}\n`;
 }

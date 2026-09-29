@@ -26,6 +26,7 @@ vi.mock('@monoes/memory', () => {
 
 import { deleteCommand } from '../commands/memory-admin.js';
 import { retrieveCommand, searchCommand, storeCommand } from '../commands/memory-crud.js';
+import { DEFAULT_SEARCH_THRESHOLD } from '../memory/memory-bridge-core.js';
 import { initializeMemoryDatabase } from '../memory/memory-initializer.js';
 
 function ctx(overrides: Partial<CommandContext> = {}): CommandContext {
@@ -238,6 +239,14 @@ describe('memory-crud commands (sql.js fallback path)', () => {
   });
 
   describe('search', () => {
+    // #407: the option default was 0.7 while the bridge used 0.3, so correct
+    // matches from the bundled embedding model (0.55-0.61) were filtered out.
+    it('declares the --threshold default as the bridge default', () => {
+      const opt = searchCommand.options?.find((o) => o.name === 'threshold');
+      expect(DEFAULT_SEARCH_THRESHOLD).toBe(0.3);
+      expect(opt?.default).toBe(DEFAULT_SEARCH_THRESHOLD);
+    });
+
     it('requires a query', async () => {
       const result = await run(searchCommand, ctx({ flags: { _: [] } }));
       expect(result.success).toBe(false);

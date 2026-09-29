@@ -204,8 +204,10 @@ asked for `full` (they'd believe they had full access and didn't) or vice versa.
   (`--config`/`--data-dir`, an empty MCP list) and refuses every tool call that needs approval
   instead of approving it: it runs with `--auto-approve false` plus a monomind plugin in that
   config dir that re-approves only cline's own safe tools (read, search, web fetch, questions,
-  skills) and skips commands, file edits, patches, subagents, teams and MCP tools; a resumed (ACP)
-  turn also rejects such permission requests. Nothing waits for an answer (a non-TTY cline refuses
+  skills) plus file edits and patches whose every target resolves inside the turn's `--cwd`
+  (relative paths against it, symlinks resolved, nothing under `.git`, and refused when the
+  folder is unknown), and skips commands, edits outside the project, subagents, teams and MCP
+  tools; a resumed (ACP) turn answers permission requests by the same rule. Nothing waits for an answer (a non-TTY cline refuses
   an unanswered approval at once, and desktop approval IPC is switched off); the refused call ends
   `ok:false, denied:true` and the turn goes on. Without the plugin the turn fails closed (every
   tool refused). A workspace's own `.cline/plugins` still load, as in the user's terminal.
