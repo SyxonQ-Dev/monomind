@@ -12,7 +12,7 @@ import {
   activeSessionsByOrg,
   runStreamClients,
 } from './server-rundb.mjs';
-import { broadcastMm } from './sse-manager.mjs';
+import { broadcastMm, writeSse } from './sse-manager.mjs';
 
 function createHandleMastermindEvent({ projectDir, MONOMIND_HOME }) {
   return async function handleMastermindEvent(req, res, corsOrigin) {
@@ -422,13 +422,7 @@ function createHandleMastermindEvent({ projectDir, MONOMIND_HOME }) {
       const _fwdClients = runStreamClients.get(_fwdOrg);
       if (_fwdClients && _fwdClients.size > 0) {
         const _fwdLine = `data: ${JSON.stringify(event)}\n\n`;
-        for (const _fwdClient of _fwdClients) {
-          try {
-            _fwdClient.write(_fwdLine);
-          } catch (_) {
-            _fwdClients.delete(_fwdClient);
-          }
-        }
+        for (const _fwdClient of _fwdClients) writeSse(_fwdClient, _fwdLine, _fwdClients);
       }
     }
     res.writeHead(200, {

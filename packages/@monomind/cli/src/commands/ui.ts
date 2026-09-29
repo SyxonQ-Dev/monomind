@@ -125,6 +125,24 @@ export const uiCommand: Command = {
         projectDirExplicit: Boolean(ctx.flags['project-dir']),
       });
 
+      // #477: this project's dashboard is already served by another process —
+      // nothing was started here, so report it and return instead of waiting.
+      if (startResult.alreadyRunning) {
+        output.printInfo(
+          `Neural Control Room already running at ${startResult.url} (pid ${startResult.pid})`,
+        );
+        if (ctx.flags.format === 'json') {
+          output.printJson({
+            port: startResult.port,
+            url: startResult.url,
+            projectDir: path.resolve(projectDir),
+            running: true,
+            alreadyRunning: true,
+          });
+        }
+        return { success: true, data: { port: startResult.port, url: startResult.url } };
+      }
+
       output.writeln();
       output.printSuccess(
         `Monomind Neural Control Room running at ${startResult.url} (port ${startResult.port})`,
