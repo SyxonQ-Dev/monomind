@@ -5,7 +5,7 @@ import type { Command, CommandContext, CommandResult } from '../types.js';
 // Metrics subcommand
 export const metricsCommand: Command = {
   name: 'metrics',
-  description: 'View learning metrics dashboard',
+  description: 'View recorded routing/outcome metrics',
   options: [
     {
       name: 'period',

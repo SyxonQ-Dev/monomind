@@ -257,7 +257,7 @@ export const WORKER_CONFIGS: Record<string, WorkerConfig> = {
   reflexion: {
     name: 'reflexion',
     description:
-      'Self-learning from failures (P2-15) — reflects on failed tasks, stores lessons for future retrieval',
+      'Turns failed routed tasks from .monomind/route-outcomes.jsonl into templated keyword notes in .monomind/reflexion-store.json (pre-task shows matches)',
     interval: 3_600_000,
     enabled: false,
     priority: WorkerPriority.Normal,

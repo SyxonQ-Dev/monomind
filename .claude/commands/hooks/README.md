@@ -11,45 +11,49 @@ Lifecycle hooks that log edits, outcomes and trajectories to local pattern files
 - [overview](./overview.md) — hooks system overview, Claude Code integration, settings.json config
 - [setup](./setup.md) — how to configure hooks in settings.json
 - [pre-edit](./pre-edit.md) — get context and agent suggestions before editing a file
-- [post-edit](./post-edit.md) — record edit outcome for learning
+- [post-edit](./post-edit.md) — record an edit outcome in the local feedback log
 - [pre-task](./pre-task.md) — register task start, get agent suggestions and model routing
-- [post-task](./post-task.md) — record task completion for pattern learning
+- [post-task](./post-task.md) — record a task outcome against its routed agent
 - [session-end](./session-end.md) — end session and persist state
 
-## All Real Subcommands (25+)
+## All Real Subcommands (<!-- doc-count:hooks-subcommands -->28<!-- /doc-count:hooks-subcommands -->, including 4 deprecated aliases)
 
 ```
 pre-edit          Get context and agent suggestions before editing a file
-post-edit         Record editing outcome for pattern logging
+post-edit         Record an edit outcome in the local feedback log
 pre-command       Assess risk before executing a command
 post-command      Record command execution outcome
 pre-task          Register task start and get agent suggestions + model routing
-post-task         Record task completion for learning
+post-task         Record a task outcome against its routed agent
 session-end       End current session and persist state
 session-restore   Restore a previous session
 route             Route task to an agent through the central picker
 explain           Explain routing decision with transparency
-pretrain          Bootstrap intelligence from repository (4-step pipeline + embeddings)
-metrics           View learning metrics dashboard
-transfer          Transfer patterns from another local project
+pretrain          Consolidate hook activity into JSON state (no model is trained)
+metrics           View recorded routing/outcome metrics
+transfer          Copy recorded patterns from another local project
 list              List all registered hooks
-worker            Background worker management (12 workers)
-progress          Check v1 implementation progress
+intelligence      JS pattern/trajectory store (train, patterns, predict, optimize, export, import)
+notify            Send notification with level and message
+worker            Background worker management (run in-process)
 statusline        Generate dynamic statusline for Claude Code display
 coverage-route    Route tasks based on test coverage gaps
 coverage-suggest  Suggest coverage improvements for a path
 coverage-gaps     List all coverage gaps with priorities
-token-optimize    Token optimization (30-50% savings)
 model-route       Route to optimal model (haiku/sonnet/opus)
 model-outcome     Record model routing outcome
 model-stats       View model routing statistics
-intelligence      JS pattern/trajectory logging (trajectory, patterns, stats)
-notify            Send notification with level and message
-worker list       List all 12 background workers
-worker dispatch   Dispatch a specific worker
-worker status     Check worker status
-worker detect     Detect worker triggers from a prompt
-worker cancel     Cancel a running worker
+route-task        Deprecated alias of route
+session-start     Deprecated alias of session-restore
+pre-bash          Alias of pre-command
+post-bash         Alias of post-command
+```
+
+Worker subcommands (<!-- doc-count:workers -->9<!-- /doc-count:workers --> background workers):
+
+```
+worker list       List all background workers
+worker run <name> Run one worker once, in-process
 ```
 
 ## Real MCP Tools

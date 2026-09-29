@@ -197,7 +197,7 @@ export const hooksPretrain: MCPTool = {
 // Transfer hook - transfer patterns from another project
 export const hooksTransfer: MCPTool = {
   name: 'hooks_transfer',
-  description: 'Transfer learned patterns from another project',
+  description: 'Copy recorded patterns from another project',
   inputSchema: {
     type: 'object',
     properties: {

@@ -130,10 +130,10 @@ pnpm run lint
 | `memory` | 12 | SQLite memory with ANN search |
 | `task` | 5 | Task creation and lifecycle |
 | `session` | 6 | Session state management |
-| `hooks` | 28 | Self-learning hooks + 9 background workers |
+| `hooks` | 28 | Edit/outcome logging, agent routing + 9 background workers |
 
-> Note: there is no `neural` CLI command. Neural pattern learning was merged
-> into `hooks intelligence`. See `doc/concepts/monoswarm.md` for monoswarm
+> Note: there is no `neural` CLI command. Its pattern commands live under
+> `hooks intelligence` — a local JSON pattern store; no model is trained. See `doc/concepts/monoswarm.md` for monoswarm
 > coordination and vote strategies.
 
 ### Quick CLI Examples

@@ -126,7 +126,7 @@ memory:
   backend: ${options.runtime.memoryBackend}
   persistPath: .monomind/data
   cacheSize: 100
-  # ADR-049: Self-Learning Memory
+  # ADR-049: memory scopes (learningBridge values are config-only; nothing reads them yet)
   learningBridge:
     enabled: ${options.runtime.enableLearningBridge ?? options.runtime.enableNeural}
     confidenceDecayRate: 0.005

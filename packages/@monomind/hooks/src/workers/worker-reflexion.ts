@@ -1,11 +1,11 @@
 /**
- * Reflexion worker (P2-15) — self-learning from task failures.
+ * Reflexion worker (P2-15) — templated notes for failed routed tasks.
  *
- * Implements the Reflexion pattern (NeurIPS 2023): stores self-reflection on
- * failures in memory, feeds as context on next similar attempt. This is the
- * simplest possible self-learning loop — no trace corpus needed, no GEPA, no
- * training pipeline. Just: "task failed → record what happened → retrieve on
- * similar future task."
+ * Loosely follows the Reflexion pattern (NeurIPS 2023): each failed record in
+ * .monomind/route-outcomes.jsonl becomes a templated note with up to 8 task
+ * keywords in .monomind/reflexion-store.json. `hooks pre-task` shows up to 3
+ * keyword-matched notes as warnings (getReflectionsForTask). No model is
+ * trained or called. Disabled by default.
  *
  * Bootstraps the trace corpus that future GEPA-based evolution (P3) needs.
  * Run with: `monomind hooks worker run reflexion`

@@ -120,7 +120,7 @@ export const modelRouteCommand: Command = {
 // Model Outcome command - record routing outcomes for learning
 export const modelOutcomeCommand: Command = {
   name: 'model-outcome',
-  description: 'Record model routing outcome for learning',
+  description: 'Record model routing outcome',
   options: [
     {
       name: 'task',
@@ -196,7 +196,7 @@ export const modelOutcomeCommand: Command = {
 // Model Stats command - view routing statistics
 export const modelStatsCommand: Command = {
   name: 'model-stats',
-  description: 'View model routing statistics and learning metrics',
+  description: 'View model routing statistics',
   options: [
     { name: 'detailed', short: 'd', type: 'boolean', description: 'Show detailed breakdown' },
   ],

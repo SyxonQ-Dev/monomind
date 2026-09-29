@@ -10,6 +10,10 @@
 // row list beneath it drift independently (i-035 reviewer finding).
 export const WORKER_COUNT = 9;
 
+// `monomind hooks` subcommands (hooksCommand.subcommands in
+// src/commands/hooks.ts), for strings that can't import the command tree.
+export const HOOKS_SUBCOMMAND_COUNT = 28;
+
 export interface WorkerRow {
   name: string;
   priority: string;
@@ -45,6 +49,6 @@ export const WORKER_ROWS: WorkerRow[] = [
     name: 'reflexion',
     priority: 'normal',
     description:
-      'Self-learning from failures (P2-15) — reflects on failed tasks, stores lessons for future retrieval',
+      'Turns failed routed tasks from .monomind/route-outcomes.jsonl into templated keyword notes in .monomind/reflexion-store.json (pre-task shows matches)',
   },
 ];
