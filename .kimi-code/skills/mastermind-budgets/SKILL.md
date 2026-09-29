@@ -1,6 +1,6 @@
 ---
 name: mastermind-budgets
-description: Mastermind budgets — view, set, and track token/cost budgets for agents and the entire org. Shows current spend vs. limits, alerts on overages, and lets board members adjust per-agent or org-wide budgets. Reads from -budgets.json org state files.
+description: Mastermind budgets — view, set, and track the spend caps the Org Runtime enforces (roles[].budget_usd, roles[].budget_tokens, run_config.budget_tokens) in the org definition. Shows each role's cap next to its spend from the runtime's own cost records, flags roles near or over a cap, and hot-reloads a running org after a change.
 type: domain-skill
 default_mode: auto
 pick: low
@@ -10,16 +10,37 @@ pick: low
 
 This skill is invoked by `mastermind:budgets` or directly via `/mastermind-budgets`.
 
+The Org Runtime enforces exactly three caps, all in the org definition `.monomind/orgs/<org>.json`
+(schemas: `packages/@monomind/cli/src/orgrt/types-role.ts` and `types.ts`; enforcement:
+`orgrt/budget-closure.ts`):
+
+| Field | Scope | What happens at the cap |
+|-------|-------|-------------------------|
+| `roles[].budget_usd` | one role, USD | its session closes and its tasks are blocked. Unset = no USD cap for that role |
+| `roles[].budget_tokens` | one role, tokens | same; replaces the role's even split of `run_config.budget_tokens` |
+| `run_config.budget_tokens` | whole org, tokens | every role's session closes (default `1000000`) |
+
+A role's `policy.maxUsd` / `policy.maxTokens`, when set, win over `budget_usd` / `budget_tokens`.
+Caps are per run: a new `monomind org run` starts at zero spend, `--resume` keeps it. The coordinator
+is warned once when a role or the org passes 80% of a cap.
+
+There is **no org-wide USD cap**. `monomind org run --budget-usd N` only refuses to start a run whose
+upfront cost *estimate* exceeds N; it does not stop a run that overspends. To cap an org in dollars,
+give every session role its own `budget_usd`. Never store budgets in a side-car file such as
+`.monomind/orgs/<org>-budgets.json` — the runtime does not read it, so a limit written there is not
+enforced.
+
 ---
 
 ## Inputs
 
 - `brain_context`: BRAIN CONTEXT block (injected by command, or loaded below if standalone)
 - `org_name`: org to manage budgets for (required)
-- `action`: show | set | reset | alert
-- `agent_id`: scope to a specific agent (optional — omit for org-wide)
-- `limit_tokens`: token limit to set (for set)
-- `limit_usd`: USD cost limit to set (for set)
+- `action`: show | set | clear | alert
+- `agent_id`: role id to scope to (optional — omit for the org-wide `run_config.budget_tokens`)
+- `limit_tokens`: token cap to set (for set) — `roles[].budget_tokens`, or `run_config.budget_tokens` without `agent_id`
+- `limit_usd`: USD cap to set (for set, requires `agent_id`) — `roles[].budget_usd`
+- `run`: run id to read spend from (optional — defaults to the latest run)
 - `caller`: command | master
 
 ---
@@ -30,18 +51,18 @@ If `caller` is not "command", load brain context following mastermind-protocol/S
 
 ---
 
-## Step 1 — Load Org and Budget File
+## Step 1 — Load Org and Spend
 
 ```bash
 orgFile=".monomind/orgs/${org_name}.json"
 [ ! -f "$orgFile" ] && { echo "ERROR: Org '${org_name}' not found."; exit 1; }
 
-budgetsFile=".monomind/orgs/${org_name}-budgets.json"
-stateFile=".monomind/orgs/${org_name}-state.json"
-
-if [ ! -f "$budgetsFile" ]; then
-  echo '{"org_budget":{},"agent_budgets":{},"period":"monthly","currency":"USD"}' > "$budgetsFile"
-fi
+# Spend comes from the runtime's own records (runtime.json + the run's event log),
+# the same numbers the daemon enforces against. Empty when the org has never run.
+spendJson=$(npx -y monomind@latest org costs "$org_name" ${run:+--run "$run"} --format json 2>/dev/null \
+  | tail -n 1)
+echo "$spendJson" | jq -e '.items' >/dev/null 2>&1 \
+  || spendJson='{"items":[],"totals":{"tokens":0,"cost_usd":0,"messages":0}}'
 ```
 
 ---
@@ -51,173 +72,129 @@ fi
 ### show (default)
 
 ```bash
-echo "BUDGETS — $org_name"
+echo "BUDGETS — $org_name  (run: $(echo "$spendJson" | jq -r '.run // "none yet"'))"
 echo "════════════════════════════════════════════════════════"
 
-python3 - "$orgFile" "$budgetsFile" "$stateFile" "${agent_id:-}" <<'PYEOF'
-import json, sys, os
-
-orgData    = json.load(open(sys.argv[1]))
-budgetData = json.load(open(sys.argv[2]))
-statePath  = sys.argv[3]
-agentFilter= sys.argv[4]
-
-# Load heartbeat state for per-agent token usage
-agentTokens = {}
-if os.path.exists(statePath):
-    try:
-        state = json.load(open(statePath))
-        for r in state.get("roles", []):
-            rid = r.get("id","")
-            agentTokens[rid] = {
-                "tokensIn":  r.get("tokens_in", 0),
-                "tokensOut": r.get("tokens_out", 0),
-                "totalCostUsd": r.get("total_cost_usd", 0.0),
-            }
-    except: pass
-
-orgBudget   = budgetData.get("org_budget", {})
-agentBudgets= budgetData.get("agent_budgets", {})
-period      = budgetData.get("period", "monthly")
-
-print(f"  Period: {period}")
-print()
-
-# Org-wide budget
-orgLimitTokens = orgBudget.get("limit_tokens")
-orgLimitUsd    = orgBudget.get("limit_usd")
-orgSpentTokens = sum(v.get("tokensIn",0) + v.get("tokensOut",0) for v in agentTokens.values())
-orgSpentUsd    = sum(v.get("totalCostUsd",0) for v in agentTokens.values())
-
-print("ORG BUDGET")
-print("────────────────────────────────────────────────────────")
-print(f"  Tokens spent:  {orgSpentTokens:>12,}")
-if orgLimitTokens:
-    pct = orgSpentTokens / orgLimitTokens * 100
-    bar = "█" * int(pct / 5) + "░" * (20 - int(pct / 5))
-    print(f"  Token limit:   {orgLimitTokens:>12,}  [{bar}] {pct:.1f}%")
-print(f"  Cost (USD):    ${orgSpentUsd:>11.4f}")
-if orgLimitUsd:
-    pct = orgSpentUsd / orgLimitUsd * 100
-    bar = "█" * int(pct / 5) + "░" * (20 - int(pct / 5))
-    print(f"  Cost limit:    ${orgLimitUsd:>11.2f}    [{bar}] {pct:.1f}%")
-print()
-
-# Per-agent budgets
-roles = orgData.get("roles", [])
-if agentFilter:
-    roles = [r for r in roles if r.get("id") == agentFilter]
-
-print("AGENT BUDGETS")
-print("────────────────────────────────────────────────────────")
-print(f"  {'AGENT':<28} {'TOKENS IN':<12} {'TOKENS OUT':<12} {'COST USD':<12} {'LIMIT USD'}")
-print("  " + "─" * 82)
-
-for role in roles:
-    rid   = role.get("id","?")
-    title = role.get("title", rid)[:26]
-    tok   = agentTokens.get(rid, {})
-    tIn   = tok.get("tokensIn", 0)
-    tOut  = tok.get("tokensOut", 0)
-    cost  = tok.get("totalCostUsd", 0.0)
-    lim   = agentBudgets.get(rid, {}).get("limit_usd")
-    limStr= f"${lim:.2f}" if lim else "—"
-
-    overBudget = lim and cost > lim
-    flag = " ⚠ OVER" if overBudget else ""
-    print(f"  {title:<28} {tIn:<12,} {tOut:<12,} ${cost:<11.4f} {limStr}{flag}")
-
-if not roles:
-    print("  (no agents)")
-PYEOF
+jq -r --argjson spend "$spendJson" --arg only "${agent_id:-}" '
+  def usd: . * 10000 | round / 10000;
+  ($spend.items | map({key: .role, value: .}) | from_entries) as $s
+  | [.roles[] | select(.kind != "endpoint")] as $roles
+  | (.run_config.budget_tokens // 1000000) as $orgTok
+  # even split as orgrt/role-slot.ts computeReplacementBudget: what the roles
+  # with their own budget_tokens leave, shared by the roles without one
+  | [$roles[] | select(.budget_tokens == null)] as $even
+  | (($orgTok - ([$roles[].budget_tokens // 0] | add // 0)) / ([$even | length, 1] | max)
+     | floor | [., 0] | max) as $split
+  | "ORG   run_config.budget_tokens \($orgTok)   spent \($spend.totals.tokens) tokens / $\($spend.totals.cost_usd | usd)",
+    "      (no org-wide USD cap — set budget_usd per role)",
+    "",
+    ( $roles[] | select($only == "" or .id == $only)
+      | ($s[.id] // {cost_usd: 0, tokens: 0}) as $r
+      | (.policy.maxUsd // .budget_usd) as $usd
+      | (.policy.maxTokens // .budget_tokens // $split) as $tok
+      | (if ($usd and $r.cost_usd >= $usd) or $r.tokens >= $tok then "  OVER"
+         elif ($usd and $r.cost_usd >= $usd * 0.8) or $r.tokens >= $tok * 0.8 then "  >80%"
+         else "" end) as $flag
+      | "\(.id)\($flag)",
+        "    USD:    $\($r.cost_usd | usd) / \(if $usd then "$\($usd)" else "no cap (budget_usd unset)" end)",
+        "    tokens: \($r.tokens) / \($tok)\(if .policy.maxTokens or .budget_tokens then "" else " (even split of run_config.budget_tokens)" end)" )
+' "$orgFile"
 
 echo ""
-echo "  Set limit: /mastermind-budgets --org $org_name --action set --agent-id <id> --limit-usd 5.00"
-echo "  Reset:     /mastermind-budgets --org $org_name --action reset"
+echo "  Set a role USD cap:   /mastermind-budgets --org $org_name --action set --agent-id <role> --limit-usd 5"
+echo "  Set the org token cap: /mastermind-budgets --org $org_name --action set --limit-tokens 2000000"
+echo "  Spend history:        npx -y monomind@latest org report $org_name --all"
 ```
 
 ### set
 
+Edits the enforced fields in the org definition, validates it, then hot-reloads a running org.
+`org reload` applies `budget_usd`, `budget_tokens` and `run_config.budget_tokens` to live sessions
+with their spend kept, and reopens a role that was closed for budget once it is under the new cap
+(`orgrt/org-reload.ts`). A stopped org picks the new caps up on its next `monomind org run`.
+
 ```bash
-ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+tmp="${orgFile}.tmp"
+if [ -n "${agent_id:-}" ]; then
+  jq -e --arg id "$agent_id" '.roles[] | select(.id == $id)' "$orgFile" >/dev/null \
+    || { echo "ERROR: role '$agent_id' not found in $orgFile"; exit 1; }
+  jq -e --arg id "$agent_id" '.roles[] | select(.id == $id) | .kind == "endpoint"' "$orgFile" >/dev/null \
+    && { echo "ERROR: '$agent_id' is an endpoint role — endpoint roles cannot carry budgets"; exit 1; }
+  if [ -n "${limit_usd:-}" ]; then
+    [[ "$limit_usd" =~ ^[0-9]+(\.[0-9]+)?$ ]] && awk -v v="$limit_usd" 'BEGIN{exit !(v>0)}' \
+      || { echo "ERROR: limit_usd must be a positive number"; exit 1; }
+    jq --arg id "$agent_id" --argjson v "$limit_usd" \
+      '(.roles[] | select(.id == $id)).budget_usd = $v' "$orgFile" > "$tmp" && mv "$tmp" "$orgFile"
+    echo "  roles[$agent_id].budget_usd → \$$limit_usd"
+    jq -e --arg id "$agent_id" '.roles[] | select(.id == $id) | .policy.maxUsd != null' "$orgFile" >/dev/null \
+      && echo "  NOTE: this role's policy.maxUsd is set and takes precedence over budget_usd."
+  fi
+  if [ -n "${limit_tokens:-}" ]; then
+    [[ "$limit_tokens" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: limit_tokens must be a positive integer"; exit 1; }
+    jq --arg id "$agent_id" --argjson v "$limit_tokens" \
+      '(.roles[] | select(.id == $id)).budget_tokens = $v' "$orgFile" > "$tmp" && mv "$tmp" "$orgFile"
+    echo "  roles[$agent_id].budget_tokens → $limit_tokens"
+  fi
+else
+  [ -n "${limit_usd:-}" ] && {
+    echo "ERROR: the runtime has no org-wide USD cap. Pass --agent-id to set roles[].budget_usd per role."
+    exit 1
+  }
+  [[ "${limit_tokens:-}" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: limit_tokens must be a positive integer"; exit 1; }
+  jq --argjson v "$limit_tokens" '.run_config.budget_tokens = $v' "$orgFile" > "$tmp" && mv "$tmp" "$orgFile"
+  echo "  run_config.budget_tokens → $limit_tokens"
+fi
 
-python3 - "$budgetsFile" "${agent_id:-}" "${limit_tokens:-}" "${limit_usd:-}" "$ts" <<'PYEOF'
-import json, sys
-
-path, agentId, limitTok, limitUsd, ts = sys.argv[1:]
-
-data = json.load(open(path))
-
-if agentId:
-    entry = data.setdefault("agent_budgets", {}).setdefault(agentId, {})
-    if limitTok: entry["limit_tokens"] = int(limitTok)
-    if limitUsd:  entry["limit_usd"] = float(limitUsd)
-    entry["updatedAt"] = ts
-    print(f"  Budget set for agent '{agentId}':")
-    if limitTok: print(f"    Token limit: {int(limitTok):,}")
-    if limitUsd:  print(f"    USD limit:   ${float(limitUsd):.2f}")
-else:
-    org = data.setdefault("org_budget", {})
-    if limitTok: org["limit_tokens"] = int(limitTok)
-    if limitUsd:  org["limit_usd"] = float(limitUsd)
-    org["updatedAt"] = ts
-    print(f"  Org-wide budget updated:")
-    if limitTok: print(f"    Token limit: {int(limitTok):,}")
-    if limitUsd:  print(f"    USD limit:   ${float(limitUsd):.2f}")
-
-with open(path, "w") as f:
-    json.dump(data, f, indent=2)
-PYEOF
+npx -y monomind@latest org validate "$org_name" \
+  || echo "WARNING: '${org_name}' no longer passes validation — fix it before 'monomind org run ${org_name}'"
+npx -y monomind@latest org reload "$org_name"
 ```
 
-### reset
+### clear
+
+Removes a role's own caps (`budget_usd`, `budget_tokens`), so it falls back to no USD cap and its
+even split of `run_config.budget_tokens`. `run_config.budget_tokens` itself cannot be removed — the
+schema defaults it to 1000000 — only changed with `set`.
 
 ```bash
-ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-echo '{"org_budget":{},"agent_budgets":{},"period":"monthly","currency":"USD","resetAt":"'"$ts"'"}' > "$budgetsFile"
-echo "  Budget counters reset for '$org_name'  ($ts)"
-echo "  Note: resets limit configs too. Re-run --action set to restore limits."
+[ -z "${agent_id:-}" ] && { echo "ERROR: clear needs --agent-id <role>"; exit 1; }
+tmp="${orgFile}.tmp"
+jq --arg id "$agent_id" '(.roles[] | select(.id == $id)) |= del(.budget_usd, .budget_tokens)' \
+  "$orgFile" > "$tmp" && mv "$tmp" "$orgFile"
+echo "  Cleared budget_usd / budget_tokens for '$agent_id'"
+npx -y monomind@latest org validate "$org_name" \
+  || echo "WARNING: '${org_name}' no longer passes validation — fix it before 'monomind org run ${org_name}'"
+npx -y monomind@latest org reload "$org_name"
 ```
 
 ### alert
 
-Check for agents over their budget limits:
+Roles at or over 80% of an enforced cap in the selected run, and the budget events the runtime
+itself recorded (`budget-warning`, `budget-exhausted`, `org-budget-exhausted`):
 
 ```bash
 echo "BUDGET ALERTS — $org_name"
 echo "────────────────────────────────────────────────────────"
 
-python3 - "$orgFile" "$budgetsFile" "$stateFile" <<'PYEOF'
-import json, sys, os
+jq -r --argjson spend "$spendJson" '
+  ($spend.items | map({key: .role, value: .}) | from_entries) as $s
+  | [.roles[] | select(.kind != "endpoint")] as $roles
+  | [$roles[] | select(.budget_tokens == null)] as $even
+  | (((.run_config.budget_tokens // 1000000) - ([$roles[].budget_tokens // 0] | add // 0))
+     / ([$even | length, 1] | max) | floor | [., 0] | max) as $split
+  | [ $roles[]
+      | ($s[.id] // {cost_usd: 0, tokens: 0}) as $r
+      | (.policy.maxUsd // .budget_usd) as $usd
+      | (.policy.maxTokens // .budget_tokens // $split) as $tok
+      | select(($usd and $r.cost_usd >= $usd * 0.8) or $r.tokens >= $tok * 0.8)
+      | "  \(.id): $\($r.cost_usd * 10000 | round / 10000)\(if $usd then " / $\($usd)" else "" end), \($r.tokens) / \($tok) tokens" ]
+  | if length == 0 then "  All roles under 80% of their caps." else .[] end
+' "$orgFile"
 
-orgData    = json.load(open(sys.argv[1]))
-budgetData = json.load(open(sys.argv[2]))
-statePath  = sys.argv[3]
-
-agentTokens = {}
-if os.path.exists(statePath):
-    try:
-        state = json.load(open(statePath))
-        for r in state.get("roles", []):
-            rid = r.get("id","")
-            agentTokens[rid] = r.get("total_cost_usd", 0.0)
-    except: pass
-
-agentBudgets = budgetData.get("agent_budgets", {})
-alerts = []
-for rid, ab in agentBudgets.items():
-    lim = ab.get("limit_usd")
-    spent = agentTokens.get(rid, 0.0)
-    if lim and spent > lim:
-        alerts.append((rid, spent, lim))
-
-if not alerts:
-    print("  ✓ All agents within budget.")
-else:
-    print(f"  ⚠ {len(alerts)} agent(s) over budget:")
-    for rid, spent, lim in alerts:
-        print(f"    {rid}: spent ${spent:.4f} / limit ${lim:.2f}")
-PYEOF
+echo ""
+npx -y monomind@latest org events "$org_name" ${run:+--run "$run"} 2>/dev/null \
+  | jq -Rr 'fromjson? | select(.reason | IN("budget-warning", "budget-exhausted", "org-budget-exhausted"))
+            | "  [\(.reason)] \(.msg)"' | tail -n 20
 ```
 
 ---
@@ -229,6 +206,7 @@ domain: ops
 status: complete
 action: <action>
 org_name: <org_name>
+config_file: .monomind/orgs/<org_name>.json
 ```
 
 ---
