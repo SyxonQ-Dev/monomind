@@ -106,7 +106,7 @@ async function ingestTarget(ctx: CommandContext, target: string): Promise<Comman
           spinner.setText(`[${done + 1}/${total}] ${path.basename(file)}`);
         },
       });
-      spinner.succeed(
+      spinner.result(
         `Indexed ${result.totalChunks} chunks from ${result.filesProcessed} files (${result.filesSkipped} skipped)`,
       );
       if (result.errors.length) {
@@ -119,14 +119,14 @@ async function ingestTarget(ctx: CommandContext, target: string): Promise<Comman
     } else {
       const result = await ingestDocument(resolved, scope);
       if (result.skipped && !result.error) {
-        spinner.succeed(
+        spinner.result(
           `Already indexed: ${path.basename(resolved)} (${result.chunksIndexed} chunks)`,
         );
       } else if (result.error) {
         spinner.fail(result.error);
         return { success: false };
       } else {
-        spinner.succeed(`Indexed ${result.chunksIndexed} chunks from ${path.basename(resolved)}`);
+        spinner.result(`Indexed ${result.chunksIndexed} chunks from ${path.basename(resolved)}`);
       }
       return { success: true, data: result };
     }

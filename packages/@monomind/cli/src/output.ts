@@ -168,21 +168,35 @@ export class OutputFormatter {
     return previous;
   }
 
+  private reserveDepth = 0;
+  private streamBeforeReserve: NodeJS.WriteStream | undefined;
+
   /**
    * Run `fn` with stdout reserved for a machine-readable document
    * (`-o json|sarif`, `--json`): regular output goes to stderr meanwhile, or
    * nowhere under --quiet. Print the document itself with printDocument().
+   *
+   * The redirect is process-wide on this formatter (the exported `output`
+   * singleton), so anything else writing through it while `fn` runs is
+   * redirected too. Nested or overlapping calls are safe: a depth counter
+   * keeps the first call's redirect and restores the original stream only
+   * when the last one exits, even if `fn` throws.
    */
   async reserveStdout<T>(reserve: boolean, fn: () => Promise<T>): Promise<T> {
     if (!reserve) return fn();
-    const sink = this.isQuiet()
-      ? (new Writable({ write: (_c, _e, done) => done() }) as unknown as NodeJS.WriteStream)
-      : process.stderr;
-    const previous = this.setOutputStream(sink);
+    if (this.reserveDepth++ === 0) {
+      const sink = this.isQuiet()
+        ? (new Writable({ write: (_c, _e, done) => done() }) as unknown as NodeJS.WriteStream)
+        : process.stderr;
+      this.streamBeforeReserve = this.setOutputStream(sink);
+    }
     try {
       return await fn();
     } finally {
-      this.setOutputStream(previous);
+      if (--this.reserveDepth === 0 && this.streamBeforeReserve) {
+        this.setOutputStream(this.streamBeforeReserve);
+        this.streamBeforeReserve = undefined;
+      }
     }
   }
 

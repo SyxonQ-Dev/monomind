@@ -69,7 +69,21 @@ export class Spinner {
   }
 
   succeed(message?: string): void {
+    this.stop(this.formatter.success(message ?? this.text));
+  }
+
+  /** Like succeed(), for a pure progress line ("Scan complete"): --quiet drops it. */
+  complete(message?: string): void {
     this.stop(this.formatter.isQuiet() ? undefined : this.formatter.success(message ?? this.text));
+  }
+
+  /**
+   * Stop and print the command's direct result on regular output (stdout),
+   * where it survives --quiet — for commands whose only result is this line.
+   */
+  result(message: string): void {
+    this.stop();
+    this.formatter.writeln(this.formatter.success(message));
   }
 
   fail(message?: string): void {

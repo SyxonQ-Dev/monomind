@@ -156,3 +156,69 @@ describe('spinner status lines never reach stdout (#495)', () => {
     expect(stderr).toContain('Analyzing project coverage gaps');
   });
 });
+
+describe('errors still reach stderr with json + --quiet (#495)', () => {
+  beforeEach(() => output.setVerbosity('quiet'));
+
+  it('security cve --check <bad id> --json -Q', async () => {
+    const res = await cveCommand.action!(ctx({ check: 'CVE-24-1', json: true }));
+    expect(res?.success).toBe(false);
+    expect(stdout).toBe('');
+    expect(stderr).toContain('Invalid CVE ID format');
+  });
+
+  it('security scan -o sarif -Q with a bad --target', async () => {
+    const res = await scanCommand.action!(ctx({ output: 'sarif', target: 'no-such-dir' }));
+    expect(res?.success).toBe(false);
+    expect(stdout).toBe('');
+    expect(stderr).toContain('--target path does not exist');
+  });
+
+  it('security defend -o json --quiet with a missing --file', async () => {
+    const res = await defendCommand.action!(ctx({ output: 'json', file: 'missing.txt' }));
+    expect(res?.success).toBe(false);
+    expect(stdout).toBe('');
+    expect(stderr).toContain('File not found');
+  });
+});
+
+describe('spinner result lines under --quiet (#495)', () => {
+  beforeEach(() => output.setVerbosity('quiet'));
+
+  it('result() prints on stdout and survives -Q', () => {
+    output.createSpinner({ text: 'x' }).result('Exported 3 documents');
+    expect(stdout).toContain('Exported 3 documents');
+  });
+
+  it('succeed() keeps its line under -Q (on stderr); complete() drops it', () => {
+    output.createSpinner({ text: 'x' }).succeed('Transferred 2 patterns');
+    output.createSpinner({ text: 'y' }).complete('Scan complete');
+    expect(stderr).toContain('Transferred 2 patterns');
+    expect(stderr).not.toContain('Scan complete');
+    expect(stdout).toBe('');
+  });
+});
+
+describe('output.reserveStdout (#495)', () => {
+  it('restores the original stream after fn rejects', async () => {
+    await expect(
+      output.reserveStdout(true, async () => {
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
+    output.writeln('after');
+    expect(stdout).toBe('after\n');
+  });
+
+  it('overlapping calls restore stdout only when the last one exits', async () => {
+    let releaseFirst!: () => void;
+    const first = output.reserveStdout(true, () => new Promise<void>((r) => (releaseFirst = r)));
+    await output.reserveStdout(true, async () => undefined);
+    output.writeln('while first is pending');
+    releaseFirst();
+    await first;
+    output.writeln('after both');
+    expect(stderr).toContain('while first is pending');
+    expect(stdout).toBe('after both\n');
+  });
+});

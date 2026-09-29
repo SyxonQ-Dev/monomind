@@ -217,7 +217,7 @@ async function runScan(ctx: CommandContext): Promise<CommandResult> {
     if (gaps.length > 0) {
       spinner.stop(output.warning('Scan finished with INCOMPLETE coverage'));
     } else {
-      spinner.succeed('Scan complete');
+      spinner.complete('Scan complete');
     }
 
     output.writeln();
@@ -398,7 +398,7 @@ export const secretsCommand: Command = {
     if (gaps.length > 0) {
       spinner.stop(output.warning('Scan finished with INCOMPLETE coverage'));
     } else {
-      spinner.succeed('Scan complete');
+      spinner.complete('Scan complete');
     }
 
     output.writeln();

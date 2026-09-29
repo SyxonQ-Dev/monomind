@@ -29,6 +29,12 @@ monomind security <subcommand> [flags]
 - `json`: structured findings (`severity`, `type`, `location`, `description`), a `summary` count block, and `coverage` gap info — printed instead of the table.
 - `sarif`: SARIF 2.1.0 document, produced by adapting scan findings into monograph's real SARIF exporter (`exportHealthSarif` in [`packages/@monomind/monograph/src/export/sarif.ts`](packages/@monomind/monograph/src/export/sarif.ts)) rather than a second SARIF implementation.
 
+With `json` or `sarif`, stdout carries only the document, so `monomind security scan -o sarif > results.sarif` gives a valid file. The banner, progress and summary lines go to stderr. The same holds for `cve --json` and `defend -o json`. Errors always go to stderr.
+
+#### Quiet mode
+
+The global `-Q/--quiet` drops the human lines: the banner, spinner progress and "Scan complete". It keeps errors and results. In text mode `scan -Q` still prints the findings and the summary box. **`defend` uses `-Q` for its own `--quick` flag**, so write `--quiet` in full there.
+
 ---
 
 ## 2. Model Context Protocol (MCP) Security Tools (`monofence_*`)

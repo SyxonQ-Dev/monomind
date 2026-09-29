@@ -126,8 +126,10 @@ async function runCve(ctx: CommandContext): Promise<CommandResult> {
   if (checkCve) {
     const CVE_PATTERN = /^CVE-\d{4}-\d{4,}$/i;
     if (!CVE_PATTERN.test(checkCve)) {
-      output.writeln(output.error(`Invalid CVE ID format: "${checkCve}"`));
-      output.writeln(output.dim('Expected format: CVE-YYYY-NNNN (e.g. CVE-2024-12345)'));
+      output.printError(
+        `Invalid CVE ID format: "${checkCve}"`,
+        'Expected format: CVE-YYYY-NNNN (e.g. CVE-2024-12345)',
+      );
       return { success: false };
     }
 
@@ -149,7 +151,7 @@ async function runCve(ctx: CommandContext): Promise<CommandResult> {
         const nvdRaw = await httpsGet(nvdUrl);
         cveData = { _source: 'nvd', ...JSON.parse(nvdRaw) };
         source = 'NVD';
-        spinner.succeed(`Fetched from NVD`);
+        spinner.complete(`Fetched from NVD`);
       } catch {
         spinner.setText(`NVD unavailable — trying OSV...`);
         try {
@@ -157,10 +159,10 @@ async function runCve(ctx: CommandContext): Promise<CommandResult> {
           const osvRaw = await httpsGet(osvUrl);
           cveData = { _source: 'osv', ...JSON.parse(osvRaw) };
           source = 'OSV';
-          spinner.succeed(`Fetched from OSV`);
+          spinner.complete(`Fetched from OSV`);
         } catch {
           spinner.fail('Could not fetch CVE data');
-          output.writeln(output.error('Could not fetch CVE data — check your network connection'));
+          output.printError('Could not fetch CVE data — check your network connection');
           return { success: false };
         }
       }
@@ -272,19 +274,21 @@ async function runCve(ctx: CommandContext): Promise<CommandResult> {
       auditOutput = execErr.stdout || '';
       if (!auditOutput) {
         spinner.fail('npm audit failed');
-        output.writeln(output.warning(`npm audit failed: ${execErr.message || 'unknown error'}`));
-        output.writeln(output.dim('Make sure package-lock.json exists (run `npm install` first).'));
+        output.printError(
+          `npm audit failed: ${execErr.message || 'unknown error'}`,
+          'Make sure package-lock.json exists (run `npm install` first).',
+        );
         return { success: false };
       }
     }
 
-    spinner.succeed('npm audit complete');
+    spinner.complete('npm audit complete');
 
     let auditJson: Record<string, unknown>;
     try {
       auditJson = JSON.parse(auditOutput);
     } catch {
-      output.writeln(output.error('Could not parse npm audit output'));
+      output.printError('Could not parse npm audit output');
       return { success: false };
     }
 

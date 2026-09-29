@@ -284,7 +284,7 @@ async function runBenchmark(ctx: CommandContext): Promise<CommandResult> {
   }
 
   const totalTime = ((Date.now() - startTotal) / 1000).toFixed(2);
-  spinner.succeed(`Completed ${iterations} iterations in ${totalTime}s`);
+  spinner.complete(`Completed ${iterations} iterations in ${totalTime}s`);
 
   // Output results
   if (outputFormat === 'json') {
