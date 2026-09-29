@@ -6,7 +6,7 @@
 
 ## 1. System Overview & Architecture
 
-MonoFence AI is integrated into the Monomind platform via critical-priority lifecycle hooks and MCP tools ([`packages/@monomind/cli/src/mcp-tools/security-tools.ts`](packages/@monomind/cli/src/mcp-tools/security-tools.ts#securityTools)). It operates entirely locally — no user data, prompts, or tool execution content leave your machine.
+MonoFence AI is integrated into the Monomind platform via critical-priority lifecycle hooks and MCP tools ([`packages/@monomind/cli/src/mcp-tools/security-tools.ts`](packages/@monomind/cli/src/mcp-tools/security-tools.ts#securityTools)). Its scanning runs locally: MonoFence itself sends no user data, prompts, or tool execution content anywhere. The AI runtime you use still sends prompts to its model provider — see [Privacy](../privacy.md).
 
 ```
 Incoming User Prompt / Tool Payload

@@ -9,9 +9,9 @@
 // all make real requests. This pins: no unscoped instance of those claims
 // survives anywhere in the tree; both package descriptions name the same
 // platform set the README documents; a single canonical table exists and is
-// linked from every fixed site; and the two claims that ARE true and
-// Second-Brain-scoped (README.md — "Your notes never leave your computer" /
-// "the only outbound request the Second Brain ever makes") are untouched.
+// linked from every fixed site; and the README's Second-Brain claims stay
+// scoped to indexing and search (notes are indexed locally, but excerpts
+// injected into a prompt go to the AI runtime's model provider).
 
 import { execFileSync } from 'node:child_process';
 import {
@@ -35,9 +35,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..', '..', '..', '..', '..');
 
 // The four historically-false phrasings, case-insensitive. Deliberately NOT
-// matching README.md's true Second-Brain phrasings ("Your notes never leave
-// your computer", "the only outbound request the Second Brain ever makes")
-// — those use different wording entirely. The sentence-level scoping check
+// matching README.md's Second-Brain phrasing ("the only outbound request the
+// Second Brain's indexing and search make") — that uses different wording
+// entirely. The sentence-level scoping check
 // below is a second, independent guard against future wording drift, per
 // the plan: encode the allowance as "the match sits in a Second-Brain-scoped
 // sentence", not a line-number allowlist.
@@ -486,15 +486,16 @@ describe('privacy-claims (i-078)', () => {
     });
   });
 
-  describe('§4 — the true, Second-Brain-scoped claims survive unchanged', () => {
-    it('README.md still says notes never leave the computer, verbatim', () => {
+  describe('§4 — the Second-Brain-scoped claims stay scoped to indexing and search', () => {
+    it('README.md says notes are indexed locally and that injected excerpts reach the model provider', () => {
       const readme = readFileSync(join(REPO_ROOT, 'README.md'), 'utf-8');
       expect(readme).toContain(
-        'Everything runs on your machine: a local embedding model (`Alibaba-NLP/gte-modernbert-base`, 768-dim, via transformers.js) and a local SQLite vector store. **Your notes never leave your computer.**',
+        "Indexing and search run on your machine: a local embedding model (`Alibaba-NLP/gte-modernbert-base`, 768-dim, via transformers.js) and a local SQLite vector store. **Your notes are indexed and stored locally** — but the excerpts search returns are injected into your AI tool's prompts, and go to its model provider with the rest of the prompt.",
       );
       expect(readme).toContain(
-        'That download is the only outbound request the Second Brain ever makes — your documents and queries never leave your machine.',
+        "That download is the only outbound request the Second Brain's indexing and search make — your documents and queries are processed locally.",
       );
+      expect(readme).not.toContain('Your notes never leave your computer');
     });
   });
 
