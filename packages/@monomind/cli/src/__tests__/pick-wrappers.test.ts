@@ -1,7 +1,8 @@
 /**
- * hooks_route, hooks_pre-task, hooks_explain, `route task` and the monovector
- * keyword router are thin wrappers over the central picker (pickAgents →
- * rankForTask): whatever it ranks first is what each of them returns.
+ * hooks_route, hooks_pre-task, hooks_explain and the monovector keyword router
+ * are thin wrappers over the central picker (pickAgents → rankForTask):
+ * whatever it ranks first is what each of them returns. `route task` is
+ * `monomind pick --agents` (route-task-pick.test.ts).
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -12,7 +13,10 @@ const pickAgents = vi.fn();
 const recordRoute = vi.fn(async () => {});
 const agentCatalog = vi.fn();
 
-vi.mock('../routing/agent-pick.js', () => ({ pickAgents }));
+vi.mock('../routing/agent-pick.js', async (orig) => ({
+  ...(await orig<typeof import('../routing/agent-pick.js')>()),
+  pickAgents,
+}));
 vi.mock('../monovector/route-outcomes.js', async (orig) => ({
   ...(await orig<typeof import('../monovector/route-outcomes.js')>()),
   recordRoute,
@@ -36,6 +40,8 @@ const { routeCommand } = await import('../commands/route.js');
 
 const PICK = {
   method: 'keyword',
+  confident: true,
+  summary: 'agent: Security Engineer',
   agents: [
     { type: 'Security Engineer', confidence: 0.75, reason: 'r1' },
     { type: 'coder', confidence: 0.55, reason: 'r2' },
@@ -127,17 +133,6 @@ describe('monovector createKeywordRouter().route', () => {
 
 describe('monomind route task', () => {
   const task = routeCommand.subcommands?.find((c) => c.name === 'task');
-
-  it('routes to the central pick', async () => {
-    const res = await task?.action?.({
-      args: ['secure the login'],
-      flags: { json: true },
-      cwd: process.cwd(),
-      interactive: false,
-    } as never);
-    expect(res?.success).toBe(true);
-    expect((res?.data as { agentId: string }).agentId).toBe('Security Engineer');
-  });
 
   it('--agent accepts a registry slug and answers with the spawnable name', async () => {
     const res = await task?.action?.({

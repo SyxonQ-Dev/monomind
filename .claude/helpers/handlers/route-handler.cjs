@@ -3,7 +3,7 @@
 // Behavioral equivalence verified: 133 routing tests pass post-extraction.
 // hCtx (hook context) contains all shared state and utility functions:
 //   hCtx.hookInput, hCtx.toolInput, hCtx.toolName, hCtx.prompt, hCtx.args, hCtx.CWD
-//   hCtx.session, hCtx.router, hCtx.intelligence
+//   hCtx.session, hCtx.intelligence
 //   hCtx.isSimpleCommand — function defined in main(), passed via hCtx
 //   hCtx.getLearningService — async factory for LearningService singleton
 //   Utility fns: _recordRecentEdit, _findAffectedTests, _recordHookLatency,

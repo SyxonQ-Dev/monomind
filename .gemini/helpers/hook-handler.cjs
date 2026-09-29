@@ -98,7 +98,6 @@ async function getLearningService() {
 }
 
 
-const router = safeRequire(path.join(helpersDir, 'router.cjs'));
 const session = safeRequire(path.join(helpersDir, 'session.cjs'));
 const memory = safeRequire(path.join(helpersDir, 'memory.cjs'));
 const intelligence = safeRequire(path.join(helpersDir, 'intelligence.cjs'));
@@ -355,7 +354,6 @@ var hCtx = {
   args: args,
   CWD: CWD,
   session: session,
-  router: router,
   intelligence: intelligence,
   getLearningService: getLearningService,
   isSimpleCommand: isSimpleCommand,

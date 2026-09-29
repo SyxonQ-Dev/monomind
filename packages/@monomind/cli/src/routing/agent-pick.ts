@@ -41,6 +41,10 @@ export interface AgentPick {
   method: 'jev' | 'keyword' | 'fallback';
   provider?: string;
   agents: AgentSuggestion[];
+  /** The top clears pick's confidence bar (`monomind pick`'s `confident`). */
+  confident: boolean;
+  /** pickSummary for agents: `agent: <name>` or `no confident match`. */
+  summary: string;
 }
 
 function warnDecisionUnavailable(err: { provider: string; message: string }): void {
@@ -133,9 +137,13 @@ export function keywordLeader(ranked: RankedEntry[]): RankedEntry | null {
 export async function pickAgents(task: string, top = 3, root?: string): Promise<AgentPick> {
   const ranking = await pickForTask({ task, kind: 'agents', top, root });
   const ranked = ranking.agents.ranked;
+  const confident = pickConfident(ranking, 'agents');
+  const summary = pickSummary(ranking, 'agents');
   if (ranked.length === 0) {
     return {
       method: 'fallback',
+      confident,
+      summary,
       agents: [
         { type: FALLBACK_AGENT, confidence: 0.3, reason: 'No registry agent matched the task' },
       ],
@@ -145,6 +153,8 @@ export async function pickAgents(task: string, top = 3, root?: string): Promise<
   return {
     method,
     ...(ranking.provider ? { provider: ranking.provider } : {}),
+    confident,
+    summary,
     agents: ranked.map((e) => ({
       type: spawnableName(e),
       confidence: confidenceOf(e),

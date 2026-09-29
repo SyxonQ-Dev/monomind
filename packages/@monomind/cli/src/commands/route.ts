@@ -80,7 +80,8 @@ export const routeCommand: Command = {
 
     output.writeln(output.bold('Subcommands:'));
     output.printList([
-      `${output.highlight('task')}         - Route a task to optimal agent`,
+      `${output.highlight('task')}         - Route a task (same answer as \`monomind pick --agents\`)`,
+      `${output.highlight('semantic')}     - Deprecated: embeddings + Haiku fallback (@monoes/routing)`,
       `${output.highlight('list-agents')}  - List available agent types`,
       `${output.highlight('stats')}        - Show routing accuracy and adherence`,
       `${output.highlight('feedback')}     - Record routing outcome`,
