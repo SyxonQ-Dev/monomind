@@ -3,19 +3,19 @@
  */
 
 import {
-  DEFAULT_INIT_OPTIONS,
-  executeInit,
-  FULL_INIT_OPTIONS,
-  type InitOptions,
-  MINIMAL_INIT_OPTIONS,
-} from '../init/index.js';
-import {
   applyPlatformSelection,
   chooseDefaultPlatforms,
   detectInstalledPlatforms,
   INIT_PLATFORM_LABELS,
   INIT_PLATFORMS,
 } from '../init/detect-platforms.js';
+import {
+  DEFAULT_INIT_OPTIONS,
+  executeInit,
+  FULL_INIT_OPTIONS,
+  type InitOptions,
+  MINIMAL_INIT_OPTIONS,
+} from '../init/index.js';
 import { reportProjectMemory } from '../init/init-memory.js';
 import { OPTIONAL_PACKS } from '../init/packs.js';
 import { ingestDirectory } from '../knowledge/document-pipeline.js';

@@ -32,11 +32,22 @@ cd your-project
 monomind init
 ```
 
-This initializes every supported coding system: Claude Code, Antigravity, OpenCode, Kimi Code, and Codex. It writes each platform's native instructions/configuration, shared skills, and MCP wiring, then builds the initial code graph. It takes 30–60 seconds and spawns a background process for the graph build.
+This sets up the coding systems installed on your machine, out of Claude Code, Antigravity, OpenCode, Kimi Code, and Codex. A system counts as installed when its CLI is on your `PATH` (`claude`, `gemini`/`agy`, `opencode`, `kimi`, `codex`) or its config directory exists in your home (`~/.claude`, `~/.gemini`, `~/.config/opencode`, `~/.kimi`, `~/.codex`). If none is found, init sets up Claude Code and says so. Init prints what it detected and how to add the others. For each system it writes the native instructions/configuration, shared skills, and MCP wiring, then builds the initial code graph. It takes 30–60 seconds and spawns a background process for the graph build.
+
+Init never installs anything into your project: your `package.json` and lockfile stay as they are. The code graph is built with the copy of `@monoes/monograph` that ships with the monomind CLI, and the hooks find that same copy (or a global install) later.
+
+To choose the systems yourself:
+
+```bash
+monomind init --platforms claude,codex   # exactly these, installed or not
+monomind init --all-platforms            # all five (same as --target all or --full)
+```
+
+`monomind init wizard` asks the same question, with the detected systems pre-selected. `monomind init upgrade` keeps the systems a project already has and never adds new ones; re-run `monomind init --platforms ... --force` to add one later.
 
 Init also sets up the memory database (`.swarm/memory.db`, the same one `monomind memory init` creates, copied to `.claude/memory.db`), so `monomind doctor` reports **Memory Database ✓** straight away. Re-running init keeps an existing database and everything in it. Pass `--no-memory` to skip it; `--only-claude` skips it too, since that mode writes no runtime state, and `--skip-claude` creates the database without the `.claude/` copy. If the database can't be created (for example, `sql.js` is missing), init still finishes and prints a warning: run `monomind memory init` to retry.
 
-To initialize only one system, use `--target`:
+To initialize only one system, you can also use `--target`:
 
 ```bash
 monomind init --target codex

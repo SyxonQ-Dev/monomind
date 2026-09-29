@@ -46,7 +46,8 @@ export const initCommand: Command = {
     },
     {
       name: 'full',
-      description: 'Create full configuration with all components, every pack and all five platforms',
+      description:
+        'Create full configuration with all components, every pack and all five platforms',
       type: 'boolean',
       default: false,
     },
@@ -150,7 +151,8 @@ export const initCommand: Command = {
     },
     {
       name: 'all-platforms',
-      description: 'Write all five platforms (claude, antigravity, opencode, kimi, codex), installed or not',
+      description:
+        'Write all five platforms (claude, antigravity, opencode, kimi, codex), installed or not',
       type: 'boolean',
       default: false,
     },

@@ -47,12 +47,14 @@ claude mcp add monomind -- npx -y monomind@latest mcp start
 
 `monomind init` installs the **core pack**: the everyday `/mastermind:*` workflows (plan, execute, review, debug, do, …), 20 core agents and the memory, GitHub and browser toolkits, small enough that Claude Code shows every description. Everything else ships as opt-in packs (`orgs`, `org-admin`, `swarm`, `github`, `testing`, `specialists`, `business`, `extras`): pick them with `monomind init --packs orgs,github` or `--all-packs`, or add one later with `monomind packs add <pack>`. `monomind packs list` shows each pack and how much of the listing it uses.
 
-`monomind init` itself writes `.mcp.json` (and the Codex/OpenCode/Kimi/Antigravity configs) pinned to the installed version, so a start reuses the npx cache instead of re-resolving `@latest`; `--pin latest` keeps the floating `monomind@latest`, and `monomind init --force` re-pins after an upgrade.
+`monomind init` sets up only the coding systems installed on your machine: Claude Code, Antigravity, OpenCode, Kimi Code and Codex each count when their CLI is on your `PATH` or their config directory is in your home, and Claude Code is the default when none is found. It prints what it detected; `--platforms claude,codex` names the systems yourself and `--all-platforms` writes all five. It never runs `npm install` or edits your `package.json`: the code graph uses the `@monoes/monograph` copy bundled with the CLI.
+
+`monomind init` itself writes `.mcp.json` (and the configs of the other coding systems it sets up) pinned to the installed version, so a start reuses the npx cache instead of re-resolving `@latest`; `--pin latest` keeps the floating `monomind@latest`, and `monomind init --force` re-pins after an upgrade.
 
 <details>
 <summary><strong>Using Antigravity (agy)?</strong></summary>
 
-Nothing extra to do — agy output is part of **default** `monomind init`: `GEMINI.md`, `.gemini/rules/`, and a live status bar wired through `.gemini/settings.json`. The MCP server config is shared with Claude Code (`.mcp.json`). See [Antigravity guide →](doc/concepts/antigravity.md).
+Nothing extra to do when Antigravity is installed (`agy`/`gemini` on PATH or `~/.gemini`): `monomind init` then writes `GEMINI.md`, `.gemini/rules/`, and a live status bar wired through `.gemini/settings.json`. The MCP server config is shared with Claude Code (`.mcp.json`). See [Antigravity guide →](doc/concepts/antigravity.md).
 
 </details>
 
@@ -63,7 +65,7 @@ Nothing extra to do — agy output is part of **default** `monomind init`: `GEMI
 monomind init --target opencode # initialize only OpenCode
 ```
 
-`monomind init` initializes all supported coding systems. `--target opencode` initializes only OpenCode; the legacy `--opencode` flag remains an alias. You get the same MCP tools, agent roster, commands, skills, and security gates, plus a `/monomind-status` command. See [OpenCode guide →](doc/concepts/opencode.md).
+`monomind init` sets up the coding systems it detects on your machine (CLI on PATH or config directory in your home), OpenCode included when it is installed. `--target opencode` initializes only OpenCode; the legacy `--opencode` flag remains an alias. You get the same MCP tools, agent roster, commands, skills, and security gates, plus a `/monomind-status` command. See [OpenCode guide →](doc/concepts/opencode.md).
 
 </details>
 
@@ -74,7 +76,7 @@ monomind init --target opencode # initialize only OpenCode
 monomind init --target kimicode # initialize only Kimi Code
 ```
 
-`monomind init` includes Kimi Code by default. `--target kimicode` initializes only Kimi Code; the legacy `--kimicode` flag remains an alias. You get the same MCP tools, agent roster, skills, and commands (as project-level flow skills). Install the generated plugin once for `/monomind:*` slash commands and security gates: `/plugins install ./.kimi-code/plugin`. See [Kimi Code guide →](doc/concepts/kimicode.md).
+`monomind init` includes Kimi Code when it is installed (`kimi` on PATH or `~/.kimi`). `--target kimicode` initializes only Kimi Code; the legacy `--kimicode` flag remains an alias. You get the same MCP tools, agent roster, skills, and commands (as project-level flow skills). Install the generated plugin once for `/monomind:*` slash commands and security gates: `/plugins install ./.kimi-code/plugin`. See [Kimi Code guide →](doc/concepts/kimicode.md).
 
 </details>
 
@@ -92,7 +94,7 @@ project before it loads project-scoped configuration. To run persistent
 Monomind organizations through Codex, set `"runtime": "codex"` in the org
 definition.
 
-Use `monomind init` with no target to initialize every supported coding system.
+Plain `monomind init` sets up only the coding systems installed on your machine (Codex when `codex` is on PATH or `~/.codex` exists), and Claude Code when it finds none; `--all-platforms` sets up all five and `--platforms claude,codex` names them. Init never runs `npm install` in your project.
 Use `monomind init --target codex` (or `--codex`) to initialize only Codex. See [Codex guide →](doc/concepts/codex.md).
 
 </details>
