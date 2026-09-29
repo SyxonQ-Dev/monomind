@@ -96,7 +96,12 @@ describe('CopilotAgentRunner coder mode', () => {
     });
     const ends = msgs.filter((m) => m.type === 'tool_result');
     expect(ends).toEqual([
-      expect.objectContaining({ tool_use_id: ID, is_error: false, text: expect.stringContaining('a.txt') }),
+      expect.objectContaining({
+        tool_use_id: ID,
+        is_error: false,
+        exit_code: 0,
+        text: expect.stringContaining('a.txt'),
+      }),
     ]);
     expect(msgs.filter((m) => m.type === 'assistant').map((m) => m.text)).toEqual(['done']);
     expect(msgs.at(-1)).toMatchObject({ type: 'result', session_id: 'e579b79b-b24d-4397-ae21-ec2d437cc029' });
@@ -112,7 +117,9 @@ describe('CopilotAgentRunner coder mode', () => {
     );
     const msgs = await collect();
     expect(msgs.find((m) => m.type === 'tool_use' && m.tool_use_id)).toMatchObject({ kind: 'read', input: { file_path: '/x' } });
-    expect(msgs.find((m) => m.type === 'tool_result')).toMatchObject({ is_error: true, text: 'no such file' });
+    const end = msgs.find((m) => m.type === 'tool_result');
+    expect(end).toMatchObject({ is_error: true, text: 'no such file' });
+    expect(end).not.toHaveProperty('exit_code');
   });
 
   it('resumes the captured session on the next tool round and stops re-sending the system prompt', async () => {

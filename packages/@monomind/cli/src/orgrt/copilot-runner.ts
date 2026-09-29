@@ -162,7 +162,8 @@ export class CopilotAgentRunner implements AgentRunner {
                 if (m) yield m;
               }
               if (ev.toolEnd) {
-                yield* tools.end(ev.toolEnd.id, ev.toolEnd.output, ev.toolEnd.isError, sessionId);
+                const { id, output, isError, exitCode } = ev.toolEnd;
+                yield* tools.end(id, output, isError, sessionId, undefined, exitCode);
               }
             } else if (ev.kind === 'tool') {
               // Liveness for copilot's other tool events (partial results)

@@ -109,6 +109,9 @@ export function handleLine(line: string): CopilotStreamEvent | null {
         id: data.toolCallId,
         output: data.result?.content ?? '',
         isError: data.success === false,
+        ...(typeof data.shellExecution?.exitCode === 'number'
+          ? { exitCode: data.shellExecution.exitCode }
+          : {}),
       },
     };
   }

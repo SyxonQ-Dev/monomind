@@ -15,6 +15,8 @@ export interface CopilotEvent {
     arguments?: unknown;
     success?: boolean;
     result?: { content?: unknown };
+    /** A shell tool's exit status (seen live on 1.0.88). */
+    shellExecution?: { exitCode?: number };
   };
   /** `result` (the last line) carries the session id `--resume` takes. */
   sessionId?: string;
@@ -49,7 +51,7 @@ export interface CopilotStreamEvent {
   rawText?: string;
   toolName?: string;
   toolStart?: { id: string; name: string; input: unknown };
-  toolEnd?: { id: string; output: unknown; isError: boolean };
+  toolEnd?: { id: string; output: unknown; isError: boolean; exitCode?: number };
   sessionId?: string;
 }
 
