@@ -319,7 +319,12 @@ export class AiderAgentRunner implements AgentRunner {
     setSession(sid);
     mkdirSync(stateDir, { recursive: true, mode: 0o700 });
     const messageFile = join(stateDir, `${sid}.message.md`);
-    writeFileSync(messageFile, prompt, { mode: 0o600 });
+    // aider runs a message starting with `!`/`/` as its own command (`/run`
+    // shells out with no confirmation); scoped mode keeps it a message, as
+    // the shim does by replacing preproc_user_input.
+    const message =
+      args.access !== 'full' && /^[/!]/.test(prompt.trimStart()) ? `Request: ${prompt}` : prompt;
+    writeFileSync(messageFile, message, { mode: 0o600 });
     const argv = [
       '--message-file',
       messageFile,

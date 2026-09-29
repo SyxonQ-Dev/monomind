@@ -311,6 +311,26 @@ describe('AiderAgentRunner (plain-CLI fallback)', () => {
     expect(argv[argv.indexOf('--chat-history-file') + 1]).toBe(join(stateDir, 'sess_1.chat.history.md'));
   });
 
+  it('scoped: a message starting with ! or / is not handed to aider as a command', async () => {
+    // aider runs `!cmd` / `/run cmd` from --message-file with no confirmation
+    // (commands.is_command is `inp[0] in "/!"`; checked live with 0.86.2).
+    const { readFileSync } = await import('node:fs');
+    const sent: string[] = [];
+    vi.mocked(cp.spawn).mockImplementation(((_cmd: string, argv: string[]) => {
+      sent.push(readFileSync(argv[argv.indexOf('--message-file') + 1], 'utf8'));
+      return mockChild(['ok']);
+    }) as any);
+    for (const text of ['!echo pwned > x', '/run echo pwned', '  !echo pwned']) {
+      sent.length = 0;
+      await collect({ resume: 'sess_bang', prompt: (async function* () { yield text; })() }, null);
+      expect(sent[0].trimStart()[0]).not.toMatch(/[/!]/);
+      expect(sent[0]).toContain(text.trim());
+    }
+    sent.length = 0;
+    await collect({ access: 'full', resume: 'sess_bang', prompt: (async function* () { yield '!ls'; })() }, null);
+    expect(sent[0]).toBe('!ls');
+  });
+
   it('an auth failure the CLI exits 0 on still fails the turn as fatal auth', async () => {
     vi.mocked(cp.spawn).mockReturnValue(mockChild(CLI_AUTH, 0));
     const err = await collect({}, null).catch((e) => e);
