@@ -20,12 +20,6 @@ At session end, automatically saves:
 
 ### 2. Session Restoration
 ```javascript
-// Retrieve saved session state
-mcp__monomind__memory_retrieve({
-  key: "session-state",
-  namespace: "sessions"
-})
-
 // Restore a named session
 mcp__monomind__session_restore({
   sessionId: "sess-123"
@@ -59,19 +53,8 @@ npx monomind hooks session-restore --id "sess-123"
 
 ### 4. Privacy & Control
 ```javascript
-// List memory entries by namespace
-mcp__monomind__memory_list({
-  namespace: "sessions"
-})
-
-// Delete specific memory entry
-mcp__monomind__memory_delete({
-  key: "session-123",
-  namespace: "sessions"
-})
-
 // Check memory stats
-mcp__monomind__memory_stats({})
+mcp__monomind__memory_health({})
 ```
 
 **Manual control:**

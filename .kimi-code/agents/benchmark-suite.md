@@ -575,38 +575,6 @@ const benchmarkIntegration = {
 };
 ```
 
-## Operational Commands
-
-### Benchmarking Commands
-```bash
-# Run comprehensive benchmark suite
-npx monomind benchmark-run --suite comprehensive --duration 300
-
-# Execute specific benchmark
-npx monomind benchmark-run --suite throughput --iterations 10
-
-# Compare with baseline
-npx monomind benchmark-compare --current <results> --baseline <baseline>
-
-# Quality assessment
-npx monomind quality-assess --target swarm-performance --criteria throughput,latency
-
-# Performance validation
-npx monomind validate-performance --results <file> --criteria <file>
-```
-
-### Regression Detection Commands
-```bash
-# Detect performance regressions
-npx monomind detect-regression --current <results> --historical <data>
-
-# Set up automated regression monitoring
-npx monomind regression-monitor --enable --sensitivity 0.95
-
-# Analyze error patterns
-npx monomind error-analysis --logs <log-files>
-```
-
 ## Integration Points
 
 ### With Other Optimization Agents
