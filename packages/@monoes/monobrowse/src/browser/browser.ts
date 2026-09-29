@@ -14,4 +14,8 @@ export {
   openUrl,
   waitForLoad,
 } from './browser-page.js';
-export { getLaunchedPid, getLaunchedUserDataDir } from './browser-state.js';
+export {
+  getLaunchedPid,
+  getLaunchedUserDataDir,
+  ownsLaunchedUserDataDir,
+} from './browser-state.js';
