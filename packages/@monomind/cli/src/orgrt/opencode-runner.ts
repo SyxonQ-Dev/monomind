@@ -61,6 +61,20 @@
  * visible text — is what's collected per part for it, exactly as the
  * previous blocking-call implementation did.
  *
+ * Coder mode (plan MM3, contract §4/§5):
+ *   - opencode's agent loop writes one assistant message PER STEP (a step
+ *     that calls a native tool completes with `finish: "tool-calls"` and
+ *     the next step is a new message), so a round collects every assistant
+ *     message in the session and ends on the first one that completes with
+ *     any other finish — or on `session.idle` once everything seen is done.
+ *   - `type:"tool"` parts become matched tool_use/tool_result messages
+ *     (opencode-runner-tools.ts), gated like the Claude runner's.
+ *   - Full access: permission override + `always` replies + process-group
+ *     spawn (opencode-runner-server.ts). Effort → the model's variant.
+ *   - settingSources: nothing to un-isolate — the served instance always
+ *     loads the user's opencode config and the project's opencode.json,
+ *     AGENTS.md and MCP servers; full mode overrides only `permission`.
+ *
  * Non-disturbance guarantees:
  *   - The SDK is imported dynamically; the package has no hard dependency on
  *     @opencode-ai/sdk. Selected only via MONOMIND_RUNTIME=opencode; without
@@ -68,7 +82,6 @@
  *     clear actionable error instead of crashing at import time.
  */
 
-import { spawn } from 'node:child_process';
 import {
   type AgentMessage,
   type AgentRunArgs,
@@ -79,8 +92,14 @@ import { computeSafeChunk } from './antigravity-runner.js';
 // Reused, not reimplemented — see antigravity-runner.ts's own header for why
 // a fence can legitimately span multiple incremental deltas and must never
 // surface, complete or partial, in visible text.
-import { maskedCommand } from './authority-mask.js';
-import { omitAnthropicManagedKeys } from './provider.js';
+import {
+  type OpencodeServer,
+  replyPermission,
+  resolveEffortVariant,
+  startOpencodeServer,
+  withTimeout,
+} from './opencode-runner-server.js';
+import { OpencodeToolParts } from './opencode-runner-tools.js';
 import {
   buildToolProtocol,
   formatToolResults,
@@ -145,8 +164,9 @@ export class OpencodeAgentRunner implements AgentRunner {
     // or spawn an ephemeral one. Spawning per role keeps org roles isolated
     // from the user's interactive opencode state — and is the only path that
     // can carry the role's session env (#262, see startOpencodeServer).
+    const full = args.access === 'full';
     let client: any;
-    let server: { url: string; close(): void } | null = null;
+    let server: OpencodeServer | null = null;
     const attachUrl = this.opencodeUrl || process.env.OPENCODE_URL;
     if (attachUrl) {
       client = sdk.createOpencodeClient({ baseUrl: attachUrl, directory: args.cwd });
@@ -154,16 +174,18 @@ export class OpencodeAgentRunner implements AgentRunner {
       server = await startOpencodeServer(args);
       client = sdk.createOpencodeClient({ baseUrl: server.url });
     }
+    const baseUrl = attachUrl ?? server!.url;
 
     // Abort hook (see AgentRunArgs.signal): the only child this runner owns
-    // is the ephemeral server it spawned — close it so its process dies,
+    // is the ephemeral server it spawned — kill it (in full mode its whole
+    // process tree, process-group-spawn.ts) so its process dies,
     // which also tears down the event-stream connection below and fails the
     // in-flight round instead of running on unobserved. (Attached servers
     // are the user's — never close those.)
     const unsubscribeAbort = killOnAbort(args.signal, {
-      kill: () => {
+      kill: (signal) => {
         try {
-          server?.close();
+          server?.target.kill(signal);
         } catch {
           /* best-effort */
         }
@@ -188,7 +210,14 @@ export class OpencodeAgentRunner implements AgentRunner {
         // parentID/title) — resuming means reusing the existing session id
         // directly. session.get confirms the session still exists on the
         // opencode server before we drive prompt() calls against it.
-        await client.session.get({ path: { id: sessionId } });
+        // The client reports a missing session as `{error}`, not a throw.
+        const got = await client.session.get({ path: { id: sessionId } });
+        if (got?.error) {
+          throw new Error(
+            `OpencodeAgentRunner: cannot resume opencode session ${sessionId}: ` +
+              (got.error?.data?.message ?? got.error?.name ?? JSON.stringify(got.error)),
+          );
+        }
       } else {
         const created = await client.session.create({ body: { title: 'monomind-org-role' } });
         sessionId = created?.data?.id ?? created?.id;
@@ -206,6 +235,27 @@ export class OpencodeAgentRunner implements AgentRunner {
         modelParts.length >= 2
           ? { providerID: modelParts[0], modelID: modelParts.slice(1).join('/') }
           : undefined;
+      const variant = await resolveEffortVariant(client, args.model, args.effort);
+
+      // Native tool calls → tool_use/tool_result, gated exactly like the
+      // Claude runner's rich tool_use (#357/#365): session.ts never sets
+      // either flag, so the org runtime's message stream is unchanged.
+      const emitToolUse = streamPartials || args.extras?.includeToolUseEvents === true;
+      const toolParts = emitToolUse ? new OpencodeToolParts(sessionId) : undefined;
+      if (toolParts) {
+        try {
+          const st = await client.mcp?.status?.();
+          toolParts.mcpServers = Object.keys(st?.data ?? {});
+        } catch {
+          /* MCP tools then map to kind "other" */
+        }
+      }
+      // This role's session plus its task-subagent child sessions — whose
+      // permission requests full access answers (never another client's).
+      const ownSessions = new Set<string>([sessionId]);
+      // Assistant messages already counted — across rounds, so a late
+      // update to an earlier round's message is never re-counted.
+      const completedMessages = new Set<string>();
 
       for await (const p of args.prompt) {
         const text = typeof p === 'string' ? p : (p?.message?.content ?? String(p ?? ''));
@@ -225,6 +275,7 @@ export class OpencodeAgentRunner implements AgentRunner {
                 parts: [{ type: 'text', text: nextPrompt }],
                 system: systemPrompt,
                 ...(model ? { model } : {}),
+                ...(variant ? { variant } : {}),
               },
             }),
             TURN_TIMEOUT_MS,
@@ -233,18 +284,14 @@ export class OpencodeAgentRunner implements AgentRunner {
 
           // Per-round incremental-streaming state — reset every round, same
           // cadence as antigravity/qwen-rpc's own per-step/per-round reset.
-          // assistantMessageId is discovered from the event stream itself
-          // (promptAsync's 204 response carries no id) — the first
-          // role:"assistant" message.updated seen this round.
-          let assistantMessageId: string | undefined;
+          // The round's assistant message ids are discovered from the event
+          // stream itself (promptAsync's 204 response carries no id) — one
+          // per agent-loop step (see the header).
+          const roundMessages = new Set<string>();
           const partTypes = new Map<string, string>();
           const partRawText = new Map<string, string>();
           const partVisible = new Map<string, string>();
           const partOrder: string[] = [];
-          let finalTokens:
-            | { input?: number; output?: number; cache?: { read?: number; write?: number } }
-            | undefined;
-          let finalCost: number | undefined;
 
           const roundDeadline = Date.now() + TURN_TIMEOUT_MS;
           for (;;) {
@@ -269,13 +316,47 @@ export class OpencodeAgentRunner implements AgentRunner {
             if (evType === 'message.updated') {
               const info = props.info;
               if (!info || info.sessionID !== sessionId || info.role !== 'assistant') continue;
-              if (assistantMessageId === undefined) assistantMessageId = info.id;
-              if (info.id !== assistantMessageId) continue;
+              if (completedMessages.has(info.id)) continue;
+              roundMessages.add(info.id);
               if (info.time?.completed) {
-                finalTokens = info.tokens;
-                finalCost = typeof info.cost === 'number' ? info.cost : undefined;
-                break; // this round's assistant response is fully generated
+                completedMessages.add(info.id);
+                const tokens = info.tokens ?? {};
+                turnInputTokens +=
+                  (tokens.input ?? 0) + (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0);
+                turnOutputTokens += tokens.output ?? 0;
+                turnCost += typeof info.cost === 'number' ? info.cost : 0;
+                // A native-tool step continues in a new message; anything
+                // else means this round's response is fully generated.
+                if (info.finish !== 'tool-calls') break;
               }
+              continue;
+            }
+
+            if (
+              (evType === 'session.idle' ||
+                (evType === 'session.status' && props.status?.type === 'idle')) &&
+              props.sessionID === sessionId
+            ) {
+              // Backstop for a loop that stops after a tool step (e.g. a
+              // rejected permission). A stale idle from before this round
+              // is ignored: nothing has been seen yet.
+              if (
+                roundMessages.size > 0 &&
+                [...roundMessages].every((id) => completedMessages.has(id))
+              )
+                break;
+              continue;
+            }
+
+            if (evType === 'session.created' || evType === 'session.updated') {
+              const info = props.info;
+              if (info?.id && ownSessions.has(info.parentID)) ownSessions.add(info.id);
+              continue;
+            }
+
+            if (evType === 'permission.asked' || evType === 'permission.updated') {
+              if (full && ownSessions.has(props.sessionID))
+                void replyPermission(baseUrl, args.cwd, evType, props);
               continue;
             }
 
@@ -285,14 +366,17 @@ export class OpencodeAgentRunner implements AgentRunner {
               // Strict gate, not "skip the check if unknown": the echoed
               // USER message (and its own text part, carrying the prompt
               // text back verbatim) always arrives BEFORE the assistant
-              // message.updated that establishes assistantMessageId — live-
-              // verified. Treating "don't know the assistant id yet" as
+              // message.updated that establishes the assistant message id —
+              // live-verified. Treating "don't know the assistant id yet" as
               // "let it through" was a real bug caught live: the prompt
               // text itself got recorded as a text part and leaked out as
               // a fake final "assistant" message once nothing else claimed
               // to have already shown it.
-              if (assistantMessageId === undefined || part.messageID !== assistantMessageId)
+              if (!roundMessages.has(part.messageID)) continue;
+              if (part.type === 'tool') {
+                for (const m of toolParts?.onPart(part) ?? []) yield m;
                 continue;
+              }
               if (!partTypes.has(part.id)) partOrder.push(part.id);
               partTypes.set(part.id, part.type);
               if (part.type === 'text' && typeof part.text === 'string') {
@@ -304,8 +388,7 @@ export class OpencodeAgentRunner implements AgentRunner {
             if (evType === 'message.part.delta') {
               if (props.sessionID !== sessionId) continue;
               // Same strict gate as message.part.updated above.
-              if (assistantMessageId === undefined || props.messageID !== assistantMessageId)
-                continue;
+              if (!roundMessages.has(props.messageID)) continue;
               if (props.field !== 'text') continue;
               if (partTypes.get(props.partID) !== 'text') continue;
               const raw = (partRawText.get(props.partID) ?? '') + (props.delta ?? '');
@@ -335,17 +418,11 @@ export class OpencodeAgentRunner implements AgentRunner {
                   (err?.data?.message ?? err?.name ?? JSON.stringify(err) ?? 'unknown error'),
               );
             }
-            // Everything else (session.status, session.idle, plugin.*,
+            // Everything else (busy session.status, plugin.*,
             // file.watcher.*, catalog.*, …) carries no signal this runner
             // acts on — drained, matching the previous implementation's own
             // "only text parts matter" scope.
           }
-
-          const tokens = finalTokens ?? {};
-          turnInputTokens +=
-            (tokens.input ?? 0) + (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0);
-          turnOutputTokens += tokens.output ?? 0;
-          turnCost += finalCost ?? 0;
 
           // Final reconciliation, one texts[] entry per text part — matching
           // the previous implementation's per-part (not joined) granularity.
@@ -396,6 +473,7 @@ export class OpencodeAgentRunner implements AgentRunner {
       }
     } finally {
       unsubscribeAbort();
+      server?.stop();
       // Termination path: close the ephemeral server we spawned. (Attached
       // servers are the user's — never close those.) This also tears down
       // the event-stream connection.
@@ -406,91 +484,4 @@ export class OpencodeAgentRunner implements AgentRunner {
       }
     }
   }
-}
-
-/** How long the ephemeral server may take to print its listening line. The
- *  SDK's own default of 5s is too tight for a cold machine, and a timeout
- *  there crashes the role session. */
-const SERVER_START_TIMEOUT_MS = 30_000;
-
-/**
- * Start the ephemeral opencode server WITH THE ROLE'S SESSION ENV (#262).
- *
- * The SDK's `createOpencode()`/`createOpencodeServer()` spawn `opencode serve`
- * with the daemon's `process.env` and take no env option (`ServerOptions` is
- * `{hostname, port, signal, timeout, config}` — @opencode-ai/sdk 1.18.15), so
- * `args.env` never reached the process that runs the role's shell: provider
- * credentials, the #249 MONOMIND_* scoping and the #258 git guard all silently
- * failed to apply, and that shell had the operator's full git/GitHub access.
- * Spawning it here is codex-runner.ts's own `{ ...process.env, ...args.env }`
- * shape. An ATTACHED server (`OPENCODE_URL`) can't get the env — it is the
- * operator's own process; role-sandbox.ts audits it with `git-guard-unapplied`.
- */
-function startOpencodeServer(args: AgentRunArgs): Promise<{ url: string; close(): void }> {
-  // Mirrors runner-registry.ts's OPENCODE_BIN override for this runtime.
-  const bin = process.env.OPENCODE_BIN || 'opencode';
-  const child = spawn(
-    ...maskedCommand(args.authorityMask, bin, ['serve', '--hostname=127.0.0.1', '--port=0']),
-    {
-      cwd: args.cwd,
-      // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
-      // vendor CLI; an explicit value in args.env still wins below (this is
-      // the #262 path opencode-runner.test.ts's base-url provider test uses).
-      env: { ...omitAnthropicManagedKeys(process.env), ...args.env },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  );
-  // kill() on an exited child is a no-op (same as the SDK's own stop()).
-  const close = () => void child.kill();
-  return new Promise((resolve, reject) => {
-    let out = '';
-    let settled = false;
-    const settle = (fn: () => void) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      fn();
-    };
-    const die = (what: string) =>
-      settle(() => {
-        close();
-        reject(new Error(`OpencodeAgentRunner: opencode serve ${what}\n${out}`.trimEnd()));
-      });
-    const timer = setTimeout(() => die('did not start in time'), SERVER_START_TIMEOUT_MS);
-    const onOutput = (c: Buffer) => {
-      // The SDK reads the same line ("opencode server listening on <url>").
-      out = (out + c.toString()).slice(-4000);
-      const m = out.match(/opencode server listening on\s+(https?:\/\/\S+)/);
-      if (m) settle(() => resolve({ url: m[1], close }));
-    };
-    child.stdout?.on('data', onOutput);
-    child.stderr?.on('data', onOutput);
-    child.on('error', (e: Error) => settle(() => reject(e)));
-    child.on('exit', (code: number | null) => die(`exited with code ${code}`));
-  });
-}
-
-/** Race a promise against a wall-clock timeout. */
-function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const t = setTimeout(
-      () =>
-        reject(
-          new Error(
-            `OpencodeAgentRunner: ${label} exceeded the ${Math.round(ms / 60000)}min turn timeout`,
-          ),
-        ),
-      ms,
-    );
-    p.then(
-      (v) => {
-        clearTimeout(t);
-        resolve(v);
-      },
-      (e) => {
-        clearTimeout(t);
-        reject(e);
-      },
-    );
-  });
 }
