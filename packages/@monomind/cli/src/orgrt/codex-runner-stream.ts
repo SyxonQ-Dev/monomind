@@ -2,7 +2,7 @@
 import type { AgentRunArgs } from './agent-runner.js';
 import { killOnAbort } from './agent-runner.js';
 import { maskedCommand } from './authority-mask.js';
-import { codexSandboxArgs, roleGitLevel } from './cli-sandbox.js';
+import { codexSandboxArgs, codexSandboxModeArgs, roleGitLevel } from './cli-sandbox.js';
 import { CodexToolItems, codexEffortArgs } from './codex-runner-tools.js';
 import type { CodexEvent, CodexStreamEvent, TurnOutcome } from './codex-runner-types.js';
 import { classifyStderr } from './kimicode-runner.js';
@@ -34,6 +34,9 @@ export const TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours, matching kimi/ant
  * here; agent-exec names what codex loads in a `status` notice.
  * `access: 'read'` (#388) passes `--sandbox read-only`: the whole filesystem
  * read-only and no network for model-generated shell commands.
+ * An explicit `sandbox` (#396, `agent exec --sandbox`) of read-only or
+ * workspace-write replaces both the role's default and the full-access
+ * bypass flag; `full` or unset keeps the behaviour above.
  */
 export function codexExecArgs(args: AgentRunArgs, threadId: string | undefined): string[] {
   const cliArgs: string[] = ['exec', '--json'];
@@ -41,12 +44,15 @@ export function codexExecArgs(args: AgentRunArgs, threadId: string | undefined):
   cliArgs.push(...codexEffortArgs(args.effort));
   cliArgs.push('--cd', args.cwd);
   cliArgs.push('--skip-git-repo-check');
-  if (args.access === 'full') {
-    cliArgs.push('--dangerously-bypass-approvals-and-sandbox');
-  } else if (args.access === 'read') {
+  if (args.access === 'read') {
     // #388: codex's own read-only sandbox, whatever the role's git level —
     // a read turn is never danger-full-access.
     cliArgs.push('--sandbox', 'read-only');
+  } else if (args.sandbox && args.sandbox !== 'full') {
+    // #396: an explicit `agent exec --sandbox`, with full access too.
+    cliArgs.push(...codexSandboxModeArgs(args.sandbox));
+  } else if (args.access === 'full') {
+    cliArgs.push('--dangerously-bypass-approvals-and-sandbox');
   } else {
     // #263: codex's own sandbox follows the role's policy.git level — only a
     // 'push' role still gets danger-full-access. See cli-sandbox.ts.

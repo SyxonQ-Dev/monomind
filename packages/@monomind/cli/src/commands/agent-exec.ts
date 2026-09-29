@@ -16,6 +16,7 @@ import { runAgentExec, type ToolSpec } from '../orgrt/agent-exec.js';
 import { parseSettingsFlag } from '../orgrt/agent-exec-settings.js';
 import { ORG_EFFORT_LEVELS, type OrgEffortLevel } from '../orgrt/cost-tier.js';
 import { scanInstalled } from '../orgrt/runner-registry.js';
+import { SANDBOX_MODES, type SandboxMode } from '../orgrt/runner-sandbox.js';
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 
@@ -150,6 +151,19 @@ export async function runExec(
     return usageError('--access full cannot be combined with --allow-bash-prefix');
   }
 
+  // #396 (rev 23): the vendor CLI's own sandbox; per-runtime support is
+  // checked in the engine (`unsupported`). `read` always runs read-only, so
+  // asking for `full` with it is a contradiction.
+  const sandboxFlag = ctx.flags.sandbox;
+  if (sandboxFlag !== undefined && !(SANDBOX_MODES as readonly unknown[]).includes(sandboxFlag)) {
+    return usageError(
+      `--sandbox must be one of ${SANDBOX_MODES.join(', ')} (got "${String(sandboxFlag)}")`,
+    );
+  }
+  if (access === 'read' && sandboxFlag === 'full') {
+    return usageError('--access read cannot be combined with --sandbox full');
+  }
+
   let toolSpecs: ToolSpec[] = [];
   const toolsMode = String(ctx.flags.tools ?? 'none');
   if (toolsMode !== 'none' && toolsMode !== 'stdio') {
@@ -217,6 +231,7 @@ export async function runExec(
   const exitCode = await runAgentExec({
     runtime,
     access: access as 'scoped' | 'read' | 'full',
+    ...(sandboxFlag !== undefined ? { sandbox: sandboxFlag as SandboxMode } : {}),
     prompt,
     systemPrompt,
     model: ctx.flags.model ? String(ctx.flags.model) : undefined,
@@ -323,6 +338,13 @@ export const execCommand: Command = {
         'scoped (default, allow-list only), read — read files, search, web and read-only git, no edits or general shell (runtimes listing "read" in agent scan access_modes), or full — unrestricted native tool access (runtimes with full_access in agent scan; requires --cwd, refuses root)',
       type: 'string',
       choices: ['scoped', 'read', 'full'],
+    },
+    {
+      name: 'sandbox',
+      description:
+        "The vendor CLI's own sandbox: read-only, workspace-write or full (today's default). Only modes listed in agent scan --json sandbox_modes; never loosens an org role's git level; --access read always runs read-only",
+      type: 'string',
+      choices: [...SANDBOX_MODES],
     },
     { name: 'protocol', description: 'Protocol version pin (1)', type: 'string' },
     {

@@ -41,6 +41,11 @@ export interface AgentRunArgs {
    *  runtime whose RunnerSpec.readAccess is true (runner-access.ts); claude
    *  gets it from the caller's canUseTool instead. */
   access?: 'scoped' | 'read' | 'full';
+  /** #396 (agent exec `--sandbox`, rev 23): the vendor CLI's own sandbox
+   *  mode, already capped by the role's git level (runner-sandbox.ts).
+   *  Unset or `full` = today's behaviour. Only codex, grok and dsh act on
+   *  `read-only`/`workspace-write`; agent-exec refuses it elsewhere. */
+  sandbox?: 'read-only' | 'workspace-write' | 'full';
   /** The mailbox prompt stream (or any async iterable of prompt messages). */
   prompt: AsyncIterable<any>;
   systemPrompt: string;

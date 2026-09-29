@@ -14,6 +14,12 @@
 import { statSync } from 'node:fs';
 import { callerToolsWithFullAccess } from './runner-access.js';
 import { type RunnerSpec, runnerSpec } from './runner-registry.js';
+import {
+  resolveSandbox,
+  type SandboxMode,
+  type SandboxReport,
+  sandboxReport,
+} from './runner-sandbox.js';
 
 export type AccessMode = 'scoped' | 'read' | 'full';
 
@@ -143,4 +149,28 @@ export function resolveAccess(
   emit({ v: 1, type: 'error', code: err.code, fatal: true, message: err.message });
   emit({ v: 1, type: 'done', exit_code: 2 });
   return { access, abort: true };
+}
+
+/**
+ * #396 (rev 23): resolves `--sandbox` into the mode the runner gets (capped
+ * by an org role's git level, never loosened — runner-sandbox.ts) and the
+ * `native_sandbox`/`approvals` the `start` event reports. A mode the runtime
+ * lacks emits `error {code:"unsupported"}` + `done` itself; `abort: true`
+ * means the caller must return exit code 2.
+ */
+export function resolveExecSandbox(
+  opts: {
+    runtime: string;
+    access: AccessMode;
+    sandbox?: SandboxMode;
+    env?: Record<string, string>;
+  },
+  emit: (ev: Record<string, unknown>) => void,
+): { mode?: SandboxMode; report: SandboxReport; abort: boolean } {
+  const { mode, error } = resolveSandbox(opts.runtime, opts.sandbox, [opts.env, process.env]);
+  const report = sandboxReport(opts.runtime, { access: opts.access, sandbox: mode, env: opts.env });
+  if (!error) return { mode, report, abort: false };
+  emit({ v: 1, type: 'error', code: 'unsupported', fatal: true, message: error });
+  emit({ v: 1, type: 'done', exit_code: 2 });
+  return { report, abort: true };
 }

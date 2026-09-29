@@ -16,6 +16,13 @@ import type { AgentRunner } from './agent-runner.js';
 import { type RuntimeKind, resolveRunner } from './daemon.js';
 import { accessModes, callerToolsWithFullAccess, RUNNER_ACCESS } from './runner-access.js';
 import { RUNNER_FEATURES, type RunnerFeatures } from './runner-features.js';
+import {
+  type Approvals,
+  type NativeSandbox,
+  type SandboxMode,
+  sandboxModes,
+  sandboxReport,
+} from './runner-sandbox.js';
 import { BASE_SPECS, type RunnerSpec } from './runner-specs.js';
 import { detectVersion, type VersionSource } from './version-probe.js';
 
@@ -79,6 +86,11 @@ export interface ScanEntry {
   caller_tools: boolean;
   /** #389 (rev 22): caller tools also work together with `--access full`. */
   caller_tools_with_full_access: boolean;
+  /** #396 (rev 23): the native sandbox / approvals of a default (scoped, no
+   *  `--sandbox`, no org git level) turn, and the `--sandbox` values accepted. */
+  native_sandbox: NativeSandbox;
+  approvals: Approvals;
+  sandbox_modes: SandboxMode[];
   /** Mirrors `RunnerSpec.toolActivityFidelity` (#357) — see its doc comment. */
   tool_activity_fidelity: 'full' | 'start-only' | 'none';
   /** Rev 13 service flags — mirror `RunnerFeatures` (runner-features.ts). */
@@ -174,6 +186,8 @@ export async function scanInstalled(opts: ScanOptions = {}): Promise<{
         access_modes: accessModes(spec),
         caller_tools: spec.callerTools,
         caller_tools_with_full_access: callerToolsWithFullAccess(spec),
+        ...sandboxReport(spec.id, { access: 'scoped' }),
+        sandbox_modes: [...sandboxModes(spec.id)],
         tool_activity_fidelity: spec.toolActivityFidelity,
         resume: spec.resume,
         effort: spec.effort,

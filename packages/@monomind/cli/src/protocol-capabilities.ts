@@ -116,6 +116,12 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    caller before any result is awaited (results match by id, any order);
  *    scan entries carry `caller_tools` and `caller_tools_with_full_access`
  *    (§3.1, §4.3, §6, rev 22)
+ *  - `agent-exec-sandbox` — `agent exec --sandbox read-only|workspace-write|
+ *    full` (issue #396): the vendor CLI's own sandbox where one exists
+ *    (codex, grok, dsh; `full` = today's default everywhere, any other
+ *    mode on another runtime is `unsupported`); never loosens an org role's
+ *    git level; `start` carries `native_sandbox` and `approvals`, scan
+ *    entries carry them plus `sandbox_modes` (§3.1, §3.2, §6, rev 23)
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
@@ -145,6 +151,7 @@ export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec-rate-limit-retry',
   'agent-exec-access-read',
   'agent-exec-full-access-tools',
+  'agent-exec-sandbox',
 ] as const;
 
 /** The exact handshake object emitted by `monomind --version --json`. */
