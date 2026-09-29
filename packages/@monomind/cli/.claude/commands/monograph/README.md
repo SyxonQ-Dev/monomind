@@ -93,5 +93,5 @@ The monograph MCP tools (available in Claude Code via monomind MCP server) provi
 ## See Also
 
 - `memory` — Vector memory storage (separate from graph)
-- `hooks intelligence` — Pattern learning
+- `hooks intelligence` — Local pattern/trajectory store
 - CLAUDE.md Knowledge Graph section — workflow guidance for multi-file tasks

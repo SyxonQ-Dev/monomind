@@ -45,7 +45,7 @@ export const hooksModelRoute: MCPTool = {
 // Model route outcome - record outcome for learning
 export const hooksModelOutcome: MCPTool = {
   name: 'hooks_model-outcome',
-  description: 'Record model routing outcome for learning',
+  description: 'Record model routing outcome',
   inputSchema: {
     type: 'object',
     properties: {

@@ -111,6 +111,10 @@ function generatedCountsContent() {
 // row list beneath it drift independently (i-035 reviewer finding).
 export const WORKER_COUNT = ${COUNTS.workers};
 
+// \`monomind hooks\` subcommands (hooksCommand.subcommands in
+// src/commands/hooks.ts), for strings that can't import the command tree.
+export const HOOKS_SUBCOMMAND_COUNT = ${COUNTS['hooks-subcommands']};
+
 export interface WorkerRow {
   name: string;
   priority: string;
@@ -136,24 +140,19 @@ const DOC_FILES = [
   'doc/commands/org.md',
   'doc/concepts/hooks.md',
   'doc/concepts/statusline.md',
-];
-
-/**
- * CLI source strings that embed the worker count as a plain literal (no HTML
- * comment marker — TS source can't use one inside a template string without it
- * surfacing in --help output). Each entry is { file, regex, replacePattern }
- * where replacePattern uses %COUNT% as the substitution token.
- *
- * Kept conservative: one distinctive match per file.
- */
-const CLI_SOURCE_PATCHES = [
-  {
-    file: 'packages/@monomind/cli/src/commands/hooks.ts',
-    // Matches: `${output.highlight('worker')}          - Background worker management (N workers)`,
-    regex:
-      /(`\$\{output\.highlight\('worker'\)}\s+-\s+Background worker management\s+\()\d+(\s+workers\)`,)/,
-    replacePattern: '$1%COUNT%$2',
-  },
+  'doc/concepts/memory.md',
+  // Shipped slash commands: the root tree, the npm package copy and the kimi
+  // conversions all carry the same markers (scripts/sync-claude-trees.mjs).
+  '.claude/commands/agents/agent-types.md',
+  'packages/@monomind/cli/.claude/commands/agents/agent-types.md',
+  '.kimi-code/plugin/commands/agents-agent-types.md',
+  '.kimi-code/skills/agents-agent-types/SKILL.md',
+  '.claude/commands/hooks/README.md',
+  'packages/@monomind/cli/.claude/commands/hooks/README.md',
+  '.claude/commands/hooks/overview.md',
+  'packages/@monomind/cli/.claude/commands/hooks/overview.md',
+  '.kimi-code/plugin/commands/hooks-overview.md',
+  '.kimi-code/skills/hooks-overview/SKILL.md',
 ];
 
 function markerRegex(name) {
@@ -196,32 +195,6 @@ function main() {
         writeFileSync(join(REPO_ROOT, relPath), out, 'utf8');
         console.log(`updated: ${relPath}`);
       }
-    }
-  }
-
-  // CLI source strings: plain literals, not <!-- doc-count --> markers.
-  for (const { file, regex, replacePattern } of CLI_SOURCE_PATCHES) {
-    let content;
-    try {
-      content = read(file);
-    } catch {
-      continue;
-    }
-    if (!regex.test(content)) continue;
-    // Re-extract the current count with a tight probe (regex above captures
-    // prefix/suffix groups but not the digit on its own — kept readable).
-    const digitMatch = content.match(/Background worker management\s+\((\d+)\s+workers\)/);
-    const current = digitMatch ? Number(digitMatch[1]) : NaN;
-    if (current === COUNTS.workers) continue;
-    if (checkOnly) {
-      stale.push(`${file} (worker-count literal: ${current} → ${COUNTS.workers})`);
-    } else {
-      const next = content.replace(
-        regex,
-        replacePattern.replace('%COUNT%', String(COUNTS.workers)),
-      );
-      writeFileSync(join(REPO_ROOT, file), next, 'utf8');
-      console.log(`updated: ${file} (worker-count literal)`);
     }
   }
 

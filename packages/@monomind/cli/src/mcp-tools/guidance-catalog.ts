@@ -7,6 +7,8 @@
  * `guidanceTools`.
  */
 
+import { HOOKS_SUBCOMMAND_COUNT, WORKER_COUNT } from '../init/generated-counts.js';
+
 // ── Capability Catalog ──────────────────────────────────────
 
 export interface CapabilityArea {
@@ -97,9 +99,9 @@ export const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
     whenToUse: 'When you need to persist, search, or retrieve knowledge across sessions.',
   },
   'intelligence-learning': {
-    name: 'Intelligence & Learning',
+    name: 'Intelligence & Pattern Store',
     description:
-      'Pattern storage and cosine-similarity search (SONA/ReasoningBank) backed by real embeddings.',
+      'Local JSON pattern/trajectory store with cosine-similarity search over embeddings. No model is trained.',
     tools: [
       'hooks_intelligence',
       'hooks_intelligence_learn',
@@ -109,14 +111,13 @@ export const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
     ],
     commands: [],
     agents: [],
-    skills: ['reasoningbank-intelligence', 'memory-reasoningbank'],
+    skills: [],
     whenToUse:
-      'When optimizing agent routing, training patterns from outcomes, or adaptive learning.',
+      'When recording task outcomes, storing or searching patterns, or inspecting routing stats.',
   },
   'hooks-automation': {
     name: 'Hooks & Automation',
-    description:
-      '17 lifecycle hooks + 12 background workers for automated learning and coordination.',
+    description: `${HOOKS_SUBCOMMAND_COUNT} hook subcommands + ${WORKER_COUNT} background workers for outcome logging, agent routing and coordination.`,
     tools: [
       'hooks_pre-task',
       'hooks_post-task',

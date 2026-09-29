@@ -38,10 +38,10 @@ export function cliCommandsTable(): string {
 | \`memory\` | ${subcommandCount(memoryCommand)} | SQLite memory with ANN search |
 | \`task\` | ${subcommandCount(taskCommand)} | Task creation and lifecycle |
 | \`session\` | ${subcommandCount(sessionCommand)} | Session state management |
-| \`hooks\` | ${subcommandCount(hooksCommand)} | Self-learning hooks + ${workerCountLabel(avail.hooks)}background workers${unavailNote(avail.hooks)} |
+| \`hooks\` | ${subcommandCount(hooksCommand)} | Edit/outcome logging, agent routing + ${workerCountLabel(avail.hooks)}background workers${unavailNote(avail.hooks)} |
 
-> Note: there is no \`neural\` CLI command. Neural pattern learning was merged
-> into \`hooks intelligence\`. See \`doc/concepts/monoswarm.md\` for monoswarm
+> Note: there is no \`neural\` CLI command. Its pattern commands live under
+> \`hooks intelligence\` — a local JSON pattern store; no model is trained. See \`doc/concepts/monoswarm.md\` for monoswarm
 > coordination and vote strategies.
 
 ### Quick CLI Examples
@@ -93,11 +93,11 @@ export function hooksSystem(): string {
 
 | Hook | Description |
 |------|-------------|
-| \`pre-task\` / \`post-task\` | Task lifecycle with learning |
+| \`pre-task\` / \`post-task\` | Route a task at start, record its outcome at end |
 | \`pre-edit\` / \`post-edit\` | File editing with pattern logging |
 | \`session-restore\` / \`session-end\` | Session state persistence |
 | \`route\` | Route task to optimal agent |
-| \`intelligence\` | Pattern-learning intelligence system |
+| \`intelligence\` | Local pattern/trajectory store (JSON files; no model is trained) |
 | \`worker\` | Background worker management |
 
 ### Background Workers (@monoes/hooks, run in-process)${unavailNote(avail.hooks)}
@@ -116,7 +116,7 @@ npx monomind hooks worker run audit
 }
 
 export function learningProtocol(): string {
-  return `## Auto-Learning Protocol
+  return `## Memory Protocol
 
 ### Before Starting Any Task
 \`\`\`bash
@@ -127,7 +127,7 @@ npx monomind hooks route --task "[task description]"
 ### After Completing Any Task Successfully
 \`\`\`bash
 npx monomind memory store --namespace patterns --key "[pattern-name]" --value "[what worked]"
-npx monomind hooks post-task --task-id "[id]" --success true --store-results true
+npx monomind hooks post-task --task-id "[id]" --success true
 \`\`\`
 
 - ALWAYS check memory before starting new features, debugging, or refactoring
@@ -219,12 +219,12 @@ npx monomind performance metrics --format table
 export function intelligenceSystem(): string {
   return `## Intelligence System
 
-- **Keyword routing**: Deterministic task→agent routing via \`createKeywordRouter\`
-- **Outcome measurement**: Route and command outcomes are recorded and scored to surface routing accuracy over time
+- **Keyword routing**: The picker routes prompts to agents and skills by keyword match
+- **Pick stats**: Pick adherence and subagent outcomes (\`.monomind/pick-stats.json\`) act as a bounded ranking prior on later picks
+- **Outcome logging**: Hooks log edits, outcomes and trajectories to local JSON pattern files; route outcomes are scored to measure routing accuracy
 - **Pattern search**: SQLite-backed ANN vector search for finding similar past patterns
 
-Routing and learning are JS-only — no native engine is required. Outcomes
-feed back into the recorded metrics so routing quality is measured, not assumed.`;
+No model is trained — everything runs in JS on local files.`;
 }
 
 // Emitted only where `init` activated the documents capability — every other

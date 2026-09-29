@@ -69,6 +69,5 @@ npx monomind memory import --input backup.json --merge
 
 ## See Also
 
-- `hooks intelligence` — pattern learning on top of memory
-- `neural` — pattern logging
+- `hooks intelligence` — local pattern/trajectory store on top of memory (no model is trained)
 - `session` — session state (separate from memory)
