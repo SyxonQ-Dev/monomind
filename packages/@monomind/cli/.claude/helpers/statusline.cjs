@@ -11,6 +11,7 @@
  * - No ps aux calls (uses process.memoryUsage() + file-based metrics)
  * - Strict 2s timeout on all execSync calls
  * - Shared settings cache across functions
+ * - git/sqlite3/curl/npm results cached in .monomind/cache/statusline.json (#429)
  */
 
 /* eslint-disable @typescript-eslint/no-var-requires */
@@ -19,6 +20,7 @@ const path = require('path');
 const { execSync, spawnSync } = require('child_process');
 const os = require('os');
 const { cleanEntries } = require('./utils/fs-helpers.cjs');
+const { createSegmentCache } = require('./utils/statusline-cache.cjs');
 
 // Configuration
 const CONFIG = {
@@ -26,6 +28,11 @@ const CONFIG = {
 };
 
 const CWD = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+
+// Segments that spawn a process (git, sqlite3, curl, npm) are cached per
+// project with these TTLs, so a warm render is file reads + formatting (#429).
+const cached = createSegmentCache(path.join(CWD, '.monomind', 'cache', 'statusline.json'));
+const TTL = { git: 5000, counts: 30000, slow: 10 * 60 * 1000 };
 
 // Read monomind version — check global install first, then CWD package.json
 function getVersion() {
@@ -81,7 +88,7 @@ function getVersion() {
   // Unknown — show no version rather than a made-up one (#368).
   return '';
 }
-const VERSION = getVersion();
+const VERSION = cached('version', TTL.slow, getVersion);
 
 // ANSI colors
 const c = {
@@ -163,7 +170,7 @@ function getSettings() {
 // Project identifier — github owner/repo from git remote, else folder name
 function getProjectName() {
   try {
-    const remote = safeExec('git remote get-url origin 2>/dev/null', 2000).trim();
+    const remote = cached('gitRemote', TTL.slow, () => safeExec('git remote get-url origin 2>/dev/null', 2000)).trim();
     if (remote) {
       const m = remote.match(/[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?$/);
       if (m) return `${m[1]}/${m[2]}`;
@@ -174,8 +181,12 @@ function getProjectName() {
 
 // ─── Data Collection (all pure-Node.js or single-exec) ──────────
 
-// Get all git info in ONE shell call
+// Get all git info in ONE shell call (cached for TTL.git)
 function getGitInfo() {
+  return cached('git', TTL.git, readGitInfo);
+}
+
+function readGitInfo() {
   const result = {
     name: 'user', gitBranch: '', modified: 0, untracked: 0,
     staged: 0, ahead: 0, behind: 0,
@@ -913,7 +924,7 @@ function getGraphFreshness() {
   } catch { /* ignore */ }
   if (!buildMs) return { commitsBehind: -1, stale: true, fresh: false };
   const buildIso = new Date(buildMs).toISOString();
-  const out = safeExec(`git rev-list --count --since='${buildIso}' HEAD 2>/dev/null`, 1500);
+  const out = cached('graphCommitsSince', TTL.counts, () => safeExec(`git rev-list --count --since='${buildIso}' HEAD 2>/dev/null`, 1500));
   const commitsBehind = parseInt(out, 10) || 0;
   return { commitsBehind, stale: commitsBehind > 5, fresh: commitsBehind === 0 };
 }
@@ -979,7 +990,7 @@ function getActiveOrgs() {
   // Try git-common-dir path first (mastermind orgs store run files there)
   let orgsDir = path.join(CWD, '.monomind', 'orgs');
   try {
-    const gitCommon = safeExec('git rev-parse --git-common-dir 2>/dev/null', 1000);
+    const gitCommon = cached('gitCommonDir', TTL.slow, () => safeExec('git rev-parse --git-common-dir 2>/dev/null', 1000));
     if (gitCommon) {
       const candidate = path.isAbsolute(gitCommon)
         ? path.join(gitCommon, 'monomind', 'orgs')
@@ -1067,12 +1078,14 @@ function getMonographStats() {
   try {
     if (fs.existsSync(dbPath)) {
       // Use spawnSync array args to prevent shell injection via dbPath (CWD-derived)
-      const result = spawnSync(
-        'sqlite3',
-        [dbPath, 'SELECT (SELECT COUNT(*) FROM nodes), (SELECT COUNT(*) FROM edges);'],
-        { encoding: 'utf-8', timeout: 1000 }
-      );
-      const out = (result.stdout || '').trim();
+      const out = cached('monographCounts', TTL.counts, () => {
+        const result = spawnSync(
+          'sqlite3',
+          [dbPath, 'SELECT (SELECT COUNT(*) FROM nodes), (SELECT COUNT(*) FROM edges);'],
+          { encoding: 'utf-8', timeout: 1000 }
+        );
+        return (result.stdout || '').trim();
+      });
       if (out) {
         const [n, e] = out.split('|').map(v => parseInt(v, 10) || 0);
         if (n > 0) return { nodes: n, edges: e, exists: true };
@@ -1116,8 +1129,10 @@ function getDocStats() {
   } catch { /* ignore */ }
   try {
     if (fs.existsSync(memDbPath)) {
-      const result = spawnSync('sqlite3', [memDbPath, 'SELECT COUNT(*) FROM memory_entries;'], { encoding: 'utf-8', timeout: 1000 });
-      const n = parseInt((result.stdout || '').trim(), 10) || 0;
+      const n = cached('memoryCount', TTL.counts, () => {
+        const result = spawnSync('sqlite3', [memDbPath, 'SELECT COUNT(*) FROM memory_entries;'], { encoding: 'utf-8', timeout: 1000 });
+        return parseInt((result.stdout || '').trim(), 10) || 0;
+      });
       if (n > 0) { memories = n; exists = true; }
     }
   } catch { /* ignore */ }
@@ -1261,12 +1276,12 @@ function getDashboardHealth() {
   // separates the two codes; without it they'd concatenate into "200401".
   // curl's own --max-time fires before safeExec's outer timeout so a hung server
   // yields curl's clean empty-string failure instead of an execSync kill.
-  const out = safeExec(
+  const out = cached('dashProbe:' + port, TTL.git, () => safeExec(
     "curl -s --max-time 0.4 --connect-timeout 0.2 -w '%{http_code} '"
     + " -o /dev/null http://127.0.0.1:" + port + "/"
     + " -o /dev/null http://127.0.0.1:" + port + "/api/status",
     900,
-  );
+  ));
   const codes = out.split(' ');
   const back = Number(codes[1]);
   return {
@@ -1493,7 +1508,7 @@ if (require.main !== module) {
     getHooksStatus, getActiveAgent, getLanceDBStats,
     getLearningStats, getTestStats, getIntegrationStatus,
     getActiveOrgs,
-    generateJSON,
+    generateJSON, generateDashboard, generateStatusline,
   };
 }
 

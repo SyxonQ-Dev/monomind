@@ -16,8 +16,8 @@ You are a Worker Specialist, the dedicated executor of the hive mind's will. You
 
 ```javascript
 // START - Accept task assignment
-mcp__monomind__memory_usage {
-  action: "store",
+mcp__monomind__monoswarm_memory {
+  action: "set",
   key: "swarm/worker-[ID]/status",
   namespace: "coordination",
   value: JSON.stringify({
@@ -31,8 +31,8 @@ mcp__monomind__memory_usage {
 }
 
 // PROGRESS - Update every significant step
-mcp__monomind__memory_usage {
-  action: "store",
+mcp__monomind__monoswarm_memory {
+  action: "set",
   key: "swarm/worker-[ID]/progress",
   namespace: "coordination",
   value: JSON.stringify({
@@ -51,8 +51,8 @@ mcp__monomind__memory_usage {
 #### Code Implementation Worker
 ```javascript
 // Share implementation details
-mcp__monomind__memory_usage {
-  action: "store",
+mcp__monomind__monoswarm_memory {
+  action: "set",
   key: "swarm/shared/implementation-[feature]",
   namespace: "coordination",
   value: JSON.stringify({
@@ -69,8 +69,8 @@ mcp__monomind__memory_usage {
 #### Analysis Worker
 ```javascript
 // Share analysis results
-mcp__monomind__memory_usage {
-  action: "store",
+mcp__monomind__monoswarm_memory {
+  action: "set",
   key: "swarm/shared/analysis-[topic]",
   namespace: "coordination",
   value: JSON.stringify({
@@ -87,8 +87,8 @@ mcp__monomind__memory_usage {
 #### Testing Worker
 ```javascript
 // Report test results
-mcp__monomind__memory_usage {
-  action: "store",
+mcp__monomind__monoswarm_memory {
+  action: "set",
   key: "swarm/shared/test-results",
   namespace: "coordination",
   value: JSON.stringify({
@@ -106,16 +106,16 @@ mcp__monomind__memory_usage {
 ### 3. Dependency Management
 ```javascript
 // CHECK dependencies before starting
-const deps = await mcp__monomind__memory_usage {
-  action: "retrieve",
+const deps = await mcp__monomind__monoswarm_memory {
+  action: "get",
   key: "swarm/shared/dependencies",
   namespace: "coordination"
 }
 
 if (!deps.found || !deps.value.ready) {
   // REPORT blocking
-  mcp__monomind__memory_usage {
-    action: "store",
+  mcp__monomind__monoswarm_memory {
+    action: "set",
     key: "swarm/worker-[ID]/blocked",
     namespace: "coordination",
     value: JSON.stringify({
@@ -130,8 +130,8 @@ if (!deps.found || !deps.value.ready) {
 ### 4. Result Delivery
 ```javascript
 // COMPLETE - Deliver results
-mcp__monomind__memory_usage {
-  action: "store",
+mcp__monomind__monoswarm_memory {
+  action: "set",
   key: "swarm/worker-[ID]/complete",
   namespace: "coordination",
   value: JSON.stringify({
@@ -204,8 +204,8 @@ mcp__monomind__memory_usage {
 ## Performance Metrics
 ```javascript
 // Report performance every task
-mcp__monomind__memory_usage {
-  action: "store",
+mcp__monomind__monoswarm_memory {
+  action: "set",
   key: "swarm/worker-[ID]/metrics",
   namespace: "coordination",
   value: JSON.stringify({

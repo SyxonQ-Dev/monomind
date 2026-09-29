@@ -216,6 +216,12 @@ module.exports = {
     // slash-command expansions) carry no user intent: no pick, no record.
     if (pickCore.isSystemPrompt(prompt)) return;
 
+    // A trivial reply ("thanks", "ok", "continue") gets nothing: no pick, no
+    // record (the session's earlier route still describes the work in
+    // progress), and none of the enrichment below — graph, Second Brain,
+    // banners — whose cost it can't repay (#415).
+    if (pickCore.isTrivialPrompt(prompt)) return;
+
     if (intelligence && intelligence.getContext) {
       try {
         // Each hook event runs as a fresh node process, so the module-level
@@ -246,25 +252,18 @@ module.exports = {
       //    MONOMIND_JEV_HOOK_TIMEOUT_MS and the failure breaker). Its one
       //    [PICK] line reaches Claude even under MONOMIND_HOOK_QUIET — it is
       //    the hook's answer, not an advisory banner.
-      //    A trivial reply ("thanks", "ok") gets no pick and no record: the
-      //    session's earlier route still describes the work in progress.
-      var result;
-      if (pickCore.isTrivialPrompt(prompt)) {
-        result = { agent: null, agentSlug: null, confidence: null, reason: 'trivial prompt', routingMethod: 'none', skillMatches: [] };
-      } else {
-        var decided = await _decidePick(CWD, prompt);
-        result = decided.result;
-        var pickLine = pickCore.formatPickLine(decided.pick);
-        if (pickLine) console.log(pickLine);
-        try {
-          pickCore.persistRoute(CWD, {
-            pick: decided.pick,
-            prompt: prompt,
-            sessionId: hookInput.session_id || hookInput.sessionId,
-            shown: !!pickLine,
-          });
-        } catch (e) { /* non-fatal */ }
-      }
+      var decided = await _decidePick(CWD, prompt);
+      var result = decided.result;
+      var pickLine = pickCore.formatPickLine(decided.pick);
+      if (pickLine) console.log(pickLine);
+      try {
+        pickCore.persistRoute(CWD, {
+          pick: decided.pick,
+          prompt: prompt,
+          sessionId: hookInput.session_id || hookInput.sessionId,
+          shown: !!pickLine,
+        });
+      } catch (e) { /* non-fatal */ }
 
       // When QUIET: the advisory output is suppressed anyway, so skip ALL the
       // expensive enrichment below (embedding search, second-brain HTTP, monograph

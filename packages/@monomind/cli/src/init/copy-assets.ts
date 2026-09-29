@@ -10,10 +10,12 @@ import {
   allShippedCommands,
   allShippedSkills,
   COMMANDS_MAP,
+  isCommandDoc,
+  isDeprecatedAgent,
   SKILLS_MAP,
 } from './asset-maps.js';
 import { guardFor } from './file-guard.js';
-import { countFiles, listFilesRecursive } from './fs-helpers.js';
+import { listFilesRecursive } from './fs-helpers.js';
 import { previouslyGenerated, recordGenerated, retireGeneratedEntry } from './init-manifest.js';
 import { wantsAgentsDirs, wantsGeminiDirs } from './platform-dirs.js';
 import { findSourceDir } from './shared.js';
@@ -38,6 +40,7 @@ export async function copySkills(
     Object.values(SKILLS_MAP).forEach((skills) => skillsToCopy.push(...skills));
   } else {
     if (skillsConfig.core) skillsToCopy.push(...SKILLS_MAP.core);
+    if (skillsConfig.extended) skillsToCopy.push(...SKILLS_MAP.extended);
     if (skillsConfig.memory) skillsToCopy.push(...SKILLS_MAP.memory);
     if (skillsConfig.github) skillsToCopy.push(...SKILLS_MAP.github);
     if (skillsConfig.browser) skillsToCopy.push(...SKILLS_MAP.browser);
@@ -202,9 +205,7 @@ export async function copyCommands(
     if (commandsConfig.optimization) commandsToCopy.push(...COMMANDS_MAP.optimization);
     if (commandsConfig.pair) commandsToCopy.push(...(COMMANDS_MAP.pair || []));
     if (commandsConfig.streamChain) commandsToCopy.push(...(COMMANDS_MAP.streamChain || []));
-    if (commandsConfig.training) commandsToCopy.push(...(COMMANDS_MAP.training || []));
     if (commandsConfig.truth) commandsToCopy.push(...(COMMANDS_MAP.truth || []));
-    if (commandsConfig.verify) commandsToCopy.push(...(COMMANDS_MAP.verify || []));
     if (commandsConfig.workflows) commandsToCopy.push(...(COMMANDS_MAP.workflows || []));
   }
 
@@ -233,6 +234,7 @@ export async function copyCommands(
 
   // Copy every selected command, keeping the ones the user edited (see copySkills).
   const guard = guardFor(targetDir, options, result);
+  const skipDoc = (p: string) => isCommandDoc(path.relative(sourceCommandsDir, p));
   const writtenCommands: string[] = [];
   for (const cmdName of knownCommands) {
     const sourcePath = path.join(sourceCommandsDir, cmdName);
@@ -243,7 +245,7 @@ export async function copyCommands(
       // overwrite what they ship, so wiping first only destroys files the user
       // added inside a shipped command directory.
       const changed = fs.statSync(sourcePath).isDirectory()
-        ? guard.copyDir(sourcePath, targetPath)
+        ? guard.copyDir(sourcePath, targetPath, skipDoc)
         : guard.copyFile(sourcePath, targetPath) === 'written';
       writtenCommands.push(cmdName);
       if (changed) result.created.files.push(`.claude/commands/${cmdName}`);
@@ -320,10 +322,11 @@ export async function copyAgents(
       // extra command in a shipped folder. `init --force` did exactly that.
       // The cost of not wiping is that a file removed from a newer version
       // lingers; the cost of wiping is silent data loss, which is worse.
-      const changed = guard.copyDir(sourcePath, targetPath);
+      const changed = guard.copyDir(sourcePath, targetPath, isDeprecatedAgent);
       // Count agent files (.md only — .yaml agents were migrated to .md)
-      const mdFiles = countFiles(sourcePath, '.md');
-      result.summary.agentsCount += mdFiles;
+      result.summary.agentsCount += [...listFilesRecursive(sourcePath)].filter(
+        (f) => f.endsWith('.md') && !isDeprecatedAgent(path.join(sourcePath, f)),
+      ).length;
       writtenAgents.push(agentCategory);
       if (changed) result.created.files.push(`.claude/agents/${agentCategory}`);
     }

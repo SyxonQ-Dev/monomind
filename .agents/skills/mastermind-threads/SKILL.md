@@ -8,7 +8,7 @@ pick: low
 
 # Mastermind Threads
 
-This skill is invoked by `mastermind:threads` or directly via `/mastermind-threads`.
+This skill is invoked directly via `/mastermind-threads`.
 
 ---
 

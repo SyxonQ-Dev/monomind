@@ -21,7 +21,8 @@
  *  4. A file that mixes monomind marker blocks (or a `monomind` JSON entry)
  *     with other content only loses the monomind part. Settings files lose
  *     only the hooks and statusLine that run a helper this plan removes
- *     (cleanup-config-edits.ts), so no config is left pointing at one.
+ *     (cleanup-config-edits.ts), so no config is left pointing at one. A
+ *     tracked settings file keeps the helpers it runs instead (GH #448).
  *  5. Anything else is kept and reported with the reason.
  */
 
@@ -32,6 +33,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { readInitManifest } from '../init/init-manifest.js';
 import { safeJsonRemove } from '../platform-adapters/merge.js';
 import {
+  helpersToKeep,
   stripCodexMcpTable,
   stripDanglingHelperRefs,
   stripOpencodeRules,
@@ -50,6 +52,8 @@ export interface CleanupPlanEntry {
   data?: boolean;
   /** New file content for `strip`. */
   content?: string;
+  /** Manual step left to the user, shown in the preview and after --force. */
+  notice?: string;
 }
 
 export interface CleanupPlanOptions {
@@ -432,7 +436,13 @@ class Planner {
   planSettings(rel: string): void {
     if (this.kindOf(rel) !== 'file') return;
     if (this.tracked.files.has(rel)) {
-      this.add(rel, 'file', 'skip', 'tracked by git');
+      // Never edited (rule 1), so keep the helpers it runs instead (GH #448).
+      const keep = helpersToKeep(rel, this.abs(rel), (ref) => this.isGone(ref));
+      for (const e of this.entries) {
+        if (e.action !== 'remove' || !keep?.covers(e.path)) continue;
+        Object.assign(e, { action: 'skip', reason: `kept: referenced by tracked ${rel}` });
+      }
+      this.add(rel, 'file', 'skip', 'tracked by git', keep ? { notice: keep.notice } : {});
       return;
     }
     let text: string;

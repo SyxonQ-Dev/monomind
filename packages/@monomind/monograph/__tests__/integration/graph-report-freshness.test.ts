@@ -31,8 +31,10 @@ describe('graph report freshness — report reflects the build that produced it'
     const { buildAsync } = await import('../../src/pipeline/orchestrator.js');
     await buildAsync(tmpRepo);
 
-    const reportPath = join(tmpRepo, 'GRAPH_REPORT.md');
+    // #414: the report goes under .monomind/, not into the user's repo root.
+    const reportPath = join(tmpRepo, '.monomind', 'GRAPH_REPORT.md');
     expect(existsSync(reportPath)).toBe(true);
+    expect(existsSync(join(tmpRepo, 'GRAPH_REPORT.md'))).toBe(false);
 
     const { openDb, closeDb } = await import('../../src/storage/db.js');
     const { countNodes } = await import('../../src/storage/node-store.js');
@@ -49,5 +51,33 @@ describe('graph report freshness — report reflects the build that produced it'
     // The report's overview table must reflect the just-committed build,
     // not the previous (here: nonexistent) snapshot.
     expect(report).toContain(`| Total nodes | ${nodeCount} |`);
+  }, 60000);
+});
+
+describe('graph report location (#414)', () => {
+  const reset = () => {
+    rmSync(join(tmpRepo, '.monomind'), { recursive: true, force: true });
+    rmSync(join(tmpRepo, 'GRAPH_REPORT.md'), { force: true });
+  };
+
+  it('reportPath writes the report where asked, relative to the repo', async () => {
+    reset();
+    const { buildAsync } = await import('../../src/pipeline/orchestrator.js');
+    await buildAsync(tmpRepo, { reportPath: 'GRAPH_REPORT.md' });
+    expect(existsSync(join(tmpRepo, 'GRAPH_REPORT.md'))).toBe(true);
+    expect(existsSync(join(tmpRepo, '.monomind', 'GRAPH_REPORT.md'))).toBe(false);
+  }, 60000);
+
+  it('MONOGRAPH_REPORT_PATH sets the location when no option is passed', async () => {
+    reset();
+    const { buildAsync } = await import('../../src/pipeline/orchestrator.js');
+    process.env.MONOGRAPH_REPORT_PATH = 'docs-out/report.md';
+    try {
+      await buildAsync(tmpRepo);
+    } finally {
+      delete process.env.MONOGRAPH_REPORT_PATH;
+    }
+    expect(existsSync(join(tmpRepo, 'docs-out', 'report.md'))).toBe(true);
+    expect(existsSync(join(tmpRepo, '.monomind', 'GRAPH_REPORT.md'))).toBe(false);
   }, 60000);
 });

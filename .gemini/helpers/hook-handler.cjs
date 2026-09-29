@@ -59,6 +59,11 @@ const {
   _graphGateShouldNudge, _isSourceSearchCommand, _isSourceSearchPaths, _graphGateMarkQueried, _getNodeCount,
 } = monograph;
 
+// #447: hint lookups prefer non-test definitions (same heuristic as the
+// monograph node resolver); symbol hints skip test-only matches entirely.
+const _HINT_NON_TEST = ' AND NOT ' + monograph._isTestPathSql('n.file_path');
+const _HINT_TEST_LAST = ' ORDER BY ' + monograph._isTestPathSql('n.file_path');
+
 const {
   safeRequire,
   _triggerExtractYamlValue, _triggerFinalize, _triggerExtractFromFrontmatter,
@@ -518,7 +523,7 @@ const handlers = {
                 if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(pattern) && pattern.length >= 4
                     && !_grepStop[pattern.toLowerCase()]) {
                   var row = db.prepare(
-                    'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                    'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                   ).get(pattern);
                   if (row) {
                     graphAssisted = true;
@@ -531,7 +536,7 @@ const handlers = {
                 if (!graphAssisted && /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(pattern) && pattern.length >= 4
                     && !_grepStop[pattern.toLowerCase()]) {
                   var row = db.prepare(
-                    'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                    'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                   ).get(pattern);
                   if (row) {
                     graphAssisted = true;
@@ -543,7 +548,7 @@ const handlers = {
                 // --- Strategy 3: dotted filename (db.ts, orchestrator.ts) → File node lookup ---
                 if (!graphAssisted && /^[a-zA-Z0-9_-]+\.[a-z]{1,4}$/.test(pattern)) {
                   var row = db.prepare(
-                    'SELECT n.name, n.file_path FROM nodes n WHERE n.name = ? AND n.label = \'File\' LIMIT 1'
+                    'SELECT n.name, n.file_path FROM nodes n WHERE n.name = ? AND n.label = \'File\'' + _HINT_TEST_LAST + ' LIMIT 1'
                   ).get(pattern);
                   if (row) {
                     graphAssisted = true;
@@ -556,7 +561,7 @@ const handlers = {
                     && pattern.indexOf('-') !== -1) {
                   var pathLike = '%/' + pattern + '%';
                   var row = db.prepare(
-                    'SELECT n.name, n.file_path FROM nodes n WHERE n.label = \'File\' AND n.file_path LIKE ? LIMIT 1'
+                    'SELECT n.name, n.file_path FROM nodes n WHERE n.label = \'File\' AND n.file_path LIKE ?' + _HINT_TEST_LAST + ' LIMIT 1'
                   ).get(pathLike);
                   if (row) {
                     graphAssisted = true;
@@ -573,7 +578,7 @@ const handlers = {
                     if (_grepStop[id.toLowerCase()] || tried[id.toLowerCase()]) continue;
                     tried[id.toLowerCase()] = 1;
                     var row2 = db.prepare(
-                      'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                      'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                     ).get(id);
                     if (row2) {
                       graphAssisted = true;
@@ -592,7 +597,7 @@ const handlers = {
                       'JOIN nodes n ON n.rowid = f.rowid ' +
                       'WHERE nodes_fts MATCH ? ' +
                       'AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') ' +
-                      'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                      'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                     ).get(ftsPattern);
                     if (ftsRow) {
                       graphAssisted = true;
@@ -609,7 +614,7 @@ const handlers = {
                     var dp = dotParts[di];
                     if (_grepStop[dp.toLowerCase()]) continue;
                     var drow = db.prepare(
-                      'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                      'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                     ).get(dp);
                     if (drow) {
                       graphAssisted = true;
@@ -624,7 +629,7 @@ const handlers = {
                   var camel = pattern.replace(/_([a-z])/g, function(_, c) { return c.toUpperCase(); });
                   if (camel !== pattern && !_grepStop[camel.toLowerCase()]) {
                     var crow = db.prepare(
-                      'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                      'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                     ).get(camel);
                     if (crow) {
                       graphAssisted = true;
@@ -643,7 +648,7 @@ const handlers = {
                   });
                   for (var ai = 0; ai < altParts.length && !graphAssisted; ai++) {
                     var arow = db.prepare(
-                      'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                      'SELECT n.name, n.file_path, n.start_line FROM nodes n WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                     ).get(altParts[ai]);
                     if (arow) {
                       graphAssisted = true;
@@ -680,7 +685,7 @@ const handlers = {
               var db = _openMonographDb();
               if (db) {
                 var row = db.prepare(
-                  'SELECT n.file_path FROM nodes n WHERE n.name = ? AND n.label = \'File\' LIMIT 1'
+                  'SELECT n.file_path FROM nodes n WHERE n.name = ? AND n.label = \'File\'' + _HINT_TEST_LAST + ' LIMIT 1'
                 ).get(fm[1]);
                 if (row) {
                   graphAssisted = true;
@@ -695,7 +700,7 @@ const handlers = {
                 var db = _openMonographDb();
                 if (db) {
                   var wrow = db.prepare(
-                    'SELECT n.name, n.file_path FROM nodes n WHERE n.name LIKE ? AND n.label = \'File\' AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                    'SELECT n.name, n.file_path FROM nodes n WHERE n.name LIKE ? AND n.label = \'File\' AND n.file_path NOT LIKE \'%.md\'' + _HINT_TEST_LAST + ' LIMIT 1'
                   ).get('%' + wm[1] + '%');
                   if (wrow) {
                     graphAssisted = true;
@@ -765,7 +770,7 @@ const handlers = {
               var row = db.prepare(
                 'SELECT n.name, n.file_path, n.start_line FROM nodes n ' +
                 'WHERE n.name = ? AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') ' +
-                'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
               ).get(grepPattern);
               if (row) {
                 graphResolved = true;
@@ -779,7 +784,7 @@ const handlers = {
               var row = db.prepare(
                 'SELECT n.name, n.file_path, n.start_line FROM nodes n ' +
                 'WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') ' +
-                'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
               ).get(grepPattern);
               if (row) {
                 graphResolved = true;
@@ -791,7 +796,7 @@ const handlers = {
             // Strategy 3: dotted filename (db.ts, orchestrator.ts) → File node lookup
             if (!graphResolved && /^[a-zA-Z0-9_-]+\.[a-z]{1,4}$/.test(grepPattern)) {
               var row = db.prepare(
-                'SELECT n.name, n.file_path FROM nodes n WHERE n.name = ? AND n.label = \'File\' LIMIT 1'
+                'SELECT n.name, n.file_path FROM nodes n WHERE n.name = ? AND n.label = \'File\'' + _HINT_TEST_LAST + ' LIMIT 1'
               ).get(grepPattern);
               if (row) {
                 graphResolved = true;
@@ -804,7 +809,7 @@ const handlers = {
                 && grepPattern.length >= 5 && grepPattern.indexOf('-') !== -1) {
               var pathLike = '%/' + grepPattern + '%';
               var row = db.prepare(
-                'SELECT n.file_path FROM nodes n WHERE n.label = \'File\' AND n.file_path LIKE ? LIMIT 1'
+                'SELECT n.file_path FROM nodes n WHERE n.label = \'File\' AND n.file_path LIKE ?' + _HINT_TEST_LAST + ' LIMIT 1'
               ).get(pathLike);
               if (row) {
                 graphResolved = true;
@@ -823,7 +828,7 @@ const handlers = {
                 var row2 = db.prepare(
                   'SELECT n.name, n.file_path, n.start_line FROM nodes n ' +
                   'WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') ' +
-                  'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                  'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                 ).get(id);
                 if (row2) {
                   graphResolved = true;
@@ -842,7 +847,7 @@ const handlers = {
                   'JOIN nodes n ON n.rowid = f.rowid ' +
                   'WHERE nodes_fts MATCH ? ' +
                   'AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') ' +
-                  'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                  'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                 ).get(ftsQ);
                 if (ftsRow) {
                   graphResolved = true;
@@ -861,7 +866,7 @@ const handlers = {
                 var drow = db.prepare(
                   'SELECT n.name, n.file_path, n.start_line FROM nodes n ' +
                   'WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') ' +
-                  'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                  'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                 ).get(dp);
                 if (drow) {
                   graphResolved = true;
@@ -878,7 +883,7 @@ const handlers = {
                 var crow = db.prepare(
                   'SELECT n.name, n.file_path, n.start_line FROM nodes n ' +
                   'WHERE n.name = ? COLLATE NOCASE AND n.label NOT IN (\'Concept\',\'Community\',\'Folder\') ' +
-                  'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\' LIMIT 1'
+                  'AND n.file_path IS NOT NULL AND n.file_path NOT LIKE \'%.md\'' + _HINT_NON_TEST + ' LIMIT 1'
                 ).get(camel);
                 if (crow) {
                   graphResolved = true;

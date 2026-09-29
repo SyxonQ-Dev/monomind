@@ -17,7 +17,7 @@ Plain `monomind init` initializes every supported coding system. The `--target c
 
 | File | Purpose |
 |---|---|
-| `.codex/config.toml` | Project-scoped MCP configuration for `monomind@latest mcp start` |
+| `.codex/config.toml` | Project-scoped MCP configuration for `monomind mcp start`, pinned to the version that ran `init` (`--pin latest` floats) |
 | `AGENTS.md` | Codex instructions covering graph-first navigation, memory, security, and org runtime |
 | `.agents/skills/` | Shared Monomind skills available to Codex and other compatible systems |
 
