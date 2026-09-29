@@ -4,6 +4,10 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Added
+
+- **`agent test --json` takes `--sandbox` and `--env`, and reports `native_sandbox`** ([#474](https://github.com/monoes/monomind/issues/474), agent-exec protocol rev 24 <!-- TODO-REV -->, capability `agent-test-sandbox`). `--sandbox read-only|workspace-write|full` and repeatable `--env KEY=V` mean what they mean for `agent exec`, and are checked the same way. The result has a new `native_sandbox` field with the sandbox the vendor CLI really ran with, taken from the turn's `start` event (`null` when the turn never started). A mode the runtime does not have, such as `--sandbox workspace-write` on pi, returns `status: "error"` with `error.code: "unsupported"`. The test turn keeps `scoped` access, and neither flag can loosen the sandbox: an org git level below `push` still caps codex and grok at `workspace-write`. Callers such as mono-agent can now test a runtime inside the sandbox their real turns use.
+
 ### Changed
 
 - **The dashboard no longer starts at every session start unless you opt in** ([#423](https://github.com/monoes/monomind/issues/423)). The SessionStart hook `control-start.cjs` started the Control Room server (:4242) for every initialised project, and the servers stayed resident: one machine had 8, two at 0.7–0.9 GB RSS. The hook now does nothing, and prints nothing, unless `MONOMIND_DASHBOARD_AUTOSTART=1` is set or `.monomind/dashboard.json` has `{"autostart": true}` (written by the new `monomind init --dashboard`); `MONOMIND_DASHBOARD_AUTOSTART=0` turns it off for a project that opted in. A server that is already running is left alone. `monomind ui` starts it by hand and `monomind org run` still starts it unless `MONOMIND_DASHBOARD_AUTOSTART=0`. **Existing projects:** the hook ships with the package helpers, so updating turns auto-start off there too; run `monomind init --dashboard` in a project to keep it. Without a running dashboard the per-prompt Second Brain lookup uses its keyword fallback.

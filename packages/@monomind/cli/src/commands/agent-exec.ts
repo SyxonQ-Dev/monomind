@@ -66,6 +66,21 @@ export function parseEnvFlags(raw: unknown): Record<string, string> {
   return env;
 }
 
+/**
+ * Usage error for a `--sandbox` value (#396), or undefined when it is valid.
+ * Per-runtime support is checked later, in the engine (`unsupported`).
+ */
+export function sandboxFlagError(raw: unknown, access: string): string | undefined {
+  if (raw === undefined) return undefined;
+  if (!(SANDBOX_MODES as readonly unknown[]).includes(raw)) {
+    return `--sandbox must be one of ${SANDBOX_MODES.join(', ')} (got "${String(raw)}")`;
+  }
+  if (access === 'read' && raw === 'full') {
+    return '--access read cannot be combined with --sandbox full';
+  }
+  return undefined;
+}
+
 /** Load tool specs from --tools-file JSON: [{name, description, schema}]. */
 function loadToolSpecs(file: string | undefined): ToolSpec[] {
   if (!file) return [];
@@ -155,14 +170,8 @@ export async function runExec(
   // checked in the engine (`unsupported`). `read` always runs read-only, so
   // asking for `full` with it is a contradiction.
   const sandboxFlag = ctx.flags.sandbox;
-  if (sandboxFlag !== undefined && !(SANDBOX_MODES as readonly unknown[]).includes(sandboxFlag)) {
-    return usageError(
-      `--sandbox must be one of ${SANDBOX_MODES.join(', ')} (got "${String(sandboxFlag)}")`,
-    );
-  }
-  if (access === 'read' && sandboxFlag === 'full') {
-    return usageError('--access read cannot be combined with --sandbox full');
-  }
+  const sandboxError = sandboxFlagError(sandboxFlag, access);
+  if (sandboxError) return usageError(sandboxError);
 
   let toolSpecs: ToolSpec[] = [];
   const toolsMode = String(ctx.flags.tools ?? 'none');

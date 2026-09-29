@@ -1,4 +1,4 @@
-# Agent Exec Protocol — v1 (rev 23)
+# Agent Exec Protocol — v1 (rev 24) <!-- TODO-REV: renumber if #387 lands first -->
 
 - **Status**: Implemented (Phase 0 of the mono-agent delegation plan — see
   `mono-agent:docs/plans/local-agent-monomind-delegation.md`)
@@ -6,6 +6,15 @@
   the Coder mode threat model, the `--access full` guardrails (root refusal, no transitive
   escalation, env hygiene, audit log), what callers own, and residual risks (issue #360).
 - **Revision history**:
+  - rev 24 <!-- TODO-REV --> (2026-09-29): **`agent test --json` takes `--sandbox` and `--env`**
+    (issue #474) — new capability `agent-test-sandbox`. `monomind agent test <id> --json` (§13)
+    accepts `--sandbox read-only|workspace-write|full` and repeatable `--env KEY=V` with the same
+    meaning and validation as `agent exec` (§3.1). The result gains `native_sandbox`: what the
+    vendor CLI really ran with, copied from the turn's `start` event (§3.2), or `null` when the
+    turn never started. A mode the runtime lacks gives `status: "error"`,
+    `error.code: "unsupported"`. Access stays `scoped`; `--sandbox` and `--env` can tighten the
+    turn but never loosen it (an org git level below `push` still caps codex/grok at
+    `workspace-write`). Additive only.
   - rev 23 (2026-09-29): **truthful native sandbox, and `--sandbox`** (issue #396) — new
     capability `agent-exec-sandbox`. The default does not change: without the new flag every
     runtime starts exactly as in rev 22, and a non-org turn still runs most vendor CLIs without
@@ -431,7 +440,7 @@ by swarm management and is NOT reused by this protocol — the installed-only vi
 
 ```
 $ monomind --version --json
-{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-exec-background-pids","agent-exec-full-access-any","agent-exec-effort","agent-scan","agent-scan-read-only","agent-models","agent-test-json","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","org-role-full-access","doctor-json","doctor-read-only","doctor-offline","init-json","knowledge-profile-captures","agent-exec-subagent-events","agent-exec-rate-limit-retry","agent-exec-access-read","agent-exec-full-access-tools","agent-exec-sandbox"]}
+{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-exec-background-pids","agent-exec-full-access-any","agent-exec-effort","agent-scan","agent-scan-read-only","agent-models","agent-test-json","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","org-role-full-access","doctor-json","doctor-read-only","doctor-offline","init-json","knowledge-profile-captures","agent-exec-subagent-events","agent-exec-rate-limit-retry","agent-exec-access-read","agent-exec-full-access-tools","agent-exec-sandbox","agent-test-sandbox"]}
 ```
 
 Callers MUST handshake before use and fail with an actionable message (install/upgrade hint)
@@ -1147,7 +1156,7 @@ Errors keep the same shape with `models: []` and an `error: {code, message}`: `u
 
 ## 13. `monomind agent test --json` (capability `agent-test-json`, rev 18)
 
-`monomind agent test <id> [--model M] [--timeout 60s] --json` checks that one runtime and model
+`monomind agent test <id> [--model M] [--timeout 60s] [--sandbox MODE] [--env KEY=V]... --json` checks that one runtime and model
 actually answer (issue #390). It runs one turn through the `agent exec` engine with the prompt
 `Reply with the single word: ok`, max turns 1, no caller tools, `scoped` access and a fresh
 temporary cwd that is removed afterwards, then prints a single JSON object on stdout:
@@ -1155,7 +1164,8 @@ temporary cwd that is removed afterwards, then prints a single JSON object on st
 ```json
 {"v":1,"runtime":"codex","model":"gpt-5.5","status":"ok","reply":"ok",
  "latency_first_ms":812,"latency_ms":1430,"input_tokens":12,"output_tokens":1,
- "cost_usd":0.0001,"cost_estimated":false,"runtime_version":"0.52.0","error":null}
+ "cost_usd":0.0001,"cost_estimated":false,"runtime_version":"0.52.0",
+ "native_sandbox":"workspace-write","error":null}
 ```
 
 | Field | Meaning |
@@ -1168,6 +1178,7 @@ temporary cwd that is removed afterwards, then prints a single JSON object on st
 | `cost_usd` | The runtime's reported cost; when it reports none, an estimate from monomind's pricing table; `null` when neither exists |
 | `cost_estimated` | `true` when `cost_usd` is the pricing-table estimate |
 | `runtime_version` | From the runtime's install metadata, as `agent scan` reads it (§6); `null` when unknown |
+| `native_sandbox` | rev 24 <!-- TODO-REV -->, capability `agent-test-sandbox`. The vendor CLI's sandbox for this turn, from the `start` event's `native_sandbox` (§3.2): `read-only`, `workspace-write`, `full`, `none` or `monomind`. `null` when the turn never started (missing binary, unsupported `--sandbox`) |
 | `error` | `null`, or `{code, message, login_hint?}` for a failed status. `login_hint` comes with `auth` |
 
 | `status` | Meaning | Exit |
@@ -1181,6 +1192,25 @@ temporary cwd that is removed afterwards, then prints a single JSON object on st
 | `timeout` | `--timeout` (default 60s) fired | 124 |
 | `missing_binary` | The runtime's CLI is not installed | 1 |
 | `error` | Anything else; `error.code` keeps the §3.4 code (`runner-error`, `no-runner`, …) | 1 |
+
+**`--sandbox` and `--env`** (rev 24 <!-- TODO-REV -->, capability `agent-test-sandbox`, issue
+#474) work as in `agent exec` (§3.1): `--sandbox read-only|workspace-write|full` picks the vendor
+CLI's own sandbox where `agent scan --json` lists the mode in `sandbox_modes`, and `--env KEY=V`
+(repeatable) adds to the agent process's environment. The turn's access stays `scoped` whatever
+they say. The sandbox can only be tightened: a `MONOMIND_GIT_LEVEL` below `push` (from `--env`
+or monomind's own environment) caps codex/grok at `workspace-write` even with `--sandbox full`,
+and `MONOMIND_GIT_LEVEL=push` does not loosen `--sandbox read-only`. A mode the runtime lacks
+(e.g. `--sandbox workspace-write` on pi) gives `status: "error"` with `error.code:
+"unsupported"` and `native_sandbox: null`, exit 1; no turn runs. An unknown mode or a malformed
+`--env` entry is a usage error (exit 2, no JSON). Check `native_sandbox` for what the CLI really
+got:
+
+```json
+{"v":1,"runtime":"pi","model":null,"status":"error","reply":null,"latency_first_ms":null,
+ "latency_ms":3,"input_tokens":0,"output_tokens":0,"cost_usd":0,"cost_estimated":false,
+ "runtime_version":"0.87.1","native_sandbox":null,
+ "error":{"code":"unsupported","message":"--sandbox workspace-write is not supported by runtime \"pi\" (agent scan --json sandbox_modes: full)"}}
+```
 
 A missing runtime id is a usage error (exit 2, no JSON). `model_unavailable` matches the wording
 each runtime uses for a bad model — Claude Code's "issue with the selected model", copilot's

@@ -112,6 +112,7 @@ describe('runAgentTest: statuses', () => {
       cost_usd: 0.0001,
       cost_estimated: false,
       runtime_version: null,
+      native_sandbox: 'monomind',
       error: null,
     });
     expect(r.latency_first_ms).toBeGreaterThan(0);
@@ -227,6 +228,60 @@ describe('runAgentTest: statuses', () => {
   });
 });
 
+describe('runAgentTest: --sandbox and --env (#474)', () => {
+  it('passes --sandbox and --env to the turn and reports native_sandbox from start', async () => {
+    const runner = mockRunner(okTurn('ok'));
+    const r = await run('codex', runner, { sandbox: 'read-only', env: { FOO: 'bar' } });
+    expect(runner.calls[0].sandbox).toBe('read-only');
+    expect(runner.calls[0].env?.FOO).toBe('bar');
+    expect(runner.calls[0].access).toBe('scoped');
+    expect(r.status).toBe('ok');
+    expect(r.native_sandbox).toBe('read-only');
+  });
+
+  it('reports the default sandbox when none is asked for', async () => {
+    const r = await run('codex', mockRunner(okTurn('ok')));
+    expect(r.native_sandbox).toBe('full');
+  });
+
+  it('--env MONOMIND_GIT_LEVEL can only tighten: a restricted level caps --sandbox full', async () => {
+    const runner = mockRunner(okTurn('ok'));
+    const r = await run('codex', runner, {
+      sandbox: 'full',
+      env: { MONOMIND_GIT_LEVEL: 'read' },
+    });
+    expect(runner.calls[0].sandbox).toBe('workspace-write');
+    expect(r.native_sandbox).toBe('workspace-write');
+  });
+
+  it('--env MONOMIND_GIT_LEVEL=push does not loosen --sandbox read-only', async () => {
+    const runner = mockRunner(okTurn('ok'));
+    const r = await run('codex', runner, {
+      sandbox: 'read-only',
+      env: { MONOMIND_GIT_LEVEL: 'push' },
+    });
+    expect(runner.calls[0].sandbox).toBe('read-only');
+    expect(r.native_sandbox).toBe('read-only');
+  });
+
+  it('a mode the runtime lacks is status error / code unsupported, and no turn runs', async () => {
+    const runner = mockRunner(okTurn('ok'));
+    const r = await run('pi', runner, { sandbox: 'workspace-write' });
+    expect(runner.calls).toHaveLength(0);
+    expect(r.status).toBe('error');
+    expect(r.error?.code).toBe('unsupported');
+    expect(r.error?.message).toMatch(/not supported by runtime "pi"/);
+    expect(r.native_sandbox).toBeNull();
+    expect(agentTestExitCode(r.status)).toBe(1);
+  });
+
+  it('--sandbox full is accepted on every runtime', async () => {
+    const r = await run('pi', mockRunner(okTurn('ok')), { sandbox: 'full' });
+    expect(r.status).toBe('ok');
+    expect(r.native_sandbox).toBe('none');
+  });
+});
+
 describe('cost', () => {
   it('cost_estimated:false when the runtime reports cost', () => {
     expect(resolveCost('gpt-5', 0.002, 100, 10)).toEqual({
@@ -319,5 +374,36 @@ describe('runAgentTestCommand (CLI layer)', () => {
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     expect(await runAgentTestCommand(ctx([]))).toBe(2);
     expect(await runAgentTestCommand(ctx(['claude'], { timeout: 'soon' }))).toBe(2);
+  });
+
+  it('#474: bad --sandbox or --env is a usage error (exit 2)', async () => {
+    const err: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((s) => {
+      err.push(String(s));
+      return true;
+    });
+    expect(await runAgentTestCommand(ctx(['codex'], { json: true, sandbox: 'strict' }))).toBe(2);
+    expect(err.join('')).toMatch(/--sandbox must be one of read-only, workspace-write, full/);
+    expect(await runAgentTestCommand(ctx(['codex'], { json: true, env: ['NOPE'] }))).toBe(2);
+    expect(err.join('')).toMatch(/invalid --env entry/);
+  });
+
+  it('#474: --sandbox and repeatable --env reach the turn; native_sandbox is in the JSON', async () => {
+    const out: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((s) => {
+      out.push(String(s));
+      return true;
+    });
+    const runner = mockRunner(okTurn('ok'));
+    const code = await runAgentTestCommand(
+      ctx(['codex'], { json: true, sandbox: 'workspace-write', env: ['A=1', 'B=x=y'] }),
+      { runnerOverride: runner, findBinary: () => undefined },
+    );
+    expect(code).toBe(0);
+    expect(runner.calls[0].env).toMatchObject({ A: '1', B: 'x=y' });
+    expect(JSON.parse(out.join(''))).toMatchObject({
+      status: 'ok',
+      native_sandbox: 'workspace-write',
+    });
   });
 });
