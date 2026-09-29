@@ -52,6 +52,7 @@ function claudeOnlyMemorySeeds(targetDir: string): ReturnType<typeof generateMem
 
 import type { InitOptions, InitResult } from './types.js';
 import { detectPlatform } from './types.js';
+import { writeAgentsOnly } from './write-agents.js';
 import { writeAiderConf } from './write-aider.js';
 import { writeGeminiFiles } from './write-antigravity.js';
 import { writeClaudeMd, writeHelpers, writeMCPConfig, writeStatusline } from './write-claude.js';
@@ -94,6 +95,18 @@ export async function executeInit(options: InitOptions): Promise<InitResult> {
   };
 
   const targetDir = options.targetDir;
+
+  // `--target agents`: AGENTS.md only — no directories, state, memory, graph
+  // or doctor pass (write-agents.ts).
+  if (options.components.agentsOnly) {
+    try {
+      writeAgentsOnly(targetDir, options, result);
+    } catch (error) {
+      result.success = false;
+      result.errors.push(error instanceof Error ? error.message : String(error));
+    }
+    return result;
+  }
 
   try {
     // Create directory structure

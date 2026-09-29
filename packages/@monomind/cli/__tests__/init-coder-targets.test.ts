@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initCommand } from '../src/commands/init.js';
 import { resolveInitOptions } from '../src/init/resolve-options.js';
 import type { InitOptions, InitResult } from '../src/init/types.js';
+import { generateAgentsOnlyMd } from '../src/init/write-agents.js';
 import { mergeAiderRead, writeAiderConf } from '../src/init/write-aider.js';
 import { CLINE_MCP_INSTALL_COMMAND, writeClineFiles } from '../src/init/write-cline.js';
 import { output } from '../src/output.js';
@@ -89,6 +90,17 @@ describe('resolveInitOptions: cline and aider targets', () => {
     const o = opts({ target: 'all' });
     expect(o.components.cline).toBe(false);
     expect(o.selectedPlatforms).not.toContain('aider');
+    expect(o.components.agentsOnly).toBe(false);
+  });
+
+  it('--target agents selects AGENTS.md only: no platform, no Claude component', () => {
+    const o = opts({ target: 'agents' });
+    expect(o.components.agentsOnly).toBe(true);
+    expect(o.selectedPlatforms).toEqual([]);
+    expect(o.components.claudeMd).toBe(false);
+    expect(o.components.settings).toBe(false);
+    expect(o.components.mcp).toBe(false);
+    expect(o.components.codex).toBe(false);
   });
 });
 
@@ -170,7 +182,7 @@ describe('init writers', () => {
   });
 });
 
-describe('monomind init --target cline|aider (real fs)', () => {
+describe('monomind init --target cline|aider|agents (real fs)', () => {
   let tmpDir: string;
   let fakeHome: string;
   let realHome: string | undefined;
@@ -203,6 +215,46 @@ describe('monomind init --target cline|aider (real fs)', () => {
     expect(fs.existsSync(path.join(tmpDir, '.codex'))).toBe(false);
     // init never registers MCP in the user's own ~/.cline.
     expect(fs.existsSync(path.join(fakeHome, '.cline'))).toBe(false);
+  }, 30000);
+
+  it('--target agents writes AGENTS.md and nothing else (idempotent, keeps a user file)', async () => {
+    fs.mkdirSync(path.join(tmpDir, '.git'));
+    const run = () =>
+      initCommand.action!(ctxFor(tmpDir, { target: 'agents', 'if-missing': true, 'no-graph': true }));
+    const first = await run();
+    expect(first.success).toBe(true);
+    expect(fs.readdirSync(tmpDir).sort()).toEqual(['.git', 'AGENTS.md']);
+    expect(fs.readdirSync(path.join(tmpDir, '.git'))).toEqual([]);
+    const body = fs.readFileSync(path.join(tmpDir, 'AGENTS.md'), 'utf8');
+    expect(body).toBe(generateAgentsOnlyMd());
+    expect(body).not.toMatch(/\.codex|CLAUDE\.md|\.claude\//);
+    // Nothing in the user's home either (no project registry, no ~/.claude).
+    expect(fs.readdirSync(fakeHome)).toEqual([]);
+
+    fs.writeFileSync(path.join(tmpDir, 'AGENTS.md'), 'mine');
+    const second = await run();
+    expect(second.success).toBe(true);
+    expect(fs.readFileSync(path.join(tmpDir, 'AGENTS.md'), 'utf8')).toBe('mine');
+    expect(fs.readdirSync(tmpDir).sort()).toEqual(['.git', 'AGENTS.md']);
+  }, 30000);
+
+  it('--target agents --json reports only AGENTS.md, then nothing on a second run', async () => {
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((c: unknown) => {
+      writes.push(String(c));
+      return true;
+    });
+    try {
+      const flags = { target: 'agents', 'if-missing': true, json: true };
+      await initCommand.action!(ctxFor(tmpDir, flags));
+      await initCommand.action!(ctxFor(tmpDir, flags));
+    } finally {
+      spy.mockRestore();
+    }
+    const [a, b] = writes.map((w) => JSON.parse(w));
+    expect(a).toMatchObject({ created: ['AGENTS.md'], skipped: [] });
+    expect(b).toMatchObject({ created: [], skipped: ['AGENTS.md'] });
+    expect(fs.readdirSync(tmpDir)).toEqual(['AGENTS.md']);
   }, 30000);
 
   it('--target aider writes CONVENTIONS.md and a read: entry for it', async () => {

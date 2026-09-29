@@ -82,10 +82,12 @@ export function resolveInitOptions(
     'codex',
     'cline',
     'aider',
+    'agents',
   ]);
   // Coder-mode runtimes (rev 20): only on request, so `--target all` (the
   // default) writes no .clinerules/ or .aider.conf.yml into every project.
-  const optInTargets = new Set(['cline', 'aider']);
+  // `agents` (AGENTS.md only) is the opposite of all, never part of it.
+  const optInTargets = new Set(['cline', 'aider', 'agents']);
   if (!validTargets.has(target)) {
     return { ok: false, message: `Unknown init target: ${target}` };
   }
@@ -141,6 +143,7 @@ export function resolveInitOptions(
   options.components.kimicode = selectedTargets.has('kimicode');
   options.components.codex = selectedTargets.has('codex');
   options.components.cline = selectedTargets.has('cline');
+  options.components.agentsOnly = selectedTargets.has('agents');
   options.components.mcp = selectedTargets.has('claude') || selectedTargets.has('antigravity');
   if (!selectedTargets.has('claude')) {
     options.components.settings = false;
