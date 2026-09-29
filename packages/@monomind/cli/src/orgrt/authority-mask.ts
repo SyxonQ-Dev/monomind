@@ -9,11 +9,10 @@
  *     and the inbox signing key kept beside them (inbox.ts);
  *   - the dashboard's human-auth secret (`~/.monomind/dashboard-auth/`), from
  *     which its login link and browser session cookie derive;
- *   - the authority files under `.monomind/orgs/` (isAuthorityFile): the org
- *     definitions, which hold every role's own `policy`, and the state that
- *     records a human's decisions or that a daemon or the next run reads
- *     back — gates, approvals, questions, the inbox, runtime.json, the run
- *     event logs, the git guards (#498).
+ *   - the authority files under `.monomind/orgs/` (org-authority-files.ts):
+ *     the org definitions, which hold every role's own `policy`, and the
+ *     files that record a human's decisions, the daemon's state and its
+ *     control files (#498).
  *
  * Roles below `push` on the Claude runtime already run in the SDK's OS
  * sandbox, and role-sandbox.ts feeds it these paths. Everything else — a
@@ -22,77 +21,41 @@
  * `authorityMaskArgs()`: the whole filesystem as it is, except that the two
  * directories above are replaced by empty tmpfs mounts (so files created
  * there later are hidden too), the dashboard token files read as empty, and
- * the authority files are read-only. No git, network or write restriction
- * beyond that, so a role behaves exactly as before.
+ * the orgs dir is read-only apart from the subdirectories roles work in —
+ * so no org definition, decision or control file can be written, created or
+ * renamed, and the org root and `.monomind` cannot be renamed away. No git,
+ * network or write restriction beyond that.
  *
- * File tools are refused every authority file (policy.ts). For Bash they are
- * defence in depth, not the barrier: only files that exist when the role
- * starts can be made read-only, and a process that can write a file's
- * directory can rename the directory away and plant a new one. The barriers
- * are the daemon holding a running org's gates in memory (decisions.ts's
- * gatesFor) and signed inbox entries (inbox.ts).
+ * The SDK sandbox cannot express that layout (its denyWrite binds come after
+ * its allowWrite binds, so a writable subdirectory of a denied one stays
+ * read-only): there the existing authority files are read-only and the
+ * directories above them are mount points that cannot be renamed, but a NEW
+ * file can still be created in the orgs dir or an org dir. File tools are
+ * refused every authority file by policy.ts on the Claude runtime. The
+ * barriers for a running org are the daemon holding its gates in memory
+ * (decisions.ts's gatesFor) and signed inbox entries (inbox.ts).
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { dashboardCredentialPaths, operatorDirOverride } from './file-roots.js';
+import { orgsMaskLayout } from './org-authority-files.js';
+import { realPath } from './policy-paths.js';
 
 /** Under $HOME: the dashboard's human-auth secret (ui/server.mjs). */
 export const DASHBOARD_AUTH_DIR = join('.monomind', 'dashboard-auth');
 /** Under $HOME: the org daemons' operator credentials (broker.ts). */
 export const OPERATOR_DIR = join('.monomind', 'orgrt-operator');
 
-/** Files in `<root>/.monomind/orgs/<org>/` that record a human's decisions. */
-export const DECISION_FILES = ['gates.json', 'approvals.json', 'questions.json', 'inbox.jsonl'];
-/** The other files the daemon keeps in an org dir: the resume checkpoint,
- *  the decision trace, run history and the idle deadline. */
-export const ORG_STATE_FILES = [
-  'runtime.json',
-  'decisions.jsonl',
-  'history.jsonl',
-  'idle-watchdog.json',
-];
-/** Files in a run dir (`<org>/<run>/`): the run's event log, which records
- *  every approval and gate decision and which checkpoint replay reads, and
- *  its session ledger. */
-export const RUN_STATE_FILES = ['bus.jsonl', 'sessions.json'];
-/** The dir in an org dir holding each role's git guard (role-sandbox.ts):
- *  the hooks and config that enforce `policy.git`. */
-export const GIT_GUARD_DIR = 'git-guard';
-/** `.monomind/orgs/<org>-memory/` is the org's PARA memory (the
- *  mastermind-memory skill), written by roles — not an org dir. */
-const MEMORY_DIR = /-memory$/;
-
-/**
- * #498: whether `p` is a file no role may write with a file tool, whatever
- * its scope, roots or allowWrite. Under any `.monomind/orgs/`:
- *   - every file directly in it: the org definitions (`<org>.json`/`.yaml`),
- *     which hold each role's own `policy`, and the org artifacts beside them
- *     (`<org>-state.json`, `-secrets`, `-runstate`, remote-hosts.json, ...);
- *   - every file directly in an org dir: the decision files, runtime.json,
- *     decisions.jsonl, history.jsonl, idle-watchdog.json and whatever else
- *     the daemon keeps there;
- *   - a run dir's bus.jsonl and sessions.json, and anything in git-guard/.
- * The subdirectories roles work in (reports/, work/, workspace/, worktree/,
- * .mail/) and the org memory dir stay writable. Pass a real path: the caller
- * resolves symlinks first.
- */
-export function isAuthorityFile(p: string): boolean {
-  const parts = p.split(/[\\/]/);
-  for (let i = 1; i < parts.length - 1; i++) {
-    if (parts[i - 1] !== '.monomind' || parts[i] !== 'orgs') continue;
-    const [org, second, third, ...rest] = parts.slice(i + 1);
-    if (second === undefined) return true;
-    if (third === undefined) {
-      if (!MEMORY_DIR.test(org)) return true;
-      if (DECISION_FILES.includes(second) || ORG_STATE_FILES.includes(second)) return true;
-      continue;
-    }
-    if (second === GIT_GUARD_DIR) return true;
-    if (rest.length === 0 && RUN_STATE_FILES.includes(third)) return true;
-  }
-  return false;
-}
+export {
+  authorityFilePaths,
+  CONTROL_FILES,
+  DECISION_FILES,
+  GIT_GUARD_DIR,
+  isAuthorityFile,
+  ORG_STATE_FILES,
+  RUN_STATE_FILES,
+} from './org-authority-files.js';
 
 /** The directories no role may read. */
 export function authorityDirs(home: string, env: NodeJS.ProcessEnv): string[] {
@@ -118,36 +81,6 @@ export function ensureAuthorityDirs(home: string, env: NodeJS.ProcessEnv): void 
   }
 }
 
-/** Existing authority files (isAuthorityFile) under `orgRoot`, with each
- *  org's git-guard dir in place of its contents: the concrete paths the OS
- *  sandbox and the mask make read-only. They cannot protect a pattern, so a
- *  file created after the role started is not covered for Bash. */
-export function authorityFilePaths(orgRoot: string | undefined): string[] {
-  if (!orgRoot) return [];
-  const orgs = join(orgRoot, '.monomind', 'orgs');
-  const out: string[] = [];
-  const list = (dir: string) => {
-    try {
-      return readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return [];
-    }
-  };
-  for (const e of list(orgs)) {
-    const org = join(orgs, e.name);
-    if (e.isFile()) out.push(org);
-    if (!e.isDirectory()) continue;
-    for (const c of list(org)) {
-      const p = join(org, c.name);
-      if (c.isFile() && isAuthorityFile(p)) out.push(p);
-      else if (c.isDirectory() && c.name === GIT_GUARD_DIR) out.push(p);
-      else if (c.isDirectory())
-        for (const f of RUN_STATE_FILES) if (existsSync(join(p, f))) out.push(join(p, f));
-    }
-  }
-  return out;
-}
-
 /** bubblewrap arguments (before `--`) for the mask; see the module doc. */
 export function authorityMaskArgs(ctx: {
   home: string;
@@ -156,9 +89,20 @@ export function authorityMaskArgs(ctx: {
   orgRoot?: string;
 }): string[] {
   const args = ['--dev-bind', '/', '/'];
+  // #498: the org root and its .monomind become mount points, so neither can
+  // be renamed away and replaced by a tree with a forged org definition.
+  if (ctx.orgRoot)
+    for (const d of [ctx.orgRoot, join(ctx.orgRoot, '.monomind')].map(realPath))
+      if (existsSync(d)) args.push('--bind', d, d);
   for (const d of authorityDirs(ctx.home, ctx.env)) if (existsSync(d)) args.push('--tmpfs', d);
   for (const f of dashboardCredentialPaths(ctx.roots)) args.push('--ro-bind', '/dev/null', f);
-  for (const f of authorityFilePaths(ctx.orgRoot)) args.push('--ro-bind', f, f);
+  // The orgs dir read-only (no new org definition, runfile or decision file,
+  // no rename), the dirs roles work in read-write again, then the authority
+  // files those still hold read-only (org-authority-files.ts).
+  const orgs = orgsMaskLayout(ctx.orgRoot);
+  for (const d of orgs.readOnly) args.push('--ro-bind', d, d);
+  for (const d of orgs.writable) args.push('--bind', d, d);
+  for (const f of orgs.files) args.push('--ro-bind', f, f);
   return args;
 }
 

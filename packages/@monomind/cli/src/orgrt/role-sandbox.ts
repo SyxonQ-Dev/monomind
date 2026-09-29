@@ -126,6 +126,8 @@ export function resolveRoleGitEnforcement(args: {
   cwd: string;
   orgRoot?: string;
   orgDir?: string;
+  /** The current run, whose event log the SDK sandbox makes read-only. */
+  run?: string;
   bus: OrgBus;
   claudeRuntime: boolean;
   runtime?: string;
@@ -241,7 +243,12 @@ export function resolveRoleGitEnforcement(args: {
     claudeRestrictions: buildClaudeRestrictions(
       guard,
       cfg,
-      { cwd: args.cwd, orgRoot: args.orgRoot, holdStubs: args.holdStubs },
+      {
+        cwd: args.cwd,
+        orgRoot: args.orgRoot,
+        current: { org: args.org, run: args.run },
+        holdStubs: args.holdStubs,
+      },
       sandboxEnabled,
     ),
   };

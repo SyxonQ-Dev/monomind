@@ -114,6 +114,7 @@ export function spawnRoleIncarnation(
     // $TMPDIR, the org root, and any policy.sandbox.allowWrite entries.
     // $HOME is deliberately excluded; see file-roots.ts.
     fileToolRoots({ cwd: roleCwd, orgRoot: daemon.root }, role.policy?.sandbox),
+    daemon.root,
   );
   policy.setToolContext({
     providerPrefixes: () =>

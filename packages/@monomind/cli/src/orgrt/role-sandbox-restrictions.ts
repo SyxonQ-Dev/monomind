@@ -5,6 +5,7 @@ import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import {
   authorityDirs,
   authorityFilePaths,
+  CONTROL_FILES,
   DECISION_FILES,
   GIT_GUARD_DIR,
   ORG_STATE_FILES,
@@ -17,6 +18,7 @@ import {
   runtimeDir,
 } from './file-roots.js';
 import { type GitGuard, gitLocalRemotePaths } from './git-guard.js';
+import { orgsMountPoints } from './org-authority-files.js';
 import { ORG_DISALLOWED_HARNESS_TOOLS } from './org-harness-tools.js';
 import { expandDenyWrite, underAnyRoot } from './sandbox-deny-write.js';
 
@@ -136,6 +138,8 @@ export function buildClaudeRestrictions(
   ctx: {
     cwd: string;
     orgRoot?: string;
+    /** The org and run this role runs in: that run's event log is denied. */
+    current?: { org: string; run?: string };
     home?: string;
     tmp?: string;
     env?: NodeJS.ProcessEnv;
@@ -179,7 +183,7 @@ export function buildClaudeRestrictions(
     ...(ctx.orgRoot
       ? [
           ...['*.json', '*.jsonl', '*.yaml', '*.yml'],
-          ...[...DECISION_FILES, ...ORG_STATE_FILES].map((f) => join('*', f)),
+          ...[...DECISION_FILES, ...ORG_STATE_FILES, ...CONTROL_FILES].map((f) => join('*', f)),
           `${join('*', GIT_GUARD_DIR)}/**`,
         ].map((f) => rule('Edit', join(ctx.orgRoot as string, '.monomind', 'orgs', f)))
       : []),
@@ -199,7 +203,7 @@ export function buildClaudeRestrictions(
       ...(lockedRepo ? gitDirs : gitDirs.flatMap((d) => [join(d, 'config'), join(d, 'hooks')])),
       ...gitDirs.flatMap(gitLocalRemotePaths),
       ...HOME_DENY_WRITE.map((p) => join(home, p)),
-      ...authorityFilePaths(ctx.orgRoot),
+      ...authorityFilePaths(ctx.orgRoot, ctx.current),
       ...roleDenyWrite,
     ]),
     [ctx.cwd, join(home, '.claude')],
@@ -222,6 +226,11 @@ export function buildClaudeRestrictions(
       allowWrite: uniq([
         ...allowWrite,
         ...expanded.mountPoints.filter((d) => underAnyRoot(d, allowWrite)),
+        // #498: mount points, so the orgs tree cannot be renamed aside.
+        // The SDK binds denyWrite after allowWrite, so a writable dir below a
+        // denied one would stay read-only: the orgs dir itself cannot be
+        // denied here, and new files in it stay possible (authority-mask.ts).
+        ...orgsMountPoints(ctx.orgRoot).filter((d) => underAnyRoot(d, allowWrite)),
       ]),
       denyWrite: existing(expanded.denyWrite),
       denyRead: existing([
