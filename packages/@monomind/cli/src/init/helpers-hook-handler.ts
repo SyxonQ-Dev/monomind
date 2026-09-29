@@ -363,7 +363,8 @@ export function generateHookHandler(): string {
     '} // end main',
     '',
     'process.exitCode = 0;',
-    'main().catch(() => {}).finally(() => { process.exit(0); });',
+    "// Keep a gate's exit 2 (block) — an unconditional exit(0) would swallow it (#446).",
+    'main().catch(() => {}).finally(() => { process.exit(process.exitCode ?? 0); });',
   ];
   return `${lines.join('\n')}\n`;
 }
