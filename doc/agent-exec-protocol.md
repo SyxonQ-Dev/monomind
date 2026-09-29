@@ -1,4 +1,4 @@
-# Agent Exec Protocol — v1 (rev 16)
+# Agent Exec Protocol — v1 (rev 17)
 
 - **Status**: Implemented (Phase 0 of the mono-agent delegation plan — see
   `mono-agent:docs/plans/local-agent-monomind-delegation.md`)
@@ -6,6 +6,13 @@
   the Coder mode threat model, the `--access full` guardrails (root refusal, no transitive
   escalation, env hygiene, audit log), what callers own, and residual risks (issue #360).
 - **Revision history**:
+  - rev 17 (2026-09-29): **subagent lifecycle events** (issue #387) — new capability
+    `agent-exec-subagent-events` and new `subagent` event (§3.2.1), claude runtime only: a native
+    `Task`/`Agent` subagent reports `started → progress* → finished`, joined to the call's
+    `tool_activity` id by `tool_use_id`. A subagent's own text is now an `assistant` event with
+    `parent_tool_use_id` and is no longer part of `result.text`; before this revision it was
+    emitted as main-agent text and joined into `result.text`. New golden fixture
+    `subagent.ndjson`. Other runtimes are unchanged.
   - rev 16 (2026-09-29): **reasoning effort** — new capability `agent-exec-effort` and flag
     `--effort off|low|medium|high|xhigh|max` (§3.1). claude maps it onto the Agent SDK's `effort`
     option (`off` disables thinking); codex gets `-c model_reasoning_effort=<level>` (`off` →
@@ -384,6 +391,46 @@ error (bad flags, unknown runtime, missing binary) · `124` `--timeout` expired 
 Malformed caller input (§4): monomind emits `error {code:"bad-frame", fatal:false}` and
 continues; the pending `tool_call` is failed with `ERROR: bad tool_result frame` fed back to the
 agent.
+
+### 3.2.1 `subagent` events (capability `agent-exec-subagent-events`, rev 17)
+
+**claude runtime only.** When the agent delegates to a native subagent (the `Task`/`Agent` tool),
+monomind forwards the Agent SDK's task lifecycle as `subagent` events:
+
+| Field | Phases | Meaning |
+|---|---|---|
+| `phase` | all | `"started"`, `"progress"` (zero or more), then `"finished"` |
+| `id` | all | The subagent's task id; the same across its phases |
+| `tool_use_id` | all | The id of the `Task`/`Agent` call that started it — equal to that call's `tool_activity` id, so a caller can join the two |
+| `subagent_type`, `description`, `prompt` | started | As the model passed them to the tool (each omitted when absent) |
+| `summary` | progress, finished | Latest progress summary; on `finished`, the result summary |
+| `last_tool` | progress | Name of the subagent's most recent tool call |
+| `status` | finished | `"completed"` \| `"failed"` \| `"stopped"` |
+| `usage` | progress, finished | `{total_tokens, tool_uses, duration_ms}`, cumulative for that subagent, as the SDK reports it (no input/output split and no cost; cost stays on the turn's `usage` and `result` events) |
+
+Order: `started` comes after the `Task`/`Agent` call's `tool_activity(start)` and before any of
+the subagent's own tool calls; `finished` comes before the call's `tool_activity(end)`. A task
+the SDK marks as housekeeping (`skip_transcript`) or that has no tool call to join to produces
+no events.
+
+A subagent's own text arrives as `assistant {v, text, parent_tool_use_id}`, where
+`parent_tool_use_id` is the subagent's `tool_use_id`. It is sent as one complete message per
+subagent model turn, not incrementally, and it is **not** part of `result.text`, which holds only
+the main agent's text. Callers that do not route by `parent_tool_use_id` should drop `assistant`
+events that carry it. The subagent's tool calls already carry `parent_tool_use_id` on their
+`tool_activity(start)` events (rev 12). Without this capability (older monomind), a subagent's
+text was emitted as main-agent `assistant` text and joined into `result.text`.
+
+Example (`doc/agent-exec-protocol/fixtures/subagent.ndjson`, abridged):
+
+```
+{"v":1,"type":"tool_activity","id":"toolu_task","phase":"start","name":"Task","input":{"subagent_type":"Explore","description":"Find config loader","prompt":"…"},"parent_tool_use_id":null}
+{"v":1,"type":"subagent","phase":"started","id":"task_1","tool_use_id":"toolu_task","subagent_type":"Explore","description":"Find config loader","prompt":"…"}
+{"v":1,"type":"assistant","text":"Searching for loadConfig.","parent_tool_use_id":"toolu_task"}
+{"v":1,"type":"subagent","phase":"progress","id":"task_1","tool_use_id":"toolu_task","summary":"Found loadConfig in src/config.ts","last_tool":"Grep","usage":{"total_tokens":4210,"tool_uses":1,"duration_ms":2310}}
+{"v":1,"type":"subagent","phase":"finished","id":"task_1","tool_use_id":"toolu_task","status":"completed","summary":"Config is loaded by loadConfig() in src/config.ts.","usage":{"total_tokens":5120,"tool_uses":1,"duration_ms":3050}}
+{"v":1,"type":"tool_activity","id":"toolu_task","phase":"end","name":"Task","ok":true,"output":"…","output_truncated":false,"duration_ms":3120}
+```
 
 ### 3.3 Example
 

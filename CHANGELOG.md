@@ -7,6 +7,11 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 ### Added
 
 - **`agent exec --effort <level>`** (agent-exec protocol rev 16, capability `agent-exec-effort`). Sets the turn's reasoning effort: `off`, `low`, `medium`, `high`, `xhigh` or `max`. claude gets it as the Agent SDK's `effort` option (`off` disables thinking); codex gets `-c model_reasoning_effort=<level>` (`off` becomes `none`). Other runtimes ignore it, and an unknown level is rejected before the turn starts.
+- **`agent exec` reports Claude's native subagents** ([#387](https://github.com/monoes/monomind/issues/387), capability `agent-exec-subagent-events`, agent-exec protocol rev 17). When a claude turn delegates through the `Task`/`Agent` tool, the stream now carries `subagent` events (`started`, `progress`, `finished`) with the subagent's type, description, prompt, summary, last tool, status and usage. Their `tool_use_id` equals the `Task` call's `tool_activity` id, so callers can join the two. New golden fixture `doc/agent-exec-protocol/fixtures/subagent.ndjson`.
+
+### Fixed
+
+- **A subagent's text no longer leaks into the main agent's output** ([#387](https://github.com/monoes/monomind/issues/387)). On `agent exec --runtime claude`, a subagent's prose was emitted as ordinary `assistant` text and joined into `result.text`. It is now an `assistant` event with `parent_tool_use_id` set to the subagent's `Task` call, and `result.text` holds only the main agent's text.
 
 ## [2.18.4] — 2026-09-29
 
