@@ -741,8 +741,9 @@ describe('CodexAgentRunner streaming (#204)', () => {
     const end = Date.now();
 
     // First message must be the spawn-time liveness yield — this is what
-    // deterministically wins session.ts's first-pull watchdog race.
-    expect(messages[0]).toEqual({ type: 'tool_use', session_id: undefined, text: 'turn started' });
+    // deterministically wins session.ts's first-pull watchdog race. It
+    // carries no text, so it never becomes an unpaired tool_activity start.
+    expect(messages[0]).toEqual({ type: 'tool_use', session_id: undefined });
     expect(times[0] - start).toBeLessThan(300);
 
     // The shell tool call arrives as a tool_use liveness message at its
