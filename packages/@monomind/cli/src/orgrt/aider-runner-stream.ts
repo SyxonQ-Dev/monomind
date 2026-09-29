@@ -17,6 +17,7 @@ import { killOnAbort } from './agent-runner.js';
 import { maskedCommand } from './authority-mask.js';
 import { spawnRunnerProcess } from './process-group-spawn.js';
 import { omitAnthropicManagedKeys } from './provider.js';
+import { classifyProviderLimit } from './provider-limit.js';
 
 export const TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 const KILL_GRACE_MS = 5000;
@@ -108,7 +109,8 @@ export function parseCliLine(line: string): AiderEvent | undefined {
     return { type: 'error', code: 'auth', message: t };
   }
   if (/RateLimitError|insufficient_quota|exceeded your current quota/i.test(t)) {
-    return { type: 'error', code: 'quota', message: t };
+    const code = classifyProviderLimit(t) === 'rate-limited' ? 'rate-limited' : 'quota';
+    return { type: 'error', code, message: t };
   }
   if (CLI_NOISE.test(t)) return undefined;
   return { type: 'text', text: `${t}\n` };

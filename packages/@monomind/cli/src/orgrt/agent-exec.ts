@@ -27,18 +27,18 @@
 
 import { fullAccessCanUseTool, resolveAccess } from './agent-exec-access.js';
 import { StdioToolBridge, UsageTracker } from './agent-exec-bridge.js';
-import { type ExecErrorCode, FATAL_CODES } from './agent-exec-errors.js';
+import { type ExecErrorCode, execErrorCode, FATAL_CODES } from './agent-exec-errors.js';
 import {
   type AgentExecOptions,
   jsonSchemaToZodShape,
   type Terminal,
 } from './agent-exec-options.js';
+import { type AttemptContext, runWithRateLimitRetry } from './agent-exec-retry.js';
 import { createExecStatusHandler, runtimeStartupNotices } from './agent-exec-settings.js';
 import { hasUnsafeShellSyntax } from './agent-exec-shell-syntax.js';
 import { mapStopReason } from './agent-exec-stop-reason.js';
 import type { AgentMessage, OrgToolDef } from './agent-runner.js';
 import { appendFullAccessAudit } from './full-access-audit.js';
-import { classifyStderr } from './kimicode-runner.js';
 import { loadCreateOrgSkillGuidance } from './org-design-skill.js';
 import { resolveExecRunner, runnerSpec } from './runner-registry.js';
 import { ToolActivityTracker } from './tool-activity.js';
@@ -52,9 +52,18 @@ export { jsonSchemaToZodShape } from './agent-exec-options.js';
 /**
  * Run one agent exec turn. Emits protocol events via opts.emit and returns
  * the process exit code (§3.2): 0 success · 1 error · 124 timeout ·
- * 130 cancelled. `done` is emitted exactly once before returning.
+ * 130 cancelled. `done` is emitted exactly once before returning. A turn
+ * that fails on a transient rate limit is retried (agent-exec-retry.ts).
  */
-export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
+export function runAgentExec(opts: AgentExecOptions): Promise<number> {
+  return runWithRateLimitRetry(opts, runAgentExecOnce);
+}
+
+/** One attempt; a later one skips `start` + startup notices (see AttemptContext). */
+export async function runAgentExecOnce(
+  opts: AgentExecOptions,
+  ctx: AttemptContext = { attempt: 1 },
+): Promise<number> {
   const emit = opts.emit;
   const grace = opts.returnGraceMs ?? 5000;
 
@@ -126,7 +135,8 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
     settleTerminal = r;
   });
 
-  safeEmit({
+  const firstEmit = ctx.attempt === 1 ? safeEmit : () => {}; // rev 20: retries stay quiet
+  firstEmit({
     v: 1,
     type: 'start',
     runtime: opts.runtime,
@@ -144,7 +154,7 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
   });
   // rev 19: what a non-claude --settings turn loads, and an ignored --effort.
   const effortSupported = runnerSpec(opts.runtime)?.effort ?? false;
-  for (const ev of runtimeStartupNotices({ ...opts, effortSupported })) safeEmit(ev);
+  for (const ev of runtimeStartupNotices({ ...opts, effortSupported })) firstEmit(ev);
 
   // Abort hook for the runner (AgentRunArgs.signal): return() alone queues
   // behind a runner blocked in `for await (child.stdout)` and never reaches
@@ -370,14 +380,10 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
           message: `${opts.runtime} CLI not found${spec ? ` — ${spec.installHint}` : ''}`,
         });
       } else {
-        const cls = classifyStderr(e.message ?? String(err));
-        const code: ExecErrorCode = cls.fatal
-          ? /auth/i.test(cls.label ?? '')
-            ? 'auth'
-            : 'quota'
-          : 'runner-error';
-        const spec = runnerSpec(opts.runtime);
         const msg = e.message ?? String(err);
+        const { code, rateLimit } = execErrorCode(err, msg);
+        if (rateLimit) ctx.rateLimit = rateLimit; // rev 20: the wrapper decides
+        const spec = runnerSpec(opts.runtime);
         const login =
           code === 'auth' && spec?.loginHint && !/login|log in/i.test(msg)
             ? ` Run: ${spec.loginHint}`
@@ -470,14 +476,16 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
 
   const isError = lastResult.is_error === true || (lastResult.subtype ?? 'success') !== 'success';
   if (isError) {
-    safeEmit({
-      v: 1,
-      type: 'error',
-      code: 'runner-error',
-      fatal: false,
-      message:
-        (lastResult as { text?: string }).text ?? `turn failed (${lastResult.subtype ?? 'error'})`,
-    });
+    const message =
+      (lastResult as { text?: string }).text ?? `turn failed (${lastResult.subtype ?? 'error'})`;
+    const { code, rateLimit } = execErrorCode(undefined, message);
+    if (rateLimit) {
+      // rev 20: ends like a thrown 429 (error + done, no result) so it can be retried.
+      ctx.rateLimit = rateLimit;
+      safeEmit({ v: 1, type: 'error', code, fatal: true, message });
+      return finish(1);
+    }
+    safeEmit({ v: 1, type: 'error', code: 'runner-error', fatal: false, message });
   }
   // §3.2: result.text is the aggregate final text. Runners rarely put text on
   // their own result message, so derive it from what was streamed: an

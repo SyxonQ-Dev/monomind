@@ -1,6 +1,7 @@
 // packages/@monomind/cli/src/orgrt/kimicode-runner-parse.ts
 // Split out of kimicode-runner.ts (file-size sweep) — kimi stream-json wire
 // format parsing and stderr fatal-error classification.
+import { classifyProviderLimit } from './provider-limit.js';
 import { TOOL_CALL_RE } from './tool-fence.js';
 
 /**
@@ -171,24 +172,25 @@ export function extractStderrSessionId(stderr: string): string | undefined {
 
 /** Stderr patterns that mark a turn failure as FATAL (non-retryable): auth,
  *  quota, and billing errors can never be fixed by restarting the session —
- *  the daemon must not burn its crash-restart budget on them. */
-const FATAL_PATTERNS: Array<{ re: RegExp; label: string }> = [
-  { re: /auth_error|401|403/i, label: 'authentication/permission error' },
-  {
-    re: /usage limit|quota|billing cycle|insufficient.*balance|rate.?limit/i,
-    label: 'provider quota/billing limit',
-  },
-];
+ *  the daemon must not burn its crash-restart budget on them. A transient
+ *  rate limit is fatal to the daemon too, but carries `rateLimited` so
+ *  `agent exec` can retry it after a backoff (provider-limit.ts). */
+const AUTH_FATAL_RE = /auth_error|401|403/i;
 
 export interface FatalErrorInfo {
   fatal: boolean;
   label?: string;
+  /** A transient provider rate limit (429), not exhausted quota. */
+  rateLimited?: boolean;
 }
 
 /** Classify a CLI turn's stderr: is this a fatal (non-retryable) failure? */
 export function classifyStderr(stderrTail: string): FatalErrorInfo {
-  for (const p of FATAL_PATTERNS) {
-    if (p.re.test(stderrTail)) return { fatal: true, label: p.label };
-  }
+  if (AUTH_FATAL_RE.test(stderrTail))
+    return { fatal: true, label: 'authentication/permission error' };
+  const limit = classifyProviderLimit(stderrTail);
+  if (limit === 'rate-limited')
+    return { fatal: true, label: 'provider rate limit (429)', rateLimited: true };
+  if (limit === 'quota') return { fatal: true, label: 'provider quota/billing limit' };
   return { fatal: false };
 }
