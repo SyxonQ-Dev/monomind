@@ -4,6 +4,10 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Changed
+
+- **The MCP server advertises a 20-tool core by default** ([#410](https://github.com/monoes/monomind/issues/410)). `tools/list` sent 71 tools (34.7 KB, about 8.7k tokens on clients that load schemas eagerly), and 45 of them only read or write state files: `agent_*`, `task_*`, `session_*`, `config_*`, `system_*`, `guidance_*`, `hooks_*` and `mcp_status`. The default roster is now monograph (build, query, suggest, impact, context, neighbors), `pick`, `org_skill_show`, `monomind_tool_search`, `knowledge_search`/`ingest`/`remove`, `monodesign_detect`/`fix`/`palette`, and the five memory tools the generated CLAUDE.md and the KG nudge name (`memory_pattern-store`, `memory_feedback`, `memory_kg_ingest`, `memory_kg_search`, `memory_kg_stats`), 14.6 KB in all. Every other tool is still callable by name and found through `monomind_tool_search`; `MONOMIND_MCP_FULL=1` still advertises all of them.
+
 ### Fixed
 
 - **The per-prompt Second Brain lookup only sends the prompt to a loopback server** ([#402](https://github.com/monoes/monomind/issues/402)). The route hook POSTed every substantive prompt to the `url` in `.monomind/control.json` without checking where it pointed, so a tampered or committed control.json could send prompts to any host. The POST now happens only when that url is http(s) to `127.0.0.1`, `localhost` or `::1` (no credentials in the url); otherwise the hook skips it and uses the local keyword fallback.
