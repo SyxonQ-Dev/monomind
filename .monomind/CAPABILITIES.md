@@ -33,8 +33,6 @@ Monomind is a domain-driven design architecture for multi-agent AI coordination 
 | Max Agents | 15 |
 | Memory Backend | hybrid |
 | `neural.enabled` | On (session start loads the local pattern store only when on; no model is trained) |
-| `learningBridge` flag | On (config only) |
-| Agent Scopes | Enabled (project/local/user) |
 
 ---
 
@@ -201,20 +199,6 @@ session start when their output is >6h old; run on demand with
 
 No model is trained — routing and pattern logging run in JS on local files.
 Route and command outcomes are recorded and scored so routing quality is measured.
-
-### Memory Scopes (ADR-049)
-
-| Component | Status | Description |
-|-----------|--------|-------------|
-| **learningBridge** | On | Config flag only — no runtime component reads it yet |
-| **AgentMemoryScope** | ✅ Enabled | 3-scope agent memory (project/local/user) |
-
-**AgentMemoryScope** - Maps Claude Code 3-scope directories:
-- `project`: `<gitRoot>/.claude/agent-memory/<agent>/`
-- `local`: `<gitRoot>/.claude/agent-memory-local/<agent>/`
-- `user`: `~/.claude/agent-memory/<agent>/`
-
-High-confidence insights (>0.8) can transfer between agents.
 
 ### Memory Commands
 ```bash
