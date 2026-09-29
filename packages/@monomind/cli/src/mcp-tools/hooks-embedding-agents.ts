@@ -86,6 +86,90 @@ export async function suggestAgentsFromIntelligence(
   }
 }
 
+/**
+ * Mirror of FALLBACK_DESTRUCTIVE_PATTERNS in .claude/helpers/handlers/gates-handler.cjs
+ * (the PreToolUse Bash gate). That file is a dependency-free CJS hook helper,
+ * so the table cannot be imported here; keep the two in sync. Parity is pinned
+ * by __tests__/mcp-tools-hooks-pre-command-risk.test.ts.
+ */
+export const DESTRUCTIVE_COMMAND_PATTERNS: RegExp[] = [
+  /\brm\s+(?:-[a-z]*f[a-z]*r|-[a-z]*r[a-z]*f|--recursive.*--force|--force.*--recursive|-rf?)\b/i,
+  /\bdrop\s+(database|table|schema|index)\b/i,
+  /\btruncate\s+table\b/i,
+  /\bgit\s+push\s+.*--force\b/i,
+  /\bgit\s+reset\s+--hard\b/i,
+  /\bgit\s+clean\s+.*-f/i,
+  /\bformat\s+[a-z]:/i,
+  /\bdel\s+\/[sf]\b/i,
+  /\b(?:kubectl|helm)\s+delete\s+(?:--all|namespace)\b/i,
+  /\bDROP\s+(?:DATABASE|TABLE|SCHEMA)\b/i,
+  /\bDELETE\s+FROM\s+\w+/i,
+  /\bALTER\s+TABLE\s+\w+\s+DROP\b/i,
+];
+
+/** Catastrophic, usually irreversible operations checked per segment. */
+const CRITICAL_SEGMENT_PATTERNS: Array<{ pattern: RegExp; warning: string }> = [
+  {
+    pattern:
+      /\brm\s+(?=(?:\S+\s+)*-(?:[a-zA-Z]*[rR]|-recursive))(?:\S+\s+)*["']?(?:\/|~|\$HOME|\$\{HOME\})["']?\/?\*?["']?(?:\s|$)|--no-preserve-root/,
+    warning: 'Deletion of home or root directory',
+  },
+  {
+    pattern: /\bgit\s+push\b(?=.*(?:--force\b|\s-f\b|\s\+))(?=.*\b(?:main|master)\b)/,
+    warning: 'Force-push to main/master',
+  },
+  { pattern: /\bgit\s+push\b.*\s-f\b/, warning: 'Force-push detected' },
+  { pattern: /\bdd\b.*\bof=\/dev\/(?!null\b)/, warning: 'Raw write to a block device' },
+  { pattern: /\bmkfs(?:\.\w+)?\b/, warning: 'Filesystem format' },
+];
+
+/** `:(){ :|:& };:` and named variants; checked on the whole command. */
+const FORK_BOMB = /([\w:]+)\s*\(\s*\)\s*\{\s*\1\s*\|\s*\1\s*&/;
+const SHELL_INTERPRETER = /^(?:sudo\s+)?(?:\S*\/)?(?:sh|bash|zsh|dash|ksh)\b/;
+
+/**
+ * Split a shell command into segments on `&&`, `||`, `;`, `|`, `&` and
+ * newlines, ignoring separators inside quotes. `piped` marks a segment that
+ * reads the previous segment's output.
+ */
+export function splitCommandSegments(command: string): Array<{ text: string; piped: boolean }> {
+  const segments: Array<{ text: string; piped: boolean }> = [];
+  let current = '';
+  let quote: string | null = null;
+  let piped = false;
+  const push = (nextPiped: boolean) => {
+    const text = current.trim();
+    if (text) segments.push({ text, piped });
+    current = '';
+    piped = nextPiped;
+  };
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (ch === '\\' && quote !== "'") {
+      current += ch + (command[i + 1] ?? '');
+      i++;
+    } else if (quote) {
+      if (ch === quote) quote = null;
+      current += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+      current += ch;
+    } else if ((ch === '&' || ch === '|') && command[i + 1] === ch) {
+      push(false);
+      i++;
+    } else if (ch === '|') {
+      push(true);
+      if (command[i + 1] === '&') i++;
+    } else if (ch === ';' || ch === '&' || ch === '\n') {
+      push(false);
+    } else {
+      current += ch;
+    }
+  }
+  push(false);
+  return segments;
+}
+
 export function assessCommandRisk(command: string): {
   risk: string;
   level: number;
@@ -93,38 +177,32 @@ export function assessCommandRisk(command: string): {
 } {
   const warnings: string[] = [];
   let level = 0;
+  const flag = (value: number, warning: string) => {
+    level = Math.max(level, value);
+    if (!warnings.includes(warning)) warnings.push(warning);
+  };
 
-  // High risk commands
-  if (command.includes('rm -rf') || command.includes('rm -r')) {
-    level = Math.max(level, 0.9);
-    warnings.push('Recursive deletion detected - verify target path');
-  }
-  if (command.includes('sudo')) {
-    level = Math.max(level, 0.7);
-    warnings.push('Elevated privileges requested');
-  }
-  if (command.includes('> /') || command.includes('>> /')) {
-    level = Math.max(level, 0.6);
-    warnings.push('Writing to system path');
-  }
-  if (command.includes('chmod') || command.includes('chown')) {
-    level = Math.max(level, 0.5);
-    warnings.push('Permission modification');
-  }
-  if (command.includes('curl') && command.includes('|')) {
-    level = Math.max(level, 0.8);
-    warnings.push('Piping remote content to shell');
-  }
+  if (FORK_BOMB.test(command)) flag(0.95, 'Fork bomb detected');
 
-  // Safe commands
-  if (command.startsWith('npm ') || command.startsWith('npx ')) {
-    level = Math.min(level, 0.3);
-  }
-  if (command.startsWith('git ')) {
-    level = Math.min(level, 0.2);
-  }
-  if (command.startsWith('ls ') || command.startsWith('cat ') || command.startsWith('echo ')) {
-    level = Math.min(level, 0.1);
+  // Every segment is evaluated on its own; a harmless first command
+  // (`echo hi && …`) no longer caps the risk of what follows.
+  for (const { text, piped } of splitCommandSegments(command)) {
+    for (const { pattern, warning } of CRITICAL_SEGMENT_PATTERNS) {
+      if (pattern.test(text)) flag(0.95, warning);
+    }
+    const destructive = DESTRUCTIVE_COMMAND_PATTERNS.find((p) => p.test(text));
+    if (destructive === DESTRUCTIVE_COMMAND_PATTERNS[0]) {
+      flag(0.9, 'Recursive deletion detected - verify target path');
+    } else if (destructive) {
+      flag(
+        0.9,
+        `Destructive operation (blocked by the Bash gate): ${text.match(destructive)?.[0]}`,
+      );
+    }
+    if (piped && SHELL_INTERPRETER.test(text)) flag(0.9, 'Piping content into a shell');
+    if (/\bsudo\b/.test(text)) flag(0.7, 'Elevated privileges requested');
+    if (/>>? \/(?!dev\/null\b)/.test(text)) flag(0.6, 'Writing to system path');
+    if (/\bch(?:mod|own)\b/.test(text)) flag(0.5, 'Permission modification');
   }
 
   const risk = level >= 0.7 ? 'high' : level >= 0.4 ? 'medium' : 'low';
