@@ -19,7 +19,6 @@ import {
   HONEST_MONOSWARM_SENTENCE,
   projectArchitecture,
   swarmOrchestration,
-  swarmRules,
 } from './claudemd-sections-core.js';
 import {
   agentPicking,
@@ -60,40 +59,36 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 // --- Template Composers ---
 
+/** The [PICK] line comes from the UserPromptSubmit route hook; without that
+ * hook installed, rules about following it are dead text. */
+function pickingRules(opts: InitOptions): string {
+  const hooked = opts.components.settings && opts.components.helpers && opts.hooks.userPromptSubmit;
+  return hooked ? agentPicking() : '';
+}
+
+const LEAN_SECTIONS: Array<(opts: InitOptions) => string> = [
+  behavioralRules,
+  (_opts) => codingPrinciples(),
+  fileOrganization,
+  projectArchitecture,
+  buildAndTest,
+  (_opts) => securityRulesLight(),
+  concurrencyRules,
+  pickingRules,
+  secondBrainSection,
+  (_opts) => monographSection(),
+];
+
 /**
  * Template section map — defines which sections are included per template.
  */
 const TEMPLATE_SECTIONS: Record<ClaudeMdTemplate, Array<(opts: InitOptions) => string>> = {
-  minimal: [
-    behavioralRules,
-    (_opts) => codingPrinciples(),
-    fileOrganization,
-    projectArchitecture,
-    buildAndTest,
-    (_opts) => securityRulesLight(),
-    concurrencyRules,
-    (_opts) => agentPicking(),
-    (_opts) => secondBrainSection(),
-    (_opts) => monographSection(),
-    (_opts) => setupAndBoundary(),
-  ],
-  standard: [
-    behavioralRules,
-    (_opts) => codingPrinciples(),
-    fileOrganization,
-    projectArchitecture,
-    buildAndTest,
-    (_opts) => securityRulesLight(),
-    concurrencyRules,
-    (_opts) => agentPicking(),
-    (_opts) => swarmRules(),
-    (_opts) => cliCommandsTable(),
-    (_opts) => agentTypes(),
-    (_opts) => memoryCommands(),
-    (_opts) => secondBrainSection(),
-    (_opts) => monographSection(),
-    (_opts) => setupAndBoundary(),
-  ],
+  // GH #412: minimal/standard/solo carry only rules that change what the
+  // model does in the user's project. The CLI tables, curated agent list,
+  // memory commands and setup/support boilerplate stay in the opt-in
+  // full/security/performance templates.
+  minimal: LEAN_SECTIONS,
+  standard: LEAN_SECTIONS,
   full: [
     behavioralRules,
     (_opts) => codingPrinciples(),
@@ -102,7 +97,7 @@ const TEMPLATE_SECTIONS: Record<ClaudeMdTemplate, Array<(opts: InitOptions) => s
     buildAndTest,
     (_opts) => securityRulesLight(),
     concurrencyRules,
-    (_opts) => agentPicking(),
+    pickingRules,
     (_opts) => swarmOrchestration(),
     (_opts) => antiDriftConfig(),
     (_opts) => autoStartProtocol(),
@@ -112,7 +107,7 @@ const TEMPLATE_SECTIONS: Record<ClaudeMdTemplate, Array<(opts: InitOptions) => s
     (_opts) => hooksSystem(),
     (_opts) => learningProtocol(),
     (_opts) => memoryCommands(),
-    (_opts) => secondBrainSection(),
+    secondBrainSection,
     (_opts) => monographSection(),
     (_opts) => intelligenceSystem(),
     (_opts) => envVars(),
@@ -125,7 +120,7 @@ const TEMPLATE_SECTIONS: Record<ClaudeMdTemplate, Array<(opts: InitOptions) => s
     projectArchitecture,
     buildAndTest,
     concurrencyRules,
-    (_opts) => agentPicking(),
+    pickingRules,
     (_opts) => swarmOrchestration(),
     (_opts) => antiDriftConfig(),
     executionRules,
@@ -133,7 +128,7 @@ const TEMPLATE_SECTIONS: Record<ClaudeMdTemplate, Array<(opts: InitOptions) => s
     (_opts) => cliCommandsTable(),
     (_opts) => agentTypes(),
     (_opts) => memoryCommands(),
-    (_opts) => secondBrainSection(),
+    secondBrainSection,
     (_opts) => monographSection(),
     (_opts) => setupAndBoundary(),
   ],
@@ -145,7 +140,7 @@ const TEMPLATE_SECTIONS: Record<ClaudeMdTemplate, Array<(opts: InitOptions) => s
     buildAndTest,
     (_opts) => securityRulesLight(),
     concurrencyRules,
-    (_opts) => agentPicking(),
+    pickingRules,
     (_opts) => swarmOrchestration(),
     (_opts) => antiDriftConfig(),
     executionRules,
@@ -153,7 +148,7 @@ const TEMPLATE_SECTIONS: Record<ClaudeMdTemplate, Array<(opts: InitOptions) => s
     (_opts) => cliCommandsTable(),
     (_opts) => agentTypes(),
     (_opts) => memoryCommands(),
-    (_opts) => secondBrainSection(),
+    secondBrainSection,
     (_opts) => monographSection(),
     (_opts) => intelligenceSystem(),
     (_opts) => setupAndBoundary(),
@@ -166,11 +161,9 @@ const TEMPLATE_SECTIONS: Record<ClaudeMdTemplate, Array<(opts: InitOptions) => s
     buildAndTest,
     (_opts) => securityRulesLight(),
     concurrencyRules,
-    (_opts) => agentPicking(),
+    pickingRules,
     executionRules,
-    (_opts) => cliCommandsTable(),
-    (_opts) => memoryCommands(),
-    (_opts) => setupAndBoundary(),
+    (_opts) => monographSection(),
   ],
 };
 
@@ -185,7 +178,11 @@ export function generateClaudeMd(options: InitOptions, template?: ClaudeMdTempla
   const sections = TEMPLATE_SECTIONS[tmpl] ?? TEMPLATE_SECTIONS.standard;
 
   const header = `# Claude Code Configuration - Monomind\n`;
-  const body = sections.map((fn) => fn(options)).join('\n\n');
+  // A conditional section returns '' when it does not apply to this project.
+  const body = sections
+    .map((fn) => fn(options))
+    .filter(Boolean)
+    .join('\n\n');
 
   return `${header}\n${body}\n`;
 }
@@ -199,10 +196,10 @@ export function generateMinimalClaudeMd(options: InitOptions): string {
 
 /** Available template names for CLI wizard */
 export const CLAUDE_MD_TEMPLATES: Array<{ name: ClaudeMdTemplate; description: string }> = [
-  { name: 'minimal', description: 'Quick start — behavioral rules, CLI reference (~160 lines)' },
+  { name: 'minimal', description: 'Quick start — same lean rules as standard (~60 lines)' },
   {
     name: 'standard',
-    description: 'Recommended — monoswarm rules, agents, memory commands (~225 lines)',
+    description: 'Recommended — project rules, graph-first navigation, agent picking (~60 lines)',
   },
   {
     name: 'full',
@@ -218,7 +215,7 @@ export const CLAUDE_MD_TEMPLATES: Array<{ name: ClaudeMdTemplate; description: s
   },
   {
     name: 'solo',
-    description: 'Solo developer — no monoswarm, simple agent usage, memory commands (~150 lines)',
+    description: 'Solo developer — lean rules plus background-agent execution rules (~65 lines)',
   },
 ];
 

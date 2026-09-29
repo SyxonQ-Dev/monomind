@@ -67,8 +67,13 @@ describe('monoswarm "MUST initialize" claim removed from generators (i-035)', ()
     expect(hasSoleMonoswarmInitFence(generated)).toBe(false);
   });
 
-  it('the honest sentence appears exactly once in the default (standard) CLAUDE.md', () => {
-    const generated = generateClaudeMd({ ...DEFAULT_INIT_OPTIONS, targetDir: process.cwd() });
+  // The default (standard) template carries no monoswarm section since GH #412;
+  // the opt-in full template is where the sentence still ships.
+  it('the honest sentence appears exactly once in the full CLAUDE.md', () => {
+    const generated = generateClaudeMd(
+      { ...DEFAULT_INIT_OPTIONS, targetDir: process.cwd() },
+      'full',
+    );
     expect(count(generated, HONEST_MONOSWARM_SENTENCE)).toBe(1);
   });
 
