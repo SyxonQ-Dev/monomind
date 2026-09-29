@@ -122,7 +122,7 @@ export MONOMIND_LOG_LEVEL=debug
 # List all registered hooks
 npx monomind hooks list
 
-# View learning metrics
+# View recorded routing/outcome metrics
 npx monomind hooks metrics
 
 # Check background workers

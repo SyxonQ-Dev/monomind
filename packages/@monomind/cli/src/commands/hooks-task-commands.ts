@@ -131,7 +131,7 @@ export const preTaskCommand: Command = {
 // Post-task subcommand
 export const postTaskCommand: Command = {
   name: 'post-task',
-  description: 'Record task completion for learning',
+  description: 'Record a task outcome against its routed agent',
   options: [
     {
       name: 'task-id',

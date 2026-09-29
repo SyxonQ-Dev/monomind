@@ -143,8 +143,8 @@ export const hooksPretrain: MCPTool = {
         console.error('[hooks-pretrain] pattern store failed:', e);
     }
 
-    // Feed extracted import patterns into the neural training system so
-    // pretrain actually trains, not just scans.
+    // Record the extracted import patterns as steps and one trajectory in the
+    // local pattern log (intelligence.ts). No model is trained.
     let neuralPatternsLearned = 0;
     if (patterns.length > 0) {
       try {
@@ -197,7 +197,7 @@ export const hooksPretrain: MCPTool = {
 // Transfer hook - transfer patterns from another project
 export const hooksTransfer: MCPTool = {
   name: 'hooks_transfer',
-  description: 'Transfer learned patterns from another project',
+  description: 'Copy recorded patterns from another project',
   inputSchema: {
     type: 'object',
     properties: {

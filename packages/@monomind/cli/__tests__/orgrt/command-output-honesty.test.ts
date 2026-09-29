@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { WORKER_COUNT, WORKER_ROWS } from '../../src/init/generated-counts.js';
 
 const __dirname_test = dirname(fileURLToPath(import.meta.url));
 const SRC_DIR = join(__dirname_test, '..', '..', 'src');
@@ -143,6 +144,43 @@ describe('P1-19: Command-output-honesty regression (prevents P0-1 to P0-6 recurr
       expect(src).not.toContain('enable-moe');
       expect(src).not.toContain('enable-sona');
       expect(src).not.toContain('embedding-provider');
+    });
+  });
+
+  describe('hooks help and worker text — no self-learning or training claims', () => {
+    const hooksSrc = readSrc('commands/hooks.ts');
+
+    it('hooks --help no longer calls itself self-learning', () => {
+      expect(hooksSrc).not.toMatch(/self-learning/i);
+      expect(hooksSrc).toContain('No model is trained');
+    });
+
+    it('the worker count in hooks --help is derived, not a literal', () => {
+      expect(hooksSrc).toContain('Background worker management (${WORKER_COUNT} workers)');
+      expect(hooksSrc).not.toMatch(/Background worker management \(\d+ workers\)/);
+    });
+
+    it('the guidance quick reference suggests the real post-edit flags', () => {
+      const src = readSrc('mcp-tools/guidance-quickref-tool.ts');
+      expect(src).not.toContain('--train-neural');
+      expect(src).toContain('hooks post-edit --file "..." --success true');
+    });
+
+    it('the reflexion worker describes templated notes, not self-learning', () => {
+      const types = readFileSync(
+        join(SRC_DIR, '..', '..', 'hooks', 'src', 'workers', 'worker-manager-types.ts'),
+        'utf8',
+      );
+      expect(types).not.toMatch(/self-learning/i);
+      expect(types).toContain('templated keyword notes in .monomind/reflexion-store.json');
+    });
+
+    it('the @monoes/hooks package description names every worker, with the derived count', () => {
+      const pkg = JSON.parse(
+        readFileSync(join(SRC_DIR, '..', '..', 'hooks', 'package.json'), 'utf8'),
+      ) as { description: string };
+      expect(pkg.description).toContain(`${WORKER_COUNT} on-demand background workers`);
+      for (const row of WORKER_ROWS) expect(pkg.description).toContain(row.name);
     });
   });
 });

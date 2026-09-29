@@ -117,7 +117,7 @@ export const transferFromProjectCommand: Command = {
 // Parent transfer command combining all transfer methods
 export const transferCommand: Command = {
   name: 'transfer',
-  description: 'Transfer learned patterns from another local project',
+  description: 'Copy recorded patterns from another local project',
   subcommands: [transferFromProjectCommand],
   examples: [
     {

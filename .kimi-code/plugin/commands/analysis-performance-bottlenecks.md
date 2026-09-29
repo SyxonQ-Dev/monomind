@@ -57,4 +57,4 @@ mcp__monomind__performance_bottleneck({
 ```
 
 ## Continuous Optimization
-The system learns from each task to prevent future bottlenecks!
+Re-run the analysis after changes to compare against the previous results.

@@ -112,7 +112,7 @@ export const hooksPreTask: MCPTool = {
 
     // P2-15: Retrieve Reflexion reflections for this task — past failures
     // on similar tasks are injected as recommendations so the agent avoids
-    // repeating mistakes. This closes the self-learning loop.
+    // repeating mistakes. Keyword match only — no model is involved.
     let reflexionWarnings: string[] = [];
     try {
       const hooksPkg = await import('@monoes/hooks').catch(() => null);
@@ -171,7 +171,7 @@ export function postTaskOriginRef(taskId: string): string {
 
 export const hooksPostTask: MCPTool = {
   name: 'hooks_post-task',
-  description: 'Record task completion for learning',
+  description: 'Record a task outcome against its routed agent',
   inputSchema: {
     type: 'object',
     properties: {

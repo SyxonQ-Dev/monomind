@@ -28,8 +28,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { generateGeminiMd } from '../init/geminimd-generator.js';
 import { writeSharedInstructions } from '../init/shared-instructions-generator.js';
-import { detectPlatform, type InitResult } from '../init/types.js';
+import { detectPlatform, type InitOptions, type InitResult } from '../init/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..', '..', '..', '..', '..');
@@ -42,7 +43,7 @@ const REPO_ROOT = join(__dirname, '..', '..', '..', '..', '..');
 // the plan: encode the allowance as "the match sits in a Second-Brain-scoped
 // sentence", not a line-number allowlist.
 const FORBIDDEN =
-  /no data leaves your machine|fully local|only outbound request .*? monomind ever makes|no user data .*? leaves the machine/gi;
+  /no data leaves your machine|nothing leaves your machine|all data stays local|fully local|only outbound request .*? monomind ever makes|no user data .*? leaves the machine/gi;
 
 const PACKAGE_JSON_FILES = [
   'package.json',
@@ -103,6 +104,14 @@ describe('privacy-claims (i-078)', () => {
     it.each(listDocFiles())('%s has no unscoped forbidden phrase', (relPath) => {
       const text = readFileSync(join(REPO_ROOT, relPath), 'utf-8');
       expect(unscopedMatches(text)).toEqual([]);
+    });
+
+    it('GEMINI.md (committed) and the generated GEMINI.md have no unscoped forbidden phrase', () => {
+      const committed = readFileSync(join(REPO_ROOT, 'GEMINI.md'), 'utf-8');
+      expect(unscopedMatches(committed)).toEqual([]);
+      const generated = generateGeminiMd({} as InitOptions);
+      expect(unscopedMatches(generated)).toEqual([]);
+      expect(generated).toContain('sends your prompts and code');
     });
 
     it('.agents/shared_instructions.md (committed, dogfooded) has no unscoped forbidden phrase', () => {

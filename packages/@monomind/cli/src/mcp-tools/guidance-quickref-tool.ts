@@ -65,8 +65,8 @@ export const guidanceQuickRef: MCPTool = {
               desc: 'Record task outcome for learning',
             },
             {
-              cmd: 'npx monomind@latest hooks post-edit --file "..." --train-neural true',
-              desc: 'Train patterns from edits',
+              cmd: 'npx monomind@latest hooks post-edit --file "..." --success true',
+              desc: 'Record an edit outcome in the local feedback log',
             },
             {
               cmd: 'npx monomind@latest memory search --query "..."',
