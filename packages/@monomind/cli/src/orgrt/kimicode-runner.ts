@@ -201,10 +201,12 @@ export class KimiCodeAgentRunner implements AgentRunner {
               yield* tools.end(ev.toolResult.id, ev.toolResult.output, false, sessionId);
             }
             if (ev.kind === 'tool') {
-              // Liveness for kimi's own tool activity: session.ts never
-              // renders tool_use as chat — it only feeds the StateDetector
-              // ('tool-call' state) and refreshes last-activity.
-              yield { type: 'tool_use', session_id: sessionId, text: ev.toolName };
+              // Liveness (spawn-time, or a tool event with no call id):
+              // session.ts never renders tool_use as chat — it only feeds
+              // the StateDetector ('tool-call' state) and refreshes
+              // last-activity. No label: a bare ping never becomes a
+              // tool_activity event (kimi's real calls do, above).
+              yield { type: 'tool_use', session_id: sessionId };
             }
           }
           if (outcome.sessionId) sessionId = outcome.sessionId;

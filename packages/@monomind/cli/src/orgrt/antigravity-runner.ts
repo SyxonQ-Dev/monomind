@@ -134,10 +134,11 @@ export class AntigravityAgentRunner implements AgentRunner {
               if (ev.rawText !== undefined) rawTexts.push(ev.rawText);
               if (ev.text) yield { type: 'assistant', session_id: conversationId, text: ev.text };
             } else if (ev.kind === 'tool') {
-              // Liveness for agy's own tool activity: session.ts never
-              // renders tool_use as chat — it only feeds the StateDetector
-              // ('tool-call' state) and refreshes last-activity.
-              yield { type: 'tool_use', session_id: conversationId, text: ev.toolName };
+              // Spawn-time liveness: session.ts never renders tool_use as
+              // chat — it only feeds the StateDetector ('tool-call' state)
+              // and refreshes last-activity. No label: a bare ping never
+              // becomes a tool_activity event (agy's real steps do, below).
+              yield { type: 'tool_use', session_id: conversationId };
             } else if (ev.kind === 'native' && ev.native) {
               // agy's own tool steps as matched start/end pairs (session.ts
               // still sees 'tool_use' liveness; agent exec gets tool_activity).

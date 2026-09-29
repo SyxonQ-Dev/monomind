@@ -9,6 +9,7 @@ import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentMessage, AgentRunArgs } from '../../src/orgrt/agent-runner.js';
 import { AntigravityAgentRunner } from '../../src/orgrt/antigravity-runner.js';
+import { ToolActivityTracker } from '../../src/orgrt/tool-activity.js';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 
@@ -95,6 +96,19 @@ describe('AntigravityAgentRunner coder mode', () => {
     expect(tools[1]).toMatchObject({ tool: 'write_to_file', input: { file_path: '/w/b.txt' }, kind: 'write' });
     expect(results[1]).toMatchObject({ tool_use_id: tools[1].tool_use_id });
     expect(msgs.at(-1)).toMatchObject({ type: 'result', session_id: CID });
+  });
+
+  it('the spawn-time liveness ping never becomes a tool_activity event — only real steps do', async () => {
+    vi.mocked(cp.spawn).mockReturnValue(mockChild(LIVE));
+    const events: Record<string, unknown>[] = [];
+    const tracker = new ToolActivityTracker((ev) => events.push(ev), 'full');
+    for (const m of await collect()) tracker.onMessage(m);
+    expect(events.map((e) => [e.phase, e.name])).toEqual([
+      ['start', 'run_command'],
+      ['end', 'run_command'],
+      ['start', 'write_to_file'],
+      ['end', 'write_to_file'],
+    ]);
   });
 
   it('maps --effort onto agy --effort (xhigh rounds down, off → low) and omits it when unset', async () => {

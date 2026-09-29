@@ -163,8 +163,9 @@ export class GrokAgentRunner implements AgentRunner {
             if (ev.kind === 'tool') {
               // Liveness only (see header) — session.ts never renders
               // tool_use as chat, it only feeds the StateDetector
-              // ('tool-call' state) and refreshes last-activity.
-              yield { type: 'tool_use', session_id: sessionId, text: ev.toolName };
+              // ('tool-call' state) and refreshes last-activity. No label:
+              // a bare ping never becomes a tool_activity event.
+              yield { type: 'tool_use', session_id: sessionId };
             }
           }
           if (outcome.sessionId) sessionId = outcome.sessionId;

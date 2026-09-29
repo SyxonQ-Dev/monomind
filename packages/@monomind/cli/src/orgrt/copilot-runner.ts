@@ -160,11 +160,12 @@ export class CopilotAgentRunner implements AgentRunner {
                 yield* tools.end(ev.toolEnd.id, ev.toolEnd.output, ev.toolEnd.isError, sessionId);
               }
             } else if (ev.kind === 'tool') {
-              // Liveness for copilot's own tool activity (or the spawn-time
-              // yield): session.ts never renders tool_use as chat — it only
-              // feeds the StateDetector ('tool-call' state) and refreshes
-              // last-activity.
-              yield { type: 'tool_use', text: ev.toolName };
+              // Liveness for copilot's other tool events (partial results)
+              // or the spawn-time yield: session.ts never renders tool_use
+              // as chat — it only feeds the StateDetector ('tool-call'
+              // state) and refreshes last-activity. No label: a bare ping
+              // never becomes a tool_activity event (real calls do, above).
+              yield { type: 'tool_use', session_id: sessionId };
             }
           }
 

@@ -173,7 +173,7 @@ describe('PiAgentRunner streaming (#204)', () => {
 
       // First message must be the spawn-time liveness yield — this wins
       // session.ts's first-pull watchdog race deterministically.
-      expect(messages[0]).toEqual({ type: 'tool_use', text: 'turn started' });
+      expect(messages[0]).toEqual({ type: 'tool_use' });
       expect(times[0] - start).toBeLessThan(300);
 
       // pi's own tool_execution_start is forwarded as tool_use liveness.

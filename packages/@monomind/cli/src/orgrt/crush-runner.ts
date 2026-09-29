@@ -213,8 +213,10 @@ export class CrushAgentRunner implements AgentRunner {
               yield { type: 'assistant', text: ev.text };
             } else if (ev.kind === 'tool') {
               // Liveness only: session.ts never renders tool_use as chat —
-              // it feeds the StateDetector and refreshes last-activity.
-              yield { type: 'tool_use', text: ev.text };
+              // it feeds the StateDetector and refreshes last-activity. No
+              // label: crush reports no native tool calls, and a bare ping
+              // never becomes a tool_activity event.
+              yield { type: 'tool_use' };
             }
           }
           sessionStarted = true;
