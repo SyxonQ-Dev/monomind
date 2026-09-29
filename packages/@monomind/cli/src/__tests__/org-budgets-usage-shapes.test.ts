@@ -81,4 +81,41 @@ describe('GET /api/org/:name/budgets — dual usage-event shape handling', () =>
     expect(worker.tokens_used).toBe(150);
     expect(worker.total_cost_usd).toBeCloseTo(0.01, 5);
   });
+
+  it('reports the limits the runtime enforces from the org definition, not <org>-budgets.json (#400)', async () => {
+    const base = join(cwd, '.monomind', 'orgs');
+    mkdirSync(base, { recursive: true });
+    writeFileSync(
+      join(base, 'myorg.json'),
+      JSON.stringify({
+        name: 'myorg',
+        run_config: { budget_tokens: 2000 },
+        roles: [
+          { id: 'boss', budget_usd: 5 },
+          { id: 'dev', budget_tokens: 800, policy: { maxUsd: 2 } },
+          { id: 'qa' },
+        ],
+      }),
+    );
+    // A stale side-car from the old skill — nothing enforces it, so it must not show.
+    writeFileSync(
+      join(base, 'myorg-budgets.json'),
+      JSON.stringify({ org_budget: { limit_usd: 50 }, agent_budgets: { qa: { limit_usd: 9 } } }),
+    );
+
+    const req = {
+      method: 'GET',
+      url: `/api/org/myorg/budgets?dir=${encodeURIComponent(cwd)}`,
+    } as any;
+    const res = makeRes();
+    await handleOrgRoutes(req, res, '/api/org/myorg/budgets', null, { projectDir: cwd });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.org_budget).toEqual({ limit_tokens: 2000 });
+    expect(body.agent_budgets).toEqual({
+      boss: { limit_usd: 5 },
+      dev: { limit_usd: 2, limit_tokens: 800 },
+    });
+  });
 });
