@@ -317,7 +317,7 @@ describe('rankSkills', () => {
 
 describe('formatPickLine', () => {
   const { formatPickLine } = pc();
-  it('gives an Org skill the CLI fallback for an MCP server that predates org_skill_show', () => {
+  it('names an Org skill by its MCP call only, with no npx suffix (#415)', () => {
     expect(
       formatPickLine({
         agent: null,
@@ -326,15 +326,7 @@ describe('formatPickLine', () => {
           invoke: 'mcp__monomind__org_skill_show {"name":"code-reviewer"}',
         },
       }),
-    ).toBe(
-      '[PICK] skill: mcp__monomind__org_skill_show {"name":"code-reviewer"} (or: npx -y monomind org skills show code-reviewer)',
-    );
-    // Never a name that is not a plain skill name inside a command line.
-    expect(
-      formatPickLine({
-        skill: { skill: 'x; echo pwned', invoke: 'mcp__monomind__org_skill_show {"name":"x"}' },
-      }),
-    ).toBe('[PICK] skill: mcp__monomind__org_skill_show {"name":"x"}');
+    ).toBe('[PICK] skill: mcp__monomind__org_skill_show {"name":"code-reviewer"}');
   });
 
   it('prints both parts, one part, or nothing', () => {
