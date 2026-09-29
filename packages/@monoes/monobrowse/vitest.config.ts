@@ -14,7 +14,8 @@ export default defineConfig({
     // They are binary resource forks, not tests, and vitest would otherwise
     // try to transform them.
     exclude: ['**/node_modules/**', '**/dist/**', '**/.git/**', '**/._*'],
-    globalSetup: [home('isolated-home.global.ts')],
+    // isolated-tmpdir first: the home setup makes its dir under tmpdir() too.
+    globalSetup: ['src/__tests__/setup/isolated-tmpdir.global.ts', home('isolated-home.global.ts')],
     setupFiles: [home('isolated-home.setup.ts')],
     globals: false,
     testTimeout: 10000,
