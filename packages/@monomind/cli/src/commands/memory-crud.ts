@@ -3,6 +3,7 @@
  * store, retrieve, search
  */
 
+import { DEFAULT_SEARCH_THRESHOLD } from '../memory/memory-bridge-core.js';
 import { output } from '../output.js';
 import { input } from '../prompt.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
@@ -284,7 +285,7 @@ export const searchCommand: Command = {
       name: 'threshold',
       description: 'Similarity threshold (0-1)',
       type: 'number',
-      default: 0.7,
+      default: DEFAULT_SEARCH_THRESHOLD,
     },
     {
       name: 'type',
@@ -317,7 +318,7 @@ export const searchCommand: Command = {
     const query = (ctx.flags.query as string) || ctx.args[0];
     const namespace = (ctx.flags.namespace as string) || 'all';
     const limit = (ctx.flags.limit as number) || 10;
-    const threshold = (ctx.flags.threshold as number) || 0.3;
+    const threshold = (ctx.flags.threshold as number) || DEFAULT_SEARCH_THRESHOLD;
     const searchType = (ctx.flags.type as string) || 'semantic';
     const buildHnsw = (ctx.flags['build-hnsw'] || ctx.flags.buildHnsw) as boolean;
 
