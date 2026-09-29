@@ -157,6 +157,8 @@ After any edit, re-validate the config the same way createorg does (non-fatal �
 ```bash
 npx -y monomind@latest org validate "$org_name" \
   || echo "WARNING: '${org_name}' no longer passes validation — fix it before 'monomind org run ${org_name}'"
+# #502: a change to the schedule, budgets or run_config takes effect only once the operator signs it.
+echo "If you changed schedule, budgets or run_config, review and sign it: monomind org sign ${org_name}"
 ```
 
 ### export
@@ -240,6 +242,8 @@ echo "Agents: $(jq '.config.roles | length' "$import_path")"
 # (schema + single root role + resolvable reports_to + parseable schedule).
 npx -y monomind@latest org validate "$targetOrg" \
   || { echo "ERROR: imported org failed validation — fix .monomind/orgs/${targetOrg}.json before running it."; exit 1; }
+# #502: an imported definition is unsigned — the user reviews it, then signs it themselves.
+echo "Review its roles and policies, then sign it: monomind org sign ${targetOrg}"
 
 echo "Run /mastermind-env --org ${targetOrg} --action validate to check provider keys."
 ```

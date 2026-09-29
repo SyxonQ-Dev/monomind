@@ -201,6 +201,8 @@ echo "  Skills:   ${skills:-(none)}  pool: ${skill_pool:-(none)}"
 echo ""
 echo "Org '${org_name}' now has $(jq '.roles | length' "$orgFile") role(s)."
 echo "View: /mastermind-agent-detail --org $org_name --agent-id $agent_id"
+# #502: a new role takes effect only once the operator signs the org.
+echo "Review, then sign the change yourself: monomind org sign ${org_name}"
 ```
 
 ---

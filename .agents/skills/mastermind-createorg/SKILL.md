@@ -298,7 +298,15 @@ if [ -n "$missing_model" ]; then
   echo "ERROR: roles without an explicit adapter_config.model: ${missing_model} — set the latest model for their runtime (Step 2.4) and re-save."
   exit 1
 fi
+
+# Sign it (#502): the runtime refuses to start or reload an org definition the
+# operator has not signed. The user confirmed this config in Step 4, and this
+# session is theirs, so it signs as the operator. An org role's own process is
+# refused here; then the user runs `monomind org sign <org_name>` themselves.
+npx -y monomind@latest org sign "$org_name" --yes
 ```
+
+After any later edit to a role's `policy`, the roles, runtimes, `schedule` or `run_config`, the org must be signed again (`monomind org sign <org_name>`) before `org run`, `org reload` or `org serve` will use the change.
 
 ---
 
