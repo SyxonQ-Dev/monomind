@@ -78,8 +78,10 @@ export interface HooksConfig {
  * Skills configuration
  */
 export interface SkillsConfig {
-  /** Include core skills (swarm, mastermind, monodesign, monomotion) */
+  /** Include core skills (the mastermind engineering workflows, monolean, monodesign) */
   core: boolean;
+  /** Include extended skills (mastermind org admin, monoswarm, hooks, monomotion, …) */
+  extended?: boolean;
   /** Include memory/SQLite skills */
   memory: boolean;
   /** Include GitHub integration skills */
@@ -128,12 +130,8 @@ export interface CommandsConfig {
   pair?: boolean;
   /** Include stream-chain commands */
   streamChain?: boolean;
-  /** Include training commands */
-  training?: boolean;
   /** Include truth commands */
   truth?: boolean;
-  /** Include verify commands */
-  verify?: boolean;
   /** Include workflows commands */
   workflows?: boolean;
   /** Include all commands */

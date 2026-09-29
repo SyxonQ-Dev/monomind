@@ -420,25 +420,25 @@ export const GOLDEN_SET: GoldenPair[] = [
   {
     id: 'ref-codex-map',
     query: 'translation table between our instructions and the openai terminal agent equivalents',
-    relevant: ['.claude/commands/mastermind/references/codex-tools.md'],
+    relevant: ['.claude/skills/mastermind/references/codex-tools.md'],
     tags: ['reference'],
   },
   {
     id: 'ref-gemini-map',
     query: 'translation table for running the same procedures under google model tooling',
-    relevant: ['.claude/commands/mastermind/references/gemini-tools.md'],
+    relevant: ['.claude/skills/mastermind/references/gemini-tools.md'],
     tags: ['reference'],
   },
   {
     id: 'ref-copilot-map',
     query: 'equivalents when the harness is the github autocomplete assistant command line',
-    relevant: ['.claude/commands/mastermind/references/copilot-tools.md'],
+    relevant: ['.claude/skills/mastermind/references/copilot-tools.md'],
     tags: ['reference'],
   },
   {
     id: 'ref-agy-map',
     query: 'command mapping for the agy binary',
-    relevant: ['.claude/commands/mastermind/references/antigravity-tools.md'],
+    relevant: ['.claude/skills/mastermind/references/antigravity-tools.md'],
     tags: ['reference'],
   },
 
@@ -716,7 +716,7 @@ GOLDEN_SET.push(
   {
     id: 'b0-pi-harness',
     query: 'what do i do about task lists and spawned helpers when working inside pi',
-    relevant: ['.claude/commands/mastermind/references/pi-tools.md'],
+    relevant: ['.claude/skills/mastermind/references/pi-tools.md'],
     tags: ['b0'],
   },
   {
@@ -1701,7 +1701,7 @@ GOLDEN_SET.push(
     id: 'b3-workitem-layout',
     query:
       'one shared description of the layout every generated planning document must follow so each command does not invent its own',
-    relevant: ['.claude/commands/mastermind/_taskfile.md'],
+    relevant: ['.claude/skills/mastermind/references/taskfile.md'],
     tags: ['b3'],
   },
   {
@@ -2769,7 +2769,7 @@ GOLDEN_SET.push(
     id: 'b6-instructions-file-location',
     query:
       'where does the assistant look for its persistent project instructions and what does dispatch a helper actually map to',
-    relevant: ['.claude/commands/mastermind/references/claude-code-tools.md'],
+    relevant: ['.claude/skills/mastermind/references/claude-code-tools.md'],
     tags: ['b6'],
   },
   {
