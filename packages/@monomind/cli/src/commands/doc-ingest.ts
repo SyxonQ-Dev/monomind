@@ -34,10 +34,12 @@ export const ingestCommand: Command = {
       description: 'Ingest into the global brain (auto-detected for paths outside the project)',
     },
     { command: 'monomind doc ingest report.pdf', description: 'Ingest a single file' },
+    {
+      command: 'monomind doc ingest docs README.md',
+      description: 'Ingest several paths in one run',
+    },
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
-    const target = ctx.args[0] || '.';
-
     // --embedder is kept only so existing scripts don't break. Chunks are stored
     // through the memory bridge, which always embeds with its own model; an
     // override here never reached it (it only swapped embedding-operations'
@@ -49,71 +51,87 @@ export const ingestCommand: Command = {
       );
     }
 
-    const { ingestDocument, ingestDirectory } = await import('../knowledge/document-pipeline.js');
-    const fs = await import('node:fs');
-    const resolved = path.resolve(target);
-
-    // Zero-decision routing: an explicit --global wins; otherwise paths OUTSIDE
-    // this project belong to the personal brain (a project-scoped store would
-    // never surface them again from another project).
-    let scope = String(ctx.flags.scope || 'shared');
-    if (ctx.flags.global === true) {
-      scope = 'global';
-    } else if (!ctx.flags.scope) {
-      // Against the PROJECT ROOT, not the cwd: from a package subdirectory,
-      // `doc ingest ../../docs` targets this very project, and routing it to
-      // the personal brain because it sits above the cwd is simply wrong.
-      const relToCwd = path.relative(getProjectRoot(ctx.cwd || process.cwd()), resolved);
-      if (relToCwd.startsWith('..') || path.isAbsolute(relToCwd)) {
-        scope = 'global';
-        output.writeln(
-          output.dim(
-            `  ${target} is outside this project — ingesting into the global brain (use --scope shared to force project scope)`,
-          ),
-        );
-      }
+    // Several paths run one after another in this process — the session-start
+    // reindex passes its whole scope (docs/, doc/, top-level *.md) at once
+    // rather than racing parallel ingests on one store (#416).
+    const targets = ctx.args.length > 0 ? ctx.args : ['.'];
+    if (targets.length === 1) return ingestTarget(ctx, targets[0]);
+    let success = true;
+    const data: unknown[] = [];
+    for (const target of targets) {
+      const r = await ingestTarget(ctx, target);
+      if (!r.success) success = false;
+      data.push(r.data);
     }
-
-    const spinner = output.createSpinner({ text: 'Indexing documents...' });
-    spinner.start();
-
-    try {
-      const stat = fs.statSync(resolved);
-
-      if (stat.isDirectory()) {
-        const result = await ingestDirectory(resolved, scope, {
-          rootDir: getProjectRoot(ctx.cwd || process.cwd()),
-          onProgress: (file, done, total) => {
-            spinner.setText(`[${done + 1}/${total}] ${path.basename(file)}`);
-          },
-        });
-        spinner.succeed(
-          `Indexed ${result.totalChunks} chunks from ${result.filesProcessed} files (${result.filesSkipped} skipped)`,
-        );
-        if (result.errors.length) {
-          output.writeln(output.dim(`  Errors: ${result.errors.length}`));
-          for (const err of result.errors.slice(0, 5)) {
-            output.writeln(output.dim(`    ${err}`));
-          }
-        }
-        return { success: true, data: result };
-      } else {
-        const result = await ingestDocument(resolved, scope);
-        if (result.skipped && !result.error) {
-          spinner.succeed(
-            `Already indexed: ${path.basename(resolved)} (${result.chunksIndexed} chunks)`,
-          );
-        } else if (result.error) {
-          spinner.fail(result.error);
-          return { success: false };
-        } else {
-          spinner.succeed(`Indexed ${result.chunksIndexed} chunks from ${path.basename(resolved)}`);
-        }
-        return { success: true, data: result };
-      }
-    } catch (err) {
-      spinner.fail(String(err));
-      return { success: false, exitCode: 1 };
-    }
+    return success ? { success, data } : { success, data, exitCode: 1 };
   },
 };
+
+async function ingestTarget(ctx: CommandContext, target: string): Promise<CommandResult> {
+  const { ingestDocument, ingestDirectory } = await import('../knowledge/document-pipeline.js');
+  const fs = await import('node:fs');
+  const resolved = path.resolve(target);
+
+  // Zero-decision routing: an explicit --global wins; otherwise paths OUTSIDE
+  // this project belong to the personal brain (a project-scoped store would
+  // never surface them again from another project).
+  let scope = String(ctx.flags.scope || 'shared');
+  if (ctx.flags.global === true) {
+    scope = 'global';
+  } else if (!ctx.flags.scope) {
+    // Against the PROJECT ROOT, not the cwd: from a package subdirectory,
+    // `doc ingest ../../docs` targets this very project, and routing it to
+    // the personal brain because it sits above the cwd is simply wrong.
+    const relToCwd = path.relative(getProjectRoot(ctx.cwd || process.cwd()), resolved);
+    if (relToCwd.startsWith('..') || path.isAbsolute(relToCwd)) {
+      scope = 'global';
+      output.writeln(
+        output.dim(
+          `  ${target} is outside this project — ingesting into the global brain (use --scope shared to force project scope)`,
+        ),
+      );
+    }
+  }
+
+  const spinner = output.createSpinner({ text: 'Indexing documents...' });
+  spinner.start();
+
+  try {
+    const stat = fs.statSync(resolved);
+
+    if (stat.isDirectory()) {
+      const result = await ingestDirectory(resolved, scope, {
+        rootDir: getProjectRoot(ctx.cwd || process.cwd()),
+        onProgress: (file, done, total) => {
+          spinner.setText(`[${done + 1}/${total}] ${path.basename(file)}`);
+        },
+      });
+      spinner.succeed(
+        `Indexed ${result.totalChunks} chunks from ${result.filesProcessed} files (${result.filesSkipped} skipped)`,
+      );
+      if (result.errors.length) {
+        output.writeln(output.dim(`  Errors: ${result.errors.length}`));
+        for (const err of result.errors.slice(0, 5)) {
+          output.writeln(output.dim(`    ${err}`));
+        }
+      }
+      return { success: true, data: result };
+    } else {
+      const result = await ingestDocument(resolved, scope);
+      if (result.skipped && !result.error) {
+        spinner.succeed(
+          `Already indexed: ${path.basename(resolved)} (${result.chunksIndexed} chunks)`,
+        );
+      } else if (result.error) {
+        spinner.fail(result.error);
+        return { success: false };
+      } else {
+        spinner.succeed(`Indexed ${result.chunksIndexed} chunks from ${path.basename(resolved)}`);
+      }
+      return { success: true, data: result };
+    }
+  } catch (err) {
+    spinner.fail(String(err));
+    return { success: false, exitCode: 1 };
+  }
+}

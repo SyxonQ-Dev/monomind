@@ -455,12 +455,21 @@ module.exports = {
               // silently failing auth and reporting keyword where the warm
               // server would have answered semantic.
               var sbCtrlUrl = 'http://localhost:4242';
+              var sbCtrlPid = null;
               var _sbCfgDirs = sbRoot && sbRoot !== CWD ? [CWD, sbRoot] : [CWD];
               for (var _sbCi = 0; _sbCi < _sbCfgDirs.length; _sbCi++) {
                 try {
                   var sbCtl = JSON.parse(fs.readFileSync(path.join(_sbCfgDirs[_sbCi], '.monomind', 'control.json'), 'utf-8'));
-                  if (sbCtl.url) { sbCtrlUrl = sbCtl.url; break; }
+                  if (sbCtl.url) { sbCtrlUrl = sbCtl.url; sbCtrlPid = sbCtl.pid; break; }
                 } catch (_) {}
+              }
+              // #416: a server whose recorded pid is gone cannot answer — skip
+              // the POST instead of paying its timeout on every prompt. A
+              // missing/0 pid (not yet paired) can't be judged, so it is tried.
+              if (Number.isInteger(sbCtrlPid) && sbCtrlPid > 0) {
+                try { process.kill(sbCtrlPid, 0); } catch (e) {
+                  if (!e || e.code !== 'EPERM') throw new Error('control server pid not alive');
+                }
               }
               var sbAuth = '';
               for (var _sbAi = 0; _sbAi < _sbCfgDirs.length; _sbAi++) {
@@ -474,7 +483,9 @@ module.exports = {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-monomind-token': sbAuth },
                 body: JSON.stringify({ query: sbPrompt, namespace: 'knowledge:shared', limit: 3 }),
-                signal: AbortSignal.timeout(900),
+                // A warm server answers in well under this; a hung one must
+                // not hold the prompt for long (#416: was 900 ms).
+                signal: AbortSignal.timeout(250),
               });
               if (sbResp.ok) {
                 var sbData = await sbResp.json();
@@ -498,8 +509,12 @@ module.exports = {
             }
             // Relevance floor: injecting weak matches pollutes every prompt's
             // context — configurable via .monomind/second-brain.json, default
-            // 0.35 for semantic hits, 0.5 for the noisier keyword fallback.
-            var sbFloor = sbMethod === 'keyword' ? 0.5 : 0.35;
+            // 0.65 for semantic hits, 0.5 for the noisier keyword fallback.
+            // #416: at the old 0.35 floor, 2 of 27 injected excerpts were
+            // relevant. Semantic scores are gte-modernbert cosine (+0.05 for
+            // project hits, see routes-org-knowledge.mjs), where unrelated
+            // prose in the same repo routinely lands at 0.4–0.6.
+            var sbFloor = sbMethod === 'keyword' ? 0.5 : 0.65;
             var sbInjectionLimit = 3;
             try {
               var sbConf = JSON.parse(fs.readFileSync(path.join(CWD, '.monomind', 'second-brain.json'), 'utf-8'));
@@ -507,6 +522,13 @@ module.exports = {
               if (typeof sbConf.injectionLimit === 'number' && sbConf.injectionLimit > 0) sbInjectionLimit = sbConf.injectionLimit;
             } catch (_) {}
             if (sbHits) sbHits = sbHits.filter(function(h) { return (h.score || 0) >= sbFloor; });
+            // One excerpt by default; a runner-up only rides along when it
+            // scores within 0.03 of the top hit (a genuine tie, not a tail).
+            if (sbHits && sbHits.length > 1) {
+              sbHits.sort(function(a, b) { return (b.score || 0) - (a.score || 0); });
+              var sbTop = sbHits[0].score || 0;
+              sbHits = sbHits.filter(function(h, i) { return i === 0 || sbTop - (h.score || 0) <= 0.03; });
+            }
             if (sbHits && sbHits.length > sbInjectionLimit) sbHits = sbHits.slice(0, sbInjectionLimit);
 
             // Telemetry: append one JSONL line per evaluated prompt so the
