@@ -128,15 +128,20 @@ describe('#396 other runtimes ignore the field', () => {
       piCliArgs('json', 's1', base()),
     );
   });
-  it('only the codex, grok and dsh runners read args.sandbox', () => {
+  it('only the runners with a mode in RUNNER_SANDBOX_MODES read args.sandbox', () => {
     const dir = join(dirname(fileURLToPath(import.meta.url)), '..', 'orgrt');
     const readers = readdirSync(dir)
       .filter((f) => f.endsWith('.ts') && /args\.sandbox/.test(readFileSync(join(dir, f), 'utf8')))
       .sort();
     expect(readers).toEqual([
+      'antigravity-runner-stream.ts',
       'codex-runner-stream.ts',
+      'copilot-runner-stream.ts',
       'dsh-runner-stream.ts',
       'grok-runner-stream.ts',
+      'opencode-runner-server.ts',
+      'opencode-runner.ts',
+      'pi-runner-state.ts',
     ]);
   });
 });
@@ -188,6 +193,18 @@ const DEFAULTS: Record<string, [string, string]> = {
   aider: ['none', 'off'],
 };
 
+const APPROVALS_WHEN_NARROWED: Record<string, string> = {
+  claude: 'n/a',
+  codex: 'off',
+  grok: 'off',
+  dsh: 'on',
+  copilot: 'on',
+  antigravity: 'on',
+  opencode: 'on',
+  pi: 'off',
+  'pi-rpc': 'off',
+};
+
 describe('#396 start event', () => {
   const savedLevel = process.env.MONOMIND_GIT_LEVEL;
   afterEach(() => {
@@ -216,17 +233,20 @@ describe('#396 start event', () => {
         const [native, approvals] = DEFAULTS[runtime];
         if (mode === 'full') expect(start).toMatchObject({ native_sandbox: native, approvals });
         else
-          expect(start).toMatchObject({
-            native_sandbox: mode,
-            approvals: runtime === 'dsh' ? 'on' : 'off',
+          expect(start, `${runtime} ${mode}`).toMatchObject({
+            // #482: claude's allow-list is monomind's own; the CLIs with
+            // approval rules report them on.
+            native_sandbox: runtime === 'claude' ? 'monomind' : mode,
+            approvals: APPROVALS_WHEN_NARROWED[runtime],
           });
+        expect(start).toMatchObject({ sandbox_requested: mode, sandbox_applied: mode });
       }
     }
   });
 
   it('an unsupported mode is error {code:"unsupported", fatal:true}, exit 2, the runner never runs', async () => {
     for (const [runtime, modes] of Object.entries(RUNNER_SANDBOX_MODES)) {
-      for (const mode of ['read-only', 'workspace-write'] as SandboxMode[]) {
+      for (const mode of ['read-only', 'restricted', 'workspace-write'] as SandboxMode[]) {
         if (modes.includes(mode)) continue;
         const { code, events, seen } = await turn(runtime, { sandbox: mode });
         expect(code, `${runtime} ${mode}`).toBe(2);
@@ -298,13 +318,24 @@ describe('#396 agent scan --json', () => {
         ...RUNNER_SANDBOX_MODES[a.id as keyof typeof RUNNER_SANDBOX_MODES],
       ]);
       expect(a.sandbox_modes).toContain('full');
+      // #482: one report per accepted mode; full = the default report.
+      expect(Object.keys(a.sandbox_mode_reports)).toEqual(a.sandbox_modes);
+      expect(a.sandbox_mode_reports.full).toEqual({ native_sandbox: native, approvals });
     }
+    const reports = Object.fromEntries(agents.map((a) => [a.id, a.sandbox_mode_reports]));
+    expect(reports.copilot.restricted).toEqual({ native_sandbox: 'restricted', approvals: 'on' });
+    expect(reports.claude['read-only']).toEqual({ native_sandbox: 'monomind', approvals: 'n/a' });
     const byId = Object.fromEntries(agents.map((a) => [a.id, a.sandbox_modes]));
     expect(byId.codex).toEqual(['read-only', 'workspace-write', 'full']);
     expect(byId.grok).toEqual(['read-only', 'workspace-write', 'full']);
     expect(byId.dsh).toEqual(['read-only', 'workspace-write', 'full']);
-    expect(byId.claude).toEqual(['full']);
-    expect(byId.copilot).toEqual(['full']);
+    // #482
+    expect(byId.claude).toEqual(['read-only', 'workspace-write', 'full']);
+    expect(byId.copilot).toEqual(['read-only', 'restricted', 'workspace-write', 'full']);
+    expect(byId.antigravity).toEqual(['restricted', 'full']);
+    expect(byId.opencode).toEqual(['restricted', 'full']);
+    expect(byId.pi).toEqual(['read-only', 'full']);
+    expect(byId.qwen).toEqual(['full']);
   });
 });
 

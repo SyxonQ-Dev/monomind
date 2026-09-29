@@ -55,8 +55,9 @@ export function piCliArgs(mode: 'json' | 'rpc', sessionId: string, args: AgentRu
   if ((args.settingSources?.length ?? 0) > 0) out.push('--approve');
   else out.push('--no-approve', '-ne', '-ns', '-np', '-nc');
   // #388: pi's documented read-only mode (`pi --help`: "no file
-  // modifications possible") — only the read-only built-in tools.
-  if (args.access === 'read') out.push('--tools', PI_READ_TOOLS);
+  // modifications possible") — only the read-only built-in tools. #482:
+  // also `--sandbox read-only`, in any access mode.
+  if (args.access === 'read' || args.sandbox === 'read-only') out.push('--tools', PI_READ_TOOLS);
   return out;
 }
 

@@ -10,11 +10,12 @@
  */
 
 import { type AgentTestOptions, agentTestExitCode, runAgentTest } from '../orgrt/agent-test.js';
-import type { SandboxMode } from '../orgrt/runner-sandbox.js';
+import type { SandboxFallback, SandboxMode } from '../orgrt/runner-sandbox.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import {
   parseDuration,
   parseEnvFlags,
+  sandboxFallbackFlagError,
   sandboxFlagError,
   testCommand as streamTestCommand,
 } from './agent-exec.js';
@@ -52,7 +53,8 @@ export async function runAgentTestCommand(
   }
   // #474: same values as agent exec --sandbox; the test turn is always scoped.
   const sandbox = ctx.flags.sandbox;
-  const sandboxError = sandboxFlagError(sandbox, 'scoped');
+  const fallback = ctx.flags['sandbox-fallback']; // #482
+  const sandboxError = sandboxFlagError(sandbox, 'scoped') ?? sandboxFallbackFlagError(fallback);
   if (sandboxError) {
     process.stderr.write(`agent test: ${sandboxError}\n`);
     return 2;
@@ -62,6 +64,7 @@ export async function runAgentTestCommand(
     model: ctx.flags.model ? String(ctx.flags.model) : undefined,
     timeoutMs,
     ...(sandbox !== undefined ? { sandbox: sandbox as SandboxMode } : {}),
+    ...(fallback !== undefined ? { sandboxFallback: fallback as SandboxFallback } : {}),
     ...(Object.keys(env).length ? { env } : {}),
     ...seams,
   });
@@ -96,6 +99,12 @@ export const testCommand: Command = {
       name: 'sandbox',
       description:
         "The vendor CLI's own sandbox, as agent exec --sandbox (read-only, workspace-write or full); reported as native_sandbox",
+      type: 'string',
+    },
+    {
+      name: 'sandbox-fallback',
+      description:
+        'As agent exec --sandbox-fallback: fail (default), strictest or run when the runtime lacks the --sandbox mode; the mode used is reported as sandbox_applied',
       type: 'string',
     },
     {

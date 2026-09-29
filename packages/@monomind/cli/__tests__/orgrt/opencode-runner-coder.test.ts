@@ -66,7 +66,10 @@ vi.mock('node:child_process', () => ({
 }));
 
 import { OpencodeAgentRunner } from '../../src/orgrt/opencode-runner.js';
-import { FULL_ACCESS_PERMISSION } from '../../src/orgrt/opencode-runner-server.js';
+import {
+  FULL_ACCESS_PERMISSION,
+  RESTRICTED_PERMISSION,
+} from '../../src/orgrt/opencode-runner-server.js';
 import {
   canonicalOpencodeTool,
   OpencodeToolParts,
@@ -410,6 +413,31 @@ describe('OpencodeAgentRunner coder mode', () => {
     });
     await collect(makeArgs());
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('#482 --sandbox restricted: edit/bash/task/external_directory ask, and every ask is rejected', async () => {
+    sessionPromptAsyncMock.mockImplementation(async () => {
+      es.push(msg('m1'));
+      es.push({ type: 'permission.asked', properties: { id: 'per_1', sessionID: S } });
+      es.push({ type: 'permission.updated', properties: { id: 'per_2', sessionID: S } });
+      es.push(done('m1', 'stop', 1, 1));
+    });
+    for (const access of ['scoped', 'full'] as const) {
+      spawnMock.mockClear();
+      fetchMock.mockClear();
+      await collect(makeArgs({ access, sandbox: 'restricted' }));
+      const env = spawnMock.mock.calls[0][2].env;
+      expect(JSON.parse(env.OPENCODE_PERMISSION), access).toEqual(RESTRICTED_PERMISSION);
+      const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body));
+      expect(bodies, access).toEqual([{ reply: 'reject' }, { response: 'reject' }]);
+    }
+    expect(Object.values(RESTRICTED_PERMISSION)).toEqual(['ask', 'ask', 'ask', 'ask']);
+  });
+
+  it('#482 --sandbox restricted refuses an attached server (its rules cannot be set)', async () => {
+    process.env.OPENCODE_URL = 'http://127.0.0.1:9';
+    await expect(collect(makeArgs({ sandbox: 'restricted' }))).rejects.toThrow(/OPENCODE_URL/);
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 
   it('maps effort to a variant the model lists, and omits one it does not', async () => {

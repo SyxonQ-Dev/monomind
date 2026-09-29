@@ -16,7 +16,7 @@ import { runAgentExec, type ToolSpec } from '../orgrt/agent-exec.js';
 import { parseSettingsFlag } from '../orgrt/agent-exec-settings.js';
 import { ORG_EFFORT_LEVELS, type OrgEffortLevel } from '../orgrt/cost-tier.js';
 import { scanInstalled } from '../orgrt/runner-registry.js';
-import { SANDBOX_MODES, type SandboxMode } from '../orgrt/runner-sandbox.js';
+import { SANDBOX_FALLBACKS, SANDBOX_MODES, type SandboxMode } from '../orgrt/runner-sandbox.js';
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 
@@ -79,6 +79,13 @@ export function sandboxFlagError(raw: unknown, access: string): string | undefin
     return '--access read cannot be combined with --sandbox full';
   }
   return undefined;
+}
+
+/** Usage error for a `--sandbox-fallback` value (#482; ignored without `--sandbox`). */
+export function sandboxFallbackFlagError(raw: unknown): string | undefined {
+  if (raw === undefined || (SANDBOX_FALLBACKS as readonly unknown[]).includes(raw))
+    return undefined;
+  return `--sandbox-fallback must be one of ${SANDBOX_FALLBACKS.join(', ')} (got "${String(raw)}")`;
 }
 
 /** Load tool specs from --tools-file JSON: [{name, description, schema}]. */
@@ -170,7 +177,9 @@ export async function runExec(
   // checked in the engine (`unsupported`). `read` always runs read-only, so
   // asking for `full` with it is a contradiction.
   const sandboxFlag = ctx.flags.sandbox;
-  const sandboxError = sandboxFlagError(sandboxFlag, access);
+  const sandboxFallback = ctx.flags['sandbox-fallback'];
+  const sandboxError =
+    sandboxFlagError(sandboxFlag, access) ?? sandboxFallbackFlagError(sandboxFallback);
   if (sandboxError) return usageError(sandboxError);
 
   let toolSpecs: ToolSpec[] = [];
@@ -241,6 +250,7 @@ export async function runExec(
     runtime,
     access: access as 'scoped' | 'read' | 'full',
     ...(sandboxFlag !== undefined ? { sandbox: sandboxFlag as SandboxMode } : {}),
+    sandboxFallback: sandboxFallback as (typeof SANDBOX_FALLBACKS)[number] | undefined, // #482
     prompt,
     systemPrompt,
     model: ctx.flags.model ? String(ctx.flags.model) : undefined,
@@ -351,9 +361,16 @@ export const execCommand: Command = {
     {
       name: 'sandbox',
       description:
-        "The vendor CLI's own sandbox: read-only, workspace-write or full (today's default). Only modes listed in agent scan --json sandbox_modes; never loosens an org role's git level; --access read always runs read-only",
+        "The vendor CLI's own sandbox: read-only, restricted (the CLI's approval rules, asks refused), workspace-write or full (today's default). Only modes listed in agent scan --json sandbox_modes (see --sandbox-fallback); never loosens an org role's git level; --access read always runs read-only",
       type: 'string',
       choices: [...SANDBOX_MODES],
+    },
+    {
+      name: 'sandbox-fallback',
+      description:
+        'When the runtime lacks the --sandbox mode: fail (default, error "unsupported"), strictest (the closest supported mode that is at least as strict, else the strictest there is) or run (the runtime default); strictest/run emit a status notice and report sandbox_applied',
+      type: 'string',
+      choices: [...SANDBOX_FALLBACKS],
     },
     { name: 'protocol', description: 'Protocol version pin (1)', type: 'string' },
     {

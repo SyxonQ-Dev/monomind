@@ -1,4 +1,4 @@
-# Agent Exec Protocol — v1 (rev 25)
+# Agent Exec Protocol — v1 (rev 26)
 
 - **Status**: Implemented (Phase 0 of the mono-agent delegation plan — see
   `mono-agent:docs/plans/local-agent-monomind-delegation.md`)
@@ -6,6 +6,39 @@
   the Coder mode threat model, the `--access full` guardrails (root refusal, no transitive
   escalation, env hygiene, audit log), what callers own, and residual risks (issue #360).
 - **Revision history**:
+  - rev 26 (2026-09-29): **more `--sandbox` modes, and `--sandbox-fallback`** (issue #482) — new
+    capabilities `agent-exec-sandbox-restricted` and `agent-exec-sandbox-fallback`. Without
+    `--sandbox` nothing changes: every runtime's argv and `start` are as in rev 25. **New mode
+    `restricted`** (§3.1): the CLI's own approval rules apply and every call they would ask about
+    is refused (nobody can answer a headless turn). It is not a file-system boundary: what it
+    covers is the CLI's rule set, including the user's own allow rules. **New modes per runtime**,
+    each checked against the installed CLI and a live turn that tried a write and a shell command:
+    copilot `restricted` (no `--allow-all-tools`), `read-only` (`--deny-tool=write
+    --deny-tool=shell`; deny rules beat every allow rule) and `workspace-write`
+    (`--allow-tool=write --deny-tool=shell` without `--allow-all-paths`: edits only under the
+    cwd, `--add-dir` and the temp dir, a symlink out of the cwd refused too, no shell);
+    antigravity `restricted` (no `--dangerously-skip-permissions`: shell and file writes are
+    auto-denied, the temp dir excepted, and the turn then ends without a reply); opencode
+    `restricted` (`OPENCODE_PERMISSION` sets edit/bash/task/external_directory to `ask` and
+    monomind rejects every ask; an agent's own `permission` block in the user's or project's
+    opencode.json still overrides it, so it is not `read-only`; refused with an attached
+    `OPENCODE_URL` server, whose rules monomind cannot set); pi and pi-rpc `read-only` (`--tools
+    read,grep,find,ls`, the rev 21 read mode); claude `read-only` and `workspace-write` with
+    `--access scoped|read` only, `native_sandbox: "monomind"` (monomind's gate runs no native tool
+    that is not allow-listed, so no native Write/Edit/NotebookEdit runs and Bash runs only the
+    caller's `--allow-bash-prefix` commands; a caller tool named like a native tool no longer lets
+    that tool through). claude `--access full` keeps only `full`. Strictness, tightest first:
+    `read-only` > `restricted` > `workspace-write` > `full`. **`--sandbox-fallback
+    fail|strictest|run`** (§3.1) says what a mode the runtime lacks does: `fail` (default) is the
+    rev 23 `error {code:"unsupported", fatal:true}`; `strictest` runs the closest supported mode
+    that is at least as strict as the request, or, when every supported mode is looser, the
+    strictest there is; `run` runs the runtime default (`full`). **`start`** gains
+    `sandbox_requested` and `sandbox_applied` whenever `--sandbox` is given (§3.2); when they
+    differ (a fallback, or an org git level below `push` capping codex/grok/dsh at
+    `workspace-write`), a `status {phase:"notice", message}` follows `start`. `native_sandbox`
+    gains the value `"restricted"`; pi's `--access read` now reports `"read-only"` (it was
+    `"none"`). **`agent scan --json`** entries gain `sandbox_mode_reports` (§6). **`agent test
+    --json`** takes `--sandbox-fallback` and its result gains `sandbox_applied` (§13).
   - rev 25 (2026-09-29): **`agent test --json` takes `--sandbox` and `--env`**
     (issue #474) — new capability `agent-test-sandbox`. `monomind agent test <id> --json` (§13)
     accepts `--sandbox read-only|workspace-write|full` and repeatable `--env KEY=V` with the same
@@ -454,7 +487,7 @@ by swarm management and is NOT reused by this protocol — the installed-only vi
 
 ```
 $ monomind --version --json
-{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-exec-background-pids","agent-exec-full-access-any","agent-exec-effort","agent-scan","agent-scan-read-only","agent-models","agent-test-json","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","org-role-full-access","doctor-json","doctor-read-only","doctor-offline","init-json","knowledge-profile-captures","agent-exec-subagent-events","agent-exec-rate-limit-retry","agent-exec-access-read","agent-exec-full-access-tools","agent-exec-sandbox","agent-test-sandbox"]}
+{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-exec-background-pids","agent-exec-full-access-any","agent-exec-effort","agent-scan","agent-scan-read-only","agent-models","agent-test-json","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","org-role-full-access","doctor-json","doctor-read-only","doctor-offline","init-json","knowledge-profile-captures","agent-exec-subagent-events","agent-exec-rate-limit-retry","agent-exec-access-read","agent-exec-full-access-tools","agent-exec-sandbox","agent-test-sandbox","agent-exec-sandbox-restricted","agent-exec-sandbox-fallback"]}
 ```
 
 Callers MUST handshake before use and fail with an actionable message (install/upgrade hint)
@@ -500,7 +533,8 @@ progress go to stderr. A caller must be able to `JSON.parse` every stdout line.
 | `--env KEY=V` | | Extra env for the agent process (repeatable) |
 | `--protocol <v>` | | Protocol version pin (`1`); reserved for the v2 transition window (§5) |
 | `--access <mode>` | | rev 12. `scoped` (default), `read` (rev 21) or `full`. `full` gives the turn unrestricted native tool access. claude: `canUseTool` allows everything (still observed via `coverEveryToolCall`), and `permissionMode: "bypassPermissions"` + the SDK's required `allowDangerouslySkipPermissions: true` opt-in are set. **rev 19**: any runtime with `full_access: true` in `agent scan --json` (§6) — the runner runs its CLI's own no-approval, no-sandbox mode (codex `--dangerously-bypass-approvals-and-sandbox`, opencode permission `allow`, the others' yolo flags) in its own process group. Rejects `--allow-bash-prefix` (usage error, exit 2). Requires an explicit, existing, directory `--cwd` and refuses root (uid 0) — both `error {code:"unsafe", fatal:true}` (§3.4). A runtime without full-access support (see `agent scan --json`'s `full_access`, §6) yields `error {code:"unsupported", fatal:true}`. **rev 21**, capability `agent-exec-access-read`: `read` = read files, search, web, `TodoWrite`, caller tools and an allowlist of read-only shell commands; no edits, general shell or subagents (the full rules are in the rev 21 history entry). `--allow-bash-prefix` adds prefixes to the read-only list under the same rules; `--settings` works with it; no `--cwd` requirement. Only runtimes whose `access_modes` (§6) lists `read` accept it (claude, codex, pi, pi-rpc); the others yield `error {code:"unsupported", fatal:true}` |
-| `--sandbox <mode>` | | rev 23, capability `agent-exec-sandbox`. The vendor CLI's own sandbox: `read-only`, `workspace-write` or `full`. Without it nothing changes (the rev 22 default). `full` = today's default on every runtime (no native sandbox added; it never loosens a runtime whose default is tighter, e.g. dsh). `read-only`/`workspace-write` only where `agent scan --json`'s `sandbox_modes` lists them: codex (`--sandbox read-only`; `--sandbox workspace-write -c sandbox_workspace_write.network_access=true`), grok (`--sandbox read-only`; `--sandbox workspace`), dsh (`DSH_PERMISSION_MODE`); elsewhere `error {code:"unsupported", fatal:true}`, exit 2. An org role's git level below `push` (`MONOMIND_GIT_LEVEL`, from `--env` or monomind's own environment) caps codex/grok at `workspace-write`: the flag may tighten but never loosen it. `--access read` always runs codex `read-only`; `--access read --sandbox full` is a usage error (exit 2). With `--access full`, `read-only`/`workspace-write` keep the native tools fully approved but inside that sandbox. The mode the CLI really got is `start.native_sandbox` (§3.2) |
+| `--sandbox <mode>` | | rev 23, capability `agent-exec-sandbox`. The vendor CLI's own sandbox: `read-only`, `workspace-write` or `full`. Without it nothing changes (the rev 22 default). `full` = today's default on every runtime (no native sandbox added; it never loosens a runtime whose default is tighter, e.g. dsh). `read-only`/`workspace-write` only where `agent scan --json`'s `sandbox_modes` lists them: codex (`--sandbox read-only`; `--sandbox workspace-write -c sandbox_workspace_write.network_access=true`), grok (`--sandbox read-only`; `--sandbox workspace`), dsh (`DSH_PERMISSION_MODE`); elsewhere `error {code:"unsupported", fatal:true}`, exit 2. An org role's git level below `push` (`MONOMIND_GIT_LEVEL`, from `--env` or monomind's own environment) caps codex/grok at `workspace-write`: the flag may tighten but never loosen it. `--access read` always runs codex `read-only`; `--access read --sandbox full` is a usage error (exit 2). With `--access full`, `read-only`/`workspace-write` keep the native tools fully approved but inside that sandbox. The mode the CLI really got is `start.native_sandbox` (§3.2) **rev 26**, capability `agent-exec-sandbox-restricted`: also `restricted` — the CLI's own approval rules, every call they would ask about refused (a rule set, not a file-system boundary; strictness: `read-only` > `restricted` > `workspace-write` > `full`). New per runtime: copilot `restricted` (no `--allow-all-tools`), `read-only` (`--deny-tool=write --deny-tool=shell`) and `workspace-write` (`--allow-tool=write --deny-tool=shell`, no `--allow-all-paths`: edits under the cwd, `--add-dir` and the temp dir only, no shell); antigravity `restricted` (no `--dangerously-skip-permissions`); opencode `restricted` (edit/bash/task/external_directory `ask`, every ask rejected; not with an attached `OPENCODE_URL` server); pi/pi-rpc `read-only` (`--tools read,grep,find,ls`); claude `read-only`/`workspace-write` with `--access scoped\|read` only (`native_sandbox: "monomind"`: no native write tool runs, Bash only for `--allow-bash-prefix` commands). With `--access full`, copilot `read-only` is `--allow-all` plus the deny rules and `workspace-write` is `--allow-all-tools --allow-all-urls --deny-tool=shell`; `restricted` ignores `--access full`. `start.sandbox_requested`/`sandbox_applied` report what was asked for and what ran |
+| `--sandbox-fallback <mode>` | | rev 26, capability `agent-exec-sandbox-fallback`. What a `--sandbox` mode the runtime lacks does: `fail` (default) — `error {code:"unsupported", fatal:true}`, exit 2, as in rev 23; `strictest` — the closest mode in the runtime's `sandbox_modes` that is at least as strict as the request, or, when every listed mode is looser, the strictest listed one; `run` — the runtime default (`full`). With `strictest`/`run` the turn runs and a `status {phase:"notice"}` right after `start` names both modes; `start.sandbox_applied` is the mode that ran. Any other value is a usage error (exit 2). Without `--sandbox` it does nothing. So a caller can send one `--sandbox` value to every runtime: `--sandbox workspace-write --sandbox-fallback strictest` runs codex, grok, dsh, copilot and claude (scoped) in `workspace-write`, antigravity and opencode in `restricted`, pi in `read-only`, and claude `--access full` and the rest at their default, each fallback with its notice |
 | `--settings <sources>` | | rev 12, capability `agent-exec-settings`. Coder mode: `none` (default) or a CSV of `user,project,local`. Non-`none` on claude loads the SDK's own settings discovery — CLAUDE.md, skills, hooks, and project/user MCP servers — appends the caller's system prompt to Claude Code's own preset instead of replacing it, and merges the `org` MCP server only when `--tools stdio` gave this turn caller tools. `--settings bogus` → exit 2. See §3.2's `status` event and the `agent-exec-settings` capability note in §2. **rev 19**: on any other runtime, non-`none` means "do not isolate the CLI's own config" (its user config, project instruction files and MCP servers load as in the user's own terminal; the source subset is all-or-nothing) and a `status {phase:"notice"}` right after `start` names what that runtime loads. |
 | `--startup-timeout <dur>` | | rev 12. Max wait for `phase:"ready"` when `--settings` is non-none (default `30s`); on expiry monomind emits `error {code:"runner-error", message:"claude did not initialize (settings/MCP startup hang?)"}` + `done`, exit 1, instead of hanging until `--timeout`. No effect with `--settings none`. |
 | `--budget-usd <n>` | | rev 3. Optional spend cap for this turn, enforced via the same per-role budget mechanism orgrt already uses internally. On breach: SIGTERM the agent child, emit `error {code:"budget", fatal:true}` + `done`, exit 1. Bare `agent exec` has no default cap — callers driving cost-sensitive flows (e.g. a chat UI, not an org role) should set this explicitly. **rev 4 granularity**: on a single-shot exec the cap is checked when the turn's `result` message arrives (the AgentRunner interface surfaces usage at result granularity) — the overspend is reported as the terminal outcome (`error budget` + exit 1, **no success `result` event`) so callers stop, but a single turn's own spend cannot be interrupted mid-flight. Mid-turn enforcement arrives with M2 (`agent_ask` in orgrt, where the mailbox-close mechanism applies). |
@@ -521,8 +555,8 @@ done`. On failure: `start → … → error → done`.
 
 | Event | Fields | Notes |
 |---|---|---|
-| `start` | `v, runtime, model?, cwd, resume?, pid, child_pid?, access, native_sandbox, approvals, streams_incrementally` | `pid` = the monomind process; `child_pid` = the agent-CLI subprocess when the runner spawns one (omitted for in-process runners). **rev 4**: v1 always omits `child_pid` — the `AgentRunner` interface does not surface child pids; add it if/when runners expose them. **rev 5**: `streams_incrementally` (bool) — whether this runtime delivers real incremental `assistant` text as a turn streams, vs. only ever a complete message at a step/turn boundary (see §9). **rev 12**: `access` (`"scoped"` \| `"full"`; rev 21: or `"read"`) — which mode this turn ran in (§3.1). **rev 23** (capability `agent-exec-sandbox`): what the vendor CLI really runs with this turn. `native_sandbox`: `"read-only"` / `"workspace-write"` (the CLI's own sandbox, in that mode), `"full"` (the runtime has a native sandbox and it is off, e.g. codex `danger-full-access`, grok profile `off`), `"none"` (the runtime has no native sandbox monomind drives; the CLI has the user's own file-system rights), or `"monomind"` (claude only, `scoped`/`read`: no vendor sandbox, monomind enforces the access mode itself through `canUseTool` and the PreToolUse gate; claude `--access full` is `"full"`). `approvals`: `"off"` (native tool calls run without asking), `"on"` (the CLI's own approval rules apply and a call that would ask is refused — opencode and cline in scoped mode, dsh except `danger-full-access`, hermes) or `"n/a"` (claude outside full access, where monomind decides each call; vercel, which has no native tools). `access: "scoped"` on a vendor CLI limits monomind's caller-tool wiring only — use these two fields for what the CLI itself can do |
-| `status` | `v, phase ("initializing"\|"ready"\|"notice"), mcp_servers? ([{name,status}]), message?` | rev 12, capability `agent-exec-settings`. Only with `--settings` non-`none` (claude runtime): `initializing` right after `start`, `ready` (with `mcp_servers`) from the SDK's own `system/init` message. **rev 19**: `phase:"notice"` with a human-readable `message`, right after `start`, on a non-claude runtime — what `--settings` makes it load (e.g. `"codex: user config (~/.codex/config.toml, incl. its MCP servers) + project AGENTS.md"`), or `"<runtime>: --effort <level> ignored …"`. A notice never has a `ready` to follow it; the startup watchdog stays claude-only. |
+| `start` | `v, runtime, model?, cwd, resume?, pid, child_pid?, access, native_sandbox, approvals, sandbox_requested?, sandbox_applied?, streams_incrementally` | `pid` = the monomind process; `child_pid` = the agent-CLI subprocess when the runner spawns one (omitted for in-process runners). **rev 4**: v1 always omits `child_pid` — the `AgentRunner` interface does not surface child pids; add it if/when runners expose them. **rev 5**: `streams_incrementally` (bool) — whether this runtime delivers real incremental `assistant` text as a turn streams, vs. only ever a complete message at a step/turn boundary (see §9). **rev 12**: `access` (`"scoped"` \| `"full"`; rev 21: or `"read"`) — which mode this turn ran in (§3.1). **rev 23** (capability `agent-exec-sandbox`): what the vendor CLI really runs with this turn. `native_sandbox`: `"read-only"` / `"workspace-write"` (the CLI's own sandbox, in that mode), `"full"` (the runtime has a native sandbox and it is off, e.g. codex `danger-full-access`, grok profile `off`), `"none"` (the runtime has no native sandbox monomind drives; the CLI has the user's own file-system rights), or `"monomind"` (claude only, `scoped`/`read`: no vendor sandbox, monomind enforces the access mode itself through `canUseTool` and the PreToolUse gate; claude `--access full` is `"full"`). `approvals`: `"off"` (native tool calls run without asking), `"on"` (the CLI's own approval rules apply and a call that would ask is refused — opencode and cline in scoped mode, dsh except `danger-full-access`, hermes) or `"n/a"` (claude outside full access, where monomind decides each call; vercel, which has no native tools). `access: "scoped"` on a vendor CLI limits monomind's caller-tool wiring only — use these two fields for what the CLI itself can do **rev 26** (capabilities `agent-exec-sandbox-restricted`, `agent-exec-sandbox-fallback`): `native_sandbox` may also be `"restricted"` (the CLI's own approval rules, asks refused; copilot, antigravity, opencode — `approvals` is `"on"`), and copilot's `read-only`/`workspace-write` come from its deny/allow rules rather than an OS sandbox (`approvals: "on"`). With `--sandbox`, `sandbox_requested` is the mode asked for and `sandbox_applied` the mode the runner got (after `--sandbox-fallback` and an org role's level cap); both are omitted without `--sandbox`. claude `scoped`/`read` with `--sandbox read-only\|workspace-write` reports `"monomind"`/`"n/a"` and `sandbox_applied` the mode |
+| `status` | `v, phase ("initializing"\|"ready"\|"notice"), mcp_servers? ([{name,status}]), message?` | rev 12, capability `agent-exec-settings`. Only with `--settings` non-`none` (claude runtime): `initializing` right after `start`, `ready` (with `mcp_servers`) from the SDK's own `system/init` message. **rev 19**: `phase:"notice"` with a human-readable `message`, right after `start`, on a non-claude runtime — what `--settings` makes it load (e.g. `"codex: user config (~/.codex/config.toml, incl. its MCP servers) + project AGENTS.md"`), or `"<runtime>: --effort <level> ignored …"`. A notice never has a `ready` to follow it; the startup watchdog stays claude-only. **rev 26**: a notice right after `start`, on any runtime, when `sandbox_applied` differs from `sandbox_requested` (e.g. `"antigravity: --sandbox workspace-write is not supported (agent scan --json sandbox_modes: restricted, full); --sandbox-fallback strictest; running with --sandbox restricted"`); it comes before the `--settings`/`--effort` notices. |
 | `session` | `v, session_id` | Runner's session/thread/conversation id; pass back via `--resume` |
 | `assistant` | `v, text` | Incremental assistant text (may be multi-line; callers append) |
 | `tool_call` | `v, id, name, args` | Only with `--tools stdio` — caller must execute and reply (§4) |
@@ -641,7 +675,7 @@ $ monomind agent exec --runtime codex --prompt "summarize ./README"
 | `cancelled` | false | Caller cancel frame or signal |
 | `bad-frame` | false | Malformed caller stdin frame; turn continues |
 | `unsafe` | true | rev 12. `--access full` refused: root (uid 0), or a missing/nonexistent/non-directory `--cwd` |
-| `unsupported` | true | rev 12. `--access full` requested on a runtime whose `RunnerSpec.supportsFullAccess` is false (see `agent scan --json`'s `full_access`, §6). rev 21: `--access read` on a runtime whose `access_modes` lacks `read`. rev 22: caller tools on a runtime whose `caller_tools` (or, with `--access full`, `caller_tools_with_full_access`) is false. rev 23: `--sandbox read-only\|workspace-write` on a runtime whose `sandbox_modes` lacks it |
+| `unsupported` | true | rev 12. `--access full` requested on a runtime whose `RunnerSpec.supportsFullAccess` is false (see `agent scan --json`'s `full_access`, §6). rev 21: `--access read` on a runtime whose `access_modes` lacks `read`. rev 22: caller tools on a runtime whose `caller_tools` (or, with `--access full`, `caller_tools_with_full_access`) is false. rev 23: `--sandbox read-only\|workspace-write` on a runtime whose `sandbox_modes` lacks it. rev 26: also `restricted`, and claude `read-only\|workspace-write` with `--access full`; only under `--sandbox-fallback fail` (the default) |
 
 Callers must treat unknown codes as `fatal:false`.
 
@@ -722,12 +756,14 @@ $ monomind agent scan --json
 {"v":1,"agents":[
   {"id":"claude","installed":true,"binary":"/usr/local/bin/claude","version":"1.0.58","install_hint":"","streams_incrementally":true,"full_access":true,
    "access_modes":["scoped","read","full"],"caller_tools":true,"caller_tools_with_full_access":true,
-   "native_sandbox":"monomind","approvals":"n/a","sandbox_modes":["full"],
+   "native_sandbox":"monomind","approvals":"n/a","sandbox_modes":["read-only","workspace-write","full"],
+   "sandbox_mode_reports":{"read-only":{"native_sandbox":"monomind","approvals":"n/a"},"workspace-write":{"native_sandbox":"monomind","approvals":"n/a"},"full":{"native_sandbox":"monomind","approvals":"n/a"}},
    "tool_activity_fidelity":"full","resume":true,"effort":true,"max_turns":true,"reports_cost":true,"init_target":"claude"},
   {"id":"codex","installed":false,"binary":null,"version":null,
    "install_hint":"npm install -g @openai/codex && codex login","streams_incrementally":false,"full_access":true,
    "access_modes":["scoped","read","full"],"caller_tools":true,"caller_tools_with_full_access":true,
    "native_sandbox":"full","approvals":"off","sandbox_modes":["read-only","workspace-write","full"],
+   "sandbox_mode_reports":{"read-only":{"native_sandbox":"read-only","approvals":"off"},"workspace-write":{"native_sandbox":"workspace-write","approvals":"off"},"full":{"native_sandbox":"full","approvals":"off"}},
    "tool_activity_fidelity":"full","resume":true,"effort":true,"max_turns":false,"reports_cost":false,"init_target":"codex"},
   …
 ]}
@@ -771,6 +807,18 @@ sandbox) and dsh (its `DSH_PERMISSION_MODE`). Defaults: claude `monomind`/`n/a`;
 `none`/`off`. Not listed as sandboxed on purpose: antigravity's `--sandbox` is an unspecified
 boolean "terminal restrictions" switch, qwen's is a container sandbox this build has not
 verified, and the others have no file-system sandbox flag.
+**rev 26** (capabilities `agent-exec-sandbox-restricted`, `agent-exec-sandbox-fallback`):
+`sandbox_modes` gains `restricted` for copilot, antigravity and opencode, `read-only` and
+`workspace-write` for copilot and claude (claude's are for `--access scoped|read` only), and
+`read-only` for pi and pi-rpc — each checked against the installed CLI and a live turn that
+tried a file write and a shell command (§3.1 has the flags). `sandbox_mode_reports` maps every
+listed mode to the `native_sandbox`/`approvals` a scoped turn in that mode reports (`full` is the
+default report). Still `full` only: qwen, qwen-rpc, kimicode, cline and aider (not verified: no
+installed CLI to check), crush, hermes, vercel, and claude with `--access full` (monomind does
+not wire the Agent SDK's own sandbox into `agent exec`: it covers Bash only, while Write/Edit run
+in-process, so it would not confine writes to the cwd by itself). antigravity's `--sandbox`
+switch still is not used: it failed to start here and the model retried with the sandbox
+bypassed.
 
 `agent scan --installed --json` = installed-only view (the name `agent list` is reserved by the
 pre-existing swarm command, §1). `agent test <id>` = one smoke turn via `agent exec`
@@ -1202,7 +1250,7 @@ Errors keep the same shape with `models: []` and an `error: {code, message}`: `u
 
 ## 13. `monomind agent test --json` (capability `agent-test-json`, rev 18)
 
-`monomind agent test <id> [--model M] [--timeout 60s] [--sandbox MODE] [--env KEY=V]... --json` checks that one runtime and model
+`monomind agent test <id> [--model M] [--timeout 60s] [--sandbox MODE] [--sandbox-fallback F] [--env KEY=V]... --json` checks that one runtime and model
 actually answer (issue #390). It runs one turn through the `agent exec` engine with the prompt
 `Reply with the single word: ok`, max turns 1, no caller tools, `scoped` access and a fresh
 temporary cwd that is removed afterwards, then prints a single JSON object on stdout:
@@ -1211,7 +1259,7 @@ temporary cwd that is removed afterwards, then prints a single JSON object on st
 {"v":1,"runtime":"codex","model":"gpt-5.5","status":"ok","reply":"ok",
  "latency_first_ms":812,"latency_ms":1430,"input_tokens":12,"output_tokens":1,
  "cost_usd":0.0001,"cost_estimated":false,"runtime_version":"0.52.0",
- "native_sandbox":"workspace-write","error":null}
+ "native_sandbox":"workspace-write","sandbox_applied":"workspace-write","error":null}
 ```
 
 | Field | Meaning |
@@ -1225,6 +1273,7 @@ temporary cwd that is removed afterwards, then prints a single JSON object on st
 | `cost_estimated` | `true` when `cost_usd` is the pricing-table estimate |
 | `runtime_version` | From the runtime's install metadata, as `agent scan` reads it (§6); `null` when unknown |
 | `native_sandbox` | rev 25, capability `agent-test-sandbox`. The vendor CLI's sandbox for this turn, from the `start` event's `native_sandbox` (§3.2): `read-only`, `workspace-write`, `full`, `none` or `monomind`. `null` when the turn never started (missing binary, unsupported `--sandbox`) |
+| `sandbox_applied` | rev 26, capability `agent-exec-sandbox-fallback`. The `--sandbox` mode the turn ran in, after `--sandbox-fallback` (the `start` event's `sandbox_applied`); `null` without `--sandbox` or when the turn never started |
 | `error` | `null`, or `{code, message, login_hint?}` for a failed status. `login_hint` comes with `auth` |
 
 | `status` | Meaning | Exit |
@@ -1254,9 +1303,15 @@ got:
 ```json
 {"v":1,"runtime":"pi","model":null,"status":"error","reply":null,"latency_first_ms":null,
  "latency_ms":3,"input_tokens":0,"output_tokens":0,"cost_usd":0,"cost_estimated":false,
- "runtime_version":"0.87.1","native_sandbox":null,
- "error":{"code":"unsupported","message":"--sandbox workspace-write is not supported by runtime \"pi\" (agent scan --json sandbox_modes: full)"}}
+ "runtime_version":"0.87.1","native_sandbox":null,"sandbox_applied":null,
+ "error":{"code":"unsupported","message":"--sandbox workspace-write is not supported by runtime \"pi\" (agent scan --json sandbox_modes: read-only, full)"}}
 ```
+
+**`--sandbox-fallback fail|strictest|run`** (rev 26, capability `agent-exec-sandbox-fallback`,
+issue #482) works as in `agent exec` (§3.1): with `strictest` or `run` a mode the runtime lacks
+is replaced instead of failing, and `sandbox_applied` says what ran — e.g. `agent test pi
+--sandbox workspace-write --sandbox-fallback strictest --json` runs pi `read-only` and reports
+`"native_sandbox":"read-only","sandbox_applied":"read-only"`.
 
 A missing runtime id is a usage error (exit 2, no JSON). `model_unavailable` matches the wording
 each runtime uses for a bad model — Claude Code's "issue with the selected model", copilot's

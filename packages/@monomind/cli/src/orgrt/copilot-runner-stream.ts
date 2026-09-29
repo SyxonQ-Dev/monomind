@@ -33,6 +33,39 @@ const COPILOT_EFFORT: Record<OrgEffortLevel, string> = {
 };
 
 /**
+ * copilot's tool-permission flags. Without `--sandbox` (or with `full`):
+ * `--allow-all-tools`, or `--allow-all` (tools + every path + every URL) for
+ * full access, so a headless turn never stops on an approval it cannot
+ * answer. #482 (copilot 1.0.89, checked live): with no allow-all flag, a
+ * call that needs approval is refused in `-p` mode; deny rules beat every
+ * allow rule; without --allow-all-paths, edits stay under the cwd,
+ * `--add-dir` and the temp dir (symlinks out of the cwd refused too).
+ *   restricted       nothing — copilot's own approval rules, asks refused
+ *   read-only        --deny-tool=write --deny-tool=shell
+ *   workspace-write  --allow-tool=write --deny-tool=shell
+ * With `--access full` the read-only/workspace-write turn keeps its other
+ * tools (URLs, MCP) approved: `--allow-all` / `--allow-all-tools
+ * --allow-all-urls` plus the same deny rules (never --allow-all-paths for
+ * workspace-write).
+ */
+export function copilotPermissionArgs(args: Pick<AgentRunArgs, 'access' | 'sandbox'>): string[] {
+  const full = args.access === 'full';
+  const noShell = '--deny-tool=shell';
+  switch (args.sandbox) {
+    case 'restricted':
+      return [];
+    case 'read-only':
+      return [...(full ? ['--allow-all'] : []), '--deny-tool=write', noShell];
+    case 'workspace-write':
+      return full
+        ? ['--allow-all-tools', '--allow-all-urls', noShell]
+        : ['--allow-tool=write', noShell];
+    default:
+      return [full ? '--allow-all' : '--allow-all-tools'];
+  }
+}
+
+/**
  * Run one `copilot` invocation and stream its NDJSON output
  * INCREMENTALLY: each parsed line is yielded as soon as it arrives on
  * stdout (see the header's "Streaming / liveness" note for why buffering
@@ -56,9 +89,7 @@ export async function* streamTurn(
     '--output-format',
     'json',
     '-s',
-    // Full access: --allow-all (tools + every path + every URL), so a
-    // headless turn never stops on a path/URL approval it cannot answer.
-    args.access === 'full' ? '--allow-all' : '--allow-all-tools',
+    ...copilotPermissionArgs(args),
     '--no-ask-user',
     '--usage-output-file',
     usageFile,

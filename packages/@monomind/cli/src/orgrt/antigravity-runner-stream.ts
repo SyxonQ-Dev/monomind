@@ -128,7 +128,10 @@ export async function* streamTurn(
   const cliArgs: string[] = ['-p', prompt, '--output-format', 'stream-json'];
   if (args.model) cliArgs.push('--model', args.model);
   if (args.effort) cliArgs.push('--effort', AGY_EFFORT[args.effort]);
-  cliArgs.push('--dangerously-skip-permissions');
+  // #482 `--sandbox restricted` (any access mode): no skip, so agy's own
+  // rules auto-deny what they would ask about (shell, file writes outside
+  // the temp dir — agy 1.2.13, checked live).
+  if (args.sandbox !== 'restricted') cliArgs.push('--dangerously-skip-permissions');
   if (conversationId) {
     cliArgs.push('--conversation', conversationId);
   }

@@ -138,6 +138,19 @@ describe('AntigravityAgentRunner coder mode', () => {
     expect(argv).toContain('--dangerously-skip-permissions');
     expect(opts.detached).toBe(process.platform !== 'win32');
   });
+
+  it('#482 --sandbox restricted drops the skip flag in any access mode; full keeps the default argv', async () => {
+    const argvFor = async (extra: Partial<AgentRunArgs>) => {
+      vi.mocked(cp.spawn).mockReturnValue(mockChild(LIVE));
+      await collect(extra);
+      return vi.mocked(cp.spawn).mock.calls.at(-1)?.[1] as string[];
+    };
+    expect(await argvFor({ sandbox: 'restricted' })).not.toContain('--dangerously-skip-permissions');
+    expect(await argvFor({ access: 'full', sandbox: 'restricted' })).not.toContain(
+      '--dangerously-skip-permissions',
+    );
+    expect(await argvFor({ sandbox: 'full' })).toEqual(await argvFor({}));
+  });
 });
 
 // One agy invocation whose single agent_response step says `text`.

@@ -20,6 +20,8 @@ import {
   type Approvals,
   type NativeSandbox,
   type SandboxMode,
+  type SandboxReport,
+  sandboxModeReports,
   sandboxModes,
   sandboxReport,
 } from './runner-sandbox.js';
@@ -91,6 +93,9 @@ export interface ScanEntry {
   native_sandbox: NativeSandbox;
   approvals: Approvals;
   sandbox_modes: SandboxMode[];
+  /** #482 (rev 26): what each accepted `--sandbox` mode reports on a
+   *  scoped turn — the start event's native_sandbox/approvals for it. */
+  sandbox_mode_reports: Partial<Record<SandboxMode, SandboxReport>>;
   /** Mirrors `RunnerSpec.toolActivityFidelity` (#357) — see its doc comment. */
   tool_activity_fidelity: 'full' | 'start-only' | 'none';
   /** Rev 13 service flags — mirror `RunnerFeatures` (runner-features.ts). */
@@ -188,6 +193,7 @@ export async function scanInstalled(opts: ScanOptions = {}): Promise<{
         caller_tools_with_full_access: callerToolsWithFullAccess(spec),
         ...sandboxReport(spec.id, { access: 'scoped' }),
         sandbox_modes: [...sandboxModes(spec.id)],
+        sandbox_mode_reports: sandboxModeReports(spec.id),
         tool_activity_fidelity: spec.toolActivityFidelity,
         resume: spec.resume,
         effort: spec.effort,
