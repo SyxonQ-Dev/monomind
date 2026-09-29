@@ -239,7 +239,7 @@ gh project item-list $PROJECT_NUMBER --owner $OWNER --limit 500 --format json --
 ## Workflow Integration
 
 ### Sprint Management
-Use an Iteration field for sprints. Create it with `gh project field-create $PROJECT_NUMBER --owner $OWNER --name Sprint --data-type ITERATION`, then set it per item with `gh project item-edit --id ... --project-id ... --field-id ... --iteration-id ...` (iteration IDs are in `gh project field-list --format json`).
+Use an Iteration field for sprints. `gh project field-create` cannot create one (it only supports TEXT, SINGLE_SELECT, DATE and NUMBER), so create the Sprint iteration field in the Projects UI, then set it per item with `gh project item-edit --id ... --project-id ... --field-id ... --iteration-id ...` (iteration IDs are in `gh project field-list --format json`).
 
 ### Milestone Tracking
 ```bash
@@ -304,7 +304,7 @@ Archive finished items (`gh project item-archive`) to keep `item-list` fast, and
 ### Agile Development Board
 ```bash
 gh project create --owner $OWNER --title "Sprint Board"
-gh project field-create <number> --owner $OWNER --name Sprint --data-type ITERATION
+# Add the Sprint iteration field in the Projects UI (gh cannot create iteration fields)
 gh project field-create <number> --owner $OWNER --name "Story Points" --data-type NUMBER
 ```
 

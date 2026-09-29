@@ -57,27 +57,34 @@ gh search code "OldAPI" --owner my-organization --json repository,path \
 MATCHING_REPOS=$(gh repo list org --limit 100 --json name \
   --jq '.[] | select(.name | test("-service$")) | .name')
 
+# Show the targets and get the user's confirmation before touching any repository
+echo "$MATCHING_REPOS"
+# -> ask the user: "Open a dependency-update PR in each of these repositories?" Stop unless they agree.
+
 BRANCH="update-dependencies-$(date +%Y%m%d)"
 echo "$MATCHING_REPOS" | while read -r repo; do
-  gh repo clone org/$repo /tmp/$repo -- --depth=1
-  cd /tmp/$repo
+  # Fresh directory per repo; the subshell never falls back to your own checkout
+  D=$(mktemp -d) && gh repo clone org/$repo "$D" -- --depth=1 && (
+    cd "$D" || exit 1
 
-  # Apply the change (a subagent does the edits for anything beyond a command)
-  npm update
+    # Apply the change (a subagent does the edits for anything beyond a command)
+    npm update
 
-  # Create PR if changes exist
-  if [[ -n $(git status --porcelain) ]]; then
-    git checkout -b "$BRANCH"
-    git add -A
-    git commit -m "chore: update dependencies"
-    git push origin HEAD
+    # Create PR if changes exist
+    if [[ -n $(git status --porcelain) ]]; then
+      git checkout -b "$BRANCH"
+      git add -A
+      git commit -m "chore: update dependencies"
+      git push origin HEAD
 
-    gh pr create \
-      --title "Update dependencies" \
-      --body "Automated dependency update across services" \
-      --label "dependencies,automated" >> /tmp/created-prs.txt
-  fi
-  cd -
+      gh label create dependencies --force
+      gh label create automated --force
+      gh pr create \
+        --title "Update dependencies" \
+        --body "Automated dependency update across services" \
+        --label "dependencies,automated" >> /tmp/created-prs.txt
+    fi
+  )
 done
 
 # Link related PRs: list every PR from the rollout in each one
@@ -146,11 +153,12 @@ The `dependencies` list sets the rollout order: change `shared` first, then `bac
 ### Dependency Management
 ```bash
 # Create tracking issue first (gh issue create prints the new issue's URL)
+gh label create dependencies --force
+gh label create tracking --force
 TRACKING_URL=$(gh issue create \
   --title "Dependency Update: typescript@5.0.0" \
   --body "Tracking issue for updating TypeScript across all repositories" \
   --label "dependencies,tracking")
-TRACKING_ISSUE=${TRACKING_URL##*/}
 
 # Get all repos with TypeScript
 TS_REPOS=$(gh repo list org --limit 100 --json name --jq '.[].name' | \
@@ -161,32 +169,37 @@ TS_REPOS=$(gh repo list org --limit 100 --json name --jq '.[].name' | \
     fi
   done)
 
-# Update each repository
+# Show the targets and confirm with the user before changing them
+echo "$TS_REPOS"
+
+# Update each repository in its own temporary clone
 echo "$TS_REPOS" | while read -r repo; do
-  gh repo clone org/$repo /tmp/$repo -- --depth=1
-  cd /tmp/$repo
+  D=$(mktemp -d) && gh repo clone org/$repo "$D" -- --depth=1 && (
+    cd "$D" || exit 1
 
-  npm install --save-dev typescript@5.0.0
+    npm install --save-dev typescript@5.0.0
 
-  if npm test; then
-    git checkout -b update-typescript-5
-    git add package.json package-lock.json
-    git commit -m "chore: update TypeScript to 5.0.0
+    if npm test; then
+      git checkout -b update-typescript-5
+      git add package.json package-lock.json
+      git commit -m "chore: update TypeScript to 5.0.0
 
 Part of $TRACKING_URL"
 
-    git push origin HEAD
-    gh pr create \
-      --title "Update TypeScript to 5.0.0" \
-      --body "Updates TypeScript to version 5.0.0
+      git push origin HEAD
+      gh label create dependencies --force
+      gh pr create \
+        --title "Update TypeScript to 5.0.0" \
+        --body "Updates TypeScript to version 5.0.0
 
 Tracking: $TRACKING_URL" \
-      --label "dependencies"
-  else
-    gh issue comment "$TRACKING_ISSUE" \
-      --body "❌ Failed to update $repo - tests failing"
-  fi
-  cd -
+        --label "dependencies"
+    else
+      # The URL pins the tracking repo; a bare number would resolve against this clone
+      gh issue comment "$TRACKING_URL" \
+        --body "❌ Failed to update $repo - tests failing"
+    fi
+  )
 done
 ```
 
@@ -231,8 +244,8 @@ npx monomind memory search -q "exports changed UserDTO" -n multi-repo
 ```bash
 # Check out the rollout branch in each repository and run its tests
 for repo in shared backend frontend; do
-  gh repo clone org/$repo /tmp/it/$repo -- --branch update-typescript-5 --depth=1
-  (cd /tmp/it/$repo && npm ci && npm test) || echo "FAILED: $repo"
+  D=$(mktemp -d) && gh repo clone org/$repo "$D" -- --branch update-typescript-5 --depth=1 &&
+    (cd "$D" || exit 1; npm ci && npm test) || echo "FAILED: $repo"
 done
 
 # Or watch CI on each rollout PR
@@ -278,7 +291,11 @@ Open all PRs at once and let each merge when its checks pass. Suited to document
 Merge in dependency order and wait for each step: release `shared`, bump it in `backend`, then in `frontend`. Suited to breaking API changes and security updates.
 
 ```bash
-gh pr merge https://github.com/org/shared/pull/10 --squash
+# Wait for the checks to pass, then ask the user before merging or releasing
+PR=https://github.com/org/shared/pull/10
+gh pr checks "$PR" --watch --fail-fast
+# -> confirm with the user: "Checks are green. Merge $PR and release org/shared v2.0.0?"
+gh pr merge "$PR" --squash
 gh release create v2.0.0 --repo org/shared --generate-notes
 # then update the consumers and repeat
 ```

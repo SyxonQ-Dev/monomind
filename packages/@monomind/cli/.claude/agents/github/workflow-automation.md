@@ -34,6 +34,10 @@ jobs:
       - name: Analyze Changes
         run: |
           BASE=${{ github.event.pull_request.base.sha || github.event.before }}
+          # A push that creates a branch has an all-zero "before"; compare with the default branch instead
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            BASE=$(git merge-base "origin/${{ github.event.repository.default_branch }}" HEAD)
+          fi
           npx -y monomind analyze diff "$BASE..${{ github.sha }}" --risk --classify
 ```
 
@@ -57,6 +61,11 @@ Write `.github/workflows/ci.yml` for the detected stack, then validate it by pus
 
 ```yaml
 # Smart test runner: run only the tests related to changed files
+# (the diff needs the base commit, so check out full history)
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0
+
 - name: Changed files
   id: files
   run: |
@@ -80,6 +89,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.detect.outputs.matrix }}
+      found: ${{ steps.detect.outputs.found }}
     steps:
       - uses: actions/checkout@v4
 
@@ -91,9 +101,12 @@ jobs:
           [ -f pyproject.toml ] && LANGS+=('"python"')
           [ -f go.mod ] && LANGS+=('"go"')
           echo "matrix={\"lang\":[$(IFS=,; echo "${LANGS[*]}")]}" >> "$GITHUB_OUTPUT"
+          # An empty matrix fails the build job, so record whether anything was found
+          echo "found=$([ ${#LANGS[@]} -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
   build:
     needs: detect
+    if: needs.detect.outputs.found == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix: ${{ fromJson(needs.detect.outputs.matrix) }}
@@ -122,14 +135,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Security scan (SARIF)
-        # the scan prints a banner before the SARIF document; keep only the JSON
-        run: npx -y monomind security scan -t . --type all -o sarif | sed -n '/^{/,$p' > results.sarif
+        # The scan exits 1 when it finds something, and prints a banner before the
+        # SARIF document; keep the report and only the JSON part of it
+        run: |
+          { npx -y monomind security scan -t . --type all -o sarif || true; } | sed -n '/^{/,$p' > results.sarif
 
       - name: Secret detection
+        # fails the job when secrets are found (the upload below still runs)
         run: npx -y monomind security secrets -p . --depth deep
 
       - name: Upload to code scanning
-        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: results.sarif
 ```
@@ -163,6 +180,7 @@ gh run rerun "$RUN_ID" --failed
 
 # Create issue for persistent failures
 if ! gh run watch "$RUN_ID" --exit-status; then
+  gh label create ci-failure --force
   gh issue create \
     --title "CI Failure: Run $RUN_ID" \
     --body "$(gh run view "$RUN_ID" --log-failed | tail -50)" \
@@ -208,6 +226,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           RUN=${{ github.event.workflow_run.id }}
+          gh label create ci-failure --force
           gh issue create --title "CI failed on ${{ github.event.workflow_run.head_branch }} (run $RUN)" \
             --label ci-failure \
             --body "$(gh run view $RUN --log-failed | tail -100)"
@@ -230,7 +249,11 @@ jobs:
         with:
           fetch-depth: 0
       - name: Analyze Risk
-        run: npx -y monomind analyze diff "${{ github.event.before }}..${{ github.sha }}" --risk
+        run: |
+          BASE=${{ github.event.before }}
+          # the first push of a branch has an all-zero "before"; fall back to the parent commit
+          [ "$BASE" = "0000000000000000000000000000000000000000" ] && BASE=HEAD~1
+          npx -y monomind analyze diff "$BASE..${{ github.sha }}" --risk
 
   deploy:
     needs: assess
@@ -338,7 +361,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           RISK=$(npx -y monomind analyze diff "origin/${{ github.base_ref }}..HEAD" --risk --classify)
-          SECRETS=$(npx -y monomind security secrets -p . --depth quick)
+          # exits 1 when it finds secrets; keep the report instead of failing the step
+          SECRETS=$(npx -y monomind security secrets -p . --depth quick || true)
 
           gh pr comment ${{ github.event.pull_request.number }} \
             --body "$(printf '## PR validation\n\n```\n%s\n```\n\n```\n%s\n```' "$RISK" "$SECRETS")"
@@ -412,88 +436,6 @@ gh run watch "$(gh run list --workflow ci.yml --limit 1 --json databaseId -q '.[
 gh run view "$RUN_ID" --json jobs --jq '.jobs[] | .name as $j | .steps[] |
   select(.completedAt and .startedAt) |
   {job: $j, step: .name, seconds: ((.completedAt | fromdate) - (.startedAt | fromdate))}'
-```
-
-## Advanced Swarm Workflow Automation
-
-### Multi-Agent Pipeline Orchestration
-
-```bash
-# Initialize comprehensive workflow automation swarm
-mcp__monomind__monoswarm_init { topology: "mesh", maxAgents: 12 }
-mcp__monomind__agent_spawn { type: "coordinator", name: "Workflow Coordinator" }
-mcp__monomind__agent_spawn { type: "architect", name: "Pipeline Architect" }
-mcp__monomind__agent_spawn { type: "coder", name: "Workflow Developer" }
-mcp__monomind__agent_spawn { type: "tester", name: "CI/CD Tester" }
-mcp__monomind__agent_spawn { type: "optimizer", name: "Performance Optimizer" }
-mcp__monomind__agent_spawn { type: "monitor", name: "Automation Monitor" }
-mcp__monomind__agent_spawn { type: "analyst", name: "Workflow Analyzer" }
-
-
-# Orchestrate adaptive workflow management
-mcp__monomind__task_create {
-  description: "Manage intelligent CI/CD pipeline with continuous optimization",
-  strategy: "adaptive",
-  priority: "high",
-  dependencies: ["code_analysis", "test_optimization", "deployment_strategy"]
-}
-```
-
-### Intelligent Performance Monitoring
-
-```bash
-# Generate comprehensive workflow performance reports
-mcp__monomind__performance_report {
-  format: "detailed",
-  timeframe: "30d"
-}
-
-# Analyze workflow bottlenecks with swarm intelligence
-mcp__monomind__performance_bottleneck {
-  component: "github_actions_workflow",
-  metrics: ["build_time", "test_duration", "deployment_latency", "resource_utilization"]
-}
-
-# Store performance insights in swarm memory
-mcp__monomind__monoswarm_memory {
-  action: "set",
-  key: "workflow/performance/analysis",
-  value: {
-    bottlenecks_identified: ["slow_test_suite", "inefficient_caching"],
-    optimization_opportunities: ["parallel_matrix", "smart_caching"],
-    performance_trends: "improving",
-    cost_optimization_potential: "23%"
-  }
-}
-```
-
-### Continuous Learning and Optimization
-
-```bash
-# Record what worked so later runs of this agent can reuse it
-mcp__monomind__monoswarm_memory {
-  action: "set",
-  key: "workflow/learning/patterns",
-  value: {
-    successful_patterns: [
-      "parallel_test_execution",
-      "smart_dependency_caching",
-      "conditional_deployment_stages"
-    ],
-    failure_patterns: [
-      "sequential_heavy_operations",
-      "inefficient_docker_builds",
-      "missing_error_recovery"
-    ]
-  }
-}
-
-# Generate workflow optimization recommendations
-mcp__monomind__task_create {
-  description: "Analyze workflow performance and generate optimization recommendations",
-  strategy: "parallel",
-  priority: "medium"
-}
 ```
 
 See also: [monoswarm-pr.md](./monoswarm-pr.md), [monoswarm-issue.md](./monoswarm-issue.md), [sync-coordinator.md](./sync-coordinator.md)

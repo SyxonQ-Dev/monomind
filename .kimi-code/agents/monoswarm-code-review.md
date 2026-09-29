@@ -25,18 +25,25 @@ gh pr view $PR --json number,title,body,files,additions,deletions,labels,headRef
 gh pr diff $PR --color never > /tmp/pr-$PR.diff
 gh pr diff $PR --name-only > /tmp/pr-$PR.files
 
-# Check out the PR locally so the analyzers see the real code
-gh pr checkout $PR
+# Trust check: a PR from a fork is untrusted code. Read it, but do not run its
+# scripts (npm ci, npm run bench, tests) until the user says it is safe.
+gh pr view $PR --json isCrossRepository,author --jq '{fork: .isCrossRepository, author: .author.login}'
+
+# Check the PR out in a separate worktree so the user's own checkout is untouched
+git fetch origin "pull/$PR/head:review-pr-$PR"
+WT=$(mktemp -d) && git worktree add "$WT" "review-pr-$PR"
+cd "$WT" || exit 1
 
 # Risk, change type and suggested reviewers for the PR's range
 BASE=$(jq -r .baseRefName /tmp/pr-$PR.json)
+git fetch origin "$BASE"
 npx monomind analyze diff "origin/$BASE..HEAD" --risk --classify --reviewers
 
 # Post initial review status
 gh pr comment $PR --body "🔍 Multi-agent code review started (security, performance, architecture, style)"
 ```
 
-Then spawn one reviewer subagent per lens in a single message (for example `Security Engineer`, `reviewer` focused on performance, `system-architect`, `reviewer` focused on style), each given the PR number, `/tmp/pr-$PR.diff` and the file list, and each told to return findings as JSON (`path`, `line`, `severity`, `body`).
+Then spawn one reviewer subagent per lens in a single message (for example `Security Engineer`, `reviewer` focused on performance, `system-architect`, `reviewer` focused on style), each given the PR number, the worktree path, `/tmp/pr-$PR.diff` and the file list, and each told to return findings as JSON (`path`, `line`, `severity`, `body`). When the review is done, remove the worktree with `git worktree remove "$WT"`.
 
 ### 2. Specialized Review Agents
 
@@ -46,18 +53,21 @@ Then spawn one reviewer subagent per lens in a single message (for example `Secu
 # Security-focused review with gh CLI
 CHANGED_FILES=$(gh pr diff 123 --name-only)
 
-# Real scanners: hardcoded secrets and code/dependency issues
-npx monomind security secrets -p . --depth deep
-npx monomind security scan -t . --type all -o json > /tmp/security-123.txt   # banner, then the JSON report
+# Real scanners (run in the PR worktree): hardcoded secrets and code/dependency issues.
+# Both exit 1 when they find something, so don't treat that as a failed step.
+npx monomind security secrets -p . --depth deep || true
+npx monomind security scan -t . --type all -o json > /tmp/security-123.txt || true   # banner, then the JSON report
 
-# The security subagent reads the diff and scanner output and writes its findings
-SECURITY_RESULTS=$(cat /tmp/security-findings-123.md)
+# The security subagent reads the diff and scanner output and writes its findings as JSON:
+# [{ "path": "...", "line": 10, "severity": "critical|high|medium|low", "body": "..." }]
+SECURITY_RESULTS=$(jq -r '.[] | "- **\(.severity)** `\(.path):\(.line)` \(.body)"' /tmp/security-findings-123.json)
 
-# Post security findings
-if grep -q "critical" /tmp/security-findings-123.md; then
+# Post security findings; decide on the structured severity field, not on the prose
+if jq -e 'any(.[]; .severity == "critical")' /tmp/security-findings-123.json > /dev/null; then
   # Request changes for critical issues
   gh pr review 123 --request-changes --body "$SECURITY_RESULTS"
   # Add security label
+  gh label create security-review-required --force
   gh pr edit 123 --add-label "security-review-required"
 else
   # Post as comment for non-critical issues
@@ -72,10 +82,13 @@ fi
 npx monomind analyze complexity src/ --threshold 15 --format json > /tmp/complexity-123.json
 gh pr diff 123 --name-only
 
-# Compare benchmarks against the base branch using the project's own benchmark script
-git checkout origin/main && npm run bench > /tmp/bench-base.txt
-gh pr checkout 123 && npm run bench > /tmp/bench-pr.txt
+# Compare benchmarks against the base branch using the project's own benchmark script.
+# This runs the PR's code: only after the trust check above (never unasked on a fork PR).
+BASE_WT=$(mktemp -d) && git worktree add --detach "$BASE_WT" origin/main
+(cd "$BASE_WT" || exit 1; npm ci && npm run bench) > /tmp/bench-base.txt
+(cd "$WT" || exit 1; npm ci && npm run bench) > /tmp/bench-pr.txt
 diff /tmp/bench-base.txt /tmp/bench-pr.txt
+git worktree remove "$BASE_WT"
 ```
 
 #### Architecture Agent
@@ -83,7 +96,7 @@ diff /tmp/bench-base.txt /tmp/bench-pr.txt
 Use the monograph MCP tools to see what a changed symbol touches:
 
 ```bash
-# Rebuild the graph for the checked-out PR, then query it
+# Rebuild the graph in the PR worktree, then query it
 npx monomind monograph build
 
 # In the agent: blast radius and neighbours of each changed symbol
@@ -293,7 +306,8 @@ jobs:
           PR_NUM=${{ github.event.pull_request.number }}
           BASE=${{ github.event.pull_request.base.ref }}
           REPORT=$(npx -y monomind analyze diff "origin/$BASE..HEAD" --risk --classify)
-          SECRETS=$(npx -y monomind security secrets -p . --depth standard)
+          # exits 1 when it finds secrets; keep the report instead of failing the step
+          SECRETS=$(npx -y monomind security secrets -p . --depth standard || true)
 
           gh pr comment $PR_NUM --body "$(printf '## Automated review context\n\n```\n%s\n```\n\n```\n%s\n```' "$REPORT" "$SECRETS")"
 ```
@@ -391,15 +405,15 @@ gh api graphql -f query='mutation($id:ID!){ resolveReviewThread(input:{threadId:
 ### Status Checks
 
 ```bash
-# Make the review workflow's job a required check on main
-gh api --method PUT "repos/{owner}/{repo}/branches/main/protection" --input - <<'EOF'
-{
-  "required_status_checks": { "strict": true, "contexts": ["review-context"] },
-  "enforce_admins": false,
-  "required_pull_request_reviews": { "required_approving_review_count": 1 },
-  "restrictions": null
-}
-EOF
+# Current required checks on main (read-only)
+gh api "repos/{owner}/{repo}/branches/main/protection/required_status_checks" --jq '.contexts'
+
+# Branch protection is the user's call: ask before changing it.
+# Once they agree, add the review job to the required checks. This POST appends
+# one context and leaves the rest of the protection as it is (a PUT on
+# .../branches/main/protection would replace all of it).
+gh api --method POST "repos/{owner}/{repo}/branches/main/protection/required_status_checks/contexts" \
+  --input - <<< '["review-context"]'
 
 # See where a PR stands
 gh pr checks 123
@@ -474,11 +488,12 @@ Order reviewers by risk: run `npx monomind analyze diff --risk` first, spawn the
 ### Security-Critical PR
 
 ```bash
-# Auth system changes
-gh pr checkout 456
-npx monomind security scan -t . --depth deep
-npx monomind security secrets --depth deep
+# Auth system changes (review in a separate worktree, as in "Multi-Agent Review System")
+git fetch origin pull/456/head:review-pr-456
+WT=$(mktemp -d) && git worktree add "$WT" review-pr-456
+(cd "$WT" || exit 1; npx monomind security scan -t . --depth deep; npx monomind security secrets --depth deep) || true
 # Spawn: Security Engineer + reviewer (auth flows) + reviewer (audit logging)
+gh label create security-review-required --force
 gh pr edit 456 --add-label "security-review-required"
 ```
 
@@ -486,16 +501,16 @@ gh pr edit 456 --add-label "security-review-required"
 
 ```bash
 # Database optimization
-gh pr checkout 789
-npx monomind analyze complexity src/ --threshold 15
+git fetch origin pull/789/head:review-pr-789
+WT=$(mktemp -d) && git worktree add "$WT" review-pr-789
+(cd "$WT" || exit 1; npx monomind analyze complexity src/ --threshold 15)
 # Spawn: Database Optimizer + Performance Benchmarker; compare benchmarks against main
 ```
 
 ### UI Component PR
 
 ```bash
-# New component library
-gh pr checkout 321
+# New component library (no checkout needed to list the changed files)
 # Spawn: Accessibility Auditor + Monodesign + Technical Writer (docs)
 gh pr diff 321 --name-only | grep -E '\.(tsx|jsx|vue|css)$'
 ```
