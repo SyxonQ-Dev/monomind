@@ -99,7 +99,10 @@ export const getCommand: Command = {
           { key: 'key', header: 'Key', width: 25 },
           { key: 'value', header: 'Value', width: 30 },
         ],
-        data: Object.entries(flatEntries).map(([k, v]) => ({ key: k, value: String(v) })),
+        data: Object.entries(flatEntries).map(([k, v]) => ({
+          key: k,
+          value: Array.isArray(v) ? JSON.stringify(v) : String(v),
+        })),
       });
 
       return { success: true, data: flatEntries };
@@ -124,7 +127,9 @@ export const getCommand: Command = {
     if (ctx.flags.format === 'json') {
       output.printJson({ key, value });
     } else {
-      output.writeln(`${key} = ${value}`);
+      // Objects/arrays would interpolate as "[object Object]" (#478).
+      const display = value !== null && typeof value === 'object' ? output.json(value) : value;
+      output.writeln(`${key} = ${display}`);
     }
 
     return { success: true, data: { key, value } };
