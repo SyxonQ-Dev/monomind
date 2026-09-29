@@ -46,7 +46,7 @@ The `pre-task` hook analyzes the task description and automatically selects and 
 
 ```javascript
 // Initialize monoswarm with auto strategy
-mcp__monomind__swarm_init({
+mcp__monomind__monoswarm_init({
   topology: "hierarchical",
   maxAgents: 8,
   strategy: "specialized"

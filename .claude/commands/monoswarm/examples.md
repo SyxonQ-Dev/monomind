@@ -11,17 +11,17 @@ Ready-to-use recipes for the most common swarm scenarios.
 
 ```javascript
 // 1. Initialize
-mcp__monomind__swarm_init({ topology: "mesh", maxAgents: 6, strategy: "adaptive" })
+mcp__monomind__monoswarm_init({ topology: "mesh", maxAgents: 6, strategy: "adaptive" })
 
 // 2. Spawn agents
 mcp__monomind__agent_spawn({ type: "researcher", capabilities: ["web-search", "analysis", "synthesis"] })
 mcp__monomind__agent_spawn({ type: "analyst", capabilities: ["data-processing", "reporting"] })
 
 // 3. Coordinate
-mcp__monomind__coordination_orchestrate({ task: "research AI trends", strategy: "parallel" })
+mcp__monomind__task_create({ description: "research AI trends", strategy: "parallel" })
 
 // 4. Monitor
-mcp__monomind__swarm_status({ swarmId: "current" })
+mcp__monomind__monoswarm_status({ swarmId: "current" })
 ```
 
 ```bash
@@ -35,7 +35,7 @@ npx monomind monoswarm start "research AI trends" --strategy research --parallel
 
 ```javascript
 // 1. Initialize
-mcp__monomind__swarm_init({ topology: "hierarchical", maxAgents: 8, strategy: "specialized" })
+mcp__monomind__monoswarm_init({ topology: "hierarchical", maxAgents: 8, strategy: "specialized" })
 
 // 2. Spawn team
 mcp__monomind__agent_spawn({ type: "architect", capabilities: ["system-design", "api-design"] })
@@ -44,10 +44,10 @@ mcp__monomind__agent_spawn({ type: "tester", capabilities: ["integration", "e2e"
 mcp__monomind__agent_spawn({ type: "documenter", capabilities: ["api-docs", "readme"] })
 
 // 3. Coordinate
-mcp__monomind__coordination_orchestrate({ task: "build REST API", strategy: "sequential" })
+mcp__monomind__task_create({ description: "build REST API", strategy: "sequential" })
 
 // 4. Monitor
-mcp__monomind__swarm_status({ swarmId: "current" })
+mcp__monomind__monoswarm_status({ swarmId: "current" })
 ```
 
 ```bash
@@ -60,7 +60,7 @@ npx monomind monoswarm start "build REST API" --strategy development --mode hier
 
 ```javascript
 // 1. Initialize
-mcp__monomind__swarm_init({ topology: "mesh", maxAgents: 5, strategy: "adaptive" })
+mcp__monomind__monoswarm_init({ topology: "mesh", maxAgents: 5, strategy: "adaptive" })
 
 // 2. Spawn agents
 mcp__monomind__agent_spawn({ type: "analyst", capabilities: ["static-analysis", "complexity-analysis"] })
@@ -68,7 +68,7 @@ mcp__monomind__agent_spawn({ type: "analyst", capabilities: ["security-scan", "v
 mcp__monomind__agent_spawn({ type: "analyst", capabilities: ["performance-analysis", "bottleneck-detection"] })
 
 // 3. Coordinate
-mcp__monomind__coordination_orchestrate({ task: "analyze codebase", strategy: "parallel" })
+mcp__monomind__task_create({ description: "analyze codebase", strategy: "parallel" })
 
 // 4. Report
 mcp__monomind__performance_report({ format: "detailed" })
@@ -86,14 +86,14 @@ When a swarm gets into a bad state:
 
 ```javascript
 // Check status first
-mcp__monomind__swarm_status({ swarmId: "current" })
+mcp__monomind__monoswarm_status({ swarmId: "current" })
 
 // System health check
 mcp__monomind__system_health({})
 
 // Shut down and restart
-mcp__monomind__swarm_shutdown({ swarmId: "current" })
-mcp__monomind__swarm_init({ topology: "hierarchical", maxAgents: 6, strategy: "specialized" })
+mcp__monomind__monoswarm_shutdown({ swarmId: "current" })
+mcp__monomind__monoswarm_init({ topology: "hierarchical", maxAgents: 6, strategy: "specialized" })
 ```
 
 ## See Also

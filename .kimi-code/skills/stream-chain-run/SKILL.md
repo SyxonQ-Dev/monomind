@@ -128,7 +128,7 @@ For complex chains, combine with swarm coordination:
 
 ```javascript
 // Initialize swarm first
-mcp__monomind__swarm_init({ topology: "hierarchical", maxAgents: 4, strategy: "specialized" })
+mcp__monomind__monoswarm_init({ topology: "hierarchical", maxAgents: 4, strategy: "specialized" })
 ```
 
 Then direct the stream chain:

@@ -66,7 +66,7 @@ Spawn 2 agents in parallel via the Agent tool:
 Provide it with `$ARGUMENTS` and `PROJECT_CONTEXT`. It must:
 
 1. **Trace the component** — find all files, functions, classes, and modules related to the target. Use `mcp__monomind__monograph_query` for each key term found.
-2. **Map dependencies** — what does the component depend on? What depends on it? Use `mcp__monomind__monograph_shortest_path` for key relationships.
+2. **Map dependencies** — what does the component depend on? What depends on it? Use `mcp__monomind__monograph_neighbors` for key relationships.
 3. **Identify pain points** — look for:
    - Code smells (large files, deep nesting, god objects, duplicated logic)
    - Missing tests or low coverage areas

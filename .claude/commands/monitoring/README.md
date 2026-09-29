@@ -50,12 +50,12 @@ npx monomind monoswarm status
 
 | Tool | Purpose |
 |---|---|
-| `mcp__monomind__swarm_status` | Swarm health and agent counts |
-| `mcp__monomind__swarm_health` | Swarm health check |
+| `mcp__monomind__monoswarm_status` | Swarm health and agent counts |
+| `mcp__monomind__monoswarm_health` | Swarm health check |
 | `mcp__monomind__agent_list` | All agents with metrics |
 | `mcp__monomind__agent_status` | Specific agent status |
 | `mcp__monomind__agent_health` | Agent health check |
-| `mcp__monomind__memory_stats` | Memory backend stats |
+| `mcp__monomind__memory_health` | Memory backend stats |
 | `mcp__monomind__task_summary` | Task counts by status |
 | `mcp__monomind__task_list` | All tasks with progress |
 | `mcp__monomind__system_health` | Full system health |
