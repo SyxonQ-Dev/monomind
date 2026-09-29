@@ -359,7 +359,7 @@ export const exportCommand: Command = {
         }
         const { writeJsonFileAtomic } = await import('../utils/json-file.js');
         writeJsonFileAtomic(resolvedOut, exportPackage);
-        spinner.succeed(`Exported to: ${outputFile}`);
+        spinner.result(`Exported to: ${outputFile}`);
       } else {
         spinner.succeed('Export prepared');
         output.writeln();
