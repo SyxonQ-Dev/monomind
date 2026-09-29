@@ -52,12 +52,14 @@
  *     `data.content`/`data.text` first; the guessed shapes are kept as
  *     fallbacks rather than removed (they cost nothing and other copilot
  *     versions may differ).
- *   - Session/resume: Copilot documents a `--resume=<id>` flag, but nothing
- *     in this runner's output parsing surfaces a session id to pass back in
- *     (the same gap the cross-check source above notes about its own
- *     integration), so resume can't be wired up yet — every mailbox prompt
- *     is a fresh `copilot -p` invocation, same disclosed limitation as
- *     CrushAgentRunner. Revisit if a session-id-bearing event/field is found.
+ *   - Session/resume: the closing `{"type":"result","sessionId":...}` line
+ *     names the session (verified live, copilot 1.0.88); later invocations
+ *     pass `--resume=<id>` and send only the new prompt, and
+ *     AgentRunArgs.resume seeds it.
+ *   - Native tools: `tool.execution_start` {toolCallId, toolName,
+ *     arguments} and `tool.execution_complete` {toolCallId, success,
+ *     result.content} (verified live, 1.0.88) become matched
+ *     tool_use/tool_result pairs.
  *   - Token usage (#181) — RESOLVED, byte-verified against copilot 1.0.83 on
  *     2026-09-18. Copilot CLI has a first-class `--usage-output-file <file>`
  *     flag ("Write final usage statistics as JSON to the specified file").
@@ -90,6 +92,7 @@
 import type { AgentMessage, AgentRunArgs, AgentRunner } from './agent-runner.js';
 import { STARTUP_GRACE_MS, streamTurn, turnError } from './copilot-runner-stream.js';
 import type { TurnOutcome } from './copilot-runner-types.js';
+import { NativeToolCalls } from './kimicode-runner-tools.js';
 import {
   buildToolProtocol,
   formatToolResults,
@@ -105,11 +108,18 @@ export class CopilotAgentRunner implements AgentRunner {
 
   async *run(args: AgentRunArgs): AsyncIterable<AgentMessage> {
     const bin = this.copilotBin || process.env.COPILOT_CLI_BIN || 'copilot';
+    // copilot's closing `result` line names the session; later invocations
+    // `--resume=<id>` it, so only a fresh session needs the system prompt
+    // and tool protocol re-sent.
+    let sessionId: string | undefined = args.resume;
+    const withSystem = (body: string): string =>
+      sessionId ? body : `${args.systemPrompt}${buildToolProtocol(args.tools)}\n\n---\n\n${body}`;
+    const tools = new NativeToolCalls();
 
     try {
       for await (const p of args.prompt) {
         const text = typeof p === 'string' ? p : (p?.message?.content ?? String(p ?? ''));
-        let nextPrompt = `${args.systemPrompt}${buildToolProtocol(args.tools)}\n\n---\n\n${text}`;
+        let nextPrompt = withSystem(text);
         // #181: every tool-fence round is its own `copilot -p` invocation with
         // its own usage file, so the counts reported on this prompt's single
         // 'result' message must be the sum over all of them.
@@ -130,13 +140,25 @@ export class CopilotAgentRunner implements AgentRunner {
           // collected here while the stripped prose streams out live below.
           const rawTexts: string[] = [];
 
-          for await (const ev of streamTurn(bin, nextPrompt, args, outcome)) {
+          for await (const ev of streamTurn(bin, nextPrompt, sessionId, args, outcome)) {
             if (ev.kind === 'assistant' && ev.rawText !== undefined) {
               rawTexts.push(ev.rawText);
               // Yield assistant prose AS IT ARRIVES (per NDJSON line, not
               // after process exit): a copilot turn can run many minutes,
               // and session.ts's watchdog must see messages DURING the turn.
               if (ev.text) yield { type: 'assistant', text: ev.text };
+            } else if (ev.kind === 'session' && ev.sessionId) {
+              sessionId = ev.sessionId;
+            } else if (ev.kind === 'native') {
+              // copilot's own tool calls, paired by its toolCallId.
+              if (ev.toolStart) {
+                const s = ev.toolStart;
+                const m = tools.start(s.id, s.name, s.input, sessionId);
+                if (m) yield m;
+              }
+              if (ev.toolEnd) {
+                yield* tools.end(ev.toolEnd.id, ev.toolEnd.output, ev.toolEnd.isError, sessionId);
+              }
             } else if (ev.kind === 'tool') {
               // Liveness for copilot's own tool activity (or the spawn-time
               // yield): session.ts never renders tool_use as chat — it only
@@ -174,6 +196,7 @@ export class CopilotAgentRunner implements AgentRunner {
           if (calls.length === 0) {
             yield {
               type: 'result',
+              session_id: sessionId,
               subtype: 'success',
               input_tokens: promptInputTokens,
               output_tokens: promptOutputTokens,
@@ -186,13 +209,14 @@ export class CopilotAgentRunner implements AgentRunner {
           if (!results) {
             yield {
               type: 'result',
+              session_id: sessionId,
               subtype: 'success',
               input_tokens: promptInputTokens,
               output_tokens: promptOutputTokens,
             };
             break;
           }
-          nextPrompt = `${args.systemPrompt}${buildToolProtocol(args.tools)}\n\n---\n\n${formatToolResults(calls, results)}`;
+          nextPrompt = withSystem(formatToolResults(calls, results));
         }
       }
     } catch (err) {

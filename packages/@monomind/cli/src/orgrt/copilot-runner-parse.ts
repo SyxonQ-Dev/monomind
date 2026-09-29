@@ -91,6 +91,26 @@ export function handleLine(line: string): CopilotStreamEvent | null {
       text: text.replace(TOOL_CALL_RE, '').trim() || undefined,
     };
   }
+  const data = ev.data;
+  if (kind === 'tool.execution_start' && typeof data?.toolCallId === 'string') {
+    return {
+      kind: 'native',
+      toolStart: { id: data.toolCallId, name: String(data.toolName ?? 'tool'), input: data.arguments },
+    };
+  }
+  if (kind === 'tool.execution_complete' && typeof data?.toolCallId === 'string') {
+    return {
+      kind: 'native',
+      toolEnd: {
+        id: data.toolCallId,
+        output: data.result?.content ?? '',
+        isError: data.success === false,
+      },
+    };
+  }
+  if (kind === 'result' && typeof ev.sessionId === 'string' && ev.sessionId) {
+    return { kind: 'session', sessionId: ev.sessionId };
+  }
   if (typeof kind === 'string' && kind.startsWith('tool')) {
     const label = coerceText(ev.content) ?? ev.text ?? kind;
     return { kind: 'tool', toolName: label.slice(0, 200) };

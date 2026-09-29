@@ -4,8 +4,20 @@ export interface CopilotEvent {
   type?: string;
   kind?: string;
   role?: string;
-  /** The real 1.0.83 envelope: every event's payload lives here. */
-  data?: { content?: unknown; text?: string };
+  /** The real 1.0.83 envelope: every event's payload lives here. The tool
+   *  fields are `tool.execution_start`/`tool.execution_complete`'s (verified
+   *  live against copilot 1.0.88). */
+  data?: {
+    content?: unknown;
+    text?: string;
+    toolCallId?: string;
+    toolName?: string;
+    arguments?: unknown;
+    success?: boolean;
+    result?: { content?: unknown };
+  };
+  /** `result` (the last line) carries the session id `--resume` takes. */
+  sessionId?: string;
   content?: unknown;
   text?: string;
   message?: { content?: unknown; text?: string };
@@ -24,14 +36,21 @@ export interface CopilotUsage {
  *   - 'assistant': rawText is the event's whole text (fences intact) for
  *     end-of-turn tool-call parsing; text is the fence-stripped prose,
  *     present only when non-empty.
- *   - 'tool':      an event whose type/kind looks like tool activity —
- *     forwarded by run() as a `tool_use` liveness AgentMessage (see header).
+ *   - 'native':    copilot's own tool call starting (`toolStart`) or
+ *     finishing (`toolEnd`), paired by its toolCallId.
+ *   - 'tool':      any other event whose type/kind looks like tool activity
+ *     (e.g. tool.execution_partial_result) — forwarded by run() as a
+ *     `tool_use` liveness AgentMessage (see header).
+ *   - 'session':   the closing `result` line's session id.
  */
 export interface CopilotStreamEvent {
-  kind: 'assistant' | 'tool';
+  kind: 'assistant' | 'native' | 'tool' | 'session';
   text?: string;
   rawText?: string;
   toolName?: string;
+  toolStart?: { id: string; name: string; input: unknown };
+  toolEnd?: { id: string; output: unknown; isError: boolean };
+  sessionId?: string;
 }
 
 export interface TurnOutcome {
