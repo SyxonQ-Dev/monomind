@@ -29,7 +29,7 @@ Multi-package synchronization and version alignment with monomind swarm coordina
 ### 1. Synchronize Package Dependencies
 ```javascript
 // Initialize sync coordination swarm
-mcp__monomind__swarm_init { topology: "hierarchical", maxAgents: 5 }
+mcp__monomind__monoswarm_init { topology: "hierarchical", maxAgents: 5 }
 mcp__monomind__agent_spawn { type: "coordinator", name: "Sync Coordinator" }
 mcp__monomind__agent_spawn { type: "analyst", name: "Dependency Analyzer" }
 mcp__monomind__agent_spawn { type: "coder", name: "Integration Developer" }
@@ -51,8 +51,8 @@ Bash(`gh api repos/:owner/:repo/contents/packages/@monomind/cli/package.json \
   -f sha="$(gh api repos/:owner/:repo/contents/packages/@monomind/cli/package.json?ref=sync/package-alignment --jq '.sha')")`)
 
 // Orchestrate validation
-mcp__monomind__coordination_orchestrate {
-  task: "Validate package synchronization and run integration tests",
+mcp__monomind__task_create {
+  description: "Validate package synchronization and run integration tests",
   agents: ["coordinator", "analyst", "tester"],
   strategy: "parallel"
 }
@@ -150,7 +150,7 @@ Generated with Claude Code using Monomind swarm coordination`
 ```javascript
 [Single Message - Complete Synchronization]:
   // Initialize comprehensive sync swarm
-  mcp__monomind__swarm_init { topology: "mesh", maxAgents: 6 }
+  mcp__monomind__monoswarm_init { topology: "mesh", maxAgents: 6 }
   mcp__monomind__agent_spawn { type: "coordinator", name: "Master Sync Coordinator" }
   mcp__monomind__agent_spawn { type: "analyst", name: "Package Analyzer" }
   mcp__monomind__agent_spawn { type: "coder", name: "Integration Coder" }

@@ -69,7 +69,7 @@ Otherwise:
 
 ### 2a: Load all pending tasks
 
-**File mode:** Read `TASK_FILE`. Find all `## Task N: <title>` sections with `> status: todo` or `> status: backlog`. Follow the parsing spec in `.claude/commands/mastermind/_taskfile.md`. If `--filter` was set, keep only tasks whose title contains the filter text (case-insensitive).
+**File mode:** Read `TASK_FILE`. Find all `## Task N: <title>` sections with `> status: todo` or `> status: backlog`. Follow the parsing spec in `.claude/skills/mastermind/references/taskfile.md`. If `--filter` was set, keep only tasks whose title contains the filter text (case-insensitive).
 
 **Monotask mode:** 
 ```bash
@@ -421,7 +421,7 @@ Proceed to Step 9.
 1. Change `> status: review` → `> status: done` in that task's section
 2. Replace all `- [ ]` with `- [x]` in that task's Checklist section
 3. If DONE_WITH_CONCERNS: append `> concerns: <concerns>` after the status line
-4. **Unblock dependents**: Follow the "Prerequisite Unblock Logic" from `.claude/commands/mastermind/_taskfile.md` — find tasks whose prerequisites are now all `done` and change their status from `backlog` to `todo`.
+4. **Unblock dependents**: Follow the "Prerequisite Unblock Logic" from `.claude/skills/mastermind/references/taskfile.md` — find tasks whose prerequisites are now all `done` and change their status from `backlog` to `todo`.
 
 *Monotask mode:*
 ```bash

@@ -23,15 +23,15 @@ Then describe the feature to build:
 
 ```javascript
 // Initialize development swarm
-mcp__monomind__swarm_init({
+mcp__monomind__monoswarm_init({
   topology: "hierarchical",
   maxAgents: 8,
   strategy: "specialized"
 })
 
 // Coordinate development
-mcp__monomind__coordination_orchestrate({
-  task: "build feature X",
+mcp__monomind__task_create({
+  description: "build feature X",
   strategy: "parallel"
 })
 ```
@@ -61,7 +61,7 @@ mcp__monomind__agent_spawn({ type: "tester", capabilities: ["integration", "e2e"
 
 ```javascript
 // Check swarm status
-mcp__monomind__swarm_status({ swarmId: "current" })
+mcp__monomind__monoswarm_status({ swarmId: "current" })
 
 // System health
 mcp__monomind__system_health({})

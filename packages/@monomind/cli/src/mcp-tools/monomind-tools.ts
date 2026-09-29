@@ -1,7 +1,7 @@
 /**
  * Monomind meta-tools — discovery for the (hidden-by-default) non-core roster.
  *
- * The default `tools/list` advertises only the core tool set (~80 tools) to
+ * The default `tools/list` advertises only the core tool set (~20 tools) to
  * keep the per-call schema payload small. Non-core capabilities (browser,
  * github, swarm, claims, terminal, embeddings generation, etc.) remain fully
  * callable but are found through `monomind_tool_search`, which returns their
