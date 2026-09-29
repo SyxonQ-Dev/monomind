@@ -4,11 +4,12 @@
 // below where other modules import them from here.
 import { homedir } from 'node:os';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { isDecisionFile } from './authority-mask.js';
 import type { OrgBus } from './bus.js';
 import { fileToolDenied, isDashboardCredential } from './file-roots.js';
+import { isAuthorityFile } from './org-authority-files.js';
 import { checkGitPolicy } from './policy-git.js';
 import {
+  gitWriteViolation,
   globToRegExp,
   isWithin,
   realPath,
@@ -47,7 +48,18 @@ export interface TokenUsage {
 
 const zeroTokens = (): TokenUsage => ({ input: 0, output: 0, cacheRead: 0, cacheCreation: 0 });
 
-const WRITE_TOOLS = new Set(['Write', 'Edit', 'NotebookEdit']);
+const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+/** Every path a file-tool call names: `file_path`, `path`, NotebookEdit's
+ *  `notebook_path`, and the `file_path` of each MultiEdit edit. */
+function toolPaths(input: Record<string, unknown>): string[] {
+  const edits = Array.isArray(input.edits) ? (input.edits as Array<{ file_path?: unknown }>) : [];
+  return [
+    input.file_path,
+    input.path,
+    input.notebook_path,
+    ...edits.map((e) => e?.file_path),
+  ].filter((p): p is string => typeof p === 'string');
+}
 /** Harness messaging tools that bypass the org bus. Always denied: an agent
  *  that picks one gets the SDK's misleading "no agent named X is reachable"
  *  error, concludes its teammate is down, and deadlocks the run (observed in
@@ -96,6 +108,9 @@ export class PolicyEngine {
      *  lists (file-roots.ts's `fileToolDenied()`) still apply inside every
      *  root, cwd included — see the deny pass below. */
     private roots: string[] = [],
+    /** #498: the org root, whose `.monomind/orgs/` holds the authority files
+     *  (org-authority-files.ts). Without it, cwd and every root count as one. */
+    private orgRoot?: string,
   ) {
     // A caller may build an engine with no policy at all — treat it as {}.
     this.policy = policy ?? {};
@@ -295,13 +310,11 @@ export class PolicyEngine {
         ? (this.policy.fileWrite ?? ['**'])
         : (this.policy.fileRead ?? ['**']);
       const unrestricted = globs.length === 1 && globs[0] === '**';
-      const p =
-        typeof input.file_path === 'string'
-          ? input.file_path
-          : typeof input.path === 'string'
-            ? input.path
-            : null;
-      if (p === null && !unrestricted) {
+      // m1 (#498): every path argument the call carries is checked, so a
+      // NotebookEdit naming both file_path and notebook_path, or a MultiEdit
+      // whose edits name their own files, is refused if any of them is.
+      const paths = toolPaths(input);
+      if (paths.length === 0 && !unrestricted) {
         // Grep/Glob's `path` argument is optional in the SDK (defaults to cwd,
         // i.e. searches everything) — without this check, a path-less call
         // sailed straight through to allow() and bypassed fileRead/fileWrite
@@ -310,112 +323,9 @@ export class PolicyEngine {
           `${tool} has no path argument, but role ${this.role}'s ${WRITE_TOOLS.has(tool) ? 'write' : 'read'} scope is restricted — refusing an unscoped call; pass a path inside ${globs.map(describeScope).join(', ')} (relative to org workdir ${this.cwd})`,
         );
       }
-      if (p !== null) {
-        // SEC: compare REAL paths — a symlink inside the scope pointing outside
-        // the workdir (or at an out-of-scope file) passed the lexical check.
-        // Resolved once and reused below: the root check, the deny pass and
-        // the .git check (#258) all key off the same real path.
-        const real = realPath(resolve(this.cwd, p));
-        const realCwd = realPath(this.cwd);
-        // fileWrite/fileRead globs are always authored with '/' separators (POSIX
-        // convention, matches every example in types.ts and the skill docs) — but
-        // path.relative()/path.resolve() return '\'-separated paths on Windows, and
-        // globToRegExp treats '\' as a literal character, not a separator. Without
-        // normalizing, every glob with a '/' in it silently fails to match on
-        // Windows and a role with ANY fileWrite/fileRead scope narrower than the
-        // unrestricted ['**'] default is denied on every single call.
-        const rel = relative(realCwd, real);
-        const relPosix = rel.split(sep).join('/');
-        const realPosix = real.split(sep).join('/');
-        // #492: an entry with no glob characters is a path — it grants that
-        // path AND everything beneath it (a relative one resolves against the
-        // org workdir). Matched on REAL paths via isWithin, so a symlink out of
-        // the directory and a shared-prefix sibling (`site-old` vs `site`) both
-        // miss. Glob entries keep their glob semantics.
-        // B1: a directory entry matches against its SNAPSHOT, never a fresh
-        // realpath — the role can't widen it by swapping it for a symlink. An
-        // entry that no longer resolves to its snapshot refuses the call.
-        const snaps = globs.map((g) => [g, this.scopeSnapshots.get(g)] as const);
-        for (const [g, s] of snaps) {
-          const drift = s && scopeDrift(g, s);
-          if (drift) return deny(drift);
-        }
-        const inScope = (g: string): boolean => {
-          if (isGlobScope(g)) return globToRegExp(g).test(isAbsolute(g) ? realPosix : relPosix);
-          const s = this.scopeSnapshots.get(g);
-          return !!s && !s.refused && isWithin(s.real, real);
-        };
-        const refusedNote = snaps
-          .map(([, s]) => s?.refused)
-          .filter(Boolean)
-          .map((r) => `; ${r}`)
-          .join('');
-        // #303: an absolute fileRead/fileWrite entry is an explicit, author-
-        // written grant — it authorizes a path on its own, independent of
-        // cwd/roots, the same way `policy.sandbox.allowWrite` does for Bash.
-        const grantedByAbsoluteScope = globs.some((g) => isAbsolute(g) && inScope(g));
-        if (!grantedByAbsoluteScope) {
-          // #303: beyond cwd, a role may also reach $TMPDIR, the org root, and
-          // any operator-granted policy.sandbox.allowWrite entries — the same
-          // roots the Bash sandbox already treats as writable (file-roots.ts).
-          // $HOME is deliberately never one of them; see file-roots.ts's doc
-          // comment.
-          const realRoots = uniq([realCwd, ...this.roots.map(realPath)]);
-          // #291: naming only the rejected path leaves the role guessing another
-          // absolute path — it never learns the roots it is confined to. Name
-          // the boundary and how paths resolve so the next turn can be correct.
-          // #492: an absolute scope entry is a grant of its own — name it too,
-          // with how it matches, or the role never learns it exists.
-          const absGrants = globs.filter((g) => isAbsolute(g));
-          if (!realRoots.some((root) => isWithin(root, real)))
-            return deny(
-              `path escapes every root this role may use: ${p} (roots: ${realRoots.join(', ')}${absGrants.length ? `; ${WRITE_TOOLS.has(tool) ? 'write' : 'read'} scope also grants ${absGrants.map(describeScope).join(', ')}` : ''} — paths are resolved relative to org workdir ${this.cwd}; retry with a path inside one of them)${refusedNote}`,
-            );
-        }
-        // #303: a widened root must not make credential stores, guard-undoing
-        // config, sockets, or the XDG runtime dir reachable — today they are
-        // unreachable purely because they sit outside cwd, an accident that
-        // vanishes the moment another root admits them (e.g. allowWrite:
-        // [$HOME]). Runs for READ_TOOLS too, unlike the .git check below,
-        // which is write-only.
-        const deniedHit = fileToolDenied(homedir(), process.env).find((d) =>
-          isWithin(realPath(d), real),
-        );
-        if (deniedHit)
-          return deny(
-            `path ${p} resolves inside ${deniedHit}, which no role may touch regardless of scope, root, or allowWrite (credential store, guard config, socket, or runtime dir)`,
-          );
-        if (WRITE_TOOLS.has(tool) && isDecisionFile(real))
-          return deny(
-            `path ${p} records a human's decisions (gates, approvals, questions, inbox) — only the org daemon writes it`,
-          );
-        if (isDashboardCredential(real))
-          return deny(
-            `path ${p} is a dashboard credential, which no role may touch regardless of scope, root, or allowWrite`,
-          );
-        if (!grantedByAbsoluteScope && !globs.some((g) => !isAbsolute(g) && inScope(g)))
-          return deny(
-            `path ${rel} outside ${WRITE_TOOLS.has(tool) ? 'write' : 'read'} scope — role ${this.role} may use ${globs.map(describeScope).join(', ')} (relative to org workdir ${this.cwd})${refusedNote}`,
-          );
-        // #258: Write/Edit run in-process, so the OS sandbox never sees them —
-        // without this a 'read' role could write refs and objects straight into
-        // .git, and a 'commit' role could rewrite the shared identity (#250) or
-        // the hooks that enforce its own level. Still fires for a path admitted
-        // via a root other than cwd (#303) — it does not depend on `rel`.
-        if (WRITE_TOOLS.has(tool)) {
-          const gitLevel = this.policy.git ?? 'read';
-          const segments = real.split(sep);
-          const at = segments.lastIndexOf('.git');
-          const inGit = segments[at + 1];
-          if (
-            gitLevel !== 'push' &&
-            at !== -1 &&
-            (gitLevel !== 'commit' || inGit === 'config' || inGit === 'hooks')
-          )
-            return deny(
-              `writes into ${segments.slice(at).join('/')} are not allowed (policy.git: ${gitLevel})`,
-            );
-        }
+      for (const p of paths) {
+        const reason = this.filePathDenial(tool, p, globs);
+        if (reason) return deny(reason);
       }
     }
 
@@ -440,5 +350,108 @@ export class PolicyEngine {
     }
 
     return allow();
+  }
+
+  /** Why a file-tool call on `p` is refused, or null when it may proceed. */
+  private filePathDenial(tool: string, p: string, globs: string[]): string | null {
+    // SEC: compare REAL paths — a symlink inside the scope pointing outside
+    // the workdir (or at an out-of-scope file) passed the lexical check.
+    // Resolved once and reused below: the root check, the deny pass and
+    // the .git check (#258) all key off the same real path.
+    const real = realPath(resolve(this.cwd, p));
+    const realCwd = realPath(this.cwd);
+    // fileWrite/fileRead globs are always authored with '/' separators (POSIX
+    // convention, matches every example in types.ts and the skill docs) — but
+    // path.relative()/path.resolve() return '\'-separated paths on Windows, and
+    // globToRegExp treats '\' as a literal character, not a separator. Without
+    // normalizing, every glob with a '/' in it silently fails to match on
+    // Windows and a role with ANY fileWrite/fileRead scope narrower than the
+    // unrestricted ['**'] default is denied on every single call.
+    const rel = relative(realCwd, real);
+    const relPosix = rel.split(sep).join('/');
+    const realPosix = real.split(sep).join('/');
+    // #492: an entry with no glob characters is a path — it grants that
+    // path AND everything beneath it (a relative one resolves against the
+    // org workdir). Matched on REAL paths via isWithin, so a symlink out of
+    // the directory and a shared-prefix sibling (`site-old` vs `site`) both
+    // miss. Glob entries keep their glob semantics.
+    // B1: a directory entry matches against its SNAPSHOT, never a fresh
+    // realpath — the role can't widen it by swapping it for a symlink. An
+    // entry that no longer resolves to its snapshot refuses the call.
+    const snaps = globs.map((g) => [g, this.scopeSnapshots.get(g)] as const);
+    for (const [g, s] of snaps) {
+      const drift = s && scopeDrift(g, s);
+      if (drift) return drift;
+    }
+    const inScope = (g: string): boolean => {
+      if (isGlobScope(g)) return globToRegExp(g).test(isAbsolute(g) ? realPosix : relPosix);
+      const s = this.scopeSnapshots.get(g);
+      return !!s && !s.refused && isWithin(s.real, real);
+    };
+    const refusedNote = snaps
+      .map(([, s]) => s?.refused)
+      .filter(Boolean)
+      .map((r) => `; ${r}`)
+      .join('');
+    // #303: an absolute fileRead/fileWrite entry is an explicit, author-
+    // written grant — it authorizes a path on its own, independent of
+    // cwd/roots, the same way `policy.sandbox.allowWrite` does for Bash.
+    const grantedByAbsoluteScope = globs.some((g) => isAbsolute(g) && inScope(g));
+    if (!grantedByAbsoluteScope) {
+      // #303: beyond cwd, a role may also reach $TMPDIR, the org root, and
+      // any operator-granted policy.sandbox.allowWrite entries — the same
+      // roots the Bash sandbox already treats as writable (file-roots.ts).
+      // $HOME is deliberately never one of them; see file-roots.ts's doc
+      // comment.
+      const realRoots = uniq([realCwd, ...this.roots.map(realPath)]);
+      // #291: naming only the rejected path leaves the role guessing another
+      // absolute path — it never learns the roots it is confined to. Name
+      // the boundary and how paths resolve so the next turn can be correct.
+      // #492: an absolute scope entry is a grant of its own — name it too,
+      // with how it matches, or the role never learns it exists.
+      const absGrants = globs.filter((g) => isAbsolute(g));
+      if (!realRoots.some((root) => isWithin(root, real)))
+        return `path escapes every root this role may use: ${p} (roots: ${realRoots.join(', ')}${absGrants.length ? `; ${WRITE_TOOLS.has(tool) ? 'write' : 'read'} scope also grants ${absGrants.map(describeScope).join(', ')}` : ''} — paths are resolved relative to org workdir ${this.cwd}; retry with a path inside one of them)${refusedNote}`;
+    }
+    // #303: a widened root must not make credential stores, guard-undoing
+    // config, sockets, or the XDG runtime dir reachable — today they are
+    // unreachable purely because they sit outside cwd, an accident that
+    // vanishes the moment another root admits them (e.g. allowWrite:
+    // [$HOME]). Runs for READ_TOOLS too, unlike the .git check below,
+    // which is write-only.
+    const deniedHit = fileToolDenied(homedir(), process.env).find((d) =>
+      isWithin(realPath(d), real),
+    );
+    if (deniedHit)
+      return `path ${p} resolves inside ${deniedHit}, which no role may touch regardless of scope, root, or allowWrite (credential store, guard config, socket, or runtime dir)`;
+    // #498: the org definitions (each role's own policy), the decision,
+    // state and control files under the org root's .monomind/orgs/
+    // (org-authority-files.ts). Both the resolved and the as-written path
+    // are classified, so a symlink to one of them, or one of them that is
+    // a symlink, is refused too. Without a known org root, every root the
+    // role may use is treated as one.
+    if (
+      WRITE_TOOLS.has(tool) &&
+      isAuthorityFile(
+        { real, lexical: resolve(this.cwd, p) },
+        this.orgRoot ? [this.orgRoot] : uniq([this.cwd, ...this.roots]),
+      )
+    )
+      return `path ${p} is org authority state (an org definition, a human's decisions, or runtime state under .monomind/orgs/) — no role may write it, regardless of scope, root, or allowWrite; only the operator and the org daemon do`;
+    if (isDashboardCredential(real))
+      return `path ${p} is a dashboard credential, which no role may touch regardless of scope, root, or allowWrite`;
+    if (!grantedByAbsoluteScope && !globs.some((g) => !isAbsolute(g) && inScope(g)))
+      return `path ${rel} outside ${WRITE_TOOLS.has(tool) ? 'write' : 'read'} scope — role ${this.role} may use ${globs.map(describeScope).join(', ')} (relative to org workdir ${this.cwd})${refusedNote}`;
+    // #258: Write/Edit run in-process, so the OS sandbox never sees them —
+    // without this a 'read' role could write refs and objects straight into
+    // .git, and a 'commit' role could rewrite the shared identity (#250) or
+    // the hooks that enforce its own level. Still fires for a path admitted
+    // via a root other than cwd (#303) — it does not depend on `rel`.
+    if (WRITE_TOOLS.has(tool)) {
+      const gitLevel = this.policy.git ?? 'read';
+      const inGit = gitWriteViolation(real, gitLevel);
+      if (inGit) return `writes into ${inGit} are not allowed (policy.git: ${gitLevel})`;
+    }
+    return null;
   }
 }

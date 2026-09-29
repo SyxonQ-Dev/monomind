@@ -32,9 +32,7 @@ Monomind is a domain-driven design architecture for multi-agent AI coordination 
 | Topology | hierarchical-mesh |
 | Max Agents | 15 |
 | Memory Backend | hybrid |
-| Neural Learning | Enabled |
-| Learning | Enabled |
-| Agent Scopes | Enabled (project/local/user) |
+| `neural.enabled` | On (session start loads the local pattern store only when on; no model is trained) |
 
 ---
 
@@ -99,10 +97,10 @@ Fallback when picking returns nothing — real core agents:
 | `session` | 6 | Session persistence |
 | `config` | 7 | Configuration |
 | `status` | 3 | System monitoring |
-| `hooks` | 28 | Self-learning hooks + 9 background workers |
+| `hooks` | 28 | Edit/outcome logging, agent routing + 9 background workers |
 
 > Note: there is no `workflow`, `neural`, `embeddings`, `claims`, `migrate`, or `process` CLI command.
-> Neural pattern learning was merged into `hooks intelligence`.
+> The old `neural` pattern commands live under `hooks intelligence` — a local JSON pattern store; no model is trained.
 
 ### Advanced Commands
 | Command | Subcommands | Description |
@@ -146,7 +144,7 @@ The four groups below are a curated highlight, not the full 28 — run `monomind
 | `pre-command` | Risk assessment |
 | `post-command` | Command metrics |
 | `pre-task` | Task start + agent suggestions |
-| `post-task` | Task completion learning |
+| `post-task` | Record task outcome |
 
 #### Session Hooks (4)
 | Hook | Description |
@@ -161,7 +159,7 @@ The four groups below are a curated highlight, not the full 28 — run `monomind
 |------|-------------|
 | `route` | Optimal agent routing |
 | `explain` | Routing decisions |
-| `pretrain` | Bootstrap intelligence |
+| `pretrain` | Scan the repository (file types, import lines) into the memory store and local pattern log (no training) |
 | `transfer` | Pattern transfer |
 
 #### Coverage Hooks (3)
@@ -182,7 +180,7 @@ The four groups below are a curated highlight, not the full 28 — run `monomind
 | `audit` | high | Security audit — writes .monomind/metrics/security-audit.json |
 | `consolidate` | low | RAPTOR memory consolidation — writes .monomind/metrics/consolidation.json |
 | `progress` | normal | Implementation metrics — writes .monomind/metrics/progress.json |
-| `reflexion` | normal | Self-learning from failures (P2-15) — reflects on failed tasks, stores lessons for future retrieval |
+| `reflexion` | normal | Turns failed routed tasks from .monomind/route-outcomes.jsonl into templated keyword notes in .monomind/reflexion-store.json (pre-task shows matches) |
 
 Metrics-producing workers (ddd, map, audit, consolidate) refresh at
 session start when their output is >6h old; run on demand with
@@ -195,27 +193,12 @@ session start when their output is >6h old; run on demand with
 ### Intelligence System
 - **Keyword routing**: Deterministic task→agent routing with outcome measurement
 - **ANN pattern search**: Indexed vector search via SQLite
-- **ReasoningBank**: Stores learned patterns and trajectories for retrieval
+- **Pattern store**: Hooks log edits, outcomes and trajectories to local JSON pattern files for retrieval
+- **Pick stats**: Pick adherence and subagent outcomes (`.monomind/pick-stats.json`) act as a bounded ranking prior on later picks
 - **Int8 Quantization**: ~4x memory reduction for stored embeddings
 
-Routing and learning are JS-only — no native neural engine is required. Route
-and command outcomes are recorded and scored so routing quality is measured.
-
-### Self-Learning Memory (ADR-049)
-
-| Component | Status | Description |
-|-----------|--------|-------------|
-| **Learning** | ✅ Enabled | Connects insights to the pattern store |
-| **AgentMemoryScope** | ✅ Enabled | 3-scope agent memory (project/local/user) |
-
-**Learning** — Insights trigger learning trajectories. Confidence evolves: +0.03 on access, -0.005/hour decay.
-
-**AgentMemoryScope** - Maps Claude Code 3-scope directories:
-- `project`: `<gitRoot>/.claude/agent-memory/<agent>/`
-- `local`: `<gitRoot>/.claude/agent-memory-local/<agent>/`
-- `user`: `~/.claude/agent-memory/<agent>/`
-
-High-confidence insights (>0.8) can transfer between agents.
+No model is trained — routing and pattern logging run in JS on local files.
+Route and command outcomes are recorded and scored so routing quality is measured.
 
 ### Memory Commands
 ```bash
@@ -260,7 +243,7 @@ Monoswarm members are registry agents (any agent `name`); common ones:
 |--------|--------|--------|
 | ANN Search | Indexed vector search | ✅ Implemented (SQLite) |
 | Memory Reduction | 50-75% | ✅ Implemented (~4x via Int8 quantization) |
-| Pattern Learning | Recorded + retrievable | ✅ Implemented (ReasoningBank) |
+| Pattern Logging | Recorded + retrievable | ✅ Implemented (local JSON pattern store) |
 | MCP Response | <100ms | ✅ Achieved |
 | CLI Startup | <500ms | ✅ Achieved |
 | Graph Build (1k) | <200ms | ✅ 2.78ms (71.9x headroom) |

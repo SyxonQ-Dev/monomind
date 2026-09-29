@@ -165,8 +165,6 @@ export const DEFAULT_INIT_OPTIONS: InitOptions = {
     maxAgents: 15,
     memoryBackend: 'hybrid',
     enableNeural: true,
-    enableLearningBridge: true,
-    enableAgentScopes: true,
   },
   embeddings: {
     enabled: true,
@@ -233,8 +231,6 @@ export const MINIMAL_INIT_OPTIONS: InitOptions = {
     maxAgents: 5,
     memoryBackend: 'memory',
     enableNeural: false,
-    enableLearningBridge: false,
-    enableAgentScopes: false,
   },
   embeddings: {
     enabled: false,

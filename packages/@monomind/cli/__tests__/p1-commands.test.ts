@@ -494,6 +494,30 @@ describe('Start Command', () => {
       expect(result.data).toHaveProperty('topology', 'mesh');
     });
 
+    it('should honour the swarm section init writes to config.yaml (#509)', async () => {
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        'version: "3.0.0"\n\nswarm:\n  topology: mesh\n  maxAgents: 4\n',
+      );
+
+      const result = await startCommand.action!(ctx);
+
+      expect(result.success).toBe(true);
+      expect(result.data).toHaveProperty('topology', 'mesh');
+      expect(result.data).toHaveProperty('maxAgents', 4);
+    });
+
+    it('should still read a legacy monoswarm section from config.yaml', async () => {
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        'version: "3.0.0"\n\nmonoswarm:\n  topology: ring\n  maxAgents: 6\n',
+      );
+
+      const result = await startCommand.action!(ctx);
+
+      expect(result.success).toBe(true);
+      expect(result.data).toHaveProperty('topology', 'ring');
+      expect(result.data).toHaveProperty('maxAgents', 6);
+    });
+
     it('should refuse --daemon since no long-running process exists', async () => {
       // ASL-10: `--daemon` used to spawn a detached child that did nothing but
       // watch its own pid file — no real background work happened. It now

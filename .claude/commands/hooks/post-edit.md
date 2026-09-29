@@ -1,11 +1,11 @@
 ---
 name: hooks:post-edit
-description: Record editing outcome for neural pattern learning.
+description: Record an editing outcome in the local feedback log.
 ---
 
 # hooks post-edit
 
-Record editing outcome for neural pattern learning.
+Record an editing outcome in the local feedback log.
 
 ## Usage
 
@@ -41,7 +41,7 @@ npx monomind hooks post-edit -f src/utils.ts --format json
 
 ## Output
 
-- Whether the outcome was recorded (the learning-feedback write), and which store took it
+- Whether the outcome was recorded (the feedback write), and which store took it
 
 ## Claude Code Integration
 
@@ -76,4 +76,4 @@ mcp__monomind__hooks_post-edit({
 ## See Also
 
 - `hooks pre-edit` — get context before editing
-- `hooks metrics` — view learning metrics
+- `hooks metrics` — view recorded routing/outcome metrics

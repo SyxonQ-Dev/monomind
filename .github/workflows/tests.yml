@@ -152,13 +152,71 @@ jobs:
       # weights on disk to run for real — the eval harness deliberately
       # refuses to download them mid-query (see knowledge/eval/model-presence.ts),
       # so CI has to provision them as an explicit prior step instead, exactly
-      # like a human would locally. Not cached: this is a one-time ~280MB
-      # fetch per run, and predicting the exact pnpm-mangled cache path to
-      # cache reliably isn't worth the complexity for a job that already
-      # takes minutes.
+      # like a human would locally.
+      #
+      # The weights (~280MB) are cached, because fetching them from
+      # huggingface.co on every run failed on 429/499 rate limits (GH issue
+      # #511). They live in two places:
+      #   - @huggingface/transformers' own `.cache`, beside the installed
+      #     package. Its cacheDir is fixed at `<package dir>/.cache` and it
+      #     reads no TRANSFORMERS_CACHE/HF_HOME variable, so there is no env
+      #     to pin. pnpm installs it under a version-mangled node_modules/.pnpm
+      #     path, so resolve that real path rather than hardcoding it.
+      #   - ~/.monomind/models, for the reranker classifier head
+      #     (rerankerModelsDir() in memory/memory-bridge-backend.ts).
+      # The key names the models and the revision provisionModel() pins
+      # ('main', in knowledge/eval/model-presence.ts), plus the transformers
+      # version, which is part of the cache path.
+      - name: Resolve embedding model cache path
+        id: model-cache-path
+        working-directory: packages/@monomind/cli
+        run: |
+          tf_dir=$(node -p "require('fs').realpathSync('node_modules/@huggingface/transformers')")
+          tf_version=$(node -p "require('$tf_dir/package.json').version")
+          echo "dir=$tf_dir/.cache" >> "$GITHUB_OUTPUT"
+          echo "transformers=$tf_version" >> "$GITHUB_OUTPUT"
+
+      - name: Restore embedding model cache
+        id: model-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ steps.model-cache-path.outputs.dir }}
+            ~/.monomind/models
+          key: hf-models-${{ runner.os }}-gte-modernbert-base-ettin-reranker-32m-v1-main-transformers-${{ steps.model-cache-path.outputs.transformers }}
+          restore-keys: |
+            hf-models-${{ runner.os }}-gte-modernbert-base-ettin-reranker-32m-v1-main-
+
+      # Provisioning skips any model already on disk, so after a cache hit
+      # this touches no network. On a miss, transient HuggingFace errors get
+      # two retries (20s, then 60s); a third failure fails the job as before.
       - name: Provision embedding models
         working-directory: packages/@monomind/cli
-        run: node bin/cli.js doc eval --provision-model
+        run: |
+          delays=(20 60)
+          for attempt in 1 2 3; do
+            if node bin/cli.js doc eval --provision-model; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              delay=${delays[$((attempt - 1))]}
+              echo "::warning::Model provisioning attempt $attempt failed; retrying in ${delay}s"
+              sleep "$delay"
+            fi
+          done
+          echo "::error::Model provisioning failed after 3 attempts"
+          exit 1
+
+      # Saved here, not by actions/cache's post step: that only runs when the
+      # whole job succeeds, so one failing test would discard a good download.
+      - name: Save embedding model cache
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ steps.model-cache-path.outputs.dir }}
+            ~/.monomind/models
+          key: ${{ steps.model-cache.outputs.cache-primary-key }}
 
       - name: Run root tests
         run: npx vitest run --reporter=verbose
@@ -490,11 +548,57 @@ jobs:
 
       # Same reasoning as the root job's identical step: cli's doc-eval and
       # knowledge-superseded suites need the real embedding/reranker weights
-      # on disk, provisioned as an explicit non-query-time step.
+      # on disk, provisioned as an explicit non-query-time step. Cached and
+      # retried exactly as there; see the root job's comments for the paths
+      # and the key.
+      - name: Resolve embedding model cache path
+        if: matrix.name == 'cli'
+        id: model-cache-path
+        working-directory: ${{ matrix.dir }}
+        run: |
+          tf_dir=$(node -p "require('fs').realpathSync('node_modules/@huggingface/transformers')")
+          tf_version=$(node -p "require('$tf_dir/package.json').version")
+          echo "dir=$tf_dir/.cache" >> "$GITHUB_OUTPUT"
+          echo "transformers=$tf_version" >> "$GITHUB_OUTPUT"
+
+      - name: Restore embedding model cache
+        if: matrix.name == 'cli'
+        id: model-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ steps.model-cache-path.outputs.dir }}
+            ~/.monomind/models
+          key: hf-models-${{ runner.os }}-gte-modernbert-base-ettin-reranker-32m-v1-main-transformers-${{ steps.model-cache-path.outputs.transformers }}
+          restore-keys: |
+            hf-models-${{ runner.os }}-gte-modernbert-base-ettin-reranker-32m-v1-main-
+
       - name: Provision embedding models
         if: matrix.name == 'cli'
         working-directory: ${{ matrix.dir }}
-        run: node bin/cli.js doc eval --provision-model
+        run: |
+          delays=(20 60)
+          for attempt in 1 2 3; do
+            if node bin/cli.js doc eval --provision-model; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              delay=${delays[$((attempt - 1))]}
+              echo "::warning::Model provisioning attempt $attempt failed; retrying in ${delay}s"
+              sleep "$delay"
+            fi
+          done
+          echo "::error::Model provisioning failed after 3 attempts"
+          exit 1
+
+      - name: Save embedding model cache
+        if: matrix.name == 'cli' && steps.model-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ steps.model-cache-path.outputs.dir }}
+            ~/.monomind/models
+          key: ${{ steps.model-cache.outputs.cache-primary-key }}
 
       - name: Run ${{ matrix.name }} tests
         working-directory: ${{ matrix.dir }}

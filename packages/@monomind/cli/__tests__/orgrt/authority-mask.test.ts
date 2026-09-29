@@ -15,7 +15,6 @@ import {
   authorityMaskArgs,
   authorityMaskAvailability,
   ensureAuthorityDirs,
-  isDecisionFile,
   maskedCommand,
 } from '../../src/orgrt/authority-mask.js';
 import { OrgBus } from '../../src/orgrt/bus.js';
@@ -38,18 +37,10 @@ function world() {
   writeFileSync(join(root, '.monomind/dashboard-token'), 'TOKEN');
   writeFileSync(join(root, '.monomind/orgs/acme/gates.json'), '{"gates":[]}');
   writeFileSync(join(root, '.monomind/orgs/acme/inbox.jsonl'), '');
+  writeFileSync(join(root, '.monomind/orgs/acme.json'), '{"name":"acme"}');
+  writeFileSync(join(root, '.monomind/orgs/acme/runtime.json'), '{}');
   return { home, root, env };
 }
-
-describe('isDecisionFile', () => {
-  it('matches the four decision files of an org dir, nothing else', () => {
-    expect(isDecisionFile('/p/.monomind/orgs/acme/gates.json')).toBe(true);
-    expect(isDecisionFile('/p/.monomind/orgs/acme/inbox.jsonl')).toBe(true);
-    expect(isDecisionFile('/p/.monomind/orgs/acme/runtime.json')).toBe(false);
-    expect(isDecisionFile('/p/.monomind/orgs/acme/run-1/gates.json')).toBe(false);
-    expect(isDecisionFile('/p/src/gates.json')).toBe(false);
-  });
-});
 
 describe.runIf(authorityMaskAvailability().available)('the bubblewrap mask (real bwrap)', () => {
   const inMask = (w: ReturnType<typeof world>, script: string) => {
@@ -83,6 +74,20 @@ describe.runIf(authorityMaskAvailability().available)('the bubblewrap mask (real
     expect(readFileSync(gates, 'utf8')).toBe('{"gates":[]}');
     expect(readFileSync(join(w.root, 'work/out.txt'), 'utf8')).toBe('ok\n');
     expect(r.stderr).toMatch(/Read-only|busy/i);
+  });
+
+  it('makes the org definition and runtime state unwritable too (#498)', () => {
+    const w = world();
+    const def = join(w.root, '.monomind/orgs/acme.json');
+    const rt = join(w.root, '.monomind/orgs/acme/runtime.json');
+    mkdirSync(join(w.root, '.monomind/orgs/acme/reports'));
+    inMask(
+      w,
+      `echo forged > ${def}; echo forged > ${rt}; rm -f ${def}; echo ok > ${w.root}/.monomind/orgs/acme/reports/r.md`,
+    );
+    expect(readFileSync(def, 'utf8')).toBe('{"name":"acme"}');
+    expect(readFileSync(rt, 'utf8')).toBe('{}');
+    expect(readFileSync(join(w.root, '.monomind/orgs/acme/reports/r.md'), 'utf8')).toBe('ok\n');
   });
 
   it('writes nothing the role puts in a hidden dir to the real one', () => {
@@ -131,6 +136,13 @@ describe('SDK sandbox and file tools carry the same protection', () => {
     expect(sb.filesystem.denyRead).toContain(join(w.home, '.monomind/dashboard-auth'));
     expect(sb.filesystem.denyWrite).toContain(join(w.root, '.monomind/orgs/acme/gates.json'));
     expect(r.disallowedTools).toContain(`Edit(/${join(w.root, '.monomind/orgs/*/gates.json')})`);
+    // #498: the org definition and the daemon's state, for Bash and the SDK.
+    expect(sb.filesystem.denyWrite).toContain(join(w.root, '.monomind/orgs/acme.json'));
+    expect(sb.filesystem.denyWrite).toContain(join(w.root, '.monomind/orgs/acme/runtime.json'));
+    expect(r.disallowedTools).toContain(`Edit(/${join(w.root, '.monomind/orgs/*.json')})`);
+    expect(r.disallowedTools).toContain(`Edit(/${join(w.root, '.monomind/orgs/*/decisions.jsonl')})`);
+    expect(r.disallowedTools).toContain(`Edit(/${join(w.root, '.monomind/orgs/*/git-guard')}/**)`);
+    expect(r.disallowedTools).toContain(`Edit(/${join(w.root, '.monomind/orgs/*/run')})`);
     expect(r.disallowedTools).toContain(`Read(/${join(w.home, '.monomind/dashboard-auth')}/**)`);
   });
 

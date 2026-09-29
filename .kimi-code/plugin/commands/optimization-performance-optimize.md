@@ -60,4 +60,4 @@ npx monomind performance metrics
 - `performance bottleneck` — diagnose what to optimize first
 - `performance benchmark` — measure optimization impact
 - `performance metrics` — track performance over time
-- `neural optimize` — optimize neural model weights
+- `hooks intelligence optimize` — compact the local pattern store

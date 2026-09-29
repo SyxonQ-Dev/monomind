@@ -51,19 +51,35 @@ afterEach(() => {
   } catch {}
 });
 
+/**
+ * Environment for a spawned hook, independent of the shell that runs the suite.
+ * - MONOMIND_HOOK_QUIET is set by a live Claude Code session; inherited, it
+ *   skips the graph-gate call that the fail-OPEN test relies on (#506).
+ * - GIT_CEILING_DIRECTORIES stops git discovery at the temp project, so the
+ *   fixture is a non-repo whether TMPDIR is tmpfs, disk, or inside a checkout.
+ */
+function hookEnv(overrides) {
+  const env = {
+    ...process.env,
+    GIT_CEILING_DIRECTORIES: path.dirname(fs.realpathSync(tmp)),
+    ...overrides,
+  };
+  delete env.MONOMIND_HOOK_QUIET;
+  return env;
+}
+
 /** Run a hook-handler subcommand with the given hook JSON on stdin. */
 function runHook(command, hookInput, opts = {}) {
   const r = spawnSync(process.execPath, [opts.hook || HOOK, command], {
     input: JSON.stringify(hookInput),
     encoding: 'utf-8',
-    env: {
-      ...process.env,
+    env: hookEnv({
       CLAUDE_PROJECT_DIR: opts.cwd || tmp,
       // Keep the optional heuristic layers out of these assertions — they are
       // deliberately fail-open and not what is under test here.
       MONOMIND_MONOFENCE_GATE: 'off',
       MONOMIND_GRAPH_GATE: 'off',
-    },
+    }),
     timeout: 20000,
   });
   return { code: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
@@ -205,6 +221,20 @@ describe('pre-bash destructive-ops gate', () => {
     expect(res.code).toBe(0);
     expect(res.stdout).toBe('');
   });
+
+  it('HAPPY PATH: a search in a non-git project does not leak git errors (#506)', () => {
+    // grep/find reach the monograph lookup, which asks git for the repo root.
+    // Outside a repo git fails; its "fatal: not a git repository" must not
+    // end up on the hook's stderr.
+    const res = runHook('pre-bash', {
+      tool_name: 'Bash',
+      tool_input: { command: 'grep -rn foo src' },
+      session_id: 's1',
+    });
+    expect(res.code).toBe(0);
+    expect(res.stdout).toBe('');
+    expect(res.stderr).not.toMatch(/fatal:/);
+  });
 });
 
 /**
@@ -231,12 +261,11 @@ describe('monofence pre-write layer does not block ordinary source', () => {
         tool_input: { file_path: '/tmp/sample.ts', content },
       }),
       encoding: 'utf-8',
-      env: {
-        ...process.env,
+      env: hookEnv({
         CLAUDE_PROJECT_DIR: tmp,
         MONOMIND_MONOFENCE_GATE: 'on',
         MONOMIND_GRAPH_GATE: 'off',
-      },
+      }),
       timeout: 20000,
     });
     return { code: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
@@ -403,7 +432,7 @@ describe('gates fail CLOSED when they crash (regression: crash == silent allow)'
           session_id: 's1',
         }),
         encoding: 'utf-8',
-        env: { ...process.env, CLAUDE_PROJECT_DIR: tmp, MONOMIND_MONOFENCE_GATE: 'off' },
+        env: hookEnv({ CLAUDE_PROJECT_DIR: tmp, MONOMIND_MONOFENCE_GATE: 'off' }),
         timeout: 20000,
       },
     );

@@ -5,7 +5,7 @@ import type { Command, CommandContext, CommandResult } from '../types.js';
 // Route subcommand
 export const routeCommand: Command = {
   name: 'route',
-  description: 'Route task to optimal agent using learned patterns',
+  description: 'Route task to an agent through the keyword picker',
   options: [
     {
       name: 'task',

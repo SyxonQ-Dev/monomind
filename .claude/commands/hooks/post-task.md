@@ -1,11 +1,11 @@
 ---
 name: hooks:post-task
-description: Record task completion for neural pattern learning.
+description: Record a task outcome against its routed agent.
 ---
 
 # hooks post-task
 
-Record task completion for neural pattern learning.
+Record a task outcome against its routed agent.
 
 ## Usage
 
@@ -41,7 +41,7 @@ npx monomind hooks post-task -i task-123 --success true --format json
 
 ## Output
 
-- Whether the learning feedback was recorded, and which store took it
+- Whether the feedback record was written, and which store took it
 - Whether the routing outcome was saved
 
 ## MCP Tool
@@ -59,4 +59,4 @@ mcp__monomind__hooks_post-task({
 ## See Also
 
 - `hooks pre-task` — register task start
-- `hooks metrics` — view learning metrics
+- `hooks metrics` — view recorded routing/outcome metrics

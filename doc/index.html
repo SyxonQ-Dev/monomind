@@ -301,7 +301,7 @@ code { font-family: var(--ff-m); font-size: 0.85em; background: var(--surface2);
   <section class="hero-section">
     <canvas id="hero-canvas" aria-hidden="true"></canvas>
     <div class="hero-eyebrow">Autonomous Claude Code Orchestration</div>
-    <h1 class="hero-title">Build. Learn. Evolve.<br><em>Without stopping.</em></h1>
+    <h1 class="hero-title">Pick. Remember. Coordinate.<br><em>For Claude Code, Codex and more.</em></h1>
     <p class="hero-sub">Monomind wraps Claude Code with persistent memory, multi-agent swarms, a code knowledge graph, and one picker that chooses the right agent and skill for every task — all wired into one CLI.</p>
     <div class="hero-actions">
       <button class="btn btn-primary" data-page="getting-started">Get Started →</button>
@@ -373,7 +373,7 @@ code { font-family: var(--ff-m); font-size: 0.85em; background: var(--surface2);
 <span class="cmd">npx monomind init --target codex</span>
 
 <span class="cmd">npx monomind hooks worker list</span>
-<span class="comment"># Background workers (security, health, learning...) run at session start</span>
+<span class="comment"># Background workers (health, security, map, audit...) — metrics workers refresh at session start</span>
 
 <span class="cmd">npx monomind doctor --fix</span>
 <span class="comment"># Checks: Node 22.12+, git, config, worker metrics, DB, MCP, disk</span></div>
@@ -629,7 +629,7 @@ monomind doc ingest ./their-knowledge -s shared
       <div class="phase-step"><div class="phase-connector"><div class="phase-dot"></div><div class="phase-line"></div></div><div class="phase-body"><div class="phase-num">Step 1</div><div class="phase-name">RETRIEVE</div><div class="phase-desc">Keyword/Jaccard scoring of stored patterns and episodes against the prompt. Top matches are injected as context.</div></div></div>
       <div class="phase-step"><div class="phase-connector"><div class="phase-dot"></div><div class="phase-line"></div></div><div class="phase-body"><div class="phase-num">Step 2</div><div class="phase-name">LOG</div><div class="phase-desc">Trajectories, steps, and command/route outcomes are recorded (<code>intelligence.ts</code>, <code>command-outcomes.ts</code>, <code>route-outcomes.ts</code>).</div></div></div>
       <div class="phase-step"><div class="phase-connector"><div class="phase-dot"></div><div class="phase-line"></div></div><div class="phase-body"><div class="phase-num">Step 3</div><div class="phase-name">MEASURE</div><div class="phase-desc">Recommended routes are correlated with actual outcomes; <code>doctor</code> reports routing accuracy and adherence.</div></div></div>
-      <div class="phase-step"><div class="phase-connector"><div class="phase-dot"></div><div class="phase-line"></div></div><div class="phase-body"><div class="phase-num">Step 4</div><div class="phase-name">CONSOLIDATE</div><div class="phase-desc">Dedup, detect contradictions, and prune old patterns from <code>patterns.json</code>.</div></div></div>
+      <div class="phase-step"><div class="phase-connector"><div class="phase-dot"></div><div class="phase-line"></div></div><div class="phase-body"><div class="phase-num">Step 4</div><div class="phase-name">CONSOLIDATE</div><div class="phase-desc">At session end, successful outcomes become entries in <code>auto-memory-store.json</code>; near-duplicates are skipped and the store is capped at 200 entries.</div></div></div>
     </div>
   </div>
 </div>
@@ -717,7 +717,7 @@ monomind doc ingest ./their-knowledge -s shared
       <div class="card"><div class="card-title">Central Picker</div><div class="card-desc">One index of registry agents and skills, ranked by a Jev decision model when one is configured and by a BM25-style keyword ranker otherwise. The prompt hook delivers it as a <code>[PICK]</code> line; <code>monomind pick</code>, the <code>pick</code> MCP tool and <code>route task</code> return it on request. <code>route semantic</code> adds an embedding layer (<code>@monoes/routing</code>) after the picker. See <a href="#agents" style="color:var(--accent)">Agents &amp; Skills</a>.</div></div>
       <div class="card"><div class="card-title">Route-Outcome Measurement</div><div class="card-desc">Every pick is recorded and joined with the subagent actually spawned and whether it succeeded. <code>doctor -c pick</code> and <code>route stats</code> report adherence and accuracy; the history breaks near-ties between keyword picks.</div></div>
       <div class="card"><div class="card-title">Trajectory + Outcome Logging</div><div class="card-desc">Steps and trajectories (<code>intelligence.ts</code>) plus command and route outcomes (<code>command-outcomes.ts</code>, <code>route-outcomes.ts</code>) are recorded as plain JSON for later analysis.</div></div>
-      <div class="card"><div class="card-title">Pattern Consolidation</div><div class="card-desc">The <code>learning</code> worker dedups, detects contradictions, and prunes old entries from <code>patterns.json</code> on a 30-minute interval.</div></div>
+      <div class="card"><div class="card-title">Pattern Consolidation</div><div class="card-desc">At session end and before context compaction, <code>consolidate()</code> in <code>intelligence.cjs</code> turns successful outcomes into entries in <code>auto-memory-store.json</code>, skipping near-duplicates and capping the store at 200 entries.</div></div>
     </div>
     <div class="section-title reveal">CLI</div>
     <div class="code-block reveal"><span class="comment"># Inspect logged patterns</span>
@@ -1063,7 +1063,7 @@ Session N: empty round (zero findings AND zero actions)
       <table class="doc-table">
         <thead><tr><th>Chip</th><th>Meaning</th></tr></thead>
         <tbody>
-          <tr><td>PATTERNS N</td><td>Number of learned routing patterns in the pattern store</td></tr>
+          <tr><td>PATTERNS N</td><td>Number of recorded routing patterns in the pattern store</td></tr>
           <tr><td>CHUNKS N</td><td>Number of indexed text chunks available for search</td></tr>
           <tr><td>SWARM topology</td><td>Active swarm topology name (hierarchical, mesh, adaptive…)</td></tr>
           <tr><td>LAST ROUTE</td><td>Agent name that the routing hook most recently selected</td></tr>
@@ -1184,7 +1184,7 @@ Session N: empty round (zero findings AND zero actions)
           <tr><td>Tools</td><td>Show tool-call summary chips on each row</td></tr>
           <tr><td>Projects</td><td>Show project path chip on each row</td></tr>
           <tr><td>CSV</td><td>Export current filtered session list as CSV</td></tr>
-          <tr><td>Patterns</td><td>Show learned routing pattern badges</td></tr>
+          <tr><td>Patterns</td><td>Show recorded routing pattern badges</td></tr>
           <tr><td>Compare</td><td>Enable multi-select mode for session diff (select exactly 2)</td></tr>
           <tr><td>Timeline</td><td>Switch to a Gantt-style timeline visualization</td></tr>
           <tr><td>Donut</td><td>Show a cost-by-model donut chart above the list</td></tr>
@@ -1635,7 +1635,7 @@ You are an API contract reviewer. ...</div>
       <div class="card"><div class="card-title">Decision model or keywords</div><div class="card-desc">A configured Jev decision model chooses from a 30-candidate shortlist (acted on at 0.6, shown down to 0.25). Otherwise a BM25-style keyword ranker with stemming decides. Off by default; <a href="https://github.com/monoes/monomind/blob/main/doc/privacy.md" target="_blank" rel="noopener" style="color:var(--accent)">what it sends</a>.</div></div>
       <div class="card"><div class="card-title">The [PICK] line</div><div class="card-desc">For each prompt the hook prints <code>[PICK] agent: … · skill: …</code> into Claude's context when one candidate clearly leads. Trivial and system prompts are skipped.</div></div>
       <div class="card"><div class="card-title">Same answer everywhere</div><div class="card-desc"><code>monomind pick</code>, the <code>pick</code> MCP tool, <code>hooks_route</code>, <code>route task</code>, <code>guidance_recommend</code>, the mastermind workflows and org auto-assignment all ask the same picker.</div></div>
-      <div class="card"><div class="card-title">Learns from outcomes</div><div class="card-desc">Whether spawned subagents followed the pick and succeeded is logged, and breaks near-ties between keyword picks within ±15 %.</div></div>
+      <div class="card"><div class="card-title">Outcome-weighted picks</div><div class="card-desc">Whether spawned subagents followed the pick and succeeded is logged, and breaks near-ties between keyword picks within ±15 %.</div></div>
     </div>
   </div>
 </div>

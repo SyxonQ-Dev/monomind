@@ -119,7 +119,7 @@ export const preEditCommand: Command = {
 // Post-edit subcommand
 export const postEditCommand: Command = {
   name: 'post-edit',
-  description: 'Record editing outcome for learning',
+  description: 'Record an editing outcome in the local feedback log',
   options: [
     {
       name: 'file',
