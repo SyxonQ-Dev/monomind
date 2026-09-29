@@ -53,11 +53,11 @@ export function snapshotScopeEntry(entry: string, cwd: string, home = homedir())
 
 /** Snapshots for every non-glob fileWrite/fileRead entry, keyed by entry. */
 export function snapshotScopes(
-  policy: { fileWrite?: string[]; fileRead?: string[] },
+  policy: { fileWrite?: string[]; fileRead?: string[] } | undefined,
   cwd: string,
 ): Map<string, ScopeSnapshot> {
   const out = new Map<string, ScopeSnapshot>();
-  for (const e of [...(policy.fileWrite ?? []), ...(policy.fileRead ?? [])])
+  for (const e of [...(policy?.fileWrite ?? []), ...(policy?.fileRead ?? [])])
     if (!isGlobScope(e) && !out.has(e)) out.set(e, snapshotScopeEntry(e, cwd));
   return out;
 }

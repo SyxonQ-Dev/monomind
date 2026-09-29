@@ -97,7 +97,9 @@ export class PolicyEngine {
      *  root, cwd included — see the deny pass below. */
     private roots: string[] = [],
   ) {
-    this.scopeSnapshots = snapshotScopes(policy, cwd);
+    // A caller may build an engine with no policy at all — treat it as {}.
+    this.policy = policy ?? {};
+    this.scopeSnapshots = snapshotScopes(this.policy, cwd);
   }
 
   /** Whether this role's current session runs Bash inside the SDK's OS
@@ -119,8 +121,8 @@ export class PolicyEngine {
    *  sets them itself. */
   updatePolicy(next: RolePolicy): void {
     this.policy = {
-      ...(this.policy.maxTokens != null ? { maxTokens: this.policy.maxTokens } : {}),
-      ...(this.policy.maxUsd != null ? { maxUsd: this.policy.maxUsd } : {}),
+      ...(this.policy?.maxTokens != null ? { maxTokens: this.policy.maxTokens } : {}),
+      ...(this.policy?.maxUsd != null ? { maxUsd: this.policy.maxUsd } : {}),
       ...(next ?? {}),
     };
     this.scopeSnapshots = snapshotScopes(this.policy, this.cwd);

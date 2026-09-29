@@ -276,6 +276,17 @@ describe('#492 B1 — a directory grant is fixed at startup; the role cannot wid
   });
 });
 
+describe('#492 — an engine built with no policy', () => {
+  it('constructs and decides without throwing, and on reload', async () => {
+    const cwd = scratch('pds-cwd-');
+    const p = new PolicyEngine('r', undefined as never, mkBus(), cwd);
+    expect((await p.decide('Write', { file_path: join(cwd, 'a.md'), content: 'x' })).behavior).toBe('allow');
+    expect((await p.decide('Read', { file_path: join(cwd, 'a.md') })).behavior).toBe('allow');
+    p.updatePolicy(undefined as never);
+    expect((await p.decide('Read', { file_path: join(cwd, 'a.md') })).behavior).toBe('allow');
+  });
+});
+
 describe('#492 — schema and org validate', () => {
   it('rejects an empty-string scope entry', () => {
     expect(RolePolicySchema.safeParse({ fileWrite: [''] }).success).toBe(false);
