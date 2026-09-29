@@ -10,7 +10,7 @@ import { createRequire } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -178,6 +178,71 @@ describe('resolveMonographEntry', () => {
 
   it('returns null when nothing resolves', () => {
     expect(loadMod().resolveMonographEntry(project, NOWHERE)).toBeNull();
+  });
+});
+
+// #415: the prompt hook resolves on every prompt; `npm root -g` must not be
+// spawned while a fresh cached answer exists.
+describe('npmGlobalRoot cache', () => {
+  const childProcess = require('node:child_process');
+  let home;
+  let cacheFile;
+  let spawnSpy;
+  beforeEach(() => {
+    home = path.join(tmp, 'mm-home');
+    cacheFile = path.join(home, 'cache', 'npm-root-g.json');
+    vi.stubEnv('MONOMIND_HOME', home);
+    vi.stubEnv('npm_config_prefix', '');
+    spawnSpy = vi.spyOn(childProcess, 'execSync');
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+  const key = () => [process.execPath, '', process.env.PATH || ''].join('|');
+  const writeCache = (rec) => {
+    fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
+    fs.writeFileSync(cacheFile, JSON.stringify(rec));
+  };
+
+  it('uses a fresh cached root without spawning npm', () => {
+    const root = path.join(tmp, 'global');
+    fs.mkdirSync(root, { recursive: true });
+    writeCache({ key: key(), root, at: Date.now() });
+    const entry = fakeMonograph(path.join(root, '@monoes', 'monograph'));
+    const hit = loadMod().resolveMonographEntry(project, { npxCacheDir: '/nonexistent-npx-cache' });
+    expect(hit).toMatchObject({ source: 'global', entry });
+    expect(spawnSpy).not.toHaveBeenCalled();
+  });
+
+  it('asks npm once on a miss and caches the answer for the next process', () => {
+    const root = path.join(tmp, 'global');
+    fs.mkdirSync(root, { recursive: true });
+    spawnSpy.mockReturnValue(root + '\n');
+    expect(loadMod().npmGlobalRoot()).toBe(root);
+    expect(spawnSpy).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fs.readFileSync(cacheFile, 'utf-8'))).toMatchObject({ root });
+    expect(loadMod().npmGlobalRoot()).toBe(root);
+    expect(spawnSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['expired', (root) => ({ key: key(), root, at: Date.now() - 25 * 3600 * 1000 })],
+    [
+      'for another node binary',
+      (root) => ({ key: key().replace(process.execPath, '/other/node'), root, at: Date.now() }),
+    ],
+    [
+      'pointing at a removed directory',
+      (root) => ({ key: key(), root: root + '-gone', at: Date.now() }),
+    ],
+  ])('asks npm again when the cached root is %s', (_label, rec) => {
+    const root = path.join(tmp, 'global');
+    fs.mkdirSync(root, { recursive: true });
+    writeCache(rec(root));
+    spawnSpy.mockReturnValue(root + '\n');
+    expect(loadMod().npmGlobalRoot()).toBe(root);
+    expect(spawnSpy).toHaveBeenCalledTimes(1);
   });
 });
 

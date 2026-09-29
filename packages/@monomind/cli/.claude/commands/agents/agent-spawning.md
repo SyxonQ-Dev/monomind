@@ -22,7 +22,7 @@ Task("Tester", "Create tests...", "tester")
 
 MCP tools are ONLY for coordination:
 ```javascript
-mcp__monomind__swarm_init { topology: "mesh" }
+mcp__monomind__monoswarm_init { topology: "mesh" }
 mcp__monomind__agent_spawn { type: "researcher" }
 ```
 

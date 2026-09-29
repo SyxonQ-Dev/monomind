@@ -27,9 +27,7 @@ export function behavioralRules(): string {
 - NEVER save working files, text/mds, or tests to the root folder
 - Never continuously check status after spawning a swarm — wait for results
 - ALWAYS read a file before editing it
-- NEVER commit secrets, credentials, or .env files
-- ALWAYS call \`mcp__monomind__monograph_query\` BEFORE running grep/rg/find via Bash for code exploration — only fall back to Bash grep if monograph returns 0 results or the DB does not exist
-- When starting any task that touches 3+ files: call \`mcp__monomind__monograph_suggest\` first to get relevant nodes ranked by task relevance`;
+- NEVER commit secrets, credentials, or .env files`;
 }
 
 export function codingPrinciples(): string {
@@ -68,42 +66,26 @@ export function fileOrganization(options: InitOptions): string {
   const lines = ['- NEVER save to root folder — use the directories below'];
   if (srcDir) lines.push(`- Use \`/${srcDir}\` for source code files`);
   if (testDir) lines.push(`- Use \`/${testDir}\` for test files`);
-  lines.push(
-    '- Use `/docs` for documentation and markdown files',
-    '- Use `/config` for configuration files',
-    '- Use `/scripts` for utility scripts',
-    '- Use `/examples` for example code',
-  );
+  lines.push('- Use `/docs` for documentation and `/scripts` for utility scripts');
   return `## File Organization\n\n${lines.join('\n')}`;
 }
 
-export function projectArchitecture(options: InitOptions): string {
+// GH #412: the DDD / TDD-London / event-sourcing mandates and the
+// topology/max-agents "Project Config" were imposed on every project whatever
+// its architecture, and cost tokens on every request without changing what
+// the model does in it.
+export function projectArchitecture(): string {
   return `## Project Architecture
 
-- Follow Domain-Driven Design with bounded contexts
 - Keep files under 500 lines
-- Use typed interfaces for all public APIs
-- Prefer TDD London School (mock-first) for new code
-- Use event sourcing for state changes
-- Ensure input validation at system boundaries
-
-### Project Config
-
-- **Topology**: ${options.runtime.topology}
-- **Max Agents**: ${options.runtime.maxAgents}
-- **Memory**: ${options.runtime.memoryBackend}
-- **Neural**: Disabled (keyword routing only)`;
+- Use typed interfaces for all public APIs`;
 }
 
 export function concurrencyRules(): string {
   return `## Concurrency: 1 MESSAGE = ALL RELATED OPERATIONS
 
-- All operations MUST be concurrent/parallel in a single message
-- Use Claude Code's Task tool for spawning agents, not just MCP
-- ALWAYS batch ALL todos in ONE TodoWrite call (5-10+ minimum)
-- ALWAYS spawn ALL agents in ONE message with full instructions via Task tool
-- ALWAYS batch ALL file reads/writes/edits in ONE message
-- ALWAYS batch ALL Bash commands in ONE message`;
+- ALWAYS batch independent file reads/writes/edits and Bash commands in ONE message
+- ALWAYS spawn ALL agents in ONE message with full instructions via Claude Code's Task tool`;
 }
 
 export function swarmOrchestration(): string {
@@ -111,19 +93,6 @@ export function swarmOrchestration(): string {
 
 - MUST spawn concurrent agents using Claude Code's Task tool
 - ${HONEST_MONOSWARM_SENTENCE}`;
-}
-
-// Consolidated spawn/anti-drift rule — emitted ONCE in the standard template
-// (previously repeated across Monoswarm Orchestration, Anti-Drift, and
-// Execution Rules). Kept out of the minimal template entirely.
-export function swarmRules(): string {
-  return `## Monoswarm Rules
-
-- ${HONEST_MONOSWARM_SENTENCE}
-- ALWAYS spawn ALL agents in ONE message via the Task tool with \`run_in_background: true\` — CLI tools coordinate, Task agents do the work
-- After spawning, STOP — never poll TaskOutput or check monoswarm status; trust agents to return
-- When agent results arrive, review ALL results before proceeding
-- Keep shared memory namespace for all agents; run frequent checkpoints via \`post-task\` hooks`;
 }
 
 export function antiDriftConfig(): string {

@@ -1,5 +1,5 @@
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { checkStaleness } from '../staleness/git-staleness.js';
 import type { MonographDb } from '../storage/db.js';
 import { closeDb, openDb } from '../storage/db.js';
@@ -412,7 +412,8 @@ export function generateGraphReport(
   // Async overload: first arg is a repo path string
   const repoPath = dbOrRepoPath;
   const resolvedDbPath = dbPath ?? join(repoPath, '.monograph', 'graph.db');
-  const resolvedOutputPath = outputPath ?? join(repoPath, 'GRAPH_REPORT.md');
+  // #414: under .monomind/, not the user's repo root, unless the caller asks.
+  const resolvedOutputPath = outputPath ?? join(repoPath, '.monomind', 'GRAPH_REPORT.md');
 
   return (async () => {
     const db = openDb(resolvedDbPath);
@@ -450,6 +451,7 @@ export function generateGraphReport(
           confidenceSection,
         ) + (gapSection ? `\n${gapSection}` : '');
 
+      mkdirSync(dirname(resolvedOutputPath), { recursive: true });
       writeFileSync(resolvedOutputPath, markdown, 'utf8');
 
       return {

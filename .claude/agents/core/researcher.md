@@ -133,8 +133,8 @@ grep -r "specific-pattern" --include="*.ts"
 ### Memory Coordination
 ```javascript
 // Report research status
-mcp__monomind__memory_usage {
-  action: "store",
+mcp__monomind__monoswarm_memory {
+  action: "set",
   key: "swarm/researcher/status",
   namespace: "coordination",
   value: JSON.stringify({
@@ -147,8 +147,8 @@ mcp__monomind__memory_usage {
 }
 
 // Share research findings
-mcp__monomind__memory_usage {
-  action: "store",
+mcp__monomind__monoswarm_memory {
+  action: "set",
   key: "swarm/shared/research-findings",
   namespace: "coordination",
   value: JSON.stringify({
@@ -176,7 +176,7 @@ mcp__monomind__github_repo_analyze {
 }
 
 // Track research metrics
-mcp__monomind__agent_metrics {
+mcp__monomind__agent_status {
   agentId: "researcher"
 }
 ```

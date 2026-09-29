@@ -134,9 +134,13 @@ export function listFilesRecursive(dir: string): Set<string> {
 }
 
 /**
- * Copy directory recursively
+ * Copy directory recursively, leaving out any source path `skip` returns true for
  */
-export function copyDirRecursive(src: string, dest: string): void {
+export function copyDirRecursive(
+  src: string,
+  dest: string,
+  skip?: (srcPath: string) => boolean,
+): void {
   fs.mkdirSync(dest, { recursive: true });
 
   const entries = fs.readdirSync(src, { withFileTypes: true });
@@ -148,9 +152,10 @@ export function copyDirRecursive(src: string, dest: string): void {
 
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
+    if (skip?.(srcPath)) continue;
 
     if (entry.isDirectory()) {
-      copyDirRecursive(srcPath, destPath);
+      copyDirRecursive(srcPath, destPath, skip);
     } else {
       fs.copyFileSync(srcPath, destPath);
     }

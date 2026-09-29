@@ -15,6 +15,7 @@ import { resolveInitOptions } from '../init/resolve-options.js';
 import { countInitFiles, formatInitFileCounts, snapshotInitFiles } from '../init/written-files.js';
 import { ingestDirectory } from '../knowledge/document-pipeline.js';
 import { output } from '../output.js';
+import { mcpAddHint } from '../platform-adapters/renderers/mcp.js';
 import { confirm } from '../prompt.js';
 import {
   downloadEmbeddingModel,
@@ -481,9 +482,7 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
     output.writeln(output.bold('  Next steps'));
     output.writeln('');
     output.writeln('  1. Register the MCP server with Claude Code:');
-    output.writeln(
-      `     ${output.highlight('claude mcp add monomind -- npx -y monomind@latest mcp start')}`,
-    );
+    output.writeln(`     ${output.highlight(mcpAddHint(options.mcp.pin))}`);
     output.writeln('');
     output.writeln(`  2. Verify the install worked:`);
     output.writeln(`     ${output.highlight('monomind mcp verify')}`);

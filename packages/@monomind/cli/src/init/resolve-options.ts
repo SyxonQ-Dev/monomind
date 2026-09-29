@@ -10,6 +10,7 @@
 
 import { VERSION } from '../index.js';
 import { resolvePlatformId } from '../platform-adapters/registry.js';
+import { MCP_FLOATING_PIN } from '../platform-adapters/renderers/mcp.js';
 import type { PlatformId } from '../platform-adapters/types.js';
 import type { CommandContext } from '../types.js';
 import {
@@ -37,10 +38,18 @@ export function resolveInitOptions(
   const requestedPlatforms = ctx.flags.platform as string | undefined;
   const enablePlatformHooks = ctx.flags['enable-hooks'] === true;
   const noInstall = (ctx.flags['no-install'] || ctx.flags.noInstall) as boolean;
-  // `--pin` with no value pins to the running CLI; `--pin <version>` pins to
-  // that exact version. Absent (the default) keeps the floating command.
+  // Absent (the default) pins to the running CLI (#419); bare `--pin` does the
+  // same explicitly, `--pin <version>` pins to that version, and `--pin latest`
+  // or `--no-pin` keep the floating `monomind@latest` command.
   const pinFlag = ctx.flags.pin;
-  const pin = pinFlag === true ? VERSION : typeof pinFlag === 'string' ? pinFlag : undefined;
+  const pin =
+    ctx.flags['no-pin'] === true
+      ? MCP_FLOATING_PIN
+      : pinFlag === true
+        ? VERSION
+        : typeof pinFlag === 'string'
+          ? pinFlag
+          : undefined;
 
   let options: InitOptions;
 

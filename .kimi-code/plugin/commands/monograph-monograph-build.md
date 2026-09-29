@@ -22,6 +22,7 @@ npx monomind monograph build [options]
 | `--llm` | — | boolean | `false` | Enable Claude semantic extraction (requires `ANTHROPIC_API_KEY`) |
 | `--llm-sections` | — | number | `50` | Max sections to enrich with LLM |
 | `--force` | `-f` | boolean | `false` | Force full rebuild even if index is fresh |
+| `--report-path` | — | string | `.monomind/GRAPH_REPORT.md` | Where to write GRAPH_REPORT.md, relative to the indexed path (also `MONOGRAPH_REPORT_PATH`) |
 
 ## Examples
 
@@ -43,6 +44,9 @@ npx monomind monograph build -p ./src
 
 # Force full rebuild
 npx monomind monograph build --force
+
+# Write GRAPH_REPORT.md to the repo root (the old location)
+npx monomind monograph build --report-path GRAPH_REPORT.md
 ```
 
 ## What Gets Indexed
