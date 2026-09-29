@@ -12,6 +12,7 @@ export * from './list-repos.js';
 export * from './neighbors.js';
 export * from './query.js';
 export * from './rename.js';
+export type { SymbolCandidate } from './resolve-node.js';
 export * from './route-map.js';
 export * from './serve.js';
 export * from './shape-check.js';

@@ -377,6 +377,20 @@ export async function ensureConnected(port: number, targetId?: string) {
   return { client: session.client!, sessionId: session.sessionId, targetId: session.targetId };
 }
 
+/**
+ * Drop this process's CDP connection and nothing else: the browser, its
+ * session record and the port pin all stay, so the next command reconnects to
+ * the same session. An embedder that lets the event loop drain instead of
+ * calling process.exit() (monomind's CLI, ADR-R001) calls this once a
+ * subcommand is done — an open websocket otherwise holds the process until
+ * its force-exit watchdog (#408).
+ */
+export function disconnectSession(): void {
+  session.client?.close();
+  session.client = null;
+  session.sessionId = '';
+}
+
 // Each CLI invocation is a fresh process, so the in-memory session.refs Map built by
 // a prior `snapshot` command is gone by the time a later `find`/`click`/etc.
 // command runs. Rehydrate it from the on-disk ref cache (written by

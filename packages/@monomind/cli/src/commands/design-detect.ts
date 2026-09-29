@@ -115,6 +115,17 @@ const detectSubcommand: Command = {
       type: 'boolean',
       description: 'Output results as JSON',
     },
+    {
+      name: 'no-group',
+      type: 'boolean',
+      description: 'List every occurrence instead of one line per unique (rule, snippet)',
+    },
+    {
+      name: 'include-unverified',
+      type: 'boolean',
+      description:
+        'Also report contrast checks the static analyser cannot verify (translucent colours, overlays, gradients)',
+    },
   ],
   examples: [
     { command: 'monomind design detect', description: 'Detect anti-patterns in current directory' },
@@ -140,6 +151,8 @@ const detectSubcommand: Command = {
 
     const forwardArgs: string[] = ['detect', target];
     if (jsonOutput) forwardArgs.push('--json');
+    if (ctx.flags['no-group']) forwardArgs.push('--no-group');
+    if (ctx.flags['include-unverified']) forwardArgs.push('--include-unverified');
 
     const exitCode = await runMonodesign(cliPath, forwardArgs);
 
