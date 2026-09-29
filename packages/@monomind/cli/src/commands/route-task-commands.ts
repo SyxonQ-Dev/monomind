@@ -5,10 +5,25 @@
  * @module @monomind/cli/commands/route-task-commands
  */
 
-import type { RouteDecision } from '../monovector/index.js';
+import type { TaskRanking } from '../decision/picks.js';
 import { output } from '../output.js';
+import { spawnableName } from '../routing/agent-pick.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
-import { agentName, findAgent, getRouter, registryAgents } from './route-shared.js';
+import { pickAction } from './pick.js';
+import { agentName, findAgent, registryAgents } from './route-shared.js';
+
+/** `route task` is `monomind pick --agents` (#430): the same ranking, printed
+ *  the same way. `agentId` names the top agent only when pick is confident. */
+async function routeViaPick(
+  task: string,
+  json: boolean,
+  ctx: CommandContext,
+): Promise<CommandResult> {
+  const res = await pickAction({ ...ctx, flags: { ...ctx.flags, task, agents: true, json } });
+  const ranking = res.data as TaskRanking | undefined;
+  const top = ranking?.agents.confident ? ranking.agents.ranked[0] : undefined;
+  return { ...res, data: { ...ranking, agentId: top ? spawnableName(top) : null } };
+}
 
 // ============================================================================
 // Route Subcommand
@@ -16,7 +31,8 @@ import { agentName, findAgent, getRouter, registryAgents } from './route-shared.
 
 export const routeTaskCommand: Command = {
   name: 'task',
-  description: 'Route a task to the best registry agent (same ranking as `monomind pick`)',
+  description:
+    'Route a task to the best registry agent (same answer and output as `monomind pick --agents`)',
   options: [
     {
       name: 'keyword',
@@ -70,10 +86,10 @@ export const routeTaskCommand: Command = {
     const taskDescription = rawTask;
 
     const spinner = output.createSpinner({ text: 'Analyzing task...', spinner: 'dots' });
-    spinner.start();
 
     try {
       if (forceAgent) {
+        spinner.start();
         // Use specified agent directly
         const agent = findAgent(forceAgent);
 
@@ -112,69 +128,7 @@ export const routeTaskCommand: Command = {
         return { success: true, data: { agentId: name, agentName: name } };
       }
 
-      // Route through the central picker (monovector createKeywordRouter)
-      const router = await getRouter();
-      const result: RouteDecision = await router.route(taskDescription);
-      const agent = findAgent(result.route);
-
-      spinner.succeed(`Routed to ${result.route}`);
-
-      if (jsonOutput) {
-        output.printJson({
-          task: taskDescription,
-          agentId: result.route,
-          agentName: result.route,
-          confidence: result.confidence,
-          alternatives: (result.alternatives || []).map((a) => ({
-            agentId: a.route,
-            agentName: a.route,
-            score: a.score,
-          })),
-        });
-      } else {
-        output.writeln();
-
-        const confidence = result.confidence ?? 0;
-        // Use bound methods to preserve `this` context when calling output methods
-        const confidenceColor =
-          confidence >= 0.7
-            ? (text: string) => output.success(text)
-            : confidence >= 0.4
-              ? (text: string) => output.warning(text)
-              : (text: string) => output.error(text);
-
-        const alternatives = result.alternatives || [];
-
-        output.printBox(
-          [
-            `Task: ${taskDescription}`,
-            ``,
-            `Agent: ${output.highlight(result.route)}`,
-            `Confidence: ${confidenceColor(`${(confidence * 100).toFixed(1)}%`)}`,
-            ``,
-            `Description: ${agent?.description ?? ''}`,
-            `Category: ${agent?.category || '-'}`,
-          ].join('\n'),
-          'Agent Routing',
-        );
-
-        if (alternatives.length > 0) {
-          output.writeln();
-          output.writeln(output.bold('Alternatives:'));
-          output.printTable({
-            columns: [
-              { key: 'agent', header: 'Agent', width: 32 },
-              { key: 'score', header: 'Score', width: 12, align: 'right' },
-            ],
-            data: alternatives.map((a) => ({
-              agent: a.route,
-              score: (a.score ?? 0).toFixed(3),
-            })),
-          });
-        }
-      }
-
-      return { success: true, data: { agentId: result.route, result } };
+      return await routeViaPick(taskDescription, jsonOutput, ctx);
     } catch (error) {
       spinner.fail('Routing failed');
       output.printError(error instanceof Error ? error.message : String(error));
@@ -257,7 +211,7 @@ export const semanticRouteCommand: Command = {
   name: 'semantic',
   aliases: ['sem'],
   description:
-    'Route a task through the central picker, falling back to cosine similarity (RouteLayer) and Haiku',
+    'Deprecated: use `route task` / `monomind pick`. Central picker, then cosine similarity (RouteLayer) and Haiku',
   options: [
     {
       name: 'task',

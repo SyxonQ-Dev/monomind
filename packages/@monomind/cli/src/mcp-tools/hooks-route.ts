@@ -83,6 +83,9 @@ export const hooksRoute: MCPTool = {
       },
       matchedPattern: routingMethod,
       semanticMatches: [],
+      // pick's verdict: act on primaryAgent only when confident is true.
+      confident: pick.confident,
+      summary: pick.summary,
       primaryAgent: primary,
       alternativeAgents: alternatives,
       estimatedMetrics: {
@@ -212,7 +215,9 @@ export const hooksExplain: MCPTool = {
       task,
       explanation:
         `The routing decision was made by the central picker: ${how}. ` +
-        `"${top.type}" ranked first with ${(top.confidence * 100).toFixed(0)}% confidence.`,
+        `"${top.type}" ranked first with ${(top.confidence * 100).toFixed(0)}% confidence` +
+        (pick.confident ? '.' : ', below the pick bar (no confident match).'),
+      confident: pick.confident,
       factors: [
         {
           factor: pick.method === 'jev' ? 'Decision Model' : 'Keyword Match',
