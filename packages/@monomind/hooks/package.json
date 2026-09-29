@@ -50,6 +50,7 @@
     "hooks",
     "daemons",
     "statusline",
+    "reasoningbank",
     "mcp",
     "agents"
   ],
