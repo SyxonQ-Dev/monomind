@@ -19,6 +19,12 @@ export interface OrgToolDef {
    *  (the built-in org tools). `hints` maps a key callers are known to
    *  confuse with a real one to the correction the error names. */
   strict?: { hints?: Record<string, string> };
+  /** #389: calls to this tool made in one assistant message may run at the
+   *  same time (agent exec's caller tools: each is its own stdio round trip,
+   *  matched by id). Fence runners start such a round's calls together;
+   *  ClaudeAgentRunner marks the tool `readOnlyHint`, which is what makes
+   *  Claude Code run MCP calls concurrently. Unset: one after another. */
+  concurrent?: boolean;
   handler: (args: Record<string, unknown>) => Promise<{ text: string }>;
 }
 
@@ -30,8 +36,11 @@ export interface AgentRunArgs {
    *  RunnerSpec.supportsFullAccess is true runs its CLI's own no-approval,
    *  no-sandbox mode in a process group (process-group-spawn.ts). Unset/
    *  `scoped` = today's behavior, byte-identical. Set by agent-exec.ts and
-   *  full-access org roles (#365). Runners without full access ignore it. */
-  access?: 'scoped' | 'full';
+   *  full-access org roles (#365). Runners without full access ignore it.
+   *  `read` (#388, agent exec only) = the CLI's own read-only mode on a
+   *  runtime whose RunnerSpec.readAccess is true (runner-access.ts); claude
+   *  gets it from the caller's canUseTool instead. */
+  access?: 'scoped' | 'read' | 'full';
   /** The mailbox prompt stream (or any async iterable of prompt messages). */
   prompt: AsyncIterable<any>;
   systemPrompt: string;

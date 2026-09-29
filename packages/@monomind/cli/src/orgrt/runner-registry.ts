@@ -14,6 +14,7 @@ import * as fs from 'node:fs';
 import { delimiter, join } from 'node:path';
 import type { AgentRunner } from './agent-runner.js';
 import { type RuntimeKind, resolveRunner } from './daemon.js';
+import { accessModes, callerToolsWithFullAccess, RUNNER_ACCESS } from './runner-access.js';
 import { RUNNER_FEATURES, type RunnerFeatures } from './runner-features.js';
 import { BASE_SPECS, type RunnerSpec } from './runner-specs.js';
 import { detectVersion, type VersionSource } from './version-probe.js';
@@ -23,6 +24,7 @@ export type { RunnerSpec };
 export const RUNNER_SPECS: RunnerSpec[] = BASE_SPECS.map((s) => ({
   ...s,
   ...RUNNER_FEATURES[s.id],
+  ...RUNNER_ACCESS[s.id],
 }));
 
 const SPEC_BY_ID = new Map(RUNNER_SPECS.map((s) => [s.id, s]));
@@ -71,6 +73,12 @@ export interface ScanEntry {
   streams_incrementally: boolean;
   /** #355. Mirrors `RunnerSpec.supportsFullAccess` — see its doc comment. */
   full_access: boolean;
+  /** #388 (rev 21): the `--access` values this runtime accepts. */
+  access_modes: Array<'scoped' | 'read' | 'full'>;
+  /** #389 (rev 22): `--tools stdio` caller tools work on this runtime. */
+  caller_tools: boolean;
+  /** #389 (rev 22): caller tools also work together with `--access full`. */
+  caller_tools_with_full_access: boolean;
   /** Mirrors `RunnerSpec.toolActivityFidelity` (#357) — see its doc comment. */
   tool_activity_fidelity: 'full' | 'start-only' | 'none';
   /** Rev 13 service flags — mirror `RunnerFeatures` (runner-features.ts). */
@@ -163,6 +171,9 @@ export async function scanInstalled(opts: ScanOptions = {}): Promise<{
         login_hint: spec.loginHint ?? null,
         streams_incrementally: spec.streamsIncrementally,
         full_access: spec.supportsFullAccess,
+        access_modes: accessModes(spec),
+        caller_tools: spec.callerTools,
+        caller_tools_with_full_access: callerToolsWithFullAccess(spec),
         tool_activity_fidelity: spec.toolActivityFidelity,
         resume: spec.resume,
         effort: spec.effort,

@@ -32,6 +32,9 @@ export const PI_THINKING: Record<OrgEffortLevel, string> = {
   max: 'max',
 };
 
+/** Built-in pi tools a `--access read` turn keeps (#388). */
+export const PI_READ_TOOLS = 'read,grep,find,ls';
+
 /**
  * Flags shared by `--mode json` and `--mode rpc`:
  *   - `--session-id <id>` opens that exact project session or creates it
@@ -51,6 +54,9 @@ export function piCliArgs(mode: 'json' | 'rpc', sessionId: string, args: AgentRu
   if (args.effort) out.push('--thinking', PI_THINKING[args.effort]);
   if ((args.settingSources?.length ?? 0) > 0) out.push('--approve');
   else out.push('--no-approve', '-ne', '-ns', '-np', '-nc');
+  // #388: pi's documented read-only mode (`pi --help`: "no file
+  // modifications possible") — only the read-only built-in tools.
+  if (args.access === 'read') out.push('--tools', PI_READ_TOOLS);
   return out;
 }
 

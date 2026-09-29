@@ -11,9 +11,10 @@
  */
 
 import type { RuntimeKind } from './daemon.js';
+import type { RunnerAccess } from './runner-access.js';
 import type { RunnerFeatures } from './runner-features.js';
 
-export interface RunnerSpec extends RunnerFeatures {
+export interface RunnerSpec extends RunnerFeatures, RunnerAccess {
   /** Runtime id accepted by `agent exec --runtime` and org role `runtime`. */
   id: RuntimeKind;
   /** Binary probed on PATH (null for in-process runtimes like vercel). */
@@ -58,7 +59,7 @@ export interface RunnerSpec extends RunnerFeatures {
   toolActivityFidelity: 'full' | 'start-only' | 'none';
 }
 
-export const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures>> = [
+export const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures | keyof RunnerAccess>> = [
   {
     id: 'claude',
     binary: 'claude', // SDK locates its own CLI; PATH probe is best-effort

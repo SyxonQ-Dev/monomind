@@ -12,6 +12,13 @@ import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { AgentMessage, AgentRunArgs } from '../../src/orgrt/agent-runner.js';
 import { KimiCodeAgentRunner } from '../../src/orgrt/kimicode-runner.js';
+import {
+  callerFence,
+  expectAllCallsBeforeResults,
+  expectCallerRoundTrip,
+  rosterResult,
+  runFullAccessToolTurn,
+} from '../../src/__tests__/caller-tool-turn.js';
 
 const SCRIPT = `#!/usr/bin/env node
 const fs = require('fs');
@@ -99,5 +106,58 @@ describe('KimiCodeAgentRunner coder mode', () => {
     ]);
     const texts = messages.filter((m) => m.type === 'assistant').map((m) => m.text);
     expect(texts).toEqual(['Listing.', 'done']);
+  });
+});
+
+/** A fake `kimi` whose first invocation replies `first`, every later one `done`. */
+function callerKimi(first: string) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'monomind-kimi-389-'));
+  const bin = path.join(dir, 'kimi.cjs');
+  const log = path.join(dir, 'calls.log');
+  fs.writeFileSync(
+    bin,
+    `#!/usr/bin/env node
+const fs = require('fs');
+const log = ${JSON.stringify(log)};
+const prompt = fs.readFileSync(0, 'utf8');
+const n = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').split('\\n').filter(Boolean).length : 0;
+fs.appendFileSync(log, JSON.stringify({ argv: process.argv.slice(2), prompt }) + '\\n');
+console.log(JSON.stringify({ role: 'assistant', content: n === 0 ? ${JSON.stringify(first)} : 'done' }));
+console.log(JSON.stringify({ role: 'meta', type: 'session.resume_hint', session_id: 'session_389' }));
+`,
+  );
+  fs.chmodSync(bin, 0o755);
+  const calls = () =>
+    fs
+      .readFileSync(log, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as { argv: string[]; prompt: string });
+  return { runner: new KimiCodeAgentRunner(bin), calls };
+}
+
+describe('#389 kimicode: full access + stdio caller tools', () => {
+  it('a full-access turn calls a stdio tool and gets the result back', async () => {
+    const kimi = callerKimi(`Checking.\n${callerFence('core')}`);
+    const turn = await runFullAccessToolTurn('kimicode', kimi.runner);
+    expectCallerRoundTrip(turn, ['core']);
+    const calls = kimi.calls();
+    expect(calls).toHaveLength(2);
+    // Full access: the user's own kimi agent, not the org-role agent file.
+    expect(calls[0].argv).not.toContain('--agent-file');
+    // Tool protocol in the first prompt, the caller's answer in the resumed one.
+    expect(calls[0].prompt).toContain('org_roster');
+    expect(calls[1].prompt).toContain(rosterResult('core'));
+    expect(calls[1].argv[calls[1].argv.indexOf('--session') + 1]).toBe('session_389');
+  });
+
+  it('two parallel caller calls: both tool_call frames before either tool_result', async () => {
+    const kimi = callerKimi(`${callerFence('core')}\n${callerFence('qa')}`);
+    const turn = await runFullAccessToolTurn('kimicode', kimi.runner, { expectCalls: 2 });
+    expectCallerRoundTrip(turn, ['core', 'qa']);
+    expectAllCallsBeforeResults(turn, 2);
+    const second = kimi.calls()[1].prompt;
+    expect(second).toContain(rosterResult('core'));
+    expect(second).toContain(rosterResult('qa'));
   });
 });

@@ -9,6 +9,13 @@ import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentMessage, AgentRunArgs } from '../../src/orgrt/agent-runner.js';
 import { CrushAgentRunner } from '../../src/orgrt/crush-runner.js';
+import {
+  callerFence,
+  expectAllCallsBeforeResults,
+  expectCallerRoundTrip,
+  rosterResult,
+  runFullAccessToolTurn,
+} from '../../src/__tests__/caller-tool-turn.js';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 
@@ -66,5 +73,38 @@ describe('CrushAgentRunner coder mode', () => {
     const msgs = await collect({ access: 'full' });
     expect(msgs.some((m) => m.type === 'tool_use' && m.tool_use_id)).toBe(false);
     expect(msgs.some((m) => m.type === 'tool_result')).toBe(false);
+  });
+});
+
+describe('#389 crush: full access + stdio caller tools', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const argvAt = (i: number) => vi.mocked(cp.spawn).mock.calls[i]?.[1] as string[];
+
+  it('a full-access turn calls a stdio tool and gets the result back', async () => {
+    const children = [mockChild(['Checking.', ...callerFence('core').split('\n')]), mockChild(['done'])];
+    vi.mocked(cp.spawn).mockImplementation(() => children.shift()!);
+    const turn = await runFullAccessToolTurn('crush', new CrushAgentRunner({ crushBin: '/bin/crush' }));
+    expectCallerRoundTrip(turn, ['core']);
+    expect(vi.mocked(cp.spawn).mock.calls).toHaveLength(2);
+    // Tool protocol in the first prompt, the caller's answer in the --continue one.
+    expect(argvAt(0)[1]).toContain('org_roster');
+    expect(argvAt(1)[1]).toContain(rosterResult('core'));
+    expect(argvAt(1)).toContain('--continue');
+    const opts = vi.mocked(cp.spawn).mock.calls[0]?.[2] as cp.SpawnOptions;
+    expect(opts.detached).toBe(process.platform !== 'win32');
+  });
+
+  it('two parallel caller calls: both tool_call frames before either tool_result', async () => {
+    const out = ['Checking.', ...callerFence('core').split('\n'), ...callerFence('qa').split('\n')];
+    const children = [mockChild(out), mockChild(['done'])];
+    vi.mocked(cp.spawn).mockImplementation(() => children.shift()!);
+    const turn = await runFullAccessToolTurn('crush', new CrushAgentRunner({ crushBin: '/bin/crush' }), {
+      expectCalls: 2,
+    });
+    expectCallerRoundTrip(turn, ['core', 'qa']);
+    expectAllCallsBeforeResults(turn, 2);
+    expect(argvAt(1)[1]).toContain(rosterResult('core'));
+    expect(argvAt(1)[1]).toContain(rosterResult('qa'));
   });
 });

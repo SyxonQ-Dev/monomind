@@ -10,6 +10,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentMessage, AgentRunArgs } from '../../src/orgrt/agent-runner.js';
 import { QwenAgentRunner } from '../../src/orgrt/qwen-runner.js';
 import { parseQwenEvents } from '../../src/orgrt/qwen-runner.js';
+import {
+  callerFence,
+  expectAllCallsBeforeResults,
+  expectCallerRoundTrip,
+  rosterResult,
+  runFullAccessToolTurn,
+} from '../../src/__tests__/caller-tool-turn.js';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 
@@ -106,5 +113,50 @@ describe('QwenAgentRunner coder mode', () => {
     const [, argv, opts] = vi.mocked(cp.spawn).mock.calls[0] as [string, string[], cp.SpawnOptions];
     expect(argv).toContain('--yolo');
     expect(opts.detached).toBe(process.platform !== 'win32');
+  });
+});
+
+// One qwen invocation whose only assistant message says `text`.
+const qwenTurn = (text: string) => [
+  j({ type: 'system', subtype: 'init', session_id: 'q1' }),
+  j({ type: 'assistant', session_id: 'q1', message: { content: [{ type: 'text', text }] } }),
+  j({ type: 'result', subtype: 'success', session_id: 'q1', usage: { input_tokens: 1, output_tokens: 1 } }),
+];
+
+describe('#389 qwen: full access + stdio caller tools', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const promptAt = (i: number) => {
+    const a = vi.mocked(cp.spawn).mock.calls[i][1] as string[];
+    return a[a.indexOf('-p') + 1];
+  };
+
+  it('a full-access turn calls a stdio tool and gets the result back', async () => {
+    vi.mocked(cp.spawn)
+      .mockReturnValueOnce(mockChild(qwenTurn(`Checking.\n${callerFence('core')}`)))
+      .mockReturnValueOnce(mockChild(qwenTurn('done')));
+    const turn = await runFullAccessToolTurn('qwen', new QwenAgentRunner('/bin/qwen'));
+    expectCallerRoundTrip(turn, ['core']);
+    const calls = vi.mocked(cp.spawn).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0][1]).toContain('--yolo');
+    expect((calls[0][2] as cp.SpawnOptions).detached).toBe(process.platform !== 'win32');
+    // Tool protocol in the first prompt, the caller's answer in the resumed one.
+    expect(promptAt(0)).toContain('org_roster');
+    expect(promptAt(1)).toContain(rosterResult('core'));
+    expect(calls[1][1]).toEqual(expect.arrayContaining(['--resume', 'q1']));
+  });
+
+  it('two parallel caller calls: both tool_call frames before either tool_result', async () => {
+    vi.mocked(cp.spawn)
+      .mockReturnValueOnce(mockChild(qwenTurn(`${callerFence('core')}\n${callerFence('qa')}`)))
+      .mockReturnValueOnce(mockChild(qwenTurn('done')));
+    const turn = await runFullAccessToolTurn('qwen', new QwenAgentRunner('/bin/qwen'), {
+      expectCalls: 2,
+    });
+    expectCallerRoundTrip(turn, ['core', 'qa']);
+    expectAllCallsBeforeResults(turn, 2);
+    expect(promptAt(1)).toContain(rosterResult('core'));
+    expect(promptAt(1)).toContain(rosterResult('qa'));
   });
 });

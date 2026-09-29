@@ -99,6 +99,23 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    on a transient provider rate limit (429) up to 3 attempts with backoff,
  *    emitting a `status` notice before each retry; giving up is `error
  *    {code:"rate-limited", fatal:true}`, distinct from `quota` (§3.4, rev 20)
+ *  - `agent-exec-access-read` — `agent exec --access read` (issue #388):
+ *    native read tools, web, TodoWrite and caller tools, plus an allowlist of
+ *    read-only shell commands (`git status|diff|log|show|blame`, `ls`, `cat`,
+ *    `head`, `tail`, `wc`, `rg`, `grep`, `find` without actions that run or
+ *    write; `--allow-bash-prefix` adds to it); no edits, general shell or
+ *    subagents. claude enforces it itself; codex runs `--sandbox read-only`,
+ *    pi/pi-rpc `--tools read,grep,find,ls`; any other runtime answers
+ *    `unsupported`. `agent scan --json` entries carry `access_modes`
+ *    (§3.1, §6, rev 21)
+ *  - `agent-exec-full-access-tools` — `--tools stdio` caller tools together
+ *    with `--access full` on every runtime whose scan entry has
+ *    `caller_tools_with_full_access: true` (issue #389): exposed next to the
+ *    native tools, same `tool_call`/`tool_result` frames and `--tool-timeout`
+ *    as scoped mode; the calls of one assistant message are all sent to the
+ *    caller before any result is awaited (results match by id, any order);
+ *    scan entries carry `caller_tools` and `caller_tools_with_full_access`
+ *    (§3.1, §4.3, §6, rev 22)
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
@@ -126,6 +143,8 @@ export const AGENT_PROTOCOL_CAPABILITIES = [
   'knowledge-profile-captures',
   'agent-exec-subagent-events',
   'agent-exec-rate-limit-retry',
+  'agent-exec-access-read',
+  'agent-exec-full-access-tools',
 ] as const;
 
 /** The exact handshake object emitted by `monomind --version --json`. */

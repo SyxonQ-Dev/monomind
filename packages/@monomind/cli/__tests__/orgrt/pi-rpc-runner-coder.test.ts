@@ -11,6 +11,13 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentMessage, AgentRunArgs } from '../../src/orgrt/agent-runner.js';
 import { type PiRpcProcess, PiRpcAgentRunner } from '../../src/orgrt/pi-rpc-runner.js';
+import {
+  callerFence,
+  expectAllCallsBeforeResults,
+  expectCallerRoundTrip,
+  rosterResult,
+  runFullAccessToolTurn,
+} from '../../src/__tests__/caller-tool-turn.js';
 
 const fixture = (name: string): string[] =>
   readFileSync(join(__dirname, 'fixtures', 'pi-0.87', name), 'utf8').trim().split('\n');
@@ -135,5 +142,52 @@ describe('PiRpcAgentRunner — pi 0.87.1', () => {
   it('a failed final retry fails the turn', async () => {
     const pi = scriptedPi([fixture('json-retry-failed.jsonl')]);
     await expect(run(pi)).rejects.toThrow(/pi reported an error: 529/);
+  });
+});
+
+/** One rpc prompt whose assistant reply is plain `text` (rpc-abort.jsonl's shapes, no native tools). */
+const textPrompt = (text: string) => {
+  const reply = { role: 'assistant', content: [{ type: 'text', text }], usage: { input: 10, output: 5 } };
+  return [
+    JSON.stringify({ type: 'response', command: 'prompt', success: true }),
+    JSON.stringify({ type: 'agent_start' }),
+    JSON.stringify({ type: 'message_end', message: reply }),
+    JSON.stringify({ type: 'agent_end', messages: [reply] }),
+    JSON.stringify({ type: 'agent_settled' }),
+  ];
+};
+
+/** The real runner over `scriptedPi`, recording the access each spawn was given. */
+function callerRunner(pi: ReturnType<typeof scriptedPi>, access: unknown[]) {
+  return new PiRpcAgentRunner('pi', (bin, a, _opts, runArgs) => {
+    access.push(runArgs.access);
+    return pi.spawn(bin, a);
+  });
+}
+
+describe('#389 pi-rpc: full access + stdio caller tools', () => {
+  it('a full-access turn calls a stdio tool and gets the result back', async () => {
+    const pi = scriptedPi([textPrompt(`Checking.\n${callerFence('core')}`), textPrompt('done')]);
+    const access: unknown[] = [];
+    const turn = await runFullAccessToolTurn('pi-rpc', callerRunner(pi, access));
+    expectCallerRoundTrip(turn, ['core']);
+    // One long-lived process, spawned as a full-access process-group leader.
+    expect(pi.argv).toHaveLength(1);
+    expect(access).toEqual(['full']);
+    // Tool protocol in the first prompt, the caller's answer in the next rpc prompt.
+    const prompts = pi.written.filter((c) => c.type === 'prompt');
+    expect(prompts).toHaveLength(2);
+    expect(prompts[0].message).toContain('org_roster');
+    expect(prompts[1].message).toContain(rosterResult('core'));
+  });
+
+  it('two parallel caller calls: both tool_call frames before either tool_result', async () => {
+    const pi = scriptedPi([textPrompt(`${callerFence('core')}\n${callerFence('qa')}`), textPrompt('done')]);
+    const turn = await runFullAccessToolTurn('pi-rpc', callerRunner(pi, []), { expectCalls: 2 });
+    expectCallerRoundTrip(turn, ['core', 'qa']);
+    expectAllCallsBeforeResults(turn, 2);
+    const second = pi.written.filter((c) => c.type === 'prompt')[1].message;
+    expect(second).toContain(rosterResult('core'));
+    expect(second).toContain(rosterResult('qa'));
   });
 });

@@ -9,6 +9,13 @@ import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentMessage, AgentRunArgs } from '../../src/orgrt/agent-runner.js';
 import { GrokAgentRunner } from '../../src/orgrt/grok-runner.js';
+import {
+  callerFence,
+  expectAllCallsBeforeResults,
+  expectCallerRoundTrip,
+  rosterResult,
+  runFullAccessToolTurn,
+} from '../../src/__tests__/caller-tool-turn.js';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 
@@ -167,5 +174,50 @@ describe('GrokAgentRunner coder mode', () => {
       ),
     );
     await expect(collect()).rejects.toThrow(/Not signed in/);
+  });
+});
+
+// One grok invocation whose only assistant frame says `text`.
+const grokTurn = (text: string) => [
+  j({ type: 'system', subtype: 'init', session_id: 'abc123', tools: [] }),
+  j({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] }, session_id: 'abc123' }),
+  j({ type: 'result', subtype: 'success', is_error: false, usage: { input_tokens: 1, output_tokens: 1 }, session_id: 'abc123' }),
+];
+
+describe('#389 grok: full access + stdio caller tools', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const promptAt = (i: number) => {
+    const a = vi.mocked(cp.spawn).mock.calls[i][1] as string[];
+    return a[a.indexOf('-p') + 1];
+  };
+
+  it('a full-access turn calls a stdio tool and gets the result back', async () => {
+    vi.mocked(cp.spawn)
+      .mockReturnValueOnce(mockChild(grokTurn(`Checking.\n${callerFence('core')}`)))
+      .mockReturnValueOnce(mockChild(grokTurn('done')));
+    const turn = await runFullAccessToolTurn('grok', new GrokAgentRunner('/bin/grok'));
+    expectCallerRoundTrip(turn, ['core']);
+    const calls = vi.mocked(cp.spawn).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0][1]).toContain('--always-approve');
+    expect(calls[0][1]).not.toContain('--sandbox');
+    // Tool protocol in the first prompt, the caller's answer in the resumed one.
+    expect(promptAt(0)).toContain('org_roster');
+    expect(promptAt(1)).toContain(rosterResult('core'));
+    expect(calls[1][1]).toEqual(expect.arrayContaining(['--resume', 'abc123']));
+  });
+
+  it('two parallel caller calls: both tool_call frames before either tool_result', async () => {
+    vi.mocked(cp.spawn)
+      .mockReturnValueOnce(mockChild(grokTurn(`${callerFence('core')}\n${callerFence('qa')}`)))
+      .mockReturnValueOnce(mockChild(grokTurn('done')));
+    const turn = await runFullAccessToolTurn('grok', new GrokAgentRunner('/bin/grok'), {
+      expectCalls: 2,
+    });
+    expectCallerRoundTrip(turn, ['core', 'qa']);
+    expectAllCallsBeforeResults(turn, 2);
+    expect(promptAt(1)).toContain(rosterResult('core'));
+    expect(promptAt(1)).toContain(rosterResult('qa'));
   });
 });

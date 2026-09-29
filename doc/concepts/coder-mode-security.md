@@ -221,6 +221,55 @@ asked for `full` (they'd believe they had full access and didn't) or vice versa.
   runtime whose spec supports full access; the grant flow (signed human ack, drift suspension,
   taint, unattended gate) is unchanged.
 
+### 2.7 Read access (`--access read`, rev 21, issue #388)
+
+`read` sits between `scoped` and `full`: it is a narrowing of what a turn can do, not a new way to
+reach full access, so it does not widen §2.1. It flows through the same single path
+(`commands/agent-exec.ts` → `resolveAccess()` → `AgentRunArgs.access`), the engine hands the
+allow-everything `fullAccessCanUseTool` to a turn only when `access === 'full'` (pinned by
+`agent-exec-no-transitive-escalation.test.ts`, together with the set of runtimes that accept
+`read`), and no runner treats `read` as anything but read-only: claude keeps `permissionMode:
+'default'` with a gate, and no runtime gets its yolo flags or process-group spawn for `read`.
+
+- **claude**: `orgrt/agent-exec-read.ts`'s `readAccessCanUseTool`, installed like the scoped gate
+  (`canUseTool` plus the PreToolUse hook, so calls the CLI would allow itself are checked too).
+  Allowed: `Read`, `Grep`, `Glob`, `LS`, `WebSearch`, `WebFetch`, `TodoWrite`, `Skill`,
+  `ToolSearch`, the caller's own stdio tools, and `Bash` only for an allowlisted prefix (`git
+  status|diff|log|show|blame`, `ls`, `cat`, `head`, `tail`, `wc`, `rg`, `grep`, `find`, plus
+  `--allow-bash-prefix` entries). A shell command must be one literal invocation (the scoped
+  mode's metacharacter scanner plus no unquoted parentheses) and carry no argument that makes an
+  allowed command run or write something: `find -exec|-execdir|-ok|-okdir|-delete|-fprint|
+  -fprint0|-fprintf|-fls`, `rg --pre`, `git --output`/`--ext-diff` (checked on the words bash
+  would see, quotes removed). Everything else — `Edit`, `Write`, `MultiEdit`, `NotebookEdit`,
+  other shell commands, `Task`/`Agent`, MCP tools from the user's `--settings` — is denied, and
+  the call's `tool_activity` end carries `denied: true`.
+- **codex**: `codex exec --sandbox read-only` regardless of `MONOMIND_GIT_LEVEL` (a read turn is
+  never `danger-full-access`); the whole filesystem is read-only and the network is off for its
+  shell commands. Its shell rules are codex's, not the allowlist above.
+- **pi / pi-rpc**: `--tools read,grep,find,ls`, pi's documented read-only mode: no bash, edit or
+  write tool (extension tools off too).
+- **Everything else** (opencode included: its permission config cannot express deny-by-default,
+  see `orgrt/runner-access.ts`) answers `error {code:"unsupported", fatal:true}`; nothing falls
+  back to scoped or full.
+
+Residual risks specific to `read`: `Read`, `cat` and `git show` can read any file the user can
+(`~/.ssh`, `.env`), and `WebFetch` can send what was read to a URL — read access keeps the working
+tree and the machine unchanged, it does not keep data inside it. `git` commands still honor the
+repository's own `.git/config` (e.g. `core.fsmonitor`, or a `diff.<driver>.textconv` filter named
+in `.gitattributes`), so a checkout whose config already sets such a command runs it through `git
+status`/`git diff`/`git show`; `find` and `rg` read whatever is in the tree. `--allow-bash-prefix`
+entries are trusted exactly as in scoped mode. Callers that need no network or no reads outside
+the project should use a runtime sandbox (codex) or run the turn in a container.
+
+### 2.8 Caller tools with full access (rev 22, issue #389)
+
+`--access full --tools stdio` adds the caller's own tools to a full-access turn; it grants nothing
+the caller did not already hold (each call is executed by the caller, which sees every `tool_call`
+frame). On claude the caller tools are marked `readOnlyHint` so Claude Code runs parallel calls
+concurrently. That annotation is a scheduling hint, not a claim monomind relies on for security:
+the caller's tools may well write, and in `scoped`/`read` mode the gate allows them by name
+exactly as before. `--allow-bash-prefix` stays a usage error with `--access full`.
+
 ## 3. What callers own (not monomind's job)
 
 - **mono-agent's coder-mode gating**: off by default, a risk-confirmation dialog before first use,

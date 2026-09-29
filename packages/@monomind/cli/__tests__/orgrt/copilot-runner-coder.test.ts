@@ -10,6 +10,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import type { AgentMessage, AgentRunArgs } from '../../src/orgrt/agent-runner.js';
 import { CopilotAgentRunner } from '../../src/orgrt/copilot-runner.js';
+import {
+  callerFence,
+  expectAllCallsBeforeResults,
+  expectCallerRoundTrip,
+  rosterResult,
+  runFullAccessToolTurn,
+} from '../../src/__tests__/caller-tool-turn.js';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 
@@ -175,5 +182,49 @@ describe('CopilotAgentRunner coder mode', () => {
     expect(a).not.toContain('--allow-all-tools');
     expect(a).toContain('--no-ask-user');
     expect(a[a.indexOf('--reasoning-effort') + 1]).toBe('none');
+  });
+});
+
+// One copilot invocation whose only assistant.message says `text`.
+const copilotTurn = (text: string) => [
+  j({ type: 'assistant.message', data: { content: text, toolRequests: [] } }),
+  j({ type: 'result', sessionId: 'sess-389', exitCode: 0 }),
+];
+
+describe('#389 copilot: full access + stdio caller tools', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const promptAt = (i: number) => {
+    const a = vi.mocked(cp.spawn).mock.calls[i][1] as string[];
+    return a[a.indexOf('-p') + 1];
+  };
+
+  it('a full-access turn calls a stdio tool and gets the result back', async () => {
+    vi.mocked(cp.spawn)
+      .mockReturnValueOnce(mockChild(copilotTurn(`Checking.\n${callerFence('core')}`)))
+      .mockReturnValueOnce(mockChild(copilotTurn('done')));
+    const turn = await runFullAccessToolTurn('copilot', new CopilotAgentRunner('/bin/copilot'));
+    expectCallerRoundTrip(turn, ['core']);
+    const calls = vi.mocked(cp.spawn).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0][1]).toContain('--allow-all');
+    expect(calls[0][1]).not.toContain('--allow-all-tools');
+    // Tool protocol in the first prompt, the caller's answer in the resumed one.
+    expect(promptAt(0)).toContain('org_roster');
+    expect(promptAt(1)).toContain(rosterResult('core'));
+    expect(calls[1][1]).toContain('--resume=sess-389');
+  });
+
+  it('two parallel caller calls: both tool_call frames before either tool_result', async () => {
+    vi.mocked(cp.spawn)
+      .mockReturnValueOnce(mockChild(copilotTurn(`${callerFence('core')}\n${callerFence('qa')}`)))
+      .mockReturnValueOnce(mockChild(copilotTurn('done')));
+    const turn = await runFullAccessToolTurn('copilot', new CopilotAgentRunner('/bin/copilot'), {
+      expectCalls: 2,
+    });
+    expectCallerRoundTrip(turn, ['core', 'qa']);
+    expectAllCallsBeforeResults(turn, 2);
+    expect(promptAt(1)).toContain(rosterResult('core'));
+    expect(promptAt(1)).toContain(rosterResult('qa'));
   });
 });

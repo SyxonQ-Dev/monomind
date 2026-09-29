@@ -12,9 +12,10 @@
  */
 
 import { statSync } from 'node:fs';
+import { callerToolsWithFullAccess } from './runner-access.js';
 import { type RunnerSpec, runnerSpec } from './runner-registry.js';
 
-export type AccessMode = 'scoped' | 'full';
+export type AccessMode = 'scoped' | 'read' | 'full';
 
 /**
  * `canUseTool` for `--access full`: every call is allowed. Subprocess
@@ -81,23 +82,63 @@ export function checkFullAccessGuards(opts: {
   return null;
 }
 
+/** #388: `--access read` needs a runtime with a real read-only mode
+ *  (runner-access.ts); anywhere else it is refused, never run as scoped. */
+export function checkReadAccess(
+  runtime: string,
+  spec: RunnerSpec | undefined,
+): AccessGuardError | null {
+  if (spec?.readAccess) return null;
+  return {
+    code: 'unsupported',
+    message: `--access read is not supported by runtime "${runtime}" (no verified read-only mode — see agent scan --json access_modes)`,
+  };
+}
+
+/** #389: caller tools on a runtime that can't take them (in this access
+ *  mode) are refused, never silently dropped. */
+export function checkCallerTools(
+  runtime: string,
+  access: AccessMode,
+  spec: RunnerSpec | undefined,
+): AccessGuardError | null {
+  if (!spec) return null; // unknown runtime: resolveExecRunner already failed
+  if (!spec.callerTools) {
+    return {
+      code: 'unsupported',
+      message: `--tools stdio is not supported by runtime "${runtime}"`,
+    };
+  }
+  if (access === 'full' && !callerToolsWithFullAccess(spec)) {
+    return {
+      code: 'unsupported',
+      message: `--tools stdio with --access full is not supported by runtime "${runtime}" (agent scan --json caller_tools_with_full_access)`,
+    };
+  }
+  return null;
+}
+
 /**
- * Resolves `opts.access` (default `'scoped'`) and, for `'full'`, runs every
- * guard and emits the protocol `error`+`done` pair itself on failure — kept
- * out of agent-exec.ts's own line budget (a file shared with #356/#357).
+ * Resolves `opts.access` (default `'scoped'`), runs the guards for `'read'`
+ * (#388) and `'full'` and, with caller tools, checkCallerTools (#389), and
+ * emits the protocol `error`+`done` pair itself on failure — kept out of
+ * agent-exec.ts's own line budget (a file shared with #356/#357).
  * `abort: true` means the caller must stop and return exit code 2.
  */
 export function resolveAccess(
-  opts: { runtime: string; cwd?: string; access?: AccessMode },
+  opts: { runtime: string; cwd?: string; access?: AccessMode; hasCallerTools?: boolean },
   emit: (ev: Record<string, unknown>) => void,
 ): { access: AccessMode; abort: boolean } {
   const access = opts.access ?? 'scoped';
-  if (access !== 'full') return { access, abort: false };
-  const err = checkFullAccessGuards({
-    runtime: opts.runtime,
-    cwd: opts.cwd,
-    spec: runnerSpec(opts.runtime),
-  });
+  const spec = runnerSpec(opts.runtime);
+  const accessErr =
+    access === 'scoped'
+      ? null
+      : access === 'read'
+        ? checkReadAccess(opts.runtime, spec)
+        : checkFullAccessGuards({ runtime: opts.runtime, cwd: opts.cwd, spec });
+  const err =
+    accessErr ?? (opts.hasCallerTools ? checkCallerTools(opts.runtime, access, spec) : null);
   if (!err) return { access, abort: false };
   emit({ v: 1, type: 'error', code: err.code, fatal: true, message: err.message });
   emit({ v: 1, type: 'done', exit_code: 2 });
