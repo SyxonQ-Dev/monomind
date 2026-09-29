@@ -2,8 +2,8 @@
 // Split out of policy.ts (file-size sweep) — glob matching, web-domain
 // matching, and the real-path helpers PolicyEngine.decide() uses to resolve
 // and scope file-tool paths.
-import { realpathSync } from 'node:fs';
-import { basename, dirname, join, sep } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 
 const REGEX_METACHARS = new Set('.+^${}()|[]\\'.split(''));
 
@@ -41,6 +41,38 @@ export function globToRegExp(glob: string): RegExp {
     i++;
   }
   return new RegExp(`^${out}$`);
+}
+
+/** #492: a fileWrite/fileRead entry containing none of these is a plain path
+ *  (directory or file) that grants itself and everything beneath it; any
+ *  other entry is a glob matched by globToRegExp. */
+export function isGlobScope(entry: string): boolean {
+  return /[*?[{]/.test(entry);
+}
+
+/** A scope entry as a deny message names it, saying how it matches so a role
+ *  is not told it "may use" a directory it then cannot write inside. */
+export function describeScope(entry: string): string {
+  return isGlobScope(entry)
+    ? `${entry} (glob)`
+    : `${entry} (directory: this path and everything beneath it)`;
+}
+
+/** #492: `org validate` warnings — an absolute non-glob fileWrite/fileRead
+ *  entry that does not exist on disk is most likely a typo. Relative entries
+ *  are skipped: they resolve against a workdir that may not exist yet. */
+export function missingScopePathWarnings(
+  roles: { id: string; policy?: { fileWrite?: string[]; fileRead?: string[] } }[],
+): string[] {
+  const warnings: string[] = [];
+  for (const role of roles)
+    for (const field of ['fileWrite', 'fileRead'] as const)
+      for (const entry of role.policy?.[field] ?? [])
+        if (isAbsolute(entry) && !isGlobScope(entry) && !existsSync(entry))
+          warnings.push(
+            `role "${role.id}": policy.${field} entry ${entry} does not exist — a path entry grants that path and everything beneath it; check it for a typo`,
+          );
+  return warnings;
 }
 
 /** webAllow entry matcher. `*` allows any host (the intuitive "no

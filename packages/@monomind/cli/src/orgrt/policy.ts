@@ -9,7 +9,9 @@ import type { OrgBus } from './bus.js';
 import { fileToolDenied, isDashboardCredential } from './file-roots.js';
 import { checkGitPolicy } from './policy-git.js';
 import {
+  describeScope,
   globToRegExp,
+  isGlobScope,
   isWithin,
   realPath,
   safeHost,
@@ -292,7 +294,7 @@ export class PolicyEngine {
         // sailed straight through to allow() and bypassed fileRead/fileWrite
         // scoping entirely. Deny rather than guess which files it would touch.
         return deny(
-          `${tool} has no path argument, but role ${this.role}'s ${WRITE_TOOLS.has(tool) ? 'write' : 'read'} scope is restricted — refusing an unscoped call; pass a path inside ${globs.join(', ')} (relative to org workdir ${this.cwd})`,
+          `${tool} has no path argument, but role ${this.role}'s ${WRITE_TOOLS.has(tool) ? 'write' : 'read'} scope is restricted — refusing an unscoped call; pass a path inside ${globs.map(describeScope).join(', ')} (relative to org workdir ${this.cwd})`,
         );
       }
       if (p !== null) {
@@ -312,13 +314,20 @@ export class PolicyEngine {
         const rel = relative(realCwd, real);
         const relPosix = rel.split(sep).join('/');
         const realPosix = real.split(sep).join('/');
-        // #303: an absolute fileRead/fileWrite glob is an explicit, author-
+        // #492: an entry with no glob characters is a path — it grants that
+        // path AND everything beneath it (a relative one resolves against the
+        // org workdir). Matched on REAL paths via isWithin, so a symlink out of
+        // the directory and a shared-prefix sibling (`site-old` vs `site`) both
+        // miss. Glob entries keep their glob semantics.
+        const inScope = (g: string): boolean =>
+          isGlobScope(g)
+            ? globToRegExp(g).test(isAbsolute(g) ? realPosix : relPosix)
+            : isWithin(realPath(resolve(this.cwd, g)), real);
+        // #303: an absolute fileRead/fileWrite entry is an explicit, author-
         // written grant — it authorizes a path on its own, independent of
         // cwd/roots, the same way `policy.sandbox.allowWrite` does for Bash.
-        const grantedByAbsoluteGlob = globs.some(
-          (g) => isAbsolute(g) && globToRegExp(g).test(realPosix),
-        );
-        if (!grantedByAbsoluteGlob) {
+        const grantedByAbsoluteScope = globs.some((g) => isAbsolute(g) && inScope(g));
+        if (!grantedByAbsoluteScope) {
           // #303: beyond cwd, a role may also reach $TMPDIR, the org root, and
           // any operator-granted policy.sandbox.allowWrite entries — the same
           // roots the Bash sandbox already treats as writable (file-roots.ts).
@@ -328,9 +337,12 @@ export class PolicyEngine {
           // #291: naming only the rejected path leaves the role guessing another
           // absolute path — it never learns the roots it is confined to. Name
           // the boundary and how paths resolve so the next turn can be correct.
+          // #492: an absolute scope entry is a grant of its own — name it too,
+          // with how it matches, or the role never learns it exists.
+          const absGrants = globs.filter((g) => isAbsolute(g));
           if (!realRoots.some((root) => isWithin(root, real)))
             return deny(
-              `path escapes every root this role may use: ${p} (roots: ${realRoots.join(', ')} — paths are resolved relative to org workdir ${this.cwd}; retry with a path inside one of them)`,
+              `path escapes every root this role may use: ${p} (roots: ${realRoots.join(', ')}${absGrants.length ? `; ${WRITE_TOOLS.has(tool) ? 'write' : 'read'} scope also grants ${absGrants.map(describeScope).join(', ')}` : ''} — paths are resolved relative to org workdir ${this.cwd}; retry with a path inside one of them)`,
             );
         }
         // #303: a widened root must not make credential stores, guard-undoing
@@ -354,12 +366,9 @@ export class PolicyEngine {
           return deny(
             `path ${p} is a dashboard credential, which no role may touch regardless of scope, root, or allowWrite`,
           );
-        if (
-          !grantedByAbsoluteGlob &&
-          !globs.some((g) => !isAbsolute(g) && globToRegExp(g).test(relPosix))
-        )
+        if (!grantedByAbsoluteScope && !globs.some((g) => !isAbsolute(g) && inScope(g)))
           return deny(
-            `path ${rel} outside ${WRITE_TOOLS.has(tool) ? 'write' : 'read'} scope — role ${this.role} may use ${globs.join(', ')} (relative to org workdir ${this.cwd})`,
+            `path ${rel} outside ${WRITE_TOOLS.has(tool) ? 'write' : 'read'} scope — role ${this.role} may use ${globs.map(describeScope).join(', ')} (relative to org workdir ${this.cwd})`,
           );
         // #258: Write/Edit run in-process, so the OS sandbox never sees them —
         // without this a 'read' role could write refs and objects straight into

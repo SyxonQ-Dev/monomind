@@ -91,6 +91,9 @@ export const validateAction = async (ctx: CommandContext): Promise<CommandResult
       const gitFindings = gitEnforcementFindings(def);
       errors.push(...gitFindings.errors);
       warnings.push(...gitFindings.warnings);
+      // #492: a bare absolute scope path that doesn't exist is likely a typo.
+      const { missingScopePathWarnings } = await import('../orgrt/policy-paths.js');
+      warnings.push(...missingScopePathWarnings(def.roles));
       if (def.name !== stem)
         warnings.push(
           `def.name "${def.name}" differs from filename — the runtime addresses this org as "${stem}"`,
