@@ -75,6 +75,11 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *  - `agent-exec-effort` — `agent exec --effort <level>` maps the turn's
  *    reasoning effort onto the runtime: claude (SDK `effort`) and codex
  *    (`-c model_reasoning_effort`); other runtimes ignore it (rev 16, §3.1)
+ *  - `agent-exec-subagent-events` — claude runtime: `subagent` started/
+ *    progress/finished events for native `Task`/`Agent` subagents, joined to
+ *    the call's `tool_activity` id; a subagent's own text is an `assistant`
+ *    event with `parent_tool_use_id` and stays out of `result.text` (§3.2.1,
+ *    rev 17, issue #387)
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
@@ -98,6 +103,7 @@ export const AGENT_PROTOCOL_CAPABILITIES = [
   'doctor-offline',
   'init-json',
   'knowledge-profile-captures',
+  'agent-exec-subagent-events',
 ] as const;
 
 /** The exact handshake object emitted by `monomind --version --json`. */

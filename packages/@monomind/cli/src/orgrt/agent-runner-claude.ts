@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { createSdkMcpServer, query, tool } from '@anthropic-ai/claude-agent-sdk';
 import { fullAccessClaudeSpawn } from './agent-runner-claude-fullaccess.js';
 import { resolveClaudeSettingsOverrides } from './agent-runner-claude-settings.js';
+import { createSubagentTracker } from './agent-runner-claude-subagent.js';
 import type { AgentMessage, AgentRunArgs, AgentRunner } from './agent-runner-types.js';
 import { killOnAbort } from './agent-runner-types.js';
 import { maskedCommand } from './authority-mask.js';
@@ -297,6 +298,7 @@ export class ClaudeAgentRunner implements AgentRunner {
     /** #289: tool_use id → what was called and when, so the tool_result block
      *  (which carries only the id) can be reported with a name and a duration. */
     const pendingToolCalls = new Map<string, { tool: string; startedAt: number }>();
+    const subagentOf = createSubagentTracker(); // #387
 
     const assembleVisible = (): string =>
       [...blockTexts.entries()]
@@ -308,7 +310,8 @@ export class ClaudeAgentRunner implements AgentRunner {
       for await (const m of stream as AsyncIterable<any>) {
         const session_id = m.session_id;
         if (streamPartials && m.type === 'stream_event') {
-          const event = m.event;
+          // #387: skip a subagent's partials; its whole message is yielded below.
+          const event = m.parent_tool_use_id ? undefined : m.event;
           if (event?.type === 'message_start') {
             // Defends against a turn that errors/aborts without ever
             // reaching the 'assistant' branch below (which normally does
@@ -365,6 +368,7 @@ export class ClaudeAgentRunner implements AgentRunner {
               }
             }
           }
+          const parent: string | null = m.parent_tool_use_id ?? null; // #387: subagent text
           const fullText = (m.message?.content ?? [])
             .filter((b: any) => b.type === 'text')
             .map((b: any) => b.text)
@@ -374,17 +378,21 @@ export class ClaudeAgentRunner implements AgentRunner {
           // byte-for-byte the prior behavior session.ts depends on. With
           // it, this yields only whatever safe increment hasn't already
           // been streamed above (normally undefined — already fully shown).
-          const text = streamPartials
-            ? fullText.length > visibleSoFar.length
-              ? fullText.slice(visibleSoFar.length)
-              : undefined
-            : fullText;
-          blockTexts = new Map();
-          visibleSoFar = '';
+          const text =
+            streamPartials && !parent
+              ? fullText.length > visibleSoFar.length
+                ? fullText.slice(visibleSoFar.length)
+                : undefined
+              : fullText;
+          if (!parent) {
+            blockTexts = new Map();
+            visibleSoFar = '';
+          }
           yield {
             type: 'assistant',
             session_id,
             text,
+            ...(parent ? { parent_tool_use_id: parent } : {}),
             input_tokens: m.message?.usage?.input_tokens,
             output_tokens: m.message?.usage?.output_tokens,
             // BetaUsage types both cache fields as `number | null`; normalize
@@ -432,6 +440,10 @@ export class ClaudeAgentRunner implements AgentRunner {
           // non-empty) — session.ts (org runtime) never sets it, so this
           // branch never fires there, matching "org runtime unchanged".
           yield { type: 'status', session_id, phase: 'ready', mcp_servers: m.mcp_servers };
+        } else if (streamPartials && m.type === 'system') {
+          // #387: agent-exec only (the org runtime never sets streamPartials).
+          const subagent = subagentOf(m);
+          if (subagent) yield { type: 'subagent', session_id, subagent };
         }
         // Other message kinds (system when settingSources is empty, …)
         // carry no signal session.ts acts on.

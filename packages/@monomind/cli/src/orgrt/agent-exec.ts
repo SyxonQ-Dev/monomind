@@ -323,9 +323,11 @@ export async function runAgentExec(opts: AgentExecOptions): Promise<number> {
         }
 
         if (m.type === 'assistant' && m.text) {
-          rawTexts.push(m.text);
-          safeEmit({ v: 1, type: 'assistant', text: m.text });
-        } else if (m.type === 'result') {
+          const sub = m.parent_tool_use_id ? { parent_tool_use_id: m.parent_tool_use_id } : {};
+          if (!m.parent_tool_use_id) rawTexts.push(m.text); // #387: subagent text stays out
+          safeEmit({ v: 1, type: 'assistant', text: m.text, ...sub });
+        } else if (m.type === 'subagent') safeEmit({ v: 1, type: 'subagent', ...m.subagent });
+        else if (m.type === 'result') {
           const d = usage.delta(m);
           totals = { in: totals.in + d.in, out: totals.out + d.out, usd: totals.usd + d.usd };
           safeEmit({
