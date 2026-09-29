@@ -1,8 +1,8 @@
 'use strict';
 /**
  * Intelligence context module for hook-handler.cjs
- * Provides context injection, trajectory logging, feedback recording,
- * edit tracking, consolidation, and stats.
+ * Provides trajectory logging, feedback recording, edit tracking,
+ * consolidation, and stats.
  *
  * Data directory: $CLAUDE_PROJECT_DIR/.monomind/data/
  *   auto-memory-store.json      — persisted memory entries
@@ -29,24 +29,8 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MiB guard
 const RING_BUFFER_MAX = 50;
 const MAX_ENTRIES = 200;
 
-// Same list as src/memory/text-tokens.ts's STOPWORDS (inlined — this is a
-// standalone hook script with no access to the TS build). Without this,
-// getContext()'s 2-word-overlap bar counts connector words like "you"/"can"/
-// "the"/"that"/"any" as evidence of relevance, so almost any two prompts
-// spuriously "match" and a stale, unrelated stored entry keeps resurfacing.
-const STOPWORDS = new Set([
-  'a', 'an', 'the', 'and', 'or', 'but', 'if', 'of', 'to', 'in', 'on', 'at', 'by',
-  'for', 'with', 'from', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'do',
-  'does', 'did', 'doing', 'have', 'has', 'had', 'i', 'we', 'you', 'it', 'its',
-  'that', 'this', 'these', 'those', 'what', 'which', 'who', 'how', 'when', 'where',
-  'why', 'can', 'could', 'should', 'would', 'will', 'my', 'our', 'me', 'us', 'as',
-  'so', 'than', 'then', 'there', 'here', 'not', 'no', 'all', 'any', 'some', 'get',
-  'got', 'about', 'into', 'over', 'out', 'up', 'down', 'again', 'am', 'they',
-]);
-
 var _entries = [];        // deduplicated memory entries loaded from store
 var _recentEdits = [];    // ring buffer of recently edited paths (in-memory, may be empty across subprocesses)
-var _lastContext = null;  // last non-null context returned by getContext()
 
 function ensureDataDir() {
   try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (_) {}
@@ -54,10 +38,9 @@ function ensureDataDir() {
 
 // ── multi-process-safe store flush (P1-14) ──────────────────────────────────
 // STORE_FILE (auto-memory-store.json) is read once into `_entries` at init()
-// and can be written by more than one code path — consolidate() and
-// bootstrapFromDb() — each of which may be running in a *different* process
-// (e.g. the long-lived MCP server process and a short-lived CJS hook
-// subprocess launched concurrently). Without a lock + re-read-before-write,
+// and is written by consolidate(), which may be running in more than one
+// process at once (e.g. the long-lived MCP server process and a short-lived
+// CJS hook subprocess launched concurrently). Without a lock + re-read-before-write,
 // whichever process flushes last silently erases whatever the other process
 // added since its own load. mergeAndWriteStore() re-reads the current
 // on-disk file immediately before writing, merges the caller's updates in by
@@ -159,8 +142,6 @@ function init() {
     return true;
   }).slice(-MAX_ENTRIES);
 
-  // Bootstrap from monograph when store is sparse — called externally via bootstrapFromDb(db)
-
   // Write ranked-context.json (sorted by confidence desc) with version envelope
   var ranked = _entries.slice().sort(function(a, b) {
     return (b.confidence || 0) - (a.confidence || 0);
@@ -170,51 +151,6 @@ function init() {
   } catch (_) {}
 
   return { nodes: _entries.length, edges: 0 };
-}
-
-// ── getContext ─────────────────────────────────────────────────────────────────
-
-function getContext(prompt) {
-  if (!prompt || typeof prompt !== 'string' || prompt.trim() === '') return null;
-  if (_entries.length === 0) return null;
-
-  var promptWords = prompt.toLowerCase().split(/\W+/).filter(function(w) { return w.length >= 3 && !STOPWORDS.has(w); });
-  var promptSet = new Set(promptWords);
-  if (promptSet.size < 2) return null; // need at least 2 meaningful words
-
-  var scored = [];
-  for (var i = 0; i < _entries.length; i++) {
-    var e = _entries[i];
-    var content = ((e.content || '') + ' ' + (e.summary || '')).toLowerCase();
-    var words = content.split(/\W+/).filter(function(w) { return w.length >= 3 && !STOPWORDS.has(w); });
-    // Count DISTINCT overlapping words, not raw occurrences — content and
-    // summary commonly repeat the same filenames, so a single shared word
-    // (e.g. "review" in both a file's name and its own summary restating it)
-    // was inflating hits to 2+ on its own, undermining the "distinct" bar
-    // this comment already promised.
-    var entrySet = new Set(words);
-    var hits = 0;
-    promptSet.forEach(function(w) { if (entrySet.has(w)) hits++; });
-    // Require at least 2 distinct word matches to reduce false positives
-    if (hits >= 2) {
-      scored.push({ entry: e, hits: hits });
-    }
-  }
-
-  if (scored.length === 0) return null;
-
-  // Sort by hit count descending, then by confidence
-  scored.sort(function(a, b) {
-    if (b.hits !== a.hits) return b.hits - a.hits;
-    return (b.entry.confidence || 0) - (a.entry.confidence || 0);
-  });
-
-  var top = scored[0].entry;
-  var text = String(top.summary || top.content || top.id || 'context match');
-  if (text.length > 160) text = text.slice(0, 160) + '…';
-  var result = '[INTELLIGENCE] ' + text;
-  _lastContext = result;
-  return result;
 }
 
 // ── recordEdit ────────────────────────────────────────────────────────────────
@@ -310,8 +246,8 @@ function consolidate() {
       if (uniquePaths.length === 0) continue;
       var baseNames = uniquePaths.slice(0, 5).map(function(bp) { return path.basename(bp); });
 
-      // Prefer real semantic content for the summary: outcome.context (rare —
-      // only set when getContext matched in the same process), else the
+      // Prefer real semantic content for the summary: outcome.context (only in
+      // records written before the per-prompt lookup was removed), else the
       // matching episode's prompt snippet + first commit subject.
       var summary = outcome.context || null;
       var hasCommits = false;
@@ -428,7 +364,6 @@ function feedback(success) {
   var record = JSON.stringify({
     ts: Date.now(),
     success: !!success,
-    context: _lastContext,
     recentEdits: edits,
   }) + '\n';
   try { fs.appendFileSync(OUTCOMES_FILE, record, 'utf-8'); } catch (_) {}
@@ -484,48 +419,4 @@ async function recordMemoryDecision(input) {
   if (mod && mod.recordMemoryDecision) return mod.recordMemoryDecision(input);
 }
 
-// Bootstrap intelligence store from an already-open monograph DB handle.
-// Called from route-handler on first prompt when store is sparse.
-function bootstrapFromDb(db) {
-  if (!db || _entries.length >= 5) return 0;
-  try {
-    var hubs = db.prepare(
-      "SELECT n.name, n.label, n.file_path AS file, COUNT(e.id) AS deg " +
-      "FROM nodes n JOIN edges e ON (e.source_id = n.id OR e.target_id = n.id) " +
-      "WHERE n.label IN ('File','Function','Class') AND n.file_path NOT LIKE '%node_modules%' AND n.file_path NOT LIKE '%dist/%' " +
-      "GROUP BY n.id ORDER BY deg DESC LIMIT 10"
-    ).all();
-    if (hubs.length === 0) return 0;
-    var existingIds = new Set(_entries.map(function(e) { return e.id; }));
-    var newHubEntries = [];
-    var added = 0;
-    for (var hi = 0; hi < hubs.length; hi++) {
-      var h = hubs[hi];
-      var bId = 'bootstrap-hub-' + hi;
-      if (existingIds.has(bId)) continue;
-      var hubEntry = {
-        id: bId,
-        type: 'hub',
-        content: h.name + ' (' + h.label + ') — ' + (h.file || '').replace(CWD + '/', '') + ' (' + h.deg + ' connections)',
-        summary: 'Key codebase hub: ' + h.name + ' with ' + h.deg + ' dependencies',
-        confidence: 0.4,
-        files: h.file ? [h.file] : [],
-        ts: Date.now(),
-      };
-      if (_entries.length >= MAX_ENTRIES) _entries.shift();
-      _entries.push(hubEntry);
-      newHubEntries.push(hubEntry);
-      added++;
-    }
-    if (added > 0) {
-      ensureDataDir();
-      // mergeAndWriteStore re-reads STORE_FILE immediately before writing, so
-      // this only ever adds these hub entries into whatever is currently on
-      // disk — it never overwrites entries a concurrent process added.
-      try { mergeAndWriteStore(newHubEntries, 200); } catch (_) {}
-    }
-    return added;
-  } catch (_) { return 0; }
-}
-
-module.exports = { init, getContext, recordEdit, consolidate, feedback, stats, logTrajectory, storePattern, findSimilarPatterns, recordMemoryDecision, bootstrapFromDb };
+module.exports = { init, recordEdit, consolidate, feedback, stats, logTrajectory, storePattern, findSimilarPatterns, recordMemoryDecision };

@@ -18,7 +18,7 @@
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { extname, join, resolve } from 'node:path';
+import { extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { resolveMonodesignCli } from '../commands/design-detect.js';
 import { hashUnit, hueWord, SEEDS, toOklchCss, weightedPick } from '../commands/design-palette.js';
 import type { MCPTool } from './types.js';
@@ -43,9 +43,13 @@ async function getEngine(): Promise<Record<string, any>> {
  *  cascade-dependent finding in HTML (#353). */
 const HTML_EXTENSIONS = new Set(['.html', '.htm']);
 
+// Unverified contrast checks (translucent colours, overlays, gradients) are
+// always collected so the response can say how many were held back (#424).
+const SCAN_OPTIONS = { includeUnverified: true };
+
 async function detectFile(engine: Record<string, any>, file: string): Promise<any[]> {
   return HTML_EXTENSIONS.has(extname(file).toLowerCase())
-    ? await engine.detectHtml(file)
+    ? await engine.detectHtml(file, SCAN_OPTIONS)
     : engine.detectText(readFileSync(file, 'utf8'), file);
 }
 
@@ -62,7 +66,7 @@ async function detectInline(
   try {
     const file = join(dir, `inline${ext}`);
     writeFileSync(file, content);
-    const found: any[] = await engine.detectHtml(file);
+    const found: any[] = await engine.detectHtml(file, SCAN_OPTIONS);
     return found.map((f) => (f.file === file ? { ...f, file: virtualPath } : f));
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -70,7 +74,49 @@ async function detectInline(
 }
 
 const MAX_FINDINGS = 100;
+const MAX_GROUPS = 20;
 const MAX_OUTPUT_CHARS = 20_000;
+
+function displayPath(file: unknown): unknown {
+  if (typeof file !== 'string' || !isAbsolute(file)) return file;
+  const rel = relative(getProjectCwd(), file);
+  return rel && !rel.startsWith('..') ? rel : file;
+}
+
+/** Default response: one entry per (rule, snippet) with a count and example
+ *  locations, capped at MAX_GROUPS by severity. Rule descriptions are listed
+ *  once in `rules` instead of on every group (#424). */
+function groupedResponse(engine: Record<string, any>, findings: any[], offset: number) {
+  const groups: any[] = engine.groupFindings(findings);
+  const page = groups.slice(offset, offset + MAX_GROUPS);
+  const rules: Record<string, { name: string; description?: string }> = {};
+  for (const g of page) {
+    rules[g.antipattern] ??= {
+      name: g.name,
+      description: g.description ? String(g.description).slice(0, 200) : undefined,
+    };
+  }
+  const remaining = groups.length - offset - page.length;
+  return {
+    uniqueCount: groups.length,
+    groups: page.map((g) => ({
+      antipattern: g.antipattern,
+      severity: g.severity,
+      count: g.count,
+      snippet: g.snippet.slice(0, 120),
+      locations: g.locations.map((l: { file: string; line?: number }) =>
+        l.line ? `${displayPath(l.file)}:${l.line}` : displayPath(l.file),
+      ),
+      ...(g.fileCount > g.locations.length ? { moreFiles: g.fileCount - g.locations.length } : {}),
+    })),
+    rules,
+    ...(remaining > 0
+      ? {
+          more: `${remaining} more group(s); call again with offset=${offset + page.length}, or verbose=true for the raw findings list`,
+        }
+      : {}),
+  };
+}
 
 function truncateFindings(findings: any[]): { findings: any[]; truncated: boolean } {
   if (findings.length <= MAX_FINDINGS) return { findings, truncated: false };
@@ -161,7 +207,7 @@ const monodesignPalette: MCPTool = {
 const monodesignDetect: MCPTool = {
   name: 'monodesign_detect',
   description:
-    'Detect design anti-patterns (overused fonts, tiny text, gradient text, glow, layout issues) in HTML/CSS files using the bundled monodesign engine, in-process. Pass a target file/dir, or inline content.',
+    'Detect design anti-patterns (overused fonts, tiny text, gradient text, glow, layout issues) in HTML/CSS files using the bundled monodesign engine, in-process. Pass a target file/dir, or inline content. Returns findings grouped by (rule, snippet) with counts, most severe first; verbose=true for the raw list.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -177,6 +223,19 @@ const monodesignDetect: MCPTool = {
       severity: {
         type: 'string',
         description: 'Minimum severity to include: info | warning | error (default: all)',
+      },
+      verbose: {
+        type: 'boolean',
+        description: `Return the raw per-occurrence findings list (capped at ${MAX_FINDINGS}) instead of grouped findings`,
+      },
+      offset: {
+        type: 'number',
+        description: `Skip this many groups (grouped output pages ${MAX_GROUPS} at a time, most severe first)`,
+      },
+      include_unverified: {
+        type: 'boolean',
+        description:
+          'Also report contrast checks the static analyser cannot verify (translucent colours, overlays, gradients, SVG text); default false',
       },
     },
   },
@@ -225,10 +284,33 @@ const monodesignDetect: MCPTool = {
         findings = findings.filter((f) => (rank[f.severity] ?? 1) >= min);
       }
 
+      const unverified = findings.filter((f) => f.unverified).length;
+      if (params.include_unverified !== true) findings = findings.filter((f) => !f.unverified);
+      const unverifiedNote =
+        unverified > 0 && params.include_unverified !== true
+          ? {
+              unverified,
+              unverifiedNote:
+                'contrast checks on translucent/overlay/gradient backgrounds were not counted; pass include_unverified=true to see them',
+            }
+          : {};
+
+      if (params.verbose !== true) {
+        const offset =
+          typeof params.offset === 'number' && params.offset > 0 ? Math.floor(params.offset) : 0;
+        return {
+          success: true,
+          count: findings.length,
+          ...unverifiedNote,
+          ...groupedResponse(engine, findings, offset),
+        };
+      }
+
       const { findings: capped, truncated } = truncateFindings(findings);
       return {
         success: true,
         count: findings.length,
+        ...unverifiedNote,
         ...(truncated ? { truncated: true, showing: MAX_FINDINGS } : {}),
         findings: capped.map(shapeFinding),
       };

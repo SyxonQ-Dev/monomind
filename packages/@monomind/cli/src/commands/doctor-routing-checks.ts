@@ -11,30 +11,48 @@ function fmtPct(v: number | null): string {
   return v === null ? 'n/a' : `${Math.round(v * 100)}%`;
 }
 
-async function routingAccuracyLine(): Promise<string> {
-  try {
-    const { computeRoutingAccuracy, computeAdherence } = await import(
-      '../monovector/route-outcomes.js'
-    );
-    const baseDir = join(process.cwd(), '.monomind');
-    const acc = await computeRoutingAccuracy(baseDir, 100);
-    const adh = await computeAdherence(baseDir);
-    const adhStr = ` | adherence ${fmtPct(adh.adherence)} (n=${adh.sample})`;
-    if (acc.accuracy === null) return `routing accuracy (last 100): no outcome data yet${adhStr}`;
-    const trend =
-      acc.recentVsPrior === null
-        ? ''
-        : ` trend ${acc.recentVsPrior >= 0 ? '+' : ''}${Math.round(acc.recentVsPrior * 100)}%`;
-    return `routing accuracy (last ${acc.window}): ${fmtPct(acc.accuracy)} [native ${fmtPct(acc.byMode.native)} / js ${fmtPct(acc.byMode.js)}]${trend}${adhStr}`;
-  } catch (e) {
-    if (process.env.DEBUG || process.env.MONOMIND_DEBUG)
-      console.error('[routingAccuracyLine] compute failed:', e);
-    return 'routing accuracy (last 100): no outcome data yet';
-  }
+/** Below this many outcomes a success rate is noise, so none is reported (#425). */
+const MIN_ROUTING_SAMPLE = 30;
+
+/** Summarize .monomind/route-outcomes.jsonl, or null when it holds no outcomes.
+ *  An accuracy figure is printed only from >= MIN_ROUTING_SAMPLE outcomes that
+ *  include both successes and failures — a one-sided flag measures nothing. */
+async function routeOutcomeCheck(): Promise<HealthCheck | null> {
+  const { computeRoutingAccuracy, computeAdherence } = await import(
+    '../monovector/route-outcomes.js'
+  );
+  const baseDir = join(process.cwd(), '.monomind');
+  const acc = await computeRoutingAccuracy(baseDir, 100);
+  const n = acc.totalWithOutcome;
+  if (acc.accuracy === null || n === 0) return null;
+  const adh = await computeAdherence(baseDir);
+  const follow = `PICK follow rate ${fmtPct(adh.adherence)} (n=${adh.sample})`;
+  const name = 'Routing Learning';
+  if (n < MIN_ROUTING_SAMPLE)
+    return {
+      name,
+      status: 'info',
+      message: `insufficient data: ${n} routed task(s) with an outcome (need ${MIN_ROUTING_SAMPLE}); ${follow}`,
+    };
+  if (acc.accuracy === 1 || acc.accuracy === 0)
+    return {
+      name,
+      status: 'warn',
+      message: `${n} outcomes, all marked ${acc.accuracy === 1 ? 'successful' : 'failed'} — no contrasting signal, so no accuracy is reported; ${follow}`,
+    };
+  const trend =
+    acc.recentVsPrior === null
+      ? ''
+      : ` trend ${acc.recentVsPrior >= 0 ? '+' : ''}${Math.round(acc.recentVsPrior * 100)}%`;
+  return {
+    name,
+    status: 'pass',
+    message: `routing accuracy ${fmtPct(acc.accuracy)} (n=${n}) [native ${fmtPct(acc.byMode.native)} / js ${fmtPct(acc.byMode.js)}]${trend}; ${follow}`,
+  };
 }
 
 /** Fallback when route-outcomes.jsonl has no data: summarize .monomind/routing-feedback.jsonl honestly. */
-function routingFeedbackFallback(): { message: string; degenerate: boolean } | null {
+function routingFeedbackFallback(): { message: string; status: HealthCheck['status'] } | null {
   try {
     const p = join(process.cwd(), '.monomind', 'routing-feedback.jsonl');
     if (!existsSync(p) || statSync(p).size > 512 * 1024) return null;
@@ -67,17 +85,20 @@ function routingFeedbackFallback(): { message: string; degenerate: boolean } | n
       .filter((v): v is boolean => typeof v === 'boolean');
     const trueCount = flags.filter(Boolean).length;
     const base = `routing feedback (fallback): ${records.length} decisions across ${sessions.size} sessions; top agents: ${top}`;
-    if (flags.length > 0 && trueCount === flags.length) {
+    if (flags.length < MIN_ROUTING_SAMPLE)
+      return {
+        message: `${base}; insufficient data: ${flags.length} success flag(s) (need ${MIN_ROUTING_SAMPLE})`,
+        status: 'info',
+      };
+    if (trueCount === flags.length) {
       return {
         message: `${base}; success flag is degenerate (100% true — sessionSuccess heuristic never records failure)`,
-        degenerate: true,
+        status: 'warn',
       };
     }
-    if (flags.length === 0)
-      return { message: `${base}; no evidence-based success flags yet`, degenerate: true };
     return {
       message: `${base}; success rate ${Math.round((trueCount / flags.length) * 100)}% (n=${flags.length})`,
-      degenerate: false,
+      status: 'pass',
     };
   } catch (e) {
     if (process.env.DEBUG || process.env.MONOMIND_DEBUG)
@@ -88,17 +109,15 @@ function routingFeedbackFallback(): { message: string; degenerate: boolean } | n
 
 export async function checkMonoesIntegration(): Promise<HealthCheck> {
   try {
-    const line = await routingAccuracyLine();
-    if (line.startsWith('routing accuracy (last 100): no outcome data yet')) {
-      const fb = routingFeedbackFallback();
-      if (fb)
-        return {
-          name: 'Routing Learning',
-          status: fb.degenerate ? 'warn' : 'pass',
-          message: fb.message,
-        };
-    }
-    return { name: 'Routing Learning', status: 'pass', message: line };
+    const outcomes = await routeOutcomeCheck().catch((e) => {
+      if (process.env.DEBUG || process.env.MONOMIND_DEBUG)
+        console.error('[routeOutcomeCheck] compute failed:', e);
+      return null;
+    });
+    if (outcomes) return outcomes;
+    const fb = routingFeedbackFallback();
+    if (fb) return { name: 'Routing Learning', status: fb.status, message: fb.message };
+    return { name: 'Routing Learning', status: 'info', message: 'no routing outcome data yet' };
   } catch (err) {
     return {
       name: 'Routing Learning',

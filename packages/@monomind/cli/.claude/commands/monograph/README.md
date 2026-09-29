@@ -58,11 +58,6 @@ The monograph MCP tools (available in Claude Code via monomind MCP server) provi
 | `mcp__monomind__monograph_suggest` | Start every task — returns relevant files ranked by task description |
 | `mcp__monomind__monograph_god_nodes` | Find high-centrality internal files |
 | `mcp__monomind__monograph_stats` | Node/edge counts |
-| `mcp__monomind__monograph_report` | Generate GRAPH_REPORT.md |
-| `mcp__monomind__monograph_shortest_path` | How two modules are connected |
-| `mcp__monomind__monograph_community` | Files forming a cohesive cluster |
-| `mcp__monomind__monograph_surprises` | Unexpected cross-community edges |
-| `mcp__monomind__monograph_export` | Export graph in various formats |
 | `mcp__monomind__monograph_watch` | Start watch mode via MCP |
 | `mcp__monomind__monograph_watch_stop` | Stop watch mode |
 | `mcp__monomind__monograph_context` | 360-degree view of a file: importers, imports, siblings |

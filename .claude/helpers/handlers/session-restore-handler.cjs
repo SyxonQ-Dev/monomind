@@ -12,7 +12,36 @@ const { injectGodNodesContext } = require('../utils/monograph.cjs');
 var _QUIET = String(process.env.MONOMIND_HOOK_QUIET || '').toLowerCase() === '1';
 function log() { if (!_QUIET) console.log.apply(console, arguments); }
 
+// #416: the background Second Brain reindex. Ingests only the curated corpus
+// (docs/, doc/ and top-level *.md) with the INSTALLED CLI — never
+// `npx -y monomind@latest`, which pulled a different version and swept the
+// whole repo (package READMEs, duplicates, org run logs). Dot-dirs
+// (.agents .gemini .kimi-code .opencode .codex .monomind .mail) never match
+// these targets, and ingestDirectory skips them inside docs/ too; identical
+// content collapses onto the same `doc:<contentHash>:<i>` chunk keys.
+// Returns { cmd, args, targets } or null when there is no local CLI or
+// nothing in scope.
+function knowledgeIngestCommand(root, pathEnv) {
+  var targets = [];
+  ['docs', 'doc'].forEach(function(d) {
+    try { if (fs.statSync(path.join(root, d)).isDirectory()) targets.push(d); } catch (_) {}
+  });
+  try {
+    fs.readdirSync(root).filter(function(n) {
+      return n.toLowerCase().endsWith('.md') && fs.statSync(path.join(root, n)).isFile();
+    }).sort().forEach(function(n) { targets.push(n); });
+  } catch (_) {}
+  if (targets.length === 0) return null;
+  var ingestArgs = ['doc', 'ingest'].concat(targets);
+  var bin = require('../utils/monograph-resolve.cjs').findMonomindBin(root, pathEnv);
+  if (bin) return { cmd: bin, args: ingestArgs, targets: targets };
+  var cli = path.join(root, 'packages', '@monomind', 'cli', 'bin', 'cli.js');
+  if (fs.existsSync(cli)) return { cmd: process.execPath, args: [cli].concat(ingestArgs), targets: targets };
+  return null;
+}
+
 module.exports = {
+  knowledgeIngestCommand: knowledgeIngestCommand,
   handleRestore: async function(hCtx) {
     var hookInput = hCtx.hookInput;
     var session = hCtx.session;
@@ -138,7 +167,7 @@ module.exports = {
         if (bundledDir) {
           var healed = [];
           // Top-level critical files — mirrors executor.ts's `criticalHelpers` list.
-          var helpersToCheck = ['hook-handler.cjs', 'statusline.cjs', 'router.cjs', 'monograph-freshen.cjs', 'control-start.cjs', 'intelligence.cjs', 'auto-memory-hook.mjs', 'build-skill-registry.cjs', 'agent-registry.cjs', 'org-skill-index.cjs', 'jev-picker.cjs', 'jev-catalog.cjs', 'redact-secrets.cjs', 'pick-rank.cjs', 'pick-stats.cjs'];
+          var helpersToCheck = ['hook-handler.cjs', 'statusline.cjs', 'router.cjs', 'monograph-freshen.cjs', 'control-start.cjs', 'intelligence.cjs', 'build-skill-registry.cjs', 'agent-registry.cjs', 'org-skill-index.cjs', 'jev-picker.cjs', 'jev-catalog.cjs', 'redact-secrets.cjs', 'pick-rank.cjs', 'pick-stats.cjs'];
           for (var hi = 0; hi < helpersToCheck.length; hi++) {
             var hName = helpersToCheck[hi];
             var healedName = _healIfStale(
@@ -442,10 +471,21 @@ module.exports = {
               if (_DOC_EXT[ext] && st.mtimeMs > _kbMetaMtime) _kbDirty = true;
             }
           };
-          _kbWalk(_kbRoot, 0);
+          var _kbCmd = knowledgeIngestCommand(_kbRoot);
+          // Only the ingest scope counts as a change — an edited package
+          // README must not trigger a reindex that won't touch it.
+          if (_kbCmd) {
+            _kbCmd.targets.forEach(function(t) {
+              var tp = path.join(_kbRoot, t);
+              var tst;
+              try { tst = fs.statSync(tp); } catch (_) { return; }
+              if (tst.isDirectory()) _kbWalk(tp, 1);
+              else if (tst.mtimeMs > _kbMetaMtime) _kbDirty = true;
+            });
+          }
           if (_kbDirty) {
             var _kbSpawn = require('child_process').spawn;
-            var _kbChild = _kbSpawn('npx', ['-y', 'monomind@latest', 'doc', 'ingest', '.'], {
+            var _kbChild = _kbSpawn(_kbCmd.cmd, _kbCmd.args, {
               cwd: _kbRoot,
               detached: true,
               stdio: 'ignore',
@@ -453,9 +493,9 @@ module.exports = {
               shell: process.platform === 'win32',
               windowsHide: true,
             });
-            // Without an error listener, a missing npx binary emits an
+            // Without an error listener, a missing CLI binary emits an
             // unhandled 'error' event and crashes the whole session-start hook.
-            _kbChild.on('error', function () { /* npx unavailable — reindex on a later session */ });
+            _kbChild.on('error', function () { /* CLI unavailable — reindex on a later session */ });
             _kbChild.unref();
             log('[KNOWLEDGE_REINDEX] changed documents detected — re-ingesting in background');
           }
@@ -501,17 +541,6 @@ module.exports = {
         }
       } catch (e2) { /* non-fatal */ }
     }
-
-    // Memory Palace — inject L0 (identity) + L1 (essential story) into session context.
-    try {
-      var palace = require(path.join(helpersDir, 'memory-palace.cjs'));
-      var palaceContext = palace.wakeUp(CWD);
-      if (palaceContext) {
-        // Content injection — NOT gated by QUIET. wakeUp() is called only here;
-        // no other hook or MCP tool exposes L0/L1 palace context to the LLM.
-        console.log(palaceContext);
-      }
-    } catch (e) { /* non-fatal — palace not available */ }
 
     // Periodic Update Check (once per day).
     try {

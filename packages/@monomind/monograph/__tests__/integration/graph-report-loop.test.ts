@@ -4,7 +4,8 @@ import { mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { buildAsync } from '../../src/pipeline/orchestrator.js';
 import { openDb, closeDb } from '../../src/storage/db.js';
 
-// Regression: every build writes GRAPH_REPORT.md into the repo root, and the next
+// Regression: a build asked to write GRAPH_REPORT.md into the repo root (the
+// default before #414; now `reportPath: 'GRAPH_REPORT.md'`), and the next
 // build scanned and indexed it — so the graph grew nodes and edges derived from a
 // previous build's own output, compounding on every rebuild. The scan phase now
 // treats GRAPH_REPORT.md as generated output, so a second build over unchanged
@@ -66,7 +67,7 @@ afterAll(() => rmSync(tmpRepo, { recursive: true, force: true }));
 
 describe('GRAPH_REPORT.md is not fed back into the graph', () => {
   it('a rebuild over unchanged sources reproduces the same graph', async () => {
-    await buildAsync(tmpRepo);
+    await buildAsync(tmpRepo, { reportPath: 'GRAPH_REPORT.md' });
     // The report the first build wrote is what the second build must not index.
     expect(existsSync(reportPath)).toBe(true);
     const first = snapshot();
@@ -74,7 +75,7 @@ describe('GRAPH_REPORT.md is not fed back into the graph', () => {
 
     // Clean rebuild from scratch — only the report survives from the first build.
     rmSync(join(tmpRepo, '.monomind'), { recursive: true, force: true });
-    await buildAsync(tmpRepo);
+    await buildAsync(tmpRepo, { reportPath: 'GRAPH_REPORT.md' });
     const second = snapshot();
 
     expect(second).toEqual(first);

@@ -85,6 +85,8 @@ let tmpDir;
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gf-test-'));
+  // freshen only builds inside a git work tree (#414).
+  spawnSync('git', ['init', '-q'], { cwd: tmpDir });
 });
 
 afterEach(async () => {
@@ -272,6 +274,54 @@ describe('monograph-freshen: build.lock left by an exited build', () => {
     fs.writeFileSync(lockPath, String(dead));
     const oneMinAgo = new Date(Date.now() - 60 * 1000);
     fs.utimesSync(lockPath, oneMinAgo, oneMinAgo);
+    const r = run({ CLAUDE_PROJECT_DIR: tmpDir }, { cwd: tmpDir });
+    expect(r.stdout).toContain('background build started for');
+  });
+});
+
+// ── #414: non-git directories and the auto-build rate limit ─────────────────
+
+describe('monograph-freshen: non-git directory', () => {
+  it('skips the build and prints a one-line hint to build manually', () => {
+    fs.rmSync(path.join(tmpDir, '.git'), { recursive: true, force: true });
+    createFakeMonograph(tmpDir);
+    const r = run({ CLAUDE_PROJECT_DIR: tmpDir }, { cwd: tmpDir });
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim().split('\n')).toEqual([
+      '[graph] not a git repository — skipping automatic graph build; run `monomind monograph build` to build it manually',
+    ]);
+    expect(fs.existsSync(path.join(tmpDir, '.monomind', 'graph', 'build.pid'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.monomind', 'graph', 'last-auto-build'))).toBe(false);
+  });
+});
+
+describe('monograph-freshen: auto-build rate limit', () => {
+  const stamp = () => path.join(tmpDir, '.monomind', 'graph', 'last-auto-build');
+
+  it('records the time of an automatic build', () => {
+    createFakeMonograph(tmpDir);
+    const before = Date.now();
+    const r = run({ CLAUDE_PROJECT_DIR: tmpDir }, { cwd: tmpDir });
+    expect(r.stdout).toContain('background build started for');
+    expect(parseInt(fs.readFileSync(stamp(), 'utf-8'), 10)).toBeGreaterThanOrEqual(before);
+  });
+
+  it('skips a second automatic build within 10 minutes', async () => {
+    createFakeMonograph(tmpDir);
+    run({ CLAUDE_PROJECT_DIR: tmpDir }, { cwd: tmpDir });
+    await waitForRebuildExit();
+    fs.rmSync(path.join(tmpDir, '.monomind', 'graph', 'build.pid'), { force: true });
+    const r = run({ CLAUDE_PROJECT_DIR: tmpDir }, { cwd: tmpDir });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('automatic build ran less than 10 min ago — skipping');
+    expect(r.stdout).not.toContain('background build started');
+    expect(fs.existsSync(path.join(tmpDir, '.monomind', 'graph', 'build.pid'))).toBe(false);
+  });
+
+  it('builds again once 10 minutes have passed', () => {
+    createFakeMonograph(tmpDir);
+    fs.mkdirSync(path.dirname(stamp()), { recursive: true });
+    fs.writeFileSync(stamp(), String(Date.now() - 11 * 60 * 1000));
     const r = run({ CLAUDE_PROJECT_DIR: tmpDir }, { cwd: tmpDir });
     expect(r.stdout).toContain('background build started for');
   });

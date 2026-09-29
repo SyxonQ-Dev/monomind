@@ -418,19 +418,21 @@ describe('resolveRoleGitEnforcement', () => {
   });
 
   it('installs the placeholder excludes only when the sandbox actually runs', () => {
+    // #481: the guard's excludesFile reaches git through an includeIf entry
+    // scoped to the protected repo, so ask git in that repo, not the env keys.
+    const excludesIn = (cwd: string, env: Record<string, string>) =>
+      spawnSync('git', ['config', '--get', 'core.excludesFile'], {
+        cwd,
+        encoding: 'utf8',
+        env: { ...process.env, ...env },
+      }).stdout.trim();
     const withSandbox = setup();
     const on = resolveRoleGitEnforcement({ ...withSandbox.opts, claudeRuntime: true, availability: available });
-    const keys = Object.entries(on.env)
-      .filter(([k]) => k.startsWith('GIT_CONFIG_KEY_'))
-      .map(([, v]) => v);
-    expect(keys).toContain('core.excludesFile');
+    expect(excludesIn(withSandbox.opts.cwd, on.env)).toBe(join(withSandbox.opts.orgDir, 'git-guard', 'qa', 'excludes'));
 
     const withoutSandbox = setup();
     const off = resolveRoleGitEnforcement({ ...withoutSandbox.opts, claudeRuntime: true, availability: missing });
-    const offKeys = Object.entries(off.env)
-      .filter(([k]) => k.startsWith('GIT_CONFIG_KEY_'))
-      .map(([, v]) => v);
-    expect(offKeys).not.toContain('core.excludesFile');
+    expect(excludesIn(withoutSandbox.opts.cwd, off.env)).toBe('');
   });
 
   it("'off' disables the sandbox and records the opt-out", () => {

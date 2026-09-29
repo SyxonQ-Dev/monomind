@@ -16,6 +16,7 @@ import { classifyStderr } from './kimicode-runner-parse.js';
 export type AgentFailureStatus =
   | 'auth'
   | 'quota'
+  | 'rate_limited'
   | 'model_unavailable'
   | 'timeout'
   | 'missing_binary'
@@ -74,6 +75,13 @@ const AUTH_PATTERNS: RegExp[] = [
   /\bunauthori[sz]ed\b|authentication (?:failed|error|required)/i,
   // hermes (seen): "No inference provider configured. … set an API key"
   /no inference provider configured/i,
+  // #473 crush (issue report): "No providers configured - please run 'crush'
+  // to set up a provider interactively."
+  /\bno providers? configured\b/i,
+  // #473 pi (seen): "No API key found for the selected model. Use /login to
+  // log into a provider via OAuth or API key."
+  /\bno api key (?:found|configured)\b/i,
+  /\buse \/login\b/i,
 ];
 
 /** Runners re-throw ENOENT as prose ("requires the Codex CLI (codex) on PATH"). */
@@ -100,6 +108,8 @@ export function classifyAgentError(input: AgentErrorInput): ClassifiedAgentError
   // Codes the engine decided without looking at provider text.
   if (code === 'missing-binary') return { status: 'missing_binary', code };
   if (code === 'timeout') return { status: 'timeout', code };
+  // rev 20: a 429 agent exec retried until it gave up (agent-exec-retry.ts).
+  if (code === 'rate-limited') return { status: 'rate_limited', code };
   if (code !== 'auth' && code !== 'quota' && code !== 'runner-error') {
     return { status: 'error', code };
   }
@@ -116,8 +126,9 @@ export function classifyAgentError(input: AgentErrorInput): ClassifiedAgentError
   if (matchesAny(AUTH_PATTERNS, message)) return { status: 'auth', code: 'auth' };
   const cls = classifyStderr(message);
   if (cls.fatal) {
-    return /auth/i.test(cls.label ?? '')
-      ? { status: 'auth', code: 'auth' }
+    if (/auth/i.test(cls.label ?? '')) return { status: 'auth', code: 'auth' };
+    return cls.rateLimited
+      ? { status: 'rate_limited', code: 'rate-limited' }
       : { status: 'quota', code: 'quota' };
   }
   return { status: 'error', code };

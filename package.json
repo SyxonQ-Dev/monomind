@@ -1,6 +1,6 @@
 {
   "name": "monomind",
-  "version": "2.18.5",
+  "version": "2.19.0",
   "description": "Open-source CLI extension for Claude Code, OpenCode, Antigravity, Kimi Code, and Codex. Adds an MCP server with a codebase knowledge graph, persistent memory, multi-agent coordination, and reusable slash commands. Apache 2.0 licensed. See https://github.com/monoes/monomind/blob/main/doc/privacy.md for what leaves your machine and when.",
   "type": "module",
   "bin": {
@@ -43,11 +43,12 @@
     "test:security": "vitest run tests/security/",
     "test:semantic-eval": "node --test tests/memory/cognee-port-eval.test.mjs",
     "test:coverage": "vitest run --coverage",
-    "verify": "pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run docs:refs:check && pnpm run lint:agent-refs && pnpm run sync:claude-trees:check && pnpm run test:all:run && pnpm --filter @monoes/monobrowse test && pnpm --filter @monoes/monodesign test && pnpm --filter monofence-ai test",
+    "verify": "pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run docs:refs:check && pnpm run lint:agent-refs && pnpm run lint:tool-refs && pnpm run sync:claude-trees:check && pnpm run test:all:run && pnpm --filter @monoes/monobrowse test && pnpm --filter @monoes/monodesign test && pnpm --filter monofence-ai test",
     "lint": "biome check",
     "lint:fix": "biome check --write",
     "lint:skills": "node scripts/lint-skills.mjs",
     "lint:agent-refs": "node scripts/lint-agent-refs.mjs",
+    "lint:tool-refs": "node scripts/lint-tool-refs.mjs",
     "pick:eval": "node scripts/pick-eval.mjs",
     "format": "biome format --write",
     "security:audit": "pnpm audit --audit-level high",

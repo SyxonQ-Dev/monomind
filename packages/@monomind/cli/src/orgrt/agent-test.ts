@@ -4,9 +4,10 @@
  *
  * Sends one "Reply with the single word: ok" turn through the same
  * in-process engine `agent exec` uses (runAgentExec) — max turns 1, no
- * caller tools, scoped access, a fresh temporary cwd — and folds the NDJSON
+ * caller tools, scoped access, a fresh temporary cwd, and optionally
+ * `--sandbox` / `--env` as in `agent exec` (#474) — and folds the NDJSON
  * events into one result object with a status a caller can store:
- * ok | ok_unexpected | auth | quota | model_unavailable | timeout |
+ * ok | ok_unexpected | auth | quota | rate_limited | model_unavailable | timeout |
  * missing_binary | error.
  */
 
@@ -18,6 +19,7 @@ import { type AgentFailureStatus, classifyAgentError } from './agent-error-class
 import { runAgentExec } from './agent-exec.js';
 import type { AgentRunner } from './agent-runner.js';
 import { locateBinary, resolveBinary, runnerSpec } from './runner-registry.js';
+import type { NativeSandbox, SandboxMode } from './runner-sandbox.js';
 import { detectVersion } from './version-probe.js';
 
 export const AGENT_TEST_PROMPT = 'Reply with the single word: ok';
@@ -44,6 +46,12 @@ export interface AgentTestResult {
   cost_usd: number | null;
   cost_estimated: boolean;
   runtime_version: string | null;
+  /**
+   * #474: the vendor CLI's sandbox for this turn, from the `start` event
+   * (`agent exec`'s native_sandbox). null when the turn never started
+   * (missing binary, unsupported --sandbox, unknown runtime).
+   */
+  native_sandbox: NativeSandbox | null;
   error: AgentTestError | null;
 }
 
@@ -54,6 +62,10 @@ export interface AgentTestOptions {
   runtime: string;
   model?: string;
   timeoutMs: number;
+  /** #474: `agent exec --sandbox`; it can tighten the turn, never loosen it. */
+  sandbox?: SandboxMode;
+  /** #474: extra env for the agent process, as `agent exec --env`. */
+  env?: Record<string, string>;
   /** Test seams; production uses the registry, PATH, and the real runner. */
   runnerOverride?: AgentRunner;
   findBinary?: BinaryFinder;
@@ -101,6 +113,7 @@ interface Collected {
   usd: number;
   result: { text?: string; is_error?: boolean } | null;
   error: { code: string; message: string } | null;
+  nativeSandbox: NativeSandbox | null;
 }
 
 function collector(now: () => number): {
@@ -115,9 +128,12 @@ function collector(now: () => number): {
     usd: 0,
     result: null,
     error: null,
+    nativeSandbox: null,
   };
   const emit = (ev: Record<string, unknown>): void => {
-    if (ev.type === 'assistant' && typeof ev.text === 'string') {
+    if (ev.type === 'start' && typeof ev.native_sandbox === 'string') {
+      state.nativeSandbox = ev.native_sandbox as NativeSandbox;
+    } else if (ev.type === 'assistant' && typeof ev.text === 'string') {
       state.firstAt ??= now();
       state.texts.push(ev.text);
     } else if (ev.type === 'usage') {
@@ -156,6 +172,7 @@ export async function runAgentTest(opts: AgentTestOptions): Promise<AgentTestRes
       cost_usd: 0,
       cost_estimated: false,
       runtime_version: null,
+      native_sandbox: null,
       error: {
         code: 'missing-binary',
         message: `${opts.runtime} CLI not found${spec ? ` — ${spec.installHint}` : ''}`,
@@ -177,6 +194,8 @@ export async function runAgentTest(opts: AgentTestOptions): Promise<AgentTestRes
       model: opts.model,
       cwd,
       access: 'scoped',
+      ...(opts.sandbox ? { sandbox: opts.sandbox } : {}),
+      ...(opts.env ? { env: opts.env } : {}),
       maxTurns: 1,
       timeoutMs: opts.timeoutMs,
       toolTimeoutMs: opts.timeoutMs,
@@ -219,6 +238,7 @@ export async function runAgentTest(opts: AgentTestOptions): Promise<AgentTestRes
     output_tokens: state.outTokens,
     ...resolveCost(opts.model, state.usd, state.inTokens, state.outTokens),
     runtime_version: await versionPromise,
+    native_sandbox: state.nativeSandbox,
     error,
   };
 }

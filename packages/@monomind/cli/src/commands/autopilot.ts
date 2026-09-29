@@ -177,6 +177,9 @@ const statusCommand: Command = {
       return { success: true };
     }
 
+    output.writeln(
+      output.warning('Deprecated: autopilot is superseded by `monomind org run` (#418).'),
+    );
     output.writeln(`Autopilot: ${state.enabled ? '✓ ENABLED' : '✗ DISABLED'}`);
     output.writeln(`Session: ${state.sessionId.slice(0, 8)}...`);
     output.writeln(`Iterations: ${state.iterations}/${state.maxIterations}`);
@@ -184,6 +187,12 @@ const statusCommand: Command = {
     output.writeln(`Elapsed: ${Math.round(elapsed / 60000)} min`);
     output.writeln(`Tasks: ${progress.completed}/${progress.total} (${progress.percent}%)`);
     output.writeln(`Sources: ${state.taskSources.join(', ')}`);
+    if (progress.total === 0) {
+      // Nothing in monomind writes .monomind/swarm-tasks.json (#418).
+      output.writeln(
+        output.dim('No task source has tasks — nothing in monomind writes swarm-tasks.json.'),
+      );
+    }
 
     if (progress.incomplete.length > 0 && progress.incomplete.length <= 10) {
       output.writeln('\nRemaining tasks:');
@@ -393,7 +402,7 @@ const checkCommand: Command = {
 export const autopilotCommand: Command = {
   name: 'autopilot',
   description:
-    'Persistent swarm completion — keeps agents working until ALL tasks are done. (Deprecated: prefer `monomind org run` for autonomous loops — see doc 06 P1-7.)',
+    'Deprecated: re-engagement loop over locally discovered task files; nothing in monomind writes its swarm-tasks source. Use `monomind org run`.',
   aliases: ['ap'],
   subcommands: [
     statusCommand,

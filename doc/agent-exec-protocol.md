@@ -1,4 +1,4 @@
-# Agent Exec Protocol — v1 (rev 18)
+# Agent Exec Protocol — v1 (rev 25)
 
 - **Status**: Implemented (Phase 0 of the mono-agent delegation plan — see
   `mono-agent:docs/plans/local-agent-monomind-delegation.md`)
@@ -6,6 +6,146 @@
   the Coder mode threat model, the `--access full` guardrails (root refusal, no transitive
   escalation, env hygiene, audit log), what callers own, and residual risks (issue #360).
 - **Revision history**:
+  - rev 25 (2026-09-29): **`agent test --json` takes `--sandbox` and `--env`**
+    (issue #474) — new capability `agent-test-sandbox`. `monomind agent test <id> --json` (§13)
+    accepts `--sandbox read-only|workspace-write|full` and repeatable `--env KEY=V` with the same
+    meaning and validation as `agent exec` (§3.1). The result gains `native_sandbox`: what the
+    vendor CLI really ran with, copied from the turn's `start` event (§3.2), or `null` when the
+    turn never started. A mode the runtime lacks gives `status: "error"`,
+    `error.code: "unsupported"`. Access stays `scoped`; `--sandbox` and `--env` can tighten the
+    turn but never loosen it (an org git level below `push` still caps codex/grok at
+    `workspace-write`). Additive only.
+  - rev 24 (2026-09-29): **subagent events on every runtime** (issue #387, remaining part) — no
+    new capability; `agent-exec-subagent-events` now covers every runtime, not only claude. On a
+    runtime other than claude, a native tool call whose `tool_activity(start)` has `kind:"task"`
+    is followed by a synthesized `subagent` `started` event, and its `tool_activity(end)` by a
+    `finished` event (§3.2.1). Both use the call's `tool_activity` id as `id` and `tool_use_id`.
+    These events are synthesized from `tool_activity`, so they carry less than claude's: no
+    `progress` phase, no `usage`, no `last_tool`; `finished.status` is `completed`, `failed`,
+    `denied` or `stopped` (cancel/timeout), and `summary` is the first 500 characters of the
+    call's output. Runtimes whose runner sets `kind:"task"` itself: opencode (`task`), cline
+    (`spawn_agent`, `team_*`) and dsh (`subagent`, `subagent_fork`); on others the shared name
+    table (`orgrt/tool-kind.ts`) gives `task` to `Task`, `Agent`, `spawn_subagent`,
+    `invoke_subagent`, `browser_subagent`, `spawn_agent` and `subagent`. A start-only
+    `tool_activity` (no real id) gets no `subagent` event. claude is unchanged: it keeps its
+    SDK-based events and gets no synthesized ones. New golden fixture `subagent-synth.ndjson`.
+  - rev 23 (2026-09-29): **truthful native sandbox, and `--sandbox`** (issue #396) — new
+    capability `agent-exec-sandbox`. The default does not change: without the new flag every
+    runtime starts exactly as in rev 22, and a non-org turn still runs most vendor CLIs without
+    their own sandbox (codex `danger-full-access`, grok profile `off`) and with approvals off
+    (copilot `--allow-all-tools`, qwen `--yolo`, antigravity `--dangerously-skip-permissions`, …).
+    What changes is that this is now reported: `start` gains `native_sandbox` and `approvals`
+    (§3.2), and each `agent scan --json` entry gains the default `native_sandbox`/`approvals` plus
+    `sandbox_modes` (§6). `access` keeps its meaning (the monomind-side tool mode); for a vendor
+    CLI, `scoped` never meant its own tools were restricted — read `native_sandbox`/`approvals`
+    for that. New flag `--sandbox read-only|workspace-write|full` (§3.1) picks the CLI's own
+    sandbox where one exists: codex `--sandbox read-only|workspace-write` (network on), grok
+    profiles `read-only|workspace`, dsh `DSH_PERMISSION_MODE`. `full` is accepted by every
+    runtime and means today's default (no native sandbox added; dsh stays `workspace-write`).
+    Any other mode on a runtime whose `sandbox_modes` lacks it is `error {code:"unsupported",
+    fatal:true}`, exit 2, before the turn starts. Interaction: an org role's git level below
+    `push` (`MONOMIND_GIT_LEVEL` in `--env` or in monomind's own environment) keeps codex/grok at
+    `workspace-write` and the flag can only tighten that, never loosen it; `--access read` always
+    runs codex `read-only` whatever `--sandbox` says, and `--access read --sandbox full` is a
+    usage error (exit 2); `--access full --sandbox read-only|workspace-write` gives full access
+    to the native tools inside that sandbox (codex drops `--dangerously-bypass-approvals-and-
+    sandbox` for `--sandbox <mode>`, grok keeps `--always-approve` and adds the profile, dsh uses
+    the mode instead of `danger-full-access`). Additive only.
+  - rev 22 (2026-09-29): **caller tools with full access** (issue #389) — new capability
+    `agent-exec-full-access-tools`. `--access full --tools stdio --tools-file …` is supported and
+    tested on every runtime whose `agent scan --json` entry has `caller_tools_with_full_access:
+    true` (today: every `full_access: true` runtime). Caller tools sit next to the native tools
+    (claude: the in-process `org` MCP server; the other runtimes: the fence protocol) and use the
+    same `tool_call`/`tool_result` frames and `--tool-timeout` as scoped mode (§3.1, §4.3). A
+    runtime that cannot take caller tools in the requested mode answers `error
+    {code:"unsupported", fatal:true}` instead of running without them. **Parallel calls**: the
+    calls of one assistant message are all sent as `tool_call` frames before monomind waits for
+    any result, and results may come back in any order (§4.3). claude marks caller tools
+    `readOnlyHint`, which is what makes Claude Code run MCP calls concurrently; fence runtimes
+    start a round's calls together. Scan entries gain `caller_tools` and
+    `caller_tools_with_full_access` (§6). `--allow-bash-prefix` is still a usage error with
+    `--access full`. Additive only.
+  - rev 21 (2026-09-29): **read access** (issue #388) — new capability `agent-exec-access-read`
+    and `--access read` (§3.1): a turn that can read the project and the web but not edit files,
+    run arbitrary commands or start subagents. Allowed: native read tools (`Read`, `Grep`,
+    `Glob`, `LS`), `WebSearch`, `WebFetch`, `TodoWrite`, `Skill`, `ToolSearch` and caller
+    (stdio) tools. Shell: only commands starting with an allowlisted prefix — `git
+    status|diff|log|show|blame`, `ls`, `cat`, `head`, `tail`, `wc`, `rg`, `grep`, `find`
+    (plus any `--allow-bash-prefix` entries) — as one literal invocation (no pipes, redirects,
+    `;`, `&&`, `||`, backticks, `$(...)` or subshells), with no argument that makes the command
+    run or write something (`find -exec|-execdir|-ok|-okdir|-delete|-fprint*|-fls`, `rg --pre`,
+    `git --output|--ext-diff`). Denied: `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, general
+    `Bash`, `Task`/`Agent`, and MCP tools loaded from the user's settings. `--settings` works
+    with it. claude enforces it itself (the `canUseTool` gate and the PreToolUse hook; a denied
+    call's `tool_activity` end has `denied:true`); codex runs `codex exec --sandbox read-only`
+    (whatever the role's git level; never `danger-full-access`) and pi/pi-rpc run `--tools
+    read,grep,find,ls` — both the CLI's own read-only mode, so their shell rules are the CLI's
+    (codex: read-only filesystem, no network; pi: no shell tool). Every other runtime answers
+    `error {code:"unsupported", fatal:true}` (§3.4), opencode included: its permission config
+    cannot express deny-by-default (built-in keys are decoded ahead of `"*"` and rules are
+    last-match-wins). `agent scan --json` entries gain `access_modes` (§6). `read` has no audit
+    line, no process-group spawn and no `background_pids` (those stay full-only). Additive only.
+  - rev 20 (2026-09-29): **coder mode, wave 2** — three new runtime ids and pi parity. The
+    runtimes need no new capability: a caller discovers them through `agent scan --json` (§6),
+    whose entry set grows.
+    - `cline` (Cline CLI; `--json` for a fresh session, ACP `session/load` for resume; kills the
+      hub daemon a turn starts; `init_target: "cline"`). Scoped cline allows file edits
+      inside the project (`--cwd`, not `.git`) and refuses every other tool call that needs
+      approval (commands, edits outside the project, subagents, MCP tools), and never waits for
+      an answer: the refused call's `tool_activity` ends `ok:false,
+      denied:true` and the turn continues.
+    - `aider` (Aider through a Python shim run with aider's own interpreter, plain-CLI fallback
+      when aider cannot be imported; `init_target: "aider"`; no MCP).
+    - `dsh` (DeepSeek Harness developer preview, `dsh --profile headless --json`; free models
+      via `--model <route>/<model>` on its pi-ai adapter: OpenRouter `:free` models with
+      `OPENROUTER_API_KEY`, NVIDIA's catalog with `NVIDIA_API_KEY`; OpenCode Zen's free tier
+      refuses non-OpenCode clients; `reports_cost: false`).
+    All three report `full_access: true`, `tool_activity_fidelity: "full"`, `resume`, `effort`
+    and `max_turns` (emulated where the CLI has no cap: counted steps, then a kill or abort,
+    overshooting by at most one step). `pi` now streams (`streams_incrementally: true`), enforces
+    `max_turns`, and resumes by a runner-chosen `--session-id`; `pi-rpc` gains full access,
+    tool events, resume, effort, `max_turns` and cost. `--effort` maps to pi/pi-rpc and cline
+    `--thinking`, aider's reasoning effort / thinking tokens, and dsh's generated profile patch
+    (clamped to the levels the model supports). `monomind init --target` accepts `cline`
+    (`.clinerules/monomind.md`; MCP is user-scope in cline, so init names `cline mcp install
+    monomind --yes -- npx -y monomind@latest mcp start` instead of editing `~/.cline`) and `aider`
+    (`CONVENTIONS.md` plus `read: [CONVENTIONS.md]` merged into `.aider.conf.yml`) and `agents`
+    (`AGENTS.md` only — no Claude files, no `.monomind/` state; an existing `AGENTS.md` is kept);
+    none of the three is part of `--target all`. `init_target: "agents"` for the runtimes that
+    read `AGENTS.md` natively: pi, pi-rpc, dsh, grok, copilot, qwen, qwen-rpc and crush.
+    `agent models --runtime dsh` (§12) returns dsh's curated list with `curated: true`.
+    **Rate limits** (capability `agent-exec-rate-limit-retry`): a transient provider rate limit
+    (HTTP 429, "too many requests", a per-minute cap) is no longer `quota`: `agent exec` retries
+    the turn, 3 attempts in all, after ~2s then ~4s (±20% jitter) or the provider's Retry-After
+    hint (each wait capped at 30s, all of them inside `--timeout`), emitting `status
+    {phase:"notice", message:"Rate limited (429) by <model or runtime>; retrying in Ns (attempt
+    2/3)"}` before each retry; the failed attempt's `error`/`done` are not emitted, so the turn
+    still has one `start` and one `done`. A retry starts over only when the failed attempts ran
+    no tool; after a tool ran it resumes the bound session with a short "continue where you left
+    off" prompt on a runtime with `resume`, and otherwise does not retry. A runtime whose CLI
+    already retried the 429 itself (pi's auto-retry, aider's backoff, codex's retry limit) is not
+    retried again. Giving up ends the turn with `error {code:"rate-limited", fatal:true}` —
+    "Rate limited by <x> (429) after 3 attempts. Free models are rate-limited; try again later
+    or pick another model." — and exit 1. Exhausted quota, credits, billing or a daily cap stays
+    `quota` and is never retried. `agent test --json` (§13) reports `status: "rate_limited"`.
+    Additive only.
+  - rev 19 (2026-09-29): **coder mode on every runtime** — new capability
+    `agent-exec-full-access-any`. `--access full` is accepted for every runtime whose
+    `agent scan --json` entry has `full_access: true` — claude, codex, opencode, antigravity,
+    kimicode, grok, qwen, copilot, crush, pi (not vercel, hermes, qwen-rpc, pi-rpc); the same
+    guards (root refusal, explicit existing `--cwd`) apply to all of them. Every full-access
+    runner spawns its CLI as a process-group leader (`orgrt/process-group-spawn.ts`), so
+    `cancel`/`--timeout`/`--budget-usd` kill the whole tree and `done.background_pids` and the
+    audit line cover every runtime. `--settings` on a non-claude runtime stops isolating the
+    CLI's own config (the source list is all-or-nothing there) and emits `status
+    {phase:"notice", message}` naming what the CLI loads. `--effort` (rev 16, §3.1) now also
+    maps onto opencode (model variant), antigravity (`--effort`), grok and copilot
+    (`--reasoning-effort`) and pi (`--thinking`); a runtime whose scan entry has
+    `effort: false` ignores it with a `status` notice. `agent scan --json` entries gain
+    `resume`, `effort`, `max_turns`, `reports_cost`, `init_target` (§6);
+    codex, opencode, antigravity, kimicode, grok, qwen, copilot and pi report
+    `tool_activity_fidelity: "full"`; crush (plain-text output, no tool events) reports `"none"`.
+    `tool_activity` starts gain `kind` and ends gain `exit_code` (§3.2). Additive only.
   - rev 18 (2026-09-29): **per-model test results** (issue #390) — new capability
     `agent-test-json`: `monomind agent test <id> [--model M] [--timeout 60s] --json` (§13) sends
     one "Reply with the single word: ok" turn and prints one result object with a `status`
@@ -314,7 +454,7 @@ by swarm management and is NOT reused by this protocol — the installed-only vi
 
 ```
 $ monomind --version --json
-{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-exec-background-pids","agent-exec-effort","agent-scan","agent-scan-read-only","agent-models","agent-test-json","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","org-role-full-access","doctor-json","doctor-read-only","doctor-offline","init-json","knowledge-profile-captures","agent-exec-subagent-events"]}
+{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-exec-background-pids","agent-exec-full-access-any","agent-exec-effort","agent-scan","agent-scan-read-only","agent-models","agent-test-json","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","org-role-full-access","doctor-json","doctor-read-only","doctor-offline","init-json","knowledge-profile-captures","agent-exec-subagent-events","agent-exec-rate-limit-retry","agent-exec-access-read","agent-exec-full-access-tools","agent-exec-sandbox","agent-test-sandbox"]}
 ```
 
 Callers MUST handshake before use and fail with an actionable message (install/upgrade hint)
@@ -350,17 +490,18 @@ progress go to stderr. A caller must be able to `JSON.parse` every stdout line.
 | `--system-file <path>` | | System prompt file (prepended first turn only, runner-dependent — same semantics as orgrt) |
 | `--tools <mode>` | | `none` (default) or `stdio` — enable caller-side tool execution (§4) |
 | `--tools-file <path>` | | Tool definitions as JSON (§4.1); enables native tool wiring where the runner supports it |
-| `--tool-timeout <dur>` | | Max wait for a caller `tool_result` frame (default `120s`) |
+| `--tool-timeout <dur>` | | Max wait for a caller `tool_result` frame (default `120s`), per call, in every access mode (rev 22: `--access full` included). monomind sets no upper limit; the effective maximum is the turn's `--timeout` (none by default). On claude, Claude Code's own MCP call timeout also applies (`MCP_TOOL_TIMEOUT`, settable with `--env`); a 130s call under `--tool-timeout 180s --access full` was verified end to end on Claude Code 2.1.226. Fence runtimes run the call between model rounds, so the vendor CLI does not time it out. On expiry the call gets `ERROR: tool timeout` and the turn continues (§4.3) |
 | `--model <id>` | | Model override |
-| `--effort <level>` | | rev 16, capability `agent-exec-effort`. Reasoning effort: `off`, `low`, `medium`, `high`, `xhigh` or `max`. claude: the Agent SDK's `effort` option (`off` → thinking disabled). codex: `-c model_reasoning_effort=<level>` (`off` → `none`). Other runtimes ignore it. Any other value is rejected before the turn starts (non-zero exit, no events) |
+| `--effort <level>` | | rev 16, capability `agent-exec-effort`. Reasoning effort: `off`, `low`, `medium`, `high`, `xhigh` or `max`. claude: the Agent SDK's `effort` option (`off` → thinking disabled). codex: `-c model_reasoning_effort=<level>` (`off` → `none`). Any other value is rejected before the turn starts (usage error, exit 2, no events). **rev 19**: opencode → the model's matching variant; antigravity → `--effort`; grok, copilot → `--reasoning-effort`; pi, pi-rpc → `--thinking`. **rev 20**: cline → `--thinking` (fresh turns only; a resumed ACP turn runs without thinking), aider → the model's reasoning effort or thinking tokens (a `status` notice when the model has neither), dsh → its generated profile patch (each runner clamps levels its CLI lacks). A runtime whose scan entry has `effort: false` ignores it and emits `status {phase:"notice"}` saying so (rev 19) |
 | `--cwd <path>` | | Working dir for the agent (default: cwd) |
 | `--resume <sessionId>` | | Resume a prior session/thread/conversation |
 | `--max-turns <n>` | | Cap agent turns (default `25`; the orgrt default is effectively unlimited and is NOT inherited here) |
 | `--timeout <dur>` | | Overall wall-clock timeout for the whole exec (default: none). On expiry monomind SIGTERMs the agent child, emits `error {code:"timeout"}` + `done`, exits `124` |
 | `--env KEY=V` | | Extra env for the agent process (repeatable) |
 | `--protocol <v>` | | Protocol version pin (`1`); reserved for the v2 transition window (§5) |
-| `--access <mode>` | | rev 12. `scoped` (default) or `full`. `full` (claude runtime only) gives the turn unrestricted native tool access: `canUseTool` allows everything (still observed via `coverEveryToolCall`), and `permissionMode: "bypassPermissions"` + the SDK's required `allowDangerouslySkipPermissions: true` opt-in are set. Rejects `--allow-bash-prefix` (usage error, exit 2). Requires an explicit, existing, directory `--cwd` and refuses root (uid 0) — both `error {code:"unsafe", fatal:true}` (§3.4). A runtime without full-access support (see `agent scan --json`'s `full_access`, §6) yields `error {code:"unsupported", fatal:true}` |
-| `--settings <sources>` | | rev 12, capability `agent-exec-settings`. Coder mode: `none` (default) or a CSV of `user,project,local`. Non-`none` (claude runtime only) loads the SDK's own settings discovery — CLAUDE.md, skills, hooks, and project/user MCP servers — appends the caller's system prompt to Claude Code's own preset instead of replacing it, and merges the `org` MCP server only when `--tools stdio` gave this turn caller tools. `--settings bogus` → exit 2. See §3.2's `status` event and the `agent-exec-settings` capability note in §2. |
+| `--access <mode>` | | rev 12. `scoped` (default), `read` (rev 21) or `full`. `full` gives the turn unrestricted native tool access. claude: `canUseTool` allows everything (still observed via `coverEveryToolCall`), and `permissionMode: "bypassPermissions"` + the SDK's required `allowDangerouslySkipPermissions: true` opt-in are set. **rev 19**: any runtime with `full_access: true` in `agent scan --json` (§6) — the runner runs its CLI's own no-approval, no-sandbox mode (codex `--dangerously-bypass-approvals-and-sandbox`, opencode permission `allow`, the others' yolo flags) in its own process group. Rejects `--allow-bash-prefix` (usage error, exit 2). Requires an explicit, existing, directory `--cwd` and refuses root (uid 0) — both `error {code:"unsafe", fatal:true}` (§3.4). A runtime without full-access support (see `agent scan --json`'s `full_access`, §6) yields `error {code:"unsupported", fatal:true}`. **rev 21**, capability `agent-exec-access-read`: `read` = read files, search, web, `TodoWrite`, caller tools and an allowlist of read-only shell commands; no edits, general shell or subagents (the full rules are in the rev 21 history entry). `--allow-bash-prefix` adds prefixes to the read-only list under the same rules; `--settings` works with it; no `--cwd` requirement. Only runtimes whose `access_modes` (§6) lists `read` accept it (claude, codex, pi, pi-rpc); the others yield `error {code:"unsupported", fatal:true}` |
+| `--sandbox <mode>` | | rev 23, capability `agent-exec-sandbox`. The vendor CLI's own sandbox: `read-only`, `workspace-write` or `full`. Without it nothing changes (the rev 22 default). `full` = today's default on every runtime (no native sandbox added; it never loosens a runtime whose default is tighter, e.g. dsh). `read-only`/`workspace-write` only where `agent scan --json`'s `sandbox_modes` lists them: codex (`--sandbox read-only`; `--sandbox workspace-write -c sandbox_workspace_write.network_access=true`), grok (`--sandbox read-only`; `--sandbox workspace`), dsh (`DSH_PERMISSION_MODE`); elsewhere `error {code:"unsupported", fatal:true}`, exit 2. An org role's git level below `push` (`MONOMIND_GIT_LEVEL`, from `--env` or monomind's own environment) caps codex/grok at `workspace-write`: the flag may tighten but never loosen it. `--access read` always runs codex `read-only`; `--access read --sandbox full` is a usage error (exit 2). With `--access full`, `read-only`/`workspace-write` keep the native tools fully approved but inside that sandbox. The mode the CLI really got is `start.native_sandbox` (§3.2) |
+| `--settings <sources>` | | rev 12, capability `agent-exec-settings`. Coder mode: `none` (default) or a CSV of `user,project,local`. Non-`none` on claude loads the SDK's own settings discovery — CLAUDE.md, skills, hooks, and project/user MCP servers — appends the caller's system prompt to Claude Code's own preset instead of replacing it, and merges the `org` MCP server only when `--tools stdio` gave this turn caller tools. `--settings bogus` → exit 2. See §3.2's `status` event and the `agent-exec-settings` capability note in §2. **rev 19**: on any other runtime, non-`none` means "do not isolate the CLI's own config" (its user config, project instruction files and MCP servers load as in the user's own terminal; the source subset is all-or-nothing) and a `status {phase:"notice"}` right after `start` names what that runtime loads. |
 | `--startup-timeout <dur>` | | rev 12. Max wait for `phase:"ready"` when `--settings` is non-none (default `30s`); on expiry monomind emits `error {code:"runner-error", message:"claude did not initialize (settings/MCP startup hang?)"}` + `done`, exit 1, instead of hanging until `--timeout`. No effect with `--settings none`. |
 | `--budget-usd <n>` | | rev 3. Optional spend cap for this turn, enforced via the same per-role budget mechanism orgrt already uses internally. On breach: SIGTERM the agent child, emit `error {code:"budget", fatal:true}` + `done`, exit 1. Bare `agent exec` has no default cap — callers driving cost-sensitive flows (e.g. a chat UI, not an org role) should set this explicitly. **rev 4 granularity**: on a single-shot exec the cap is checked when the turn's `result` message arrives (the AgentRunner interface surfaces usage at result granularity) — the overspend is reported as the terminal outcome (`error budget` + exit 1, **no success `result` event`) so callers stop, but a single turn's own spend cannot be interrupted mid-flight. Mid-turn enforcement arrives with M2 (`agent_ask` in orgrt, where the mailbox-close mechanism applies). |
 
@@ -380,17 +521,17 @@ done`. On failure: `start → … → error → done`.
 
 | Event | Fields | Notes |
 |---|---|---|
-| `start` | `v, runtime, model?, cwd, resume?, pid, child_pid?, access, streams_incrementally` | `pid` = the monomind process; `child_pid` = the agent-CLI subprocess when the runner spawns one (omitted for in-process runners). **rev 4**: v1 always omits `child_pid` — the `AgentRunner` interface does not surface child pids; add it if/when runners expose them. **rev 5**: `streams_incrementally` (bool) — whether this runtime delivers real incremental `assistant` text as a turn streams, vs. only ever a complete message at a step/turn boundary (see §9). **rev 12**: `access` (`"scoped"` \| `"full"`) — which mode this turn ran in (§3.1) |
-| `status` | `v, phase ("initializing"\|"ready"), mcp_servers? ([{name,status}])` | rev 12, capability `agent-exec-settings`. Only with `--settings` non-`none` (claude runtime): `initializing` right after `start`, `ready` (with `mcp_servers`) from the SDK's own `system/init` message. Absent entirely for `--settings none` and every non-claude runtime. |
+| `start` | `v, runtime, model?, cwd, resume?, pid, child_pid?, access, native_sandbox, approvals, streams_incrementally` | `pid` = the monomind process; `child_pid` = the agent-CLI subprocess when the runner spawns one (omitted for in-process runners). **rev 4**: v1 always omits `child_pid` — the `AgentRunner` interface does not surface child pids; add it if/when runners expose them. **rev 5**: `streams_incrementally` (bool) — whether this runtime delivers real incremental `assistant` text as a turn streams, vs. only ever a complete message at a step/turn boundary (see §9). **rev 12**: `access` (`"scoped"` \| `"full"`; rev 21: or `"read"`) — which mode this turn ran in (§3.1). **rev 23** (capability `agent-exec-sandbox`): what the vendor CLI really runs with this turn. `native_sandbox`: `"read-only"` / `"workspace-write"` (the CLI's own sandbox, in that mode), `"full"` (the runtime has a native sandbox and it is off, e.g. codex `danger-full-access`, grok profile `off`), `"none"` (the runtime has no native sandbox monomind drives; the CLI has the user's own file-system rights), or `"monomind"` (claude only, `scoped`/`read`: no vendor sandbox, monomind enforces the access mode itself through `canUseTool` and the PreToolUse gate; claude `--access full` is `"full"`). `approvals`: `"off"` (native tool calls run without asking), `"on"` (the CLI's own approval rules apply and a call that would ask is refused — opencode and cline in scoped mode, dsh except `danger-full-access`, hermes) or `"n/a"` (claude outside full access, where monomind decides each call; vercel, which has no native tools). `access: "scoped"` on a vendor CLI limits monomind's caller-tool wiring only — use these two fields for what the CLI itself can do |
+| `status` | `v, phase ("initializing"\|"ready"\|"notice"), mcp_servers? ([{name,status}]), message?` | rev 12, capability `agent-exec-settings`. Only with `--settings` non-`none` (claude runtime): `initializing` right after `start`, `ready` (with `mcp_servers`) from the SDK's own `system/init` message. **rev 19**: `phase:"notice"` with a human-readable `message`, right after `start`, on a non-claude runtime — what `--settings` makes it load (e.g. `"codex: user config (~/.codex/config.toml, incl. its MCP servers) + project AGENTS.md"`), or `"<runtime>: --effort <level> ignored …"`. A notice never has a `ready` to follow it; the startup watchdog stays claude-only. |
 | `session` | `v, session_id` | Runner's session/thread/conversation id; pass back via `--resume` |
 | `assistant` | `v, text` | Incremental assistant text (may be multi-line; callers append) |
 | `tool_call` | `v, id, name, args` | Only with `--tools stdio` — caller must execute and reply (§4) |
 | `tool_result` | `v, id, ok, result` | Echo of the applied result (post `canUseTool` gating) |
-| `tool_activity` | `v, id, phase ("start"\|"end"), name, input?, parent_tool_use_id?, ok?, output?, output_truncated?, denied?, cancelled?, duration_ms?` | **rev 12** (#357, capability `agent-exec-tool-activity`). NATIVE tool calls only (Bash, Edit, Write, Read, …) — a bridged `--tools stdio` call keeps its `tool_call`/`tool_result` frames instead. `id` is the SDK's own tool_use id (or a locally-minted one for a start-only runtime, see below), correlating a `"start"` with its `"end"`. `"start"`: `input` is the tool's raw input as the model sent it (`Edit`/`MultiEdit` carry `old_string`/`new_string`, `Write` carries `file_path`/`content`); `parent_tool_use_id` is non-null when the call was made inside a `Task`/`Agent` subagent's own turn, for nesting. `"end"`: `ok` (bool), `output` (the tool_result content flattened to text), `duration_ms`; a call denied under scoped mode's default-deny `canUseTool` ends with `ok:false, denied:true` instead of running; a turn cut short by `--timeout` or a `cancel` frame closes every still-open id with `ok:false, cancelled:true` before `done`. Every `input`/`output` string field is capped at 16 KiB with a sibling `<field>_truncated:true` when cut, and the whole event stays well under 64 KiB regardless of how many fields a call's own input has. Fidelity varies by runtime (§9, `agent scan --json`'s `tool_activity_fidelity`): `claude` is `"full"` (a real id, matched end); a runtime whose runner only yields a lightweight `{type:'tool_use', text: toolName}` liveness signal (no id) maps it to a `"start"`-only event with no matching `"end"` (`input: null`, `parent_tool_use_id: null`); a runtime with no tool signal at all emits none |
+| `tool_activity` | `v, id, phase ("start"\|"end"), name, kind?, input?, parent_tool_use_id?, ok?, output?, output_truncated?, denied?, cancelled?, duration_ms?, exit_code?` | **rev 12** (#357, capability `agent-exec-tool-activity`). NATIVE tool calls only (Bash, Edit, Write, Read, …) — a bridged `--tools stdio` call keeps its `tool_call`/`tool_result` frames instead. `id` is the SDK's own tool_use id (or a locally-minted one for a start-only runtime, see below), correlating a `"start"` with its `"end"`. `"start"`: `input` is the tool's raw input as the model sent it (`Edit`/`MultiEdit` carry `old_string`/`new_string`, `Write` carries `file_path`/`content`); `parent_tool_use_id` is non-null when the call was made inside a `Task`/`Agent` subagent's own turn, for nesting. `"end"`: `ok` (bool), `output` (the tool_result content flattened to text), `duration_ms`; a call denied under scoped mode's default-deny `canUseTool` ends with `ok:false, denied:true` instead of running; a turn cut short by `--timeout` or a `cancel` frame closes every still-open id with `ok:false, cancelled:true` before `done`. Every `input`/`output` string field is capped at 16 KiB with a sibling `<field>_truncated:true` when cut, and the whole event stays well under 64 KiB regardless of how many fields a call's own input has. **rev 19**: every `"start"` carries `kind` — `shell\|edit\|write\|read\|search\|web\|mcp\|task\|todo\|patch\|other` — from the runner when it knows it, else from the tool name (`orgrt/tool-kind.ts`: Claude's `Bash`→shell, `Edit`/`MultiEdit`/`NotebookEdit`→edit, `Write`→write, `Read`→read, `Glob`/`Grep`→search, `WebFetch`/`WebSearch`→web, `mcp__*`→mcp, `Task`/`Agent`→task, `TodoWrite`→todo, plus vendor names such as `exec_command`/`command_execution`→shell, `apply_patch`/`file_change`→patch, `read_file`→read, `mcp_tool_call`→mcp). `name` stays the runtime's own. Claude keeps its native `input`; other runtimes' runners translate theirs to canonical keys per kind — shell `{command, description?, cwd?}`, edit `{file_path, old_string, new_string}`, write `{file_path, content}`, read `{file_path}`, search `{pattern, path?}`, patch `{files:[{file_path, action:"add"\|"update"\|"delete", diff?}]}`, mcp `{server, tool, arguments}`, web `{url?, query?}`, other: raw. An `"end"` carries `exit_code` when the runtime reported one (shell calls). Fidelity varies by runtime (§9, `agent scan --json`'s `tool_activity_fidelity`): `"full"` (claude, codex, opencode, antigravity, kimicode, grok, qwen, copilot, pi) is a real id with a matched end; a runtime whose runner only yields a lightweight `{type:'tool_use', text: toolName}` liveness signal (no id) maps it to a `"start"`-only event with no matching `"end"` (`input: null`, `parent_tool_use_id: null`); a runtime with no tool signal at all emits none |
 | `usage` | `v, input_tokens, output_tokens, cost_usd` | Per-round delta (cumulative→delta conversion handled inside monomind) |
 | `result` | `v, subtype ("success"\|"error"), is_error, text, stop_reason, input_tokens, output_tokens, cost_usd` | Aggregate final result; **rev 7**: `text` is the complete final assistant text — the joined `assistant` texts for a `streams_incrementally` runtime, the last `assistant` message otherwise (omitted only if the turn produced none); `stop_reason`: `end_turn` \| `max_turns` \| `tool_round_cap` \| `cancelled` \| `timeout`. **rev 4**: `tool_round_cap` is detected best-effort — it matches the runner's tool-round-cap assistant note; a fence runner that stops without the note yields `end_turn` |
 | `error` | `v, code, message, fatal (bool)` | Codes in §3.4. `fatal:true` = auth/quota class — callers must not retry |
-| `done` | `v, exit_code, background_pids?` | Terminal event. Always emitted exactly once, even on error. **rev 13**, capability `agent-exec-background-pids`: `background_pids` (only for `--access full`, only after a NORMAL `end_turn` — never on `cancel`/`--timeout`/`--budget-usd`, which already kill the whole tree, §3) lists pids the turn's process-tree tracker (`orgrt/process-tree.ts`'s `trackDescendants`: the inherited `MONOMIND_EXEC_TREE` env marker plus continuous sampling) found still alive at that moment. A process whose `MONOMIND_EXEC_TREE` holds any other value (empty included) has left the turn's tree and is neither listed nor killed on `cancel`/`--timeout`/`--budget-usd` — monomind's own session-hook daemons (the dashboard, the helper self-heal, monograph refresh) set it empty, so they are never reported (#366) — e.g. a `sleep 600 &` the turn started and left running on purpose, including one reparented after its launching shell exited. A survivor that cleared its own environment and whose launching chain exited between samples can go unreported (residual v1 limitation, §3's rev 13 note). Omitted (not an empty array) when access is `scoped`, or on a platform where discovery isn't supported (win32, v1) |
+| `done` | `v, exit_code, background_pids?` | Terminal event. Always emitted exactly once, even on error. **rev 13**, capability `agent-exec-background-pids`: `background_pids` (only for `--access full`, only after a NORMAL `end_turn` — never on `cancel`/`--timeout`/`--budget-usd`, which already kill the whole tree, §3) lists pids the turn's process-tree tracker (`orgrt/process-tree.ts`'s `trackDescendants`: the inherited `MONOMIND_EXEC_TREE` env marker plus continuous sampling) found still alive at that moment. A process whose `MONOMIND_EXEC_TREE` holds any other value (empty included) has left the turn's tree and is neither listed nor killed on `cancel`/`--timeout`/`--budget-usd` — monomind's own session-hook daemons (the dashboard, the helper self-heal, monograph refresh) set it empty, so they are never reported (#366) — e.g. a `sleep 600 &` the turn started and left running on purpose, including one reparented after its launching shell exited. A survivor that cleared its own environment and whose launching chain exited between samples can go unreported (residual v1 limitation, §3's rev 13 note). Omitted (not an empty array) when access is `scoped`, or on a platform where discovery isn't supported (win32, v1). **rev 19**: every full-access runtime, not only claude (§3.1) |
 
 Exit codes: `0` success (result.subtype=success) · `1` agent/runner error · `2` usage/protocol
 error (bad flags, unknown runtime, missing binary) · `124` `--timeout` expired · `130` cancelled
@@ -400,9 +541,9 @@ Malformed caller input (§4): monomind emits `error {code:"bad-frame", fatal:fal
 continues; the pending `tool_call` is failed with `ERROR: bad tool_result frame` fed back to the
 agent.
 
-### 3.2.1 `subagent` events (capability `agent-exec-subagent-events`, rev 17)
+### 3.2.1 `subagent` events (capability `agent-exec-subagent-events`, rev 17; every runtime since rev 24)
 
-**claude runtime only.** When the agent delegates to a native subagent (the `Task`/`Agent` tool),
+**claude** (rev 17): when the agent delegates to a native subagent (the `Task`/`Agent` tool),
 monomind forwards the Agent SDK's task lifecycle as `subagent` events:
 
 | Field | Phases | Meaning |
@@ -440,6 +581,38 @@ Example (`doc/agent-exec-protocol/fixtures/subagent.ndjson`, abridged):
 {"v":1,"type":"tool_activity","id":"toolu_task","phase":"end","name":"Task","ok":true,"output":"…","output_truncated":false,"duration_ms":3120}
 ```
 
+**Other runtimes** (rev 24): the runtime reports no subagent lifecycle, so monomind synthesizes
+`subagent` events from a task-kind tool call, at lower fidelity:
+
+- `started` comes right after a `tool_activity(start)` with `kind:"task"`, and `finished` right
+  after that call's `tool_activity(end)`. `id` and `tool_use_id` are both the call's
+  `tool_activity` id (there is no separate task id).
+- `started` carries `subagent_type`, `description` and `prompt` only when the tool input has
+  them: `subagent_type`, `description` and `prompt` keys as-is (opencode's `task`, dsh's
+  `subagent`), or a `task` key as `prompt` (cline's `spawn_agent`/`team_*`).
+- `finished.status` is `"completed"` when the call ended `ok`, `"failed"` when it errored,
+  `"denied"` when it was refused (`denied:true`), and `"stopped"` when a cancel or timeout closed
+  it. `summary` is the call's output cut to 500 characters, omitted when empty.
+- There is no `progress` phase and no `usage` or `last_tool`, and nothing ties the subagent's
+  own tool calls or text to it: vendor runners send `parent_tool_use_id: null`.
+- Only calls with a real id qualify: a start-only `tool_activity` (§3.2) gets no `subagent`
+  event, since no end could close it.
+
+Runtimes whose runner marks a call `kind:"task"`: opencode (`task`), cline (`spawn_agent`,
+`team_*`) and dsh (`subagent`, `subagent_fork`). Any other runtime's call gets `task` from the
+shared name table (`orgrt/tool-kind.ts`) when named `Task`, `Agent`, `spawn_subagent`,
+`invoke_subagent`, `browser_subagent`, `spawn_agent` or `subagent`. claude never gets
+synthesized events, so it never reports a subagent twice.
+
+Example (`doc/agent-exec-protocol/fixtures/subagent-synth.ndjson`, abridged):
+
+```
+{"v":1,"type":"tool_activity","id":"call_task","phase":"start","name":"task","kind":"task","input":{"description":"Find config loader","prompt":"Find where the app loads its config file.","subagent_type":"explore"},"parent_tool_use_id":null}
+{"v":1,"type":"subagent","phase":"started","id":"call_task","tool_use_id":"call_task","subagent_type":"explore","description":"Find config loader","prompt":"Find where the app loads its config file."}
+{"v":1,"type":"tool_activity","id":"call_task","phase":"end","name":"task","ok":true,"output":"Config is loaded by loadConfig() in src/config.ts.","output_truncated":false}
+{"v":1,"type":"subagent","phase":"finished","id":"call_task","tool_use_id":"call_task","status":"completed","summary":"Config is loaded by loadConfig() in src/config.ts."}
+```
+
 ### 3.3 Example
 
 ```
@@ -458,7 +631,8 @@ $ monomind agent exec --runtime codex --prompt "summarize ./README"
 | `code` | `fatal` | Meaning / caller action |
 |---|---|---|
 | `auth` | true | Runtime not logged in / key invalid — surface the runtime's login command; do not retry |
-| `quota` | true | Rate limit / billing exhausted — do not retry |
+| `quota` | true | Quota, credits, billing or a daily cap exhausted — do not retry. Before rev 20 this also covered transient rate limits |
+| `rate-limited` | true | rev 20. A transient provider rate limit (429) that `agent exec` already retried (up to 3 attempts, rev 20 entry) or could not retry safely; the message says which. Try again later or pick another model |
 | `missing-binary` | true | Agent CLI not installed (exit 2; see `agent scan`) |
 | `no-runner` | true | rev 3. `--runtime <id>` did not resolve to a concrete `AgentRunner` (distinct from `missing-binary`: the id itself has no runner implementation, vs. a known runner's binary being absent) |
 | `budget` | true | rev 3. `--budget-usd` cap exceeded mid-turn — do not retry without raising the cap |
@@ -467,7 +641,7 @@ $ monomind agent exec --runtime codex --prompt "summarize ./README"
 | `cancelled` | false | Caller cancel frame or signal |
 | `bad-frame` | false | Malformed caller stdin frame; turn continues |
 | `unsafe` | true | rev 12. `--access full` refused: root (uid 0), or a missing/nonexistent/non-directory `--cwd` |
-| `unsupported` | true | rev 12. `--access full` requested on a runtime whose `RunnerSpec.supportsFullAccess` is false (see `agent scan --json`'s `full_access`, §6) |
+| `unsupported` | true | rev 12. `--access full` requested on a runtime whose `RunnerSpec.supportsFullAccess` is false (see `agent scan --json`'s `full_access`, §6). rev 21: `--access read` on a runtime whose `access_modes` lacks `read`. rev 22: caller tools on a runtime whose `caller_tools` (or, with `--access full`, `caller_tools_with_full_access`) is false. rev 23: `--sandbox read-only\|workspace-write` on a runtime whose `sandbox_modes` lacks it |
 
 Callers must treat unknown codes as `fatal:false`.
 
@@ -506,6 +680,22 @@ Rules:
 - One JSON object per line on caller stdin; `id` MUST match the pending `tool_call`.
 - `result.text` (string) is what the agent sees; `ok:false` result text should describe the error.
 - `--tool-timeout` expiry fails the call (`ERROR: tool timeout`) — the turn continues.
+- **Parallel calls (rev 22)**: when one assistant message makes several caller tool calls,
+  monomind emits every one of their `tool_call` frames before it waits for any `tool_result`, so a
+  caller can run them concurrently. Guarantees: sending the other calls of a message never waits on
+  the caller's answer to one of them (a caller that holds its answers sees all of that message's
+  `tool_call` frames first; one that answers at once may see an echo interleaved); fence runtimes
+  emit the frames in the order the model wrote them, on claude the order is Claude Code's dispatch
+  order — match by `id`, never by position; the caller may answer in any order, and each `tool_result` is
+  matched to its call by `id` alone; monomind echoes each `tool_result` frame when that call
+  settles (so echoes follow the caller's answer order, not the call order); the model gets each
+  result attached to the call it answers. Each call has its own `--tool-timeout`. Calls in
+  different assistant messages stay sequential (the next message comes after the model has seen
+  the previous results). claude: Claude Code runs the MCP calls of one message concurrently
+  because caller tools are marked `readOnlyHint` (read-only native tools in the same message may
+  run alongside them; a native call Claude Code does not treat as concurrency-safe, such as `Edit`,
+  runs on its own and splits the batch); fence runtimes start every call of a round together. A round
+  that mixes caller tools with other fence tools runs in order (only relevant to org roles).
 - Max 10 tool rounds per turn for fence runners (`MAX_TOOL_ROUNDS`, `tool-fence.ts`), then one
   wrap-up round in which the capped calls come back as "round cap reached" tool results; native
   runners are bounded by `--max-turns` instead. Hitting either cap yields
@@ -530,9 +720,15 @@ Rules:
 ```
 $ monomind agent scan --json
 {"v":1,"agents":[
-  {"id":"claude","installed":true,"binary":"/usr/local/bin/claude","version":"1.0.58","install_hint":"","streams_incrementally":true,"full_access":true,"tool_activity_fidelity":"full"},
+  {"id":"claude","installed":true,"binary":"/usr/local/bin/claude","version":"1.0.58","install_hint":"","streams_incrementally":true,"full_access":true,
+   "access_modes":["scoped","read","full"],"caller_tools":true,"caller_tools_with_full_access":true,
+   "native_sandbox":"monomind","approvals":"n/a","sandbox_modes":["full"],
+   "tool_activity_fidelity":"full","resume":true,"effort":true,"max_turns":true,"reports_cost":true,"init_target":"claude"},
   {"id":"codex","installed":false,"binary":null,"version":null,
-   "install_hint":"npm install -g @openai/codex && codex login","streams_incrementally":false,"full_access":false,"tool_activity_fidelity":"start-only"},
+   "install_hint":"npm install -g @openai/codex && codex login","streams_incrementally":false,"full_access":true,
+   "access_modes":["scoped","read","full"],"caller_tools":true,"caller_tools_with_full_access":true,
+   "native_sandbox":"full","approvals":"off","sandbox_modes":["read-only","workspace-write","full"],
+   "tool_activity_fidelity":"full","resume":true,"effort":true,"max_turns":false,"reports_cost":false,"init_target":"codex"},
   …
 ]}
 ```
@@ -541,9 +737,40 @@ One entry per known runner (set grows with monomind releases). Honors `<NAME>_CL
 overrides. Binary probes run in parallel with a 5s per-binary timeout so a hung `--version`
 probe cannot stall the scan. Exit 0 always (detection, not a test). **rev 5**: `streams_incrementally`
 is static per-runtime metadata (`RunnerSpec.streamsIncrementally`, §9) — unlike `installed`/`version`,
-it never depends on probing the binary, so it's always present even when `installed:false`. **rev 12**: `full_access` is likewise static per-runtime metadata (`RunnerSpec.supportsFullAccess`) — whether `agent exec --access full` (§3.1) is implemented for this runtime; only `claude` is `true` today. **rev 12**
+it never depends on probing the binary, so it's always present even when `installed:false`. **rev 12**: `full_access` is likewise static per-runtime metadata (`RunnerSpec.supportsFullAccess`) — whether `agent exec --access full` (§3.1) is implemented for this runtime (**rev 19**: every coding runtime; `false` for vercel, hermes, qwen-rpc, pi-rpc; **rev 20**:
+pi-rpc, cline, aider and dsh are `true`). **rev 12**
 (#357): `tool_activity_fidelity` (`"full"|"start-only"|"none"`) is the same kind of static metadata
-(`RunnerSpec.toolActivityFidelity`) for the §3.2 `tool_activity` event — see §9.
+(`RunnerSpec.toolActivityFidelity`) for the §3.2 `tool_activity` event — see §9. **rev 19**:
+five more static fields (`orgrt/runner-features.ts`), each saying what monomind's runner does
+today, not what the vendor CLI could do: `resume` (honors `--resume` and reports a session id to
+pass back), `effort` (maps `--effort`), `max_turns` (enforces `--max-turns` on the runtime's own
+loop), `reports_cost` (`result.cost_usd` is a real figure — a runtime without it never trips
+`--budget-usd`), and `init_target` (the `monomind init --target` value that writes this
+runtime's setup files: `claude`, `codex`, `opencode`, `kimicode`, `antigravity`, and since
+rev 20 `cline`, `aider`, and `agents` (AGENTS.md only) for pi, pi-rpc, dsh, grok, copilot,
+qwen, qwen-rpc and crush; `null` for vercel and hermes). **rev 20**:
+entries for `cline`, `aider` and `dsh`; `full_access` is `true` for every runtime except vercel,
+hermes and qwen-rpc. **rev 21** (capability `agent-exec-access-read`): `access_modes` lists the
+`--access` values (§3.1) the runtime accepts, always starting with `"scoped"`; `"read"` only where
+a read-only mode is enforced by monomind or the CLI itself (`claude`, `codex`, `pi`, `pi-rpc` —
+`orgrt/runner-access.ts`), `"full"` exactly when `full_access` is `true`.
+**rev 22** (capability `agent-exec-full-access-tools`): `caller_tools` — `--tools stdio` caller
+tools (§4) reach the model on this runtime (every runtime today); `caller_tools_with_full_access`
+— they also do with `--access full` (`caller_tools && full_access`). When it is `false`,
+`--access full` with caller tools is `error {code:"unsupported", fatal:true}`, never a turn
+without them.
+**rev 23** (capability `agent-exec-sandbox`): `native_sandbox` and `approvals` — the values a
+default turn's `start` event reports (scoped access, no `--sandbox`, no org git level; §3.2 has
+the vocabulary) — and `sandbox_modes`, the `--sandbox` values the runtime accepts, always
+including `"full"`. `read-only`/`workspace-write` only where the vendor CLI has that mode and it
+was checked (`orgrt/runner-sandbox.ts`): codex and grok (`--help` of the installed CLI; codex's
+modes exercised with `codex sandbox`, grok's profiles resolve and start its bwrap/Landlock
+sandbox) and dsh (its `DSH_PERMISSION_MODE`). Defaults: claude `monomind`/`n/a`; codex and grok
+`full`/`off`; dsh `workspace-write`/`on`; opencode, cline, hermes `none`/`on`; vercel
+`none`/`n/a`; antigravity, kimicode, qwen, qwen-rpc, crush, copilot, pi, pi-rpc, aider
+`none`/`off`. Not listed as sandboxed on purpose: antigravity's `--sandbox` is an unspecified
+boolean "terminal restrictions" switch, qwen's is a container sandbox this build has not
+verified, and the others have no file-system sandbox flag.
 
 `agent scan --installed --json` = installed-only view (the name `agent list` is reserved by the
 pre-existing swarm command, §1). `agent test <id>` = one smoke turn via `agent exec`
@@ -674,7 +901,7 @@ Callers may read `<projectRoot>/.monomind/orgs/<name>/runtime.json` and run `bus
 3. Handshake test (`--version --json` shape + capability gating).
 4. Golden NDJSON transcripts published at `doc/agent-exec-protocol/fixtures/*.ndjson` (success,
    tool-loop, fatal auth, timeout, cancel, bad-frame, tool-activity, full-access,
-   full-access-background, subagent) so callers can build contract tests without running monomind;
+   full-access-background, subagent, subagent-synth) so callers can build contract tests without running monomind;
    mono-agent's Phase 1 gate consumes these.
 5. Two real runners smoke-tested (whatever is installed in CI/dev).
 
@@ -750,20 +977,37 @@ to report tool activity, or vice versa. Set it by checking what the runner's own
 stream already yields for a tool call (`orgrt/*-runner.ts`), not by adding new runner code for this
 feature alone:
 - `"full"` — the runner yields a real tool_use id, name, and input, AND later a matching
-  `tool_result` for the same id (today: `claude` only, via `ClaudeAgentRunner`'s own
-  `'tool_use'`/`'tool_result'` AgentMessages). `orgrt/tool-activity.ts`'s `ToolActivityTracker`
+  `tool_result` for the same id (`claude`, via `ClaudeAgentRunner`'s own
+  `'tool_use'`/`'tool_result'` AgentMessages; rev 19: `codex`, `opencode`, `antigravity`,
+  `kimicode`, `grok`, `qwen`, `copilot`, `pi` from their CLIs' own tool start/complete events;
+  rev 20: `pi-rpc`, `cline`, `aider` (through its shim), `dsh`). `orgrt/tool-activity.ts`'s `ToolActivityTracker`
   turns this into a matched start/end pair.
 - `"start-only"` — the runner only yields a lightweight `{type:'tool_use', text: toolName}`
-  liveness signal, with no id to correlate an end with (`codex`, `kimicode`, `antigravity`, `grok`,
-  `qwen`, `crush`, `copilot`, `pi` today). `ToolActivityTracker` maps this to a `tool_activity`
+  liveness signal, with no id to correlate an end with (no runtime today). `ToolActivityTracker` maps this to a `tool_activity`
   `"start"` under a locally-minted id, with no matching `"end"` — do not invent one; a fabricated
   `ok`/`duration_ms` a caller can't verify is worse than omitting it.
 - `"none"` — the runner's `AgentMessage` stream carries no tool signal a caller could act on at all,
-  whether because it never yields `'tool_use'` (`opencode`, `vercel`, `qwen-rpc`, `pi-rpc` today) or
+  whether because it never yields `'tool_use'` (`vercel`, `qwen-rpc` today; `crush`
+  yields only label-free liveness pings) or
   because what it yields isn't really per-call information (`hermes`'s own `'tool_use'` is a single
   fixed `"turn started"` placeholder ping per turn, not a tool name — mapping it through the
   `"start-only"` path would fabricate a misleading tool_activity event, so it is `"none"` despite
   matching the AgentMessage shape). `ToolActivityTracker` emits nothing for a `"none"` runtime.
+
+**`full_access`** (rev 19, `RunnerSpec.supportsFullAccess`): set it only once the runner, for
+`args.access === 'full'`, (a) runs its CLI's own no-approval, no-sandbox mode, (b) spawns the CLI
+through `orgrt/process-group-spawn.ts`'s `spawnRunnerProcess(command, argv, spawnOptions, args)`
+and drives its kill ladder through the returned `target` (`killOnAbort(args.signal,
+proc.target, …)`, the turn timeout too) and calls `proc.stop()` in its `finally` — that is what
+gives `cancel` a whole-tree kill and `done` its `background_pids` — and (c) yields `tool_use` with
+`kind` and canonical `input` keys (§3.2) where the CLI reports tool calls. `agent-exec-no-
+transitive-escalation.test.ts` pins the full-access set; widening it is a security decision
+recorded in `doc/concepts/coder-mode-security.md`.
+
+**`read` in `access_modes`** (rev 21, `RunnerSpec.readAccess`, `orgrt/runner-access.ts`): set it
+only when `args.access === 'read'` turns on a read-only mode the CLI itself enforces (a sandbox or
+tool allowlist checked against the installed CLI's `--help` or a real run, never prompt text), and
+the runner passes it regardless of `MONOMIND_GIT_LEVEL`. The same escalation test pins this set.
 
 ## 10. `monomind doctor --json` (capability `doctor-json`, rev 9; `doctor-read-only`, `doctor-offline`, rev 10)
 
@@ -946,7 +1190,11 @@ stays read-only.
 Sources: `claude` — the Agent SDK's `query().supportedModels()`, the list Claude Code's `/model`
 picker shows for the signed-in account (it varies by account and plan); `codex` —
 `codex debug models`, only entries with `visibility: "list"`; `antigravity` — `agy models`;
-`opencode` — `opencode models`. Every other runtime has no listing command:
+`opencode` — `opencode models`. **rev 20**: `dsh` has no listing command either, so the result is
+the runner's own curated list (`orgrt/dsh-runner-models.ts`) with `"curated": true` — DeepSeek's
+own routes plus free OpenRouter/NVIDIA models, each with `effort_levels`, `free` and `key_env`
+(the variable its key comes from); any other `<route>/<model>` still works as free text. Every
+other runtime has no listing command:
 `"supported": false, "models": []`, exit 0 — pass a model id its CLI accepts.
 
 Errors keep the same shape with `models: []` and an `error: {code, message}`: `unknown-runtime`
@@ -954,7 +1202,7 @@ Errors keep the same shape with `models: []` and an `error: {code, message}`: `u
 
 ## 13. `monomind agent test --json` (capability `agent-test-json`, rev 18)
 
-`monomind agent test <id> [--model M] [--timeout 60s] --json` checks that one runtime and model
+`monomind agent test <id> [--model M] [--timeout 60s] [--sandbox MODE] [--env KEY=V]... --json` checks that one runtime and model
 actually answer (issue #390). It runs one turn through the `agent exec` engine with the prompt
 `Reply with the single word: ok`, max turns 1, no caller tools, `scoped` access and a fresh
 temporary cwd that is removed afterwards, then prints a single JSON object on stdout:
@@ -962,7 +1210,8 @@ temporary cwd that is removed afterwards, then prints a single JSON object on st
 ```json
 {"v":1,"runtime":"codex","model":"gpt-5.5","status":"ok","reply":"ok",
  "latency_first_ms":812,"latency_ms":1430,"input_tokens":12,"output_tokens":1,
- "cost_usd":0.0001,"cost_estimated":false,"runtime_version":"0.52.0","error":null}
+ "cost_usd":0.0001,"cost_estimated":false,"runtime_version":"0.52.0",
+ "native_sandbox":"workspace-write","error":null}
 ```
 
 | Field | Meaning |
@@ -975,6 +1224,7 @@ temporary cwd that is removed afterwards, then prints a single JSON object on st
 | `cost_usd` | The runtime's reported cost; when it reports none, an estimate from monomind's pricing table; `null` when neither exists |
 | `cost_estimated` | `true` when `cost_usd` is the pricing-table estimate |
 | `runtime_version` | From the runtime's install metadata, as `agent scan` reads it (§6); `null` when unknown |
+| `native_sandbox` | rev 25, capability `agent-test-sandbox`. The vendor CLI's sandbox for this turn, from the `start` event's `native_sandbox` (§3.2): `read-only`, `workspace-write`, `full`, `none` or `monomind`. `null` when the turn never started (missing binary, unsupported `--sandbox`) |
 | `error` | `null`, or `{code, message, login_hint?}` for a failed status. `login_hint` comes with `auth` |
 
 | `status` | Meaning | Exit |
@@ -982,11 +1232,31 @@ temporary cwd that is removed afterwards, then prints a single JSON object on st
 | `ok` | The reply is `ok` (trimmed, any case, trailing punctuation allowed) | 0 |
 | `ok_unexpected` | The turn succeeded but replied with other text | 0 |
 | `auth` | Not logged in or the key was rejected | 1 |
-| `quota` | Rate limit, usage limit or billing | 1 |
+| `quota` | Usage limit, quota or billing | 1 |
+| `rate_limited` | rev 20. A transient provider rate limit (429) after `agent exec`'s retries (`error.code: "rate-limited"`) | 1 |
 | `model_unavailable` | The runtime does not know the model, or the account's plan does not include it (`error.code: "model-unavailable"`) | 1 |
 | `timeout` | `--timeout` (default 60s) fired | 124 |
 | `missing_binary` | The runtime's CLI is not installed | 1 |
 | `error` | Anything else; `error.code` keeps the §3.4 code (`runner-error`, `no-runner`, …) | 1 |
+
+**`--sandbox` and `--env`** (rev 25, capability `agent-test-sandbox`, issue
+#474) work as in `agent exec` (§3.1): `--sandbox read-only|workspace-write|full` picks the vendor
+CLI's own sandbox where `agent scan --json` lists the mode in `sandbox_modes`, and `--env KEY=V`
+(repeatable) adds to the agent process's environment. The turn's access stays `scoped` whatever
+they say. The sandbox can only be tightened: a `MONOMIND_GIT_LEVEL` below `push` (from `--env`
+or monomind's own environment) caps codex/grok at `workspace-write` even with `--sandbox full`,
+and `MONOMIND_GIT_LEVEL=push` does not loosen `--sandbox read-only`. A mode the runtime lacks
+(e.g. `--sandbox workspace-write` on pi) gives `status: "error"` with `error.code:
+"unsupported"` and `native_sandbox: null`, exit 1; no turn runs. An unknown mode or a malformed
+`--env` entry is a usage error (exit 2, no JSON). Check `native_sandbox` for what the CLI really
+got:
+
+```json
+{"v":1,"runtime":"pi","model":null,"status":"error","reply":null,"latency_first_ms":null,
+ "latency_ms":3,"input_tokens":0,"output_tokens":0,"cost_usd":0,"cost_estimated":false,
+ "runtime_version":"0.87.1","native_sandbox":null,
+ "error":{"code":"unsupported","message":"--sandbox workspace-write is not supported by runtime \"pi\" (agent scan --json sandbox_modes: full)"}}
+```
 
 A missing runtime id is a usage error (exit 2, no JSON). `model_unavailable` matches the wording
 each runtime uses for a bad model — Claude Code's "issue with the selected model", copilot's

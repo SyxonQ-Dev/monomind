@@ -1,5 +1,4 @@
 // packages/@monomind/cli/src/orgrt/copilot-runner-stream.ts
-import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,7 +8,9 @@ import { killOnAbort } from './agent-runner.js';
 import { maskedCommand } from './authority-mask.js';
 import { handleLine, parseCopilotUsage } from './copilot-runner-parse.js';
 import type { CopilotStreamEvent, TurnOutcome } from './copilot-runner-types.js';
+import type { OrgEffortLevel } from './cost-tier.js';
 import { classifyStderr } from './kimicode-runner.js';
+import { spawnRunnerProcess } from './process-group-spawn.js';
 import { omitAnthropicManagedKeys } from './provider.js';
 
 export const TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000;
@@ -20,6 +21,16 @@ export const TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000;
  *  with no way to answer them — this is the primary mitigation for copilot
  *  specifically, not just a defensive backstop. */
 export const STARTUP_GRACE_MS = 45_000;
+
+/** `copilot --reasoning-effort`: none|minimal|low|medium|high|xhigh|max. */
+const COPILOT_EFFORT: Record<OrgEffortLevel, string> = {
+  off: 'none',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+};
 
 /**
  * Run one `copilot` invocation and stream its NDJSON output
@@ -32,6 +43,7 @@ export const STARTUP_GRACE_MS = 45_000;
 export async function* streamTurn(
   bin: string,
   prompt: string,
+  sessionId: string | undefined,
   args: AgentRunArgs,
   outcome: TurnOutcome,
 ): AsyncGenerator<CopilotStreamEvent> {
@@ -44,21 +56,32 @@ export async function* streamTurn(
     '--output-format',
     'json',
     '-s',
-    '--allow-all-tools',
+    // Full access: --allow-all (tools + every path + every URL), so a
+    // headless turn never stops on a path/URL approval it cannot answer.
+    args.access === 'full' ? '--allow-all' : '--allow-all-tools',
     '--no-ask-user',
     '--usage-output-file',
     usageFile,
   ];
   if (args.model) cliArgs.push(`--model=${args.model}`);
+  if (args.effort) cliArgs.push('--reasoning-effort', COPILOT_EFFORT[args.effort]);
+  // `=` form: --resume takes an optional value.
+  if (sessionId) cliArgs.push(`--resume=${sessionId}`);
   cliArgs.push('--add-dir', args.cwd);
 
-  const child = spawn(...maskedCommand(args.authorityMask, bin, cliArgs), {
-    cwd: args.cwd,
-    // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
-    // vendor CLI; an explicit value in args.env still wins below.
-    env: { ...omitAnthropicManagedKeys(process.env), ...args.env },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  // Process-group leader under --access full (process-group-spawn.ts).
+  const proc = spawnRunnerProcess(
+    ...maskedCommand(args.authorityMask, bin, cliArgs),
+    {
+      cwd: args.cwd,
+      // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
+      // vendor CLI; an explicit value in args.env still wins below.
+      env: { ...omitAnthropicManagedKeys(process.env), ...args.env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+    args,
+  );
+  const child = proc.child;
 
   let stderrTail = '';
   child.stderr?.on('data', (c: Buffer) => {
@@ -75,18 +98,8 @@ export async function* streamTurn(
   const KILL_GRACE_MS = 5000;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
   const killChild = (): void => {
-    try {
-      child.kill('SIGTERM');
-    } catch {
-      /* already gone */
-    }
-    killTimer = setTimeout(() => {
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        /* already gone */
-      }
-    }, KILL_GRACE_MS);
+    proc.target.kill('SIGTERM');
+    killTimer = setTimeout(() => proc.target.kill('SIGKILL'), KILL_GRACE_MS);
     killTimer.unref?.();
   };
   const timer = setTimeout(() => {
@@ -102,7 +115,7 @@ export async function* streamTurn(
   }, STARTUP_GRACE_MS);
   // Abort hook (see AgentRunArgs.signal): kill the child so the stdout
   // loop below unblocks instead of orphaning it on iterator.return().
-  const unsubscribeAbort = killOnAbort(args.signal, child, KILL_GRACE_MS);
+  const unsubscribeAbort = killOnAbort(args.signal, proc.target, KILL_GRACE_MS);
 
   // Attach the exit promise BEFORE consuming stdout: on a spawn failure
   // (ENOENT, bad binary) the 'error' event fires almost immediately — if
@@ -155,6 +168,7 @@ export async function* streamTurn(
     clearTimeout(timer);
     if (hangTimer) clearTimeout(hangTimer);
     unsubscribeAbort();
+    proc.stop();
     if (child.exitCode === null && child.signalCode === null) {
       // NOT confirmed dead. Either the consumer abandoned this stream
       // mid-turn (session.ts's silent abort calls iterator.return(), the

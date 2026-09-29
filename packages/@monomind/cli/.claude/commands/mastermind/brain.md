@@ -53,7 +53,7 @@ For each domain (or the specified domain):
 
 Re-cluster the knowledge graph for a specific domain and rebuild Tier 3 principles from it.
 
-1. Call `mcp__monomind__monograph_community` for nodes matching `mastermind:<domain>`
+1. Call `mcp__monomind__monograph_query` for nodes matching `mastermind:<domain>`
 2. For any cluster of 3+ similar nodes: merge into a single principle (LLM synthesis)
 3. Store merged principle: `mcp__monomind__memory_hierarchical-store` namespace `mastermind:principles`
 4. For conflicting nodes: add the exception relation via `mcp__monomind__memory_kg_ingest`

@@ -73,7 +73,7 @@ describe('spawnCommand', () => {
     )) as CommandResult;
 
     expect(result.success).toBe(true);
-    expect(result.data).toMatchObject({ agentType: 'coder', status: 'spawned' });
+    expect(result.data).toMatchObject({ agentType: 'coder', status: 'registered' });
     const agentId = (result.data as { agentId: string }).agentId;
     expect(typeof agentId).toBe('string');
 
@@ -85,6 +85,18 @@ describe('spawnCommand', () => {
     expect(record.status).toBe('idle'); // on-disk status differs from the CLI-facing "spawned" response
     expect(record.taskCount).toBe(0);
     expect(record.health).toBe(1);
+  });
+
+  it('says the agent was recorded and that no process was started (#418)', async () => {
+    const result = (await spawnCommand.action?.(
+      makeCtx({ flags: { type: 'coder', name: 'rec-agent', _: [] } }),
+    )) as CommandResult;
+    expect(result.success).toBe(true);
+    expect((result.data as { note?: string }).note).toMatch(/no process/i);
+    const printed = writeSpy.mock.calls.map((c) => String(c[0])).join('');
+    expect(printed).toMatch(/recorded/i);
+    expect(printed).toMatch(/no process/i);
+    expect(printed).not.toMatch(/spawned successfully/);
   });
 
   it('auto-generates a name when --name is omitted and returns a CommandResult with data', async () => {

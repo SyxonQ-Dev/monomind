@@ -33,8 +33,16 @@ export const statusCommand: Command = {
     output.writeln(output.bold(`Monoswarm Status: ${status.id}`));
     output.writeln();
 
-    // Progress bar
-    output.writeln(`Overall Progress: ${output.progressBar(status.progress, 100, 40)}`);
+    output.writeln(`Status: ${status.status}`);
+    output.writeln(
+      output.dim('  monoswarm records state only; it starts no agent processes (deprecated).'),
+    );
+    // Progress only from recorded tasks — n/a when there are none (#418).
+    output.writeln(
+      status.tasks.total > 0
+        ? `Overall Progress: ${output.progressBar(status.progress, 100, 40)}`
+        : 'Overall Progress: n/a (no tasks recorded)',
+    );
     output.writeln();
 
     // Agent status

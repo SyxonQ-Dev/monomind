@@ -16,6 +16,7 @@ import { runAgentExec, type ToolSpec } from '../orgrt/agent-exec.js';
 import { parseSettingsFlag } from '../orgrt/agent-exec-settings.js';
 import { ORG_EFFORT_LEVELS, type OrgEffortLevel } from '../orgrt/cost-tier.js';
 import { scanInstalled } from '../orgrt/runner-registry.js';
+import { SANDBOX_MODES, type SandboxMode } from '../orgrt/runner-sandbox.js';
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 
@@ -63,6 +64,21 @@ export function parseEnvFlags(raw: unknown): Record<string, string> {
     env[s.slice(0, eq)] = s.slice(eq + 1);
   }
   return env;
+}
+
+/**
+ * Usage error for a `--sandbox` value (#396), or undefined when it is valid.
+ * Per-runtime support is checked later, in the engine (`unsupported`).
+ */
+export function sandboxFlagError(raw: unknown, access: string): string | undefined {
+  if (raw === undefined) return undefined;
+  if (!(SANDBOX_MODES as readonly unknown[]).includes(raw)) {
+    return `--sandbox must be one of ${SANDBOX_MODES.join(', ')} (got "${String(raw)}")`;
+  }
+  if (access === 'read' && raw === 'full') {
+    return '--access read cannot be combined with --sandbox full';
+  }
+  return undefined;
 }
 
 /** Load tool specs from --tools-file JSON: [{name, description, schema}]. */
@@ -140,14 +156,22 @@ export async function runExec(
 
   // #355: --access full is a usage-error flag combo, checked before the
   // engine runs (root/runtime/--cwd guards live inside it — see
-  // agent-exec-access.ts's "not only the caller" doc comment).
+  // agent-exec-access.ts's "not only the caller" doc comment). `read`
+  // (#388) is checked per runtime inside the engine too.
   const access = String(ctx.flags.access ?? 'scoped');
-  if (access !== 'scoped' && access !== 'full') {
-    return usageError(`--access must be "scoped" or "full" (got "${access}")`);
+  if (access !== 'scoped' && access !== 'read' && access !== 'full') {
+    return usageError(`--access must be "scoped", "read" or "full" (got "${access}")`);
   }
   if (access === 'full' && ctx.flags['allow-bash-prefix']) {
     return usageError('--access full cannot be combined with --allow-bash-prefix');
   }
+
+  // #396 (rev 23): the vendor CLI's own sandbox; per-runtime support is
+  // checked in the engine (`unsupported`). `read` always runs read-only, so
+  // asking for `full` with it is a contradiction.
+  const sandboxFlag = ctx.flags.sandbox;
+  const sandboxError = sandboxFlagError(sandboxFlag, access);
+  if (sandboxError) return usageError(sandboxError);
 
   let toolSpecs: ToolSpec[] = [];
   const toolsMode = String(ctx.flags.tools ?? 'none');
@@ -167,7 +191,7 @@ export async function runExec(
     return usageError('--tools-file/--tool-names require --tools stdio');
   }
 
-  // rev 16: --effort, validated here; the runner maps or ignores it.
+  // rev 16 (+ rev 19 notice): --effort, validated here; the runner maps or ignores it.
   const effortFlag = ctx.flags.effort;
   if (effortFlag !== undefined && !(ORG_EFFORT_LEVELS as readonly unknown[]).includes(effortFlag)) {
     return usageError(
@@ -215,7 +239,8 @@ export async function runExec(
 
   const exitCode = await runAgentExec({
     runtime,
-    access: access as 'scoped' | 'full',
+    access: access as 'scoped' | 'read' | 'full',
+    ...(sandboxFlag !== undefined ? { sandbox: sandboxFlag as SandboxMode } : {}),
     prompt,
     systemPrompt,
     model: ctx.flags.model ? String(ctx.flags.model) : undefined,
@@ -288,7 +313,7 @@ export const execCommand: Command = {
     {
       name: 'effort',
       description:
-        'Reasoning effort: off|low|medium|high|xhigh|max (claude and codex; other runtimes ignore it)',
+        'Reasoning effort: off|low|medium|high|xhigh|max (mapped per runtime — see agent scan --json effort; ignored with a notice where unsupported)',
       type: 'string',
       choices: [...ORG_EFFORT_LEVELS],
     },
@@ -313,21 +338,28 @@ export const execCommand: Command = {
     {
       name: 'allow-bash-prefix',
       description:
-        'CSV of command prefixes (e.g. "monomind,monoagentcli") the Bash tool may run, on top of --tools-file — scoped, not a blanket Bash grant. Incompatible with --access full',
+        'CSV of command prefixes (e.g. "monomind,monoagentcli") the Bash tool may run, on top of --tools-file — scoped, not a blanket Bash grant. With --access read, added to the read-only list. Incompatible with --access full',
       type: 'string',
     },
     {
       name: 'access',
       description:
-        'scoped (default, allow-list only) or full — unrestricted native tool access (claude runtime only; requires --cwd, refuses root)',
+        'scoped (default, allow-list only), read — read files, search, web and read-only git, no edits or general shell (runtimes listing "read" in agent scan access_modes), or full — unrestricted native tool access (runtimes with full_access in agent scan; requires --cwd, refuses root)',
       type: 'string',
-      choices: ['scoped', 'full'],
+      choices: ['scoped', 'read', 'full'],
+    },
+    {
+      name: 'sandbox',
+      description:
+        "The vendor CLI's own sandbox: read-only, workspace-write or full (today's default). Only modes listed in agent scan --json sandbox_modes; never loosens an org role's git level; --access read always runs read-only",
+      type: 'string',
+      choices: [...SANDBOX_MODES],
     },
     { name: 'protocol', description: 'Protocol version pin (1)', type: 'string' },
     {
       name: 'settings',
       description:
-        'Coder mode: "none" (default) or a CSV of user,project,local — loads CLAUDE.md, skills, hooks, and project+user MCP servers (claude runtime only)',
+        'Coder mode: "none" (default) or a CSV of user,project,local — claude loads CLAUDE.md, skills, hooks, and project+user MCP servers; other runtimes stop isolating their own CLI config',
       type: 'string',
     },
     {

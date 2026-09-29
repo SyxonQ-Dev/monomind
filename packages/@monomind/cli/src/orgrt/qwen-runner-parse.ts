@@ -2,6 +2,7 @@
 // Split out of qwen-runner.ts (file-size sweep) — the stream-json wire types,
 // the per-event normalizer (handleQwenEvent), and the batch parser built on
 // it. See qwen-runner.ts's header for the live-verified wire shape.
+import { messageBlocks } from './kimicode-runner-tools.js';
 import { TOOL_CALL_RE } from './tool-fence.js';
 
 export interface QwenMessage {
@@ -9,7 +10,8 @@ export interface QwenMessage {
 }
 
 export interface QwenEvent {
-  type?: 'system' | 'assistant' | 'result';
+  /** 'user' frames carry qwen's own tool results (tool_result blocks). */
+  type?: 'system' | 'assistant' | 'user' | 'result';
   subtype?: string;
   session_id?: string;
   message?: QwenMessage;
@@ -26,16 +28,21 @@ export interface QwenEvent {
  *   - 'assistant': rawText is one whole assistant message (fences intact) for
  *     end-of-turn tool-call parsing; text is the fence-stripped prose,
  *     present only when non-empty.
- *   - 'tool':      liveness only — this runner has no live-verified wire
- *     event for qwen's own tool activity, so the only 'tool' event is the
- *     spawn-time yield (see qwen-runner.ts's header).
+ *     May also carry `toolUses` (the same message's tool_use blocks).
+ *   - 'native':    qwen's own tool calls (assistant tool_use blocks) or
+ *     results (user tool_result blocks) with no text alongside. Read from
+ *     qwen-code's headless adapter (Claude-compatible stream-json), not a
+ *     live run — no qwen install here.
+ *   - 'tool':      liveness only — the spawn-time yield.
  *   - 'meta':      any other event that only carries a session id.
  */
 export interface QwenStreamEvent {
-  kind: 'assistant' | 'tool' | 'meta';
+  kind: 'assistant' | 'native' | 'tool' | 'meta';
   text?: string;
   rawText?: string;
   toolName?: string;
+  toolUses?: Array<{ id: string; name: string; input: unknown }>;
+  toolResults?: Array<{ id: string; output: unknown; isError: boolean }>;
   sessionId?: string;
 }
 
@@ -61,19 +68,26 @@ export function handleQwenEvent(
   ev: QwenEvent,
   outcome: Pick<TurnOutcome, 'inputTokens' | 'outputTokens' | 'error'>,
 ): QwenStreamEvent | null {
-  if (ev.type === 'assistant' && ev.message?.content) {
-    const text = ev.message.content
-      .filter((b) => b.type === 'text' && typeof b.text === 'string')
-      .map((b) => b.text as string)
-      .join('\n');
-    if (!text) return ev.session_id ? { kind: 'meta', sessionId: ev.session_id } : null;
-    const stripped = text.replace(TOOL_CALL_RE, '').trim();
-    return {
-      kind: 'assistant',
-      rawText: text,
-      text: stripped || undefined,
-      sessionId: ev.session_id,
+  if ((ev.type === 'assistant' || ev.type === 'user') && ev.message?.content) {
+    const { text, toolUses, toolResults } = messageBlocks(ev.message.content);
+    const tools = {
+      ...(toolUses.length > 0 ? { toolUses } : {}),
+      ...(toolResults.length > 0 ? { toolResults } : {}),
     };
+    if (ev.type === 'assistant' && text) {
+      const stripped = text.replace(TOOL_CALL_RE, '').trim();
+      return {
+        kind: 'assistant',
+        rawText: text,
+        text: stripped || undefined,
+        sessionId: ev.session_id,
+        ...tools,
+      };
+    }
+    if (toolUses.length > 0 || toolResults.length > 0) {
+      return { kind: 'native', sessionId: ev.session_id, ...tools };
+    }
+    return ev.session_id ? { kind: 'meta', sessionId: ev.session_id } : null;
   }
 
   if (ev.type === 'result') {

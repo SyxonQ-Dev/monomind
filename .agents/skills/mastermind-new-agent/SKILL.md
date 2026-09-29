@@ -8,7 +8,7 @@ pick: low
 
 # Mastermind New Agent
 
-This skill is invoked by `mastermind:new-agent` or directly via `/mastermind-new-agent`.
+This skill is invoked directly via `/mastermind-new-agent`.
 
 It writes one role in the Org Runtime shape (`RoleSchema` in `packages/@monomind/cli/src/orgrt/types.ts`) — the same shape `mastermind-createorg` produces — and runs `monomind org validate` on the result. There is no `adapter` object, heartbeat or per-role system prompt in the org config: the runtime reads `runtime`, `adapter_config.model`, `responsibilities`, `skills` and `skill_pool`.
 

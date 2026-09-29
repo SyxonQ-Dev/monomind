@@ -8,7 +8,7 @@ pick: low
 
 # Mastermind Goal Detail
 
-This skill is invoked by `mastermind:goal-detail` or directly via `/mastermind-goal-detail`.
+This skill is invoked directly via `/mastermind-goal-detail`.
 
 ---
 

@@ -52,8 +52,11 @@ function claudeOnlyMemorySeeds(targetDir: string): ReturnType<typeof generateMem
 
 import type { InitOptions, InitResult } from './types.js';
 import { detectPlatform } from './types.js';
+import { writeAgentsOnly } from './write-agents.js';
+import { writeAiderConf } from './write-aider.js';
 import { writeGeminiFiles } from './write-antigravity.js';
 import { writeClaudeMd, writeHelpers, writeMCPConfig, writeStatusline } from './write-claude.js';
+import { writeClineFiles } from './write-cline.js';
 import { writeCodexFiles } from './write-codex.js';
 import { writeKimiFiles } from './write-kimicode.js';
 import { writeOpencodeFiles } from './write-opencode.js';
@@ -92,6 +95,18 @@ export async function executeInit(options: InitOptions): Promise<InitResult> {
   };
 
   const targetDir = options.targetDir;
+
+  // `--target agents`: AGENTS.md only — no directories, state, memory, graph
+  // or doctor pass (write-agents.ts).
+  if (options.components.agentsOnly) {
+    try {
+      writeAgentsOnly(targetDir, options, result);
+    } catch (error) {
+      result.success = false;
+      result.errors.push(error instanceof Error ? error.message : String(error));
+    }
+    return result;
+  }
 
   try {
     // Create directory structure
@@ -332,6 +347,15 @@ export async function executeInit(options: InitOptions): Promise<InitResult> {
       result.skipped.push(...applied.diagnostics.map((line) => `platform ${platform}: ${line}`));
     }
 
+    // aider loads CONVENTIONS.md (written by the aider adapter above) only
+    // through a `read:` entry; cline gets a rule file (rev 20).
+    if (options.selectedPlatforms?.includes('aider')) {
+      await writeAiderConf(targetDir, options, result);
+    }
+    if (options.components.cline) {
+      await writeClineFiles(targetDir, options, result);
+    }
+
     // Generate .agents/shared_instructions.md; its memory seeds are stored
     // once the database exists (below). #372: a Claude-only init writes no
     // .agents/ file but keeps the seeds.
@@ -369,7 +393,7 @@ export async function executeInit(options: InitOptions): Promise<InitResult> {
 
     // Build the Monograph code graph in background (non-blocking) — code-project only
     if (options.components.monograph && (capMgr === null || capMgr.isActive('code'))) {
-      await initKnowledgeGraph(targetDir, result, options.installClaudeCode !== false);
+      await initKnowledgeGraph(targetDir, result);
     } else if (options.components.monograph) {
       result.skipped.push('Monograph code graph: not a code project (skipping indexing)');
     }
@@ -385,8 +409,10 @@ export async function executeInit(options: InitOptions): Promise<InitResult> {
       }
     }
 
-    // Run doctor auto-fix (non-blocking, best-effort)
-    await runDoctorFix(targetDir, result, options.installClaudeCode !== false);
+    // Run doctor auto-fix (non-blocking, best-effort) — unless the caller
+    // runs it itself once all of its own writes are done (#425).
+    if (!options.deferDoctor)
+      await runDoctorFix(targetDir, result, options.installClaudeCode !== false);
 
     // Hash what this run left on disk (after adapters and doctor rewrote some
     // of it), so the next run can tell a user edit from an untouched file.
@@ -441,9 +467,7 @@ function countEnabledHooks(options: InitOptions): number {
   if (hooks.postToolUse) count++;
   if (hooks.userPromptSubmit) count++;
   if (hooks.sessionStart) count++;
-  if (hooks.stop) count++;
   if (hooks.preCompact) count++;
-  if (hooks.notification) count++;
 
   return count;
 }

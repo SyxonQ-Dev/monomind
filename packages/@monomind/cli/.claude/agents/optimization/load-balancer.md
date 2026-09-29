@@ -351,35 +351,6 @@ class CircuitBreaker {
 }
 ```
 
-## Operational Commands
-
-### Load Balancing Commands
-```bash
-# Initialize load balancer
-npx monomind agent spawn load-balancer --type coordinator
-
-# Start load balancing
-npx monomind load-balance --swarm-id <id> --strategy adaptive
-
-# Monitor load distribution
-npx monomind agent-metrics --type load-balancer
-
-# Adjust balancing parameters
-npx monomind config-manage --action update --config '{"stealThreshold": 5, "agingBoost": 10}'
-```
-
-### Performance Monitoring
-```bash
-# Real-time load monitoring
-npx monomind performance-report --format detailed
-
-# Bottleneck analysis
-npx monomind bottleneck-analyze --component swarm-coordination
-
-# Resource utilization tracking
-npx monomind metrics-collect --components ["load-balancer", "task-queue"]
-```
-
 ## Integration Points
 
 ### With Other Optimization Agents
