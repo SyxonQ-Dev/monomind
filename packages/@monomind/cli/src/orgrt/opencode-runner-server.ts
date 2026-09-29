@@ -57,6 +57,25 @@ export const FULL_ACCESS_PERMISSION: Record<string, 'allow' | 'deny'> = {
   question: 'deny',
 };
 
+/**
+ * #482 `--sandbox restricted`: edits, shell, subagents and paths outside the
+ * project ask — and the runner rejects every ask (`replyPermission`). `ask`,
+ * not `deny`: a denied tool leaves opencode's tool list, and opencode's own
+ * free tier then refuses the request (checked live, opencode 1.18.32). Not
+ * `read-only`: an agent's own `permission` block in the user's or the
+ * project's opencode.json still wins over this override (checked live).
+ */
+export const RESTRICTED_PERMISSION: Record<string, 'ask'> = {
+  edit: 'ask',
+  bash: 'ask',
+  task: 'ask',
+  external_directory: 'ask',
+};
+
+/** An attached server (OPENCODE_URL) keeps its own permission rules. */
+export const RESTRICTED_NEEDS_OWN_SERVER =
+  'opencode --sandbox restricted needs the ephemeral opencode server monomind starts; an attached server (OPENCODE_URL) keeps its own permission rules';
+
 /** How long the ephemeral server may take to print its listening line. The
  *  SDK's own default of 5s is too tight for a cold machine, and a timeout
  *  there crashes the role session. */
@@ -100,7 +119,11 @@ export function startOpencodeServer(args: AgentRunArgs): Promise<OpencodeServer>
       env: {
         ...omitAnthropicManagedKeys(process.env),
         ...args.env,
-        ...(full ? { OPENCODE_PERMISSION: JSON.stringify(FULL_ACCESS_PERMISSION) } : {}),
+        ...(args.sandbox === 'restricted'
+          ? { OPENCODE_PERMISSION: JSON.stringify(RESTRICTED_PERMISSION) }
+          : full
+            ? { OPENCODE_PERMISSION: JSON.stringify(FULL_ACCESS_PERMISSION) }
+            : {}),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
@@ -139,7 +162,8 @@ export function startOpencodeServer(args: AgentRunArgs): Promise<OpencodeServer>
 }
 
 /**
- * Full access: answer one permission request `always`. opencode 1.18 emits
+ * Full access: answer one permission request `always` (#482: `reject` under
+ * `--sandbox restricted`, in any access mode). opencode 1.18 emits
  * `permission.asked` (`{id, sessionID, …}`) answered at
  * `POST /permission/{id}/reply`; older servers emitted `permission.updated`
  * answered at `POST /session/{sessionID}/permissions/{id}`. The v1 SDK
@@ -152,15 +176,17 @@ export async function replyPermission(
   directory: string,
   evType: string,
   props: { id?: string; sessionID?: string },
+  reject = false,
 ): Promise<void> {
   if (!props.id) return;
+  const reply = reject ? 'reject' : 'always';
   const q = `?directory=${encodeURIComponent(directory)}`;
   const [path, body] =
     evType === 'permission.asked'
-      ? [`/permission/${encodeURIComponent(props.id)}/reply`, { reply: 'always' }]
+      ? [`/permission/${encodeURIComponent(props.id)}/reply`, { reply }]
       : [
           `/session/${encodeURIComponent(props.sessionID ?? '')}/permissions/${encodeURIComponent(props.id)}`,
-          { response: 'always' },
+          { response: reply },
         ];
   try {
     await fetch(`${baseUrl.replace(/\/+$/, '')}${path}${q}`, {

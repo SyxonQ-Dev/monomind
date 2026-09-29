@@ -43,9 +43,10 @@ export interface AgentRunArgs {
   access?: 'scoped' | 'read' | 'full';
   /** #396 (agent exec `--sandbox`, rev 23): the vendor CLI's own sandbox
    *  mode, already capped by the role's git level (runner-sandbox.ts).
-   *  Unset or `full` = today's behaviour. Only codex, grok and dsh act on
-   *  `read-only`/`workspace-write`; agent-exec refuses it elsewhere. */
-  sandbox?: 'read-only' | 'workspace-write' | 'full';
+   *  Unset or `full` = today's behaviour. Each runner acts only on the
+   *  modes RUNNER_SANDBOX_MODES lists for it (#482 added `restricted` and
+   *  copilot/antigravity/opencode/pi); agent-exec refuses the rest. */
+  sandbox?: 'read-only' | 'restricted' | 'workspace-write' | 'full';
   /** The mailbox prompt stream (or any async iterable of prompt messages). */
   prompt: AsyncIterable<any>;
   systemPrompt: string;

@@ -94,6 +94,7 @@ import { computeSafeChunk } from './antigravity-runner.js';
 // surface, complete or partial, in visible text.
 import {
   type OpencodeServer,
+  RESTRICTED_NEEDS_OWN_SERVER,
   replyPermission,
   resolveEffortVariant,
   startOpencodeServer,
@@ -165,10 +166,12 @@ export class OpencodeAgentRunner implements AgentRunner {
     // from the user's interactive opencode state — and is the only path that
     // can carry the role's session env (#262, see startOpencodeServer).
     const full = args.access === 'full';
+    const restricted = args.sandbox === 'restricted'; // #482: every ask is rejected
     let client: any;
     let server: OpencodeServer | null = null;
     const attachUrl = this.opencodeUrl || process.env.OPENCODE_URL;
     if (attachUrl) {
+      if (restricted) throw new Error(RESTRICTED_NEEDS_OWN_SERVER);
       client = sdk.createOpencodeClient({ baseUrl: attachUrl, directory: args.cwd });
     } else {
       server = await startOpencodeServer(args);
@@ -355,8 +358,8 @@ export class OpencodeAgentRunner implements AgentRunner {
             }
 
             if (evType === 'permission.asked' || evType === 'permission.updated') {
-              if (full && ownSessions.has(props.sessionID))
-                void replyPermission(baseUrl, args.cwd, evType, props);
+              if ((full || restricted) && ownSessions.has(props.sessionID))
+                void replyPermission(baseUrl, args.cwd, evType, props, restricted);
               continue;
             }
 

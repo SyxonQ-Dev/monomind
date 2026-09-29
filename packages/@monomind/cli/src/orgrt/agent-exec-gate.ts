@@ -6,6 +6,7 @@
 
 import { readAccessCanUseTool } from './agent-exec-read.js';
 import { hasUnsafeShellSyntax } from './agent-exec-shell-syntax.js';
+import type { SandboxMode } from './runner-sandbox.js';
 
 type Decision =
   | { behavior: 'allow'; updatedInput: Record<string, unknown> }
@@ -44,6 +45,27 @@ export function scopedCanUseTool(
           : `Tool "${toolName}" was not in the tool list this exec call was given.`,
     };
   };
+}
+
+/**
+ * The tool names the scoped/read gate allows: each caller tool as the
+ * SDK's `mcp__org__<name>` and, for fence runtimes, its bare name. #482: a
+ * claude turn under `--sandbox read-only|workspace-write` gets only the
+ * prefixed form, so a caller tool named like a native one ("Write",
+ * "Bash") can never let that native tool through.
+ */
+export function execAllowedToolNames(
+  runtime: string,
+  sandbox: SandboxMode | undefined,
+  tools: ReadonlyArray<{ name: string }>,
+): Set<string> {
+  const prefixedOnly =
+    runtime === 'claude' && (sandbox === 'read-only' || sandbox === 'workspace-write');
+  return new Set(
+    tools.flatMap((t) =>
+      prefixedOnly ? [`mcp__org__${t.name}`] : [`mcp__org__${t.name}`, t.name],
+    ),
+  );
 }
 
 /** The gate for a scoped or read turn. */

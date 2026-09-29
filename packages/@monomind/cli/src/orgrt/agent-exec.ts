@@ -28,7 +28,7 @@
 import { fullAccessCanUseTool, resolveAccess, resolveExecSandbox } from './agent-exec-access.js';
 import { StdioToolBridge, UsageTracker } from './agent-exec-bridge.js';
 import { type ExecErrorCode, execErrorCode, FATAL_CODES } from './agent-exec-errors.js';
-import { execCanUseTool } from './agent-exec-gate.js';
+import { execAllowedToolNames, execCanUseTool } from './agent-exec-gate.js';
 import {
   type AgentExecOptions,
   jsonSchemaToZodShape,
@@ -159,7 +159,8 @@ export async function runAgentExecOnce(
   });
   // rev 19: what a non-claude --settings turn loads, and an ignored --effort.
   const effortSupported = runnerSpec(opts.runtime)?.effort ?? false;
-  for (const ev of runtimeStartupNotices({ ...opts, effortSupported })) firstEmit(ev);
+  for (const ev of [...sandbox.notices, ...runtimeStartupNotices({ ...opts, effortSupported })])
+    firstEmit(ev); // #482: a sandbox fallback notice first
 
   // Abort hook for the runner (AgentRunArgs.signal): return() alone queues
   // behind a runner blocked in `for await (child.stdout)` and never reaches
@@ -234,7 +235,7 @@ export async function runAgentExecOnce(
   // was given"), which silently broke tool use for those runtimes:
   // tool.handler (the stdio bridge that actually emits tool_call/tool_result
   // on the wire) was never reached, since canUseTool denies before it runs.
-  const allowedToolNames = new Set(tools.flatMap((t) => [`mcp__org__${t.name}`, t.name]));
+  const allowedToolNames = execAllowedToolNames(opts.runtime, sandbox.mode, tools); // #482
   const rawCanUseTool =
     access === 'full'
       ? null

@@ -113,6 +113,7 @@ describe('runAgentTest: statuses', () => {
       cost_estimated: false,
       runtime_version: null,
       native_sandbox: 'monomind',
+      sandbox_applied: null,
       error: null,
     });
     expect(r.latency_first_ms).toBeGreaterThan(0);
@@ -279,6 +280,64 @@ describe('runAgentTest: --sandbox and --env (#474)', () => {
     const r = await run('pi', mockRunner(okTurn('ok')), { sandbox: 'full' });
     expect(r.status).toBe('ok');
     expect(r.native_sandbox).toBe('none');
+    expect(r.sandbox_applied).toBe('full');
+  });
+});
+
+describe('runAgentTest: --sandbox-fallback (#482)', () => {
+  const ctx = (args: string[], flags: Record<string, unknown> = {}): CommandContext => ({
+    args,
+    flags: { _: [], ...flags },
+    cwd: process.cwd(),
+    interactive: false,
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('strictest runs the closest stricter mode and reports it as sandbox_applied', async () => {
+    const runner = mockRunner(okTurn('ok'));
+    const r = await run('pi', runner, { sandbox: 'workspace-write', sandboxFallback: 'strictest' });
+    expect(runner.calls[0].sandbox).toBe('read-only');
+    expect(r.status).toBe('ok');
+    expect(r).toMatchObject({ native_sandbox: 'read-only', sandbox_applied: 'read-only' });
+  });
+
+  it('run runs the runtime default', async () => {
+    const runner = mockRunner(okTurn('ok'));
+    const r = await run('pi', runner, { sandbox: 'workspace-write', sandboxFallback: 'run' });
+    expect(runner.calls[0].sandbox).toBe('full');
+    expect(r).toMatchObject({ status: 'ok', native_sandbox: 'none', sandbox_applied: 'full' });
+  });
+
+  it('fail keeps the unsupported error', async () => {
+    const r = await run('pi', mockRunner(okTurn('ok')), {
+      sandbox: 'workspace-write',
+      sandboxFallback: 'fail',
+    });
+    expect(r.error?.code).toBe('unsupported');
+    expect(r.sandbox_applied).toBeNull();
+  });
+
+  it('the CLI layer validates and passes --sandbox-fallback', async () => {
+    const out: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    vi.spyOn(process.stdout, 'write').mockImplementation((s) => {
+      out.push(String(s));
+      return true;
+    });
+    const bad = ctx(['pi'], {
+      json: true,
+      sandbox: 'workspace-write',
+      'sandbox-fallback': 'maybe',
+    });
+    expect(await runAgentTestCommand(bad)).toBe(2);
+    const runner = mockRunner(okTurn('ok'));
+    const flags = { json: true, sandbox: 'workspace-write', 'sandbox-fallback': 'strictest' };
+    const code = await runAgentTestCommand(ctx(['pi'], flags), {
+      runnerOverride: runner,
+      findBinary: () => undefined,
+    });
+    expect(code).toBe(0);
+    expect(JSON.parse(out.join(''))).toMatchObject({ sandbox_applied: 'read-only' });
   });
 });
 
@@ -383,7 +442,9 @@ describe('runAgentTestCommand (CLI layer)', () => {
       return true;
     });
     expect(await runAgentTestCommand(ctx(['codex'], { json: true, sandbox: 'strict' }))).toBe(2);
-    expect(err.join('')).toMatch(/--sandbox must be one of read-only, workspace-write, full/);
+    expect(err.join('')).toMatch(
+      /--sandbox must be one of read-only, restricted, workspace-write, full/,
+    );
     expect(await runAgentTestCommand(ctx(['codex'], { json: true, env: ['NOPE'] }))).toBe(2);
     expect(err.join('')).toMatch(/invalid --env entry/);
   });

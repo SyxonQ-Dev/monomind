@@ -77,7 +77,8 @@ export function grokCliArgs(
   // Full access (`--access full`) is --always-approve with no sandbox at
   // any git level.
   // #396: an explicit `agent exec --sandbox` picks the profile, in any access mode.
-  if (args.sandbox && args.sandbox !== 'full') cliArgs.push(...grokSandboxModeArgs(args.sandbox));
+  if (args.sandbox === 'read-only' || args.sandbox === 'workspace-write')
+    cliArgs.push(...grokSandboxModeArgs(args.sandbox));
   else if (args.access !== 'full') cliArgs.push(...grokSandboxArgs(roleGitLevel(args.env)));
   if (args.model) cliArgs.push('--model', args.model);
   if (args.effort) cliArgs.push('--reasoning-effort', GROK_EFFORT[args.effort]);

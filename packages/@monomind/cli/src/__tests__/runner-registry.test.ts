@@ -73,6 +73,8 @@ describe('version handshake (§2)', () => {
         'agent-exec-full-access-tools',
         'agent-exec-sandbox',
         'agent-test-sandbox',
+        'agent-exec-sandbox-restricted',
+        'agent-exec-sandbox-fallback',
       ],
     });
     expect(p.capabilities).toContain('agent-exec');

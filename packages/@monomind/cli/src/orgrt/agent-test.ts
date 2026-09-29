@@ -19,7 +19,7 @@ import { type AgentFailureStatus, classifyAgentError } from './agent-error-class
 import { runAgentExec } from './agent-exec.js';
 import type { AgentRunner } from './agent-runner.js';
 import { locateBinary, resolveBinary, runnerSpec } from './runner-registry.js';
-import type { NativeSandbox, SandboxMode } from './runner-sandbox.js';
+import type { NativeSandbox, SandboxFallback, SandboxMode } from './runner-sandbox.js';
 import { detectVersion } from './version-probe.js';
 
 export const AGENT_TEST_PROMPT = 'Reply with the single word: ok';
@@ -52,6 +52,9 @@ export interface AgentTestResult {
    * (missing binary, unsupported --sandbox, unknown runtime).
    */
   native_sandbox: NativeSandbox | null;
+  /** #482: the `--sandbox` mode the turn ran in, after `--sandbox-fallback`
+   *  (the start event's sandbox_applied); null without `--sandbox`. */
+  sandbox_applied: SandboxMode | null;
   error: AgentTestError | null;
 }
 
@@ -64,6 +67,8 @@ export interface AgentTestOptions {
   timeoutMs: number;
   /** #474: `agent exec --sandbox`; it can tighten the turn, never loosen it. */
   sandbox?: SandboxMode;
+  /** #482: `agent exec --sandbox-fallback` for an unsupported `sandbox`. */
+  sandboxFallback?: SandboxFallback;
   /** #474: extra env for the agent process, as `agent exec --env`. */
   env?: Record<string, string>;
   /** Test seams; production uses the registry, PATH, and the real runner. */
@@ -114,6 +119,7 @@ interface Collected {
   result: { text?: string; is_error?: boolean } | null;
   error: { code: string; message: string } | null;
   nativeSandbox: NativeSandbox | null;
+  sandboxApplied: SandboxMode | null;
 }
 
 function collector(now: () => number): {
@@ -129,10 +135,12 @@ function collector(now: () => number): {
     result: null,
     error: null,
     nativeSandbox: null,
+    sandboxApplied: null,
   };
   const emit = (ev: Record<string, unknown>): void => {
     if (ev.type === 'start' && typeof ev.native_sandbox === 'string') {
       state.nativeSandbox = ev.native_sandbox as NativeSandbox;
+      state.sandboxApplied = (ev.sandbox_applied as SandboxMode | undefined) ?? null;
     } else if (ev.type === 'assistant' && typeof ev.text === 'string') {
       state.firstAt ??= now();
       state.texts.push(ev.text);
@@ -173,6 +181,7 @@ export async function runAgentTest(opts: AgentTestOptions): Promise<AgentTestRes
       cost_estimated: false,
       runtime_version: null,
       native_sandbox: null,
+      sandbox_applied: null,
       error: {
         code: 'missing-binary',
         message: `${opts.runtime} CLI not found${spec ? ` — ${spec.installHint}` : ''}`,
@@ -195,6 +204,7 @@ export async function runAgentTest(opts: AgentTestOptions): Promise<AgentTestRes
       cwd,
       access: 'scoped',
       ...(opts.sandbox ? { sandbox: opts.sandbox } : {}),
+      ...(opts.sandboxFallback ? { sandboxFallback: opts.sandboxFallback } : {}),
       ...(opts.env ? { env: opts.env } : {}),
       maxTurns: 1,
       timeoutMs: opts.timeoutMs,
@@ -239,6 +249,7 @@ export async function runAgentTest(opts: AgentTestOptions): Promise<AgentTestRes
     ...resolveCost(opts.model, state.usd, state.inTokens, state.outTokens),
     runtime_version: await versionPromise,
     native_sandbox: state.nativeSandbox,
+    sandbox_applied: state.sandboxApplied,
     error,
   };
 }

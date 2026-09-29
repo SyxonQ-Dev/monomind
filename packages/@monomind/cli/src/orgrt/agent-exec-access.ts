@@ -16,6 +16,7 @@ import { callerToolsWithFullAccess } from './runner-access.js';
 import { type RunnerSpec, runnerSpec } from './runner-registry.js';
 import {
   resolveSandbox,
+  type SandboxFallback,
   type SandboxMode,
   type SandboxReport,
   sandboxReport,
@@ -151,26 +152,50 @@ export function resolveAccess(
   return { access, abort: true };
 }
 
+/** `start` fields for `--sandbox`: the native report, plus (#482) the mode
+ *  asked for and the mode the runner got, whenever `--sandbox` was given. */
+export type ExecSandboxReport = SandboxReport & {
+  sandbox_requested?: SandboxMode;
+  sandbox_applied?: SandboxMode;
+};
+
 /**
  * #396 (rev 23): resolves `--sandbox` into the mode the runner gets (capped
  * by an org role's git level, never loosened — runner-sandbox.ts) and the
  * `native_sandbox`/`approvals` the `start` event reports. A mode the runtime
- * lacks emits `error {code:"unsupported"}` + `done` itself; `abort: true`
- * means the caller must return exit code 2.
+ * lacks emits `error {code:"unsupported"}` + `done` itself under
+ * `--sandbox-fallback fail` (the default); `abort: true` means the caller
+ * must return exit code 2. #482 (rev 26): under `strictest`/`run` it is
+ * replaced instead, and `notices` holds the `status` notice saying so.
  */
 export function resolveExecSandbox(
   opts: {
     runtime: string;
     access: AccessMode;
     sandbox?: SandboxMode;
+    sandboxFallback?: SandboxFallback;
     env?: Record<string, string>;
   },
   emit: (ev: Record<string, unknown>) => void,
-): { mode?: SandboxMode; report: SandboxReport; abort: boolean } {
-  const { mode, error } = resolveSandbox(opts.runtime, opts.sandbox, [opts.env, process.env]);
-  const report = sandboxReport(opts.runtime, { access: opts.access, sandbox: mode, env: opts.env });
-  if (!error) return { mode, report, abort: false };
+): {
+  mode?: SandboxMode;
+  report: ExecSandboxReport;
+  notices: Record<string, unknown>[];
+  abort: boolean;
+} {
+  const { mode, error, notice } = resolveSandbox(
+    opts.runtime,
+    opts.sandbox,
+    [opts.env, process.env],
+    { fallback: opts.sandboxFallback, access: opts.access },
+  );
+  const report: ExecSandboxReport = {
+    ...sandboxReport(opts.runtime, { access: opts.access, sandbox: mode, env: opts.env }),
+    ...(opts.sandbox && mode ? { sandbox_requested: opts.sandbox, sandbox_applied: mode } : {}),
+  };
+  const notices = notice ? [{ v: 1, type: 'status', phase: 'notice', message: notice }] : [];
+  if (!error) return { mode, report, notices, abort: false };
   emit({ v: 1, type: 'error', code: 'unsupported', fatal: true, message: error });
   emit({ v: 1, type: 'done', exit_code: 2 });
-  return { report, abort: true };
+  return { report, notices, abort: true };
 }

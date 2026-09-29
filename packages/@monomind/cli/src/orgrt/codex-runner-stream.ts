@@ -48,7 +48,7 @@ export function codexExecArgs(args: AgentRunArgs, threadId: string | undefined):
     // #388: codex's own read-only sandbox, whatever the role's git level —
     // a read turn is never danger-full-access.
     cliArgs.push('--sandbox', 'read-only');
-  } else if (args.sandbox && args.sandbox !== 'full') {
+  } else if (args.sandbox === 'read-only' || args.sandbox === 'workspace-write') {
     // #396: an explicit `agent exec --sandbox`, with full access too.
     cliArgs.push(...codexSandboxModeArgs(args.sandbox));
   } else if (args.access === 'full') {

@@ -126,6 +126,20 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *  - `agent-test-sandbox` — `agent test <id> --json` accepts `--sandbox` and
  *    `--env` as `agent exec` does, and the result carries `native_sandbox`
  *    (issue #474, §13)
+ *  - `agent-exec-sandbox-restricted` — `--sandbox restricted` (issue #482):
+ *    the CLI's own approval rules apply and every call they would ask about
+ *    is refused (copilot, antigravity, opencode). Same rev: copilot gains
+ *    read-only/workspace-write, pi/pi-rpc read-only, claude read-only/
+ *    workspace-write in scoped/read access (`native_sandbox: "monomind"`)
+ *    (§3.1, §3.2, §6, rev 26)
+ *  - `agent-exec-sandbox-fallback` — `agent exec|test --sandbox-fallback
+ *    fail|strictest|run` (issue #482): `fail` (default) keeps the
+ *    `unsupported` error; `strictest` runs the closest supported mode at
+ *    least as strict as the request (else the strictest there is); `run`
+ *    runs the runtime default. A replaced mode emits `status
+ *    {phase:"notice"}`; `start` carries `sandbox_requested` and
+ *    `sandbox_applied`, scan entries `sandbox_mode_reports` (§3.1, §3.2,
+ *    §6, §13, rev 26)
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
@@ -157,6 +171,8 @@ export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec-full-access-tools',
   'agent-exec-sandbox',
   'agent-test-sandbox',
+  'agent-exec-sandbox-restricted',
+  'agent-exec-sandbox-fallback',
 ] as const;
 
 /** The exact handshake object emitted by `monomind --version --json`. */

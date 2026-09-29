@@ -26,7 +26,10 @@ export interface AgentExecOptions {
   access?: 'scoped' | 'read' | 'full';
   /** #396 (rev 23): `--sandbox` — the vendor CLI's own sandbox mode
    *  (runner-sandbox.ts). undefined = today's default, argv unchanged. */
-  sandbox?: 'read-only' | 'workspace-write' | 'full';
+  sandbox?: 'read-only' | 'restricted' | 'workspace-write' | 'full';
+  /** #482 (rev 26): `--sandbox-fallback` — what an unsupported `sandbox`
+   *  does: `fail` (default, today's error), `strictest` or `run`. */
+  sandboxFallback?: 'fail' | 'strictest' | 'run';
   systemPrompt?: string;
   model?: string;
   /** `--effort`: reasoning effort, mapped per runtime (AgentRunArgs.effort). */

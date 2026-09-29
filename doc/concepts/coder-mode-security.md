@@ -270,7 +270,7 @@ concurrently. That annotation is a scheduling hint, not a claim monomind relies 
 the caller's tools may well write, and in `scoped`/`read` mode the gate allows them by name
 exactly as before. `--allow-bash-prefix` stays a usage error with `--access full`.
 
-### 2.9 The permissive default, and `--sandbox` (rev 23, issue #396)
+### 2.9 The permissive default, and `--sandbox` (rev 23, issue #396; rev 26, issue #482)
 
 A non-org `agent exec` turn is **not sandboxed by default**, and this is deliberate (kept so no
 existing caller changes behaviour). `--access scoped` is monomind's own mode: on claude it is
@@ -300,6 +300,42 @@ codex `read-only` whatever the flag says (`--access read --sandbox full` is a us
 workspace-write` keeps the native tools fully approved but inside that sandbox. A native sandbox
 covers what the vendor CLI runs, not monomind's own process or the caller's stdio tools, and the
 runtimes listed as `none` still need a container if the caller needs isolation.
+
+**Rev 26 (issue #482) adds modes where a CLI can refuse actions, and names them for what they
+enforce.** Each was checked against the installed CLI's `--help` and a live turn that tried a file
+write and a shell command (`orgrt/runner-sandbox.ts` records the versions):
+
+| Runtime | Mode | How | What is enforced, and by whom |
+|---|---|---|---|
+| copilot | `read-only` | `--deny-tool=write --deny-tool=shell`, no `--allow-all-tools` | copilot's permission engine refuses every file-editing tool and every shell command; deny rules beat any allow rule, the user's included. No OS sandbox |
+| copilot | `workspace-write` | `--allow-tool=write --deny-tool=shell`, no `--allow-all-paths` | copilot's path check keeps edits under the cwd, `--add-dir` and the temp dir (an absolute path outside and a symlink out of the cwd were refused); no shell at all. No OS sandbox |
+| copilot | `restricted` | no `--allow-all-tools` | copilot's own approval rules; everything that would ask is refused |
+| antigravity | `restricted` | no `--dangerously-skip-permissions` | agy's own rules: shell and file writes are auto-denied (the temp dir excepted), and the turn then ends without a reply. The user's `permissions.allow` rules in agy's settings can widen it |
+| opencode | `restricted` | `OPENCODE_PERMISSION` sets edit, bash, task and external_directory to `ask`; monomind rejects every ask | opencode's permission engine. An agent's own `permission` block in the user's **or the project's** `opencode.json` overrides the override, so a repository can widen it; not with an attached `OPENCODE_URL` server (refused) |
+| pi, pi-rpc | `read-only` | `--tools read,grep,find,ls` | pi exposes no write, edit or shell tool at all |
+| claude (`--access scoped\|read`) | `read-only`, `workspace-write` | nothing added: monomind's own gate | `canUseTool` + the PreToolUse hook run no native tool that is not allow-listed, so Write/Edit/NotebookEdit never run; Bash runs only the caller's `--allow-bash-prefix` commands (single literal invocations, with the user's own rights), and caller tools run on the caller's side. Under these modes a caller tool named like a native tool (`Write`) no longer lets that tool through. `native_sandbox: "monomind"` |
+
+`restricted` is not a file-system boundary: it means "the CLI's own approval rules, with every
+question answered no", so its reach is the CLI's rule set, including rules the user (or, for
+opencode, the project) added. It ranks between `read-only` and `workspace-write`: under default
+rules every CLI that has it refuses shell and file edits, but nothing stops those rules from being
+widened. `workspace-write` is advertised only where writes really stay in the cwd; claude's is the
+stricter "no native writes at all", and copilot's has no shell.
+
+claude with `--access full` still has only `full`. The Agent SDK sandbox that org roles use (#258,
+#339) runs the Bash tool in bubblewrap/Seatbelt, but Write/Edit run in-process outside it, the org
+profile keeps `$HOME` and the temp dir writable, and `--settings` MCP servers and hooks run outside
+it too, so wiring it would not confine a full-access turn's writes to the cwd; it was not wired.
+Not verified, so still `full` only: qwen, qwen-rpc, kimicode, cline and aider (not installed
+here); crush, hermes and vercel have no mode monomind can drive.
+
+**`--sandbox-fallback fail|strictest|run`** lets a caller send one `--sandbox` value to every
+runtime. `fail` (default) keeps the fatal `unsupported`, which is the safe choice for a caller that
+must not run looser than it asked. `strictest` runs the closest listed mode that is at least as
+strict, and only when every listed mode is looser (e.g. claude `--access full`, qwen) runs the
+strictest one there is, which is looser than asked. `run` runs the runtime default. Both emit a
+`status` notice and report `sandbox_requested` and `sandbox_applied` on `start`, so a caller that
+uses them must read `sandbox_applied` (and `native_sandbox`) rather than assume the request held.
 
 ## 3. What callers own (not monomind's job)
 
