@@ -617,7 +617,13 @@ function refreshQuickSummary() {
   return d;
 }
 
+var _quickRefreshSpawned = false;
+
 function _spawnQuickRefresh() {
+  // session-restore reads both quickSummary() and quickSummaryData(): one
+  // refresh per process is enough.
+  if (_quickRefreshSpawned) return;
+  _quickRefreshSpawned = true;
   try {
     var child = require('child_process').spawn(
       process.execPath, [__filename, 'refresh-summary'],
@@ -632,13 +638,18 @@ function _spawnQuickRefresh() {
  * Called at session-restore. Cache-first and non-blocking — see the note above.
  */
 function quickSummary() {
+  var d = _cachedQuickTotals();
+  return d ? _formatQuickTotals(d) : null;
+}
+
+function _cachedQuickTotals() {
   var cached = _readQuickCache();
   var fresh = cached && (Date.now() - cached.computedAt) < QUICK_CACHE_TTL_MS;
-  if (fresh) return _formatQuickTotals(cached.totals);
+  if (fresh) return cached.totals;
   // Stale or missing: never recompute inline, or we reintroduce #42. Serve the
   // stale figure (clearly better than nothing) and refresh for next time.
   _spawnQuickRefresh();
-  return cached ? _formatQuickTotals(cached.totals) : null;
+  return cached ? cached.totals : null;
 }
 
 /** Synchronous full computation. For `tokens` CLI views, which may block. */
@@ -648,11 +659,12 @@ function quickSummaryBlocking() {
 }
 
 /**
- * Same computation as quickSummary() but returns raw numbers for caching.
- * Used by hook-handler to write .monomind/metrics/token-summary.json
+ * Same totals as quickSummary() but as raw numbers, for caching.
+ * Used by session-restore to write .monomind/metrics/token-summary.json.
+ * Cache-first like quickSummary(): computing inline hung SessionStart (#403).
  */
 function quickSummaryData() {
-  return _computeQuickTotals();
+  return _cachedQuickTotals();
 }
 
 // ── ANSI Dashboard ────────────────────────────────────────────────────────────

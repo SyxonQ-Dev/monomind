@@ -19,6 +19,14 @@ import type { InitOptions } from './types.js';
 
 const OPENCODE_SCHEMA = 'https://opencode.ai/config.json';
 
+/** The monomind bash rules opencode.json gets; `cleanup` removes exactly these. */
+export const OPENCODE_MONOMIND_BASH_RULES: Readonly<Record<string, string>> = {
+  'npx monomind *': 'allow',
+  'npx -y monomind *': 'allow',
+  'npx monomind@*': 'allow',
+  'npx @monomind/*': 'allow',
+};
+
 function isWindows(): boolean {
   return process.platform === 'win32';
 }
@@ -69,10 +77,7 @@ export function generateOpencodeConfig(options: InitOptions): Record<string, unk
   config.permission = {
     bash: {
       '*': 'ask',
-      'npx monomind *': 'allow',
-      'npx -y monomind *': 'allow',
-      'npx monomind@*': 'allow',
-      'npx @monomind/*': 'allow',
+      ...OPENCODE_MONOMIND_BASH_RULES,
     },
     read: {
       '*': 'allow',

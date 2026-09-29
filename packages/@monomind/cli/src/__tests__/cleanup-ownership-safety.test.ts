@@ -202,6 +202,36 @@ describe('cleanup only removes what is provably monomind-owned', () => {
     expect(after.mcpServers.other).toEqual({ command: 'x' });
   });
 
+  it('removes only the [mcp_servers.monomind] table from an untracked .codex/config.toml', async () => {
+    newRepo();
+    const user = '[mcp_servers.other]\ncommand = "x"\n';
+    write(
+      cwd,
+      '.codex/config.toml',
+      `model = "o3"\n\n[mcp_servers.monomind]\ncommand = "npx"\n\n[mcp_servers.monomind.env]\nA = "1"\n\n${user}`,
+    );
+
+    await run(cwd, { force: true });
+
+    expect(readFileSync(join(cwd, '.codex/config.toml'), 'utf8')).toBe(`model = "o3"\n\n${user}`);
+  });
+
+  it('keeps settings.json hooks whose helper is not being removed', async () => {
+    newRepo();
+    const settings = JSON.stringify({
+      hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node .claude/helpers/mine.cjs' }] }] },
+      statusLine: { type: 'command', command: 'node .claude/helpers/mine.cjs' },
+    });
+    write(cwd, '.claude/helpers/mine.cjs', '// user helper, not in any init manifest');
+    write(cwd, '.claude/settings.json', settings);
+
+    const { plan } = await run(cwd, { force: true });
+
+    expect(readFileSync(join(cwd, '.claude/settings.json'), 'utf8')).toBe(settings);
+    expect(existsSync(join(cwd, '.claude/helpers/mine.cjs'))).toBe(true);
+    expect(entry(plan, '.claude/settings.json')?.action).toBe('skip');
+  });
+
   it('preview lists exactly what --force then does, including tracked and data skips', async () => {
     newRepo();
     write(cwd, 'AGENTS.md', OWNED_AGENTS_MD);
