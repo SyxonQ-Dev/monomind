@@ -242,6 +242,29 @@ describe('AiderAgentRunner (shim)', () => {
     expect(said).toEqual(['calling', 'final']);
   });
 
+  it('tool ids stay unique across shim invocations (each shim restarts at aider-1)', async () => {
+    const tool = {
+      name: 'org_echo',
+      description: 'echo',
+      schema: { text: z.string() },
+      handler: async (a: Record<string, unknown>) => ({ text: String(a.text) }),
+    };
+    const fence = '```tool_call\n{"name":"org_echo","arguments":{"text":"hi"}}\n```';
+    const shell = [
+      j({ id: 'aider-1', name: 'run_shell_command', kind: 'shell', input: { command: 'ls' }, type: 'tool_start' }),
+      j({ id: 'aider-1', ok: true, output: '', exit_code: 0, type: 'tool_end' }),
+    ];
+    vi.mocked(cp.spawn)
+      .mockReturnValueOnce(mockChild([...head('s-2'), ...shell, ...texts(fence), j({ stop_reason: 'end_turn', text: '', type: 'result' })]))
+      .mockReturnValueOnce(mockChild([...head('s-2'), ...shell, ...texts('done'), j({ stop_reason: 'end_turn', text: '', type: 'result' })]));
+    const msgs = await collect({ tools: [tool], canUseTool: async () => ({ behavior: 'allow' }) });
+    const starts = msgs.filter((m) => m.type === 'tool_use' && m.tool_use_id).map((m) => m.tool_use_id);
+    const ends = msgs.filter((m) => m.type === 'tool_result').map((m) => m.tool_use_id);
+    expect(starts).toHaveLength(2);
+    expect(new Set(starts).size).toBe(2);
+    expect(ends).toEqual(starts);
+  });
+
   it('a capped reflection loop ends with subtype error_max_turns', async () => {
     vi.mocked(cp.spawn).mockReturnValue(
       mockChild([...head(), ...texts('x'), j({ stop_reason: 'max_turns', text: 'x', type: 'result' })]),

@@ -104,6 +104,9 @@ export class AiderAgentRunner implements AgentRunner {
     const partials = args.extras?.includePartialMessages === true;
     let runCostUsd = 0;
     let costSeen = false;
+    // Every shim process numbers its tool calls from aider-1: later spawns
+    // in this run get a suffix so ids stay unique (cf. codex's idPrefix).
+    let spawnSeq = 0;
 
     const invocation = (prompt: string): AiderInvocation => {
       if (mode === 'shim' && python) {
@@ -143,6 +146,7 @@ export class AiderAgentRunner implements AgentRunner {
           }
           const outcome: AiderOutcome = { exitCode: 1, stderrTail: '', timedOut: false };
           const inv = invocation(nextPrompt);
+          const seq = ++spawnSeq;
           const open = new Map<string, { name: string; at: number }>();
           let full = '';
           let flushed = 0;
@@ -159,7 +163,13 @@ export class AiderAgentRunner implements AgentRunner {
             ) {
               continue;
             }
-            const out = this.toMessages(ev, sessionId, open);
+            const out = this.toMessages(
+              seq > 1 && (ev.type === 'tool_start' || ev.type === 'tool_end')
+                ? { ...ev, id: `${ev.id}.${seq}` }
+                : ev,
+              sessionId,
+              open,
+            );
             if (ev.type === 'session') sessionId = ev.session_id;
             if (ev.type === 'text') {
               full += ev.text;
