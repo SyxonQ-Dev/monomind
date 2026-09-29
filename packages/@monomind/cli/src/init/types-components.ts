@@ -218,10 +218,6 @@ export interface RuntimeConfig {
   memoryBackend: 'memory' | 'sqlite' | 'hybrid';
   /** Enable neural learning */
   enableNeural: boolean;
-  /** Enable learning system - connects insights to the pattern store */
-  enableLearningBridge?: boolean;
-  /** Enable AgentMemoryScope (ADR-049) - 3-scope agent memory */
-  enableAgentScopes?: boolean;
   /** CLAUDE.md template variant */
   claudeMdTemplate?: ClaudeMdTemplate;
 }
