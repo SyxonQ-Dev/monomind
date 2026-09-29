@@ -30,6 +30,20 @@ function advisoryLog() {
   console.log.apply(console, arguments);
 }
 
+// ── Loopback guard for the Second Brain POST ────────────────────────────────
+// The per-prompt lookup sends the user's prompt to the URL in
+// .monomind/control.json. A tampered or committed control.json must not be
+// able to point that at another host, so only http(s) to 127.0.0.1,
+// localhost or ::1 is accepted (event-logger.cjs hardcodes localhost for the
+// same reason).
+function isLoopbackUrl(raw) {
+  var u;
+  try { u = new URL(String(raw)); } catch (_) { return false; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+  if (u.username || u.password) return false;
+  return u.hostname === '127.0.0.1' || u.hostname === 'localhost' || u.hostname === '[::1]';
+}
+
 // ── Intelligence read-path bridge ───────────────────────────────────────────
 // route-handler.cjs runs as a fresh node subprocess per invocation, but a
 // single process may call handle() more than once (e.g. tests, or a daemon
@@ -174,6 +188,7 @@ async function _decidePick(CWD, prompt) {
 
 module.exports = {
   routeDeadlineMs: routeDeadlineMs,
+  isLoopbackUrl: isLoopbackUrl,
   handle: async function(hCtx) {
     var hookStart = Date.now();
     var prompt = hCtx.prompt;
@@ -484,6 +499,7 @@ module.exports = {
                   if (sbAuth) break;
                 } catch (_) {}
               }
+              if (!isLoopbackUrl(sbCtrlUrl)) throw new Error('control.json url is not loopback');
               var sbResp = await fetch(sbCtrlUrl + '/api/knowledge/search', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-monomind-token': sbAuth },

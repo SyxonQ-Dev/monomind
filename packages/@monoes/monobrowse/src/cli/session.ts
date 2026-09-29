@@ -34,8 +34,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { sessionProfileDirPath } from '../browser/profile-dir.js';
 import { SESSION_NAME_RE } from '../browser/ref-cache.js';
 import type { CdpClient, ElementRef, SessionRecord } from '../index.js';
 import { output } from './output.js';
@@ -254,6 +253,7 @@ export async function adoptLegacySession(
     launched: legacy.launched,
     pid: legacy.pid,
     userDataDir: legacy.userDataDir,
+    ownsUserDataDir: legacy.ownsUserDataDir,
     savedAt: legacy.savedAt,
   });
   await browser.removeLegacySessionRecord();
@@ -290,8 +290,10 @@ export async function launchSessionBrowser(
         port: 0,
         headless: opts.headless,
         // Chrome reports the port it bound inside this directory, so it must
-        // belong to this session alone.
-        userDataDir: join(tmpdir(), `monomind-browse-${process.pid}-${randomUUID().slice(0, 8)}`),
+        // belong to this session alone — and it is deleted when the session
+        // closes (#395).
+        userDataDir: sessionProfileDirPath(randomUUID().slice(0, 8)),
+        ownsUserDataDir: true,
       });
   await recordSession(browser, port, opts.name);
   ensureSignalCleanupHandlers();
@@ -324,6 +326,7 @@ async function recordSession(
     await browser.saveSessionRecord(port, {
       pid,
       userDataDir: browser.getLaunchedUserDataDir(port),
+      ownsUserDataDir: browser.ownsLaunchedUserDataDir(port),
       name: name ?? (await browser.loadSessionRecord(port))?.name,
     });
     return;
@@ -337,6 +340,7 @@ async function recordSession(
     launched: existing?.launched,
     pid: existing?.pid,
     userDataDir: existing?.userDataDir,
+    ownsUserDataDir: existing?.ownsUserDataDir,
     name: name ?? existing?.name,
   });
 }

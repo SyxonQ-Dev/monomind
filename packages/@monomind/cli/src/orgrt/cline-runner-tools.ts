@@ -20,6 +20,7 @@
  */
 
 import type { AgentMessage } from './agent-runner.js';
+import { isClineRefusal } from './cline-runner-scoped.js';
 import { canonicalTool, type ToolKind } from './kimicode-runner-tools.js';
 
 type Raw = Record<string, unknown>;
@@ -195,9 +196,14 @@ function outputFailed(out: unknown): boolean {
  *  matched tool_activity events. */
 export class ClineToolCalls {
   private open = new Map<string, { name: string; startedAt: number }>();
+  /** Ended ids: a second end (ACP reports a refused call failed twice) or a
+   *  late start for one is dropped, not turned into a phantom call. */
+  private closed = new Set<string>();
+  /** Whether the latest ended call was refused (never run). */
+  lastDenied = false;
 
   start(id: string, name: string, rawInput: unknown, sessionId?: string): AgentMessage | null {
-    if (this.open.has(id)) return null;
+    if (this.open.has(id) || this.closed.has(id)) return null;
     this.open.set(id, { name, startedAt: Date.now() });
     const { kind, input } = clineCanonicalTool(name, rawInput);
     return {
@@ -212,15 +218,19 @@ export class ClineToolCalls {
     };
   }
 
-  /** End message(s); an end whose start never arrived gets one synthesized. */
+  /** End message(s); an end whose start never arrived gets one synthesized.
+   *  A refused call (`denied`, or a refusal error — cline-runner-scoped.ts)
+   *  ends with `denied: true`. */
   end(
     id: string,
     name: string | undefined,
     output: unknown,
     error: string | undefined,
     sessionId?: string,
+    denied?: boolean,
   ): AgentMessage[] {
     const out: AgentMessage[] = [];
+    if (this.closed.has(id)) return out;
     if (!this.open.has(id)) {
       const s = this.start(id, name ?? 'unknown_tool', {}, sessionId);
       if (s) out.push(s);
@@ -228,14 +238,19 @@ export class ClineToolCalls {
     const call = this.open.get(id);
     if (!call) return out;
     this.open.delete(id);
+    this.closed.add(id);
+    const text = error ?? clineOutputText(output);
+    const refused = denied === true || isClineRefusal(text);
+    this.lastDenied = refused;
     out.push({
       type: 'tool_result',
       session_id: sessionId,
       tool_use_id: id,
       tool: call.name,
-      is_error: !!error || outputFailed(output),
-      text: error ?? clineOutputText(output),
+      is_error: refused || !!error || outputFailed(output),
+      text,
       duration_ms: Date.now() - call.startedAt,
+      ...(refused ? { denied: true } : {}),
     });
     return out;
   }

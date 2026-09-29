@@ -26,8 +26,8 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    runtime's own model list (§12, issue #369)
  *  - `agent-test-json` — `monomind agent test <id> [--model M] --json`: one
  *    "reply ok" turn reported as a single object with a `status` (ok,
- *    ok_unexpected, auth, quota, model_unavailable, timeout, missing_binary,
- *    error), latency, tokens and cost (rev 18, issue #390)
+ *    ok_unexpected, auth, quota, rate_limited (rev 20), model_unavailable,
+ *    timeout, missing_binary, error), latency, tokens and cost (rev 18, issue #390)
  *  - `org-json-v1`  — `--json`/`--format json` output on org observe commands (§7)
  *  - `org-tool-providers` — role `tool_providers` (stdio MCP), `policy.approvalTools`,
  *    operator-authenticated `/api/xdeliver` and live `org inbox --format json`
@@ -95,6 +95,10 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    entries carry `resume`, `effort`, `max_turns`, `reports_cost`,
  *    `init_target`; `tool_activity` start events carry `kind` (§3, §6,
  *    rev 19)
+ *  - `agent-exec-rate-limit-retry` — `agent exec` retries a turn that failed
+ *    on a transient provider rate limit (429) up to 3 attempts with backoff,
+ *    emitting a `status` notice before each retry; giving up is `error
+ *    {code:"rate-limited", fatal:true}`, distinct from `quota` (§3.4, rev 20)
  *  - `agent-exec-access-read` — `agent exec --access read` (issue #388):
  *    native read tools, web, TodoWrite and caller tools, plus an allowlist of
  *    read-only shell commands (`git status|diff|log|show|blame`, `ls`, `cat`,
@@ -138,6 +142,7 @@ export const AGENT_PROTOCOL_CAPABILITIES = [
   'init-json',
   'knowledge-profile-captures',
   'agent-exec-subagent-events',
+  'agent-exec-rate-limit-retry',
   'agent-exec-access-read',
   'agent-exec-full-access-tools',
 ] as const;

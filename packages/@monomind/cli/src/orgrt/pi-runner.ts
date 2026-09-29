@@ -48,6 +48,7 @@ import { NativeToolCalls } from './kimicode-runner-tools.js';
 import { PiRunTracker, PiTextStream, PiTurnBudget } from './pi-runner-state.js';
 import type { TurnOutcome } from './pi-runner-stream.js';
 import { STARTUP_GRACE_MS, streamTurn, turnError } from './pi-runner-stream.js';
+import { withVendorRetries } from './provider-limit.js';
 import {
   buildToolProtocol,
   formatToolResults,
@@ -151,7 +152,8 @@ export class PiAgentRunner implements AgentRunner {
           // The max-turns abort kills pi, so its exit status is not a failure.
           if (!budget.hit) {
             const failure = tracker.failure();
-            if (outcome.exitCode !== 0 || failure) throw turnError(outcome, round, failure);
+            if (outcome.exitCode !== 0 || failure)
+              throw withVendorRetries(turnError(outcome, round, failure), tracker.retries);
           }
 
           turnInputTokens += tracker.inputTokens;

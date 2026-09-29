@@ -49,6 +49,7 @@ import {
 } from './aider-runner-stream.js';
 import { computeSafeChunk } from './antigravity-runner-stream.js';
 import type { OrgEffortLevel } from './cost-tier.js';
+import { withVendorRetries } from './provider-limit.js';
 import {
   buildToolProtocol,
   formatToolResults,
@@ -362,8 +363,9 @@ export class AiderAgentRunner implements AgentRunner {
   }
 }
 
-/** The error a failed invocation throws. Auth/quota carry the markers
- *  agent-exec's classifyStderr maps to `auth` / `quota` (fatal). */
+/** The error a failed invocation throws. Auth/quota/rate-limit carry the
+ *  markers agent-exec's classifyStderr maps to `auth` / `quota` /
+ *  `rate-limited` (fatal); aider already retried a rate limit itself. */
 export function aiderError(outcome: AiderOutcome, sawEvent: boolean): Error {
   const tail = outcome.stderrTail ? `\nstderr: ${outcome.stderrTail.slice(-500)}` : '';
   const e = outcome.error;
@@ -374,6 +376,13 @@ export function aiderError(outcome: AiderOutcome, sawEvent: boolean): Error {
     );
     (err as Error & { fatal?: boolean }).fatal = true;
     return err;
+  }
+  if (e?.code === 'rate-limited') {
+    const err = new Error(
+      `AiderAgentRunner: FATAL provider error (provider rate limit (429)) — aider already retried it. ${e.message}`,
+    );
+    (err as Error & { fatal?: boolean }).fatal = true;
+    return withVendorRetries(err, 'unknown');
   }
   if (e?.code === 'session') {
     // Resuming another folder's conversation: retrying cannot help.

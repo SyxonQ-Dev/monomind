@@ -21,6 +21,9 @@
  *                 trip.
  *   initTarget  — the `monomind init --target` value that writes this
  *                 runtime's setup files, or null when init has none.
+ *                 `agents` (AGENTS.md only, no Claude files) for the
+ *                 runtimes that read AGENTS.md natively and have no
+ *                 target of their own.
  */
 
 import type { RuntimeKind } from './daemon.js';
@@ -38,6 +41,7 @@ export interface RunnerFeatures {
     | 'antigravity'
     | 'cline'
     | 'aider'
+    | 'agents'
     | null;
 }
 
@@ -71,28 +75,40 @@ export const RUNNER_FEATURES: Record<RuntimeKind, RunnerFeatures> = {
   },
   // grok: --max-turns per invocation; cost is result.total_cost_usd, which
   // grok's docs say falls back to 0 when it cannot price the turn.
-  grok: { resume: true, effort: true, maxTurns: true, reportsCost: true, initTarget: null },
-  qwen: { resume: true, effort: false, maxTurns: false, reportsCost: false, initTarget: null },
+  grok: { resume: true, effort: true, maxTurns: true, reportsCost: true, initTarget: 'agents' },
+  qwen: { resume: true, effort: false, maxTurns: false, reportsCost: false, initTarget: 'agents' },
   // Resume is per-process only (the rpc session lives as long as the child).
   'qwen-rpc': {
     resume: false,
     effort: false,
     maxTurns: false,
     reportsCost: false,
-    initTarget: null,
+    initTarget: 'agents',
   },
   // crush resumes with --continue inside one run only; no id to hand back.
-  crush: { resume: false, effort: false, maxTurns: false, reportsCost: false, initTarget: null },
+  crush: {
+    resume: false,
+    effort: false,
+    maxTurns: false,
+    reportsCost: false,
+    initTarget: 'agents',
+  },
   // copilot: the closing result line carries sessionId; --resume=<id>.
-  copilot: { resume: true, effort: true, maxTurns: false, reportsCost: false, initTarget: null },
+  copilot: {
+    resume: true,
+    effort: true,
+    maxTurns: false,
+    reportsCost: false,
+    initTarget: 'agents',
+  },
   // pi / pi-rpc (#381): resume is `--session-id <id>`, an id the runner
   // picks (sessions stay in pi's own store); effort maps 1:1 to `--thinking
   // off|low|medium|high|xhigh|max`; maxTurns is emulated (turn_start count,
   // then kill / rpc `abort`); cost is the sum of every assistant message_end's
-  // cost.total (0 for models pi cannot price). No init target: pi reads
-  // AGENTS.md natively.
-  pi: { resume: true, effort: true, maxTurns: true, reportsCost: true, initTarget: null },
-  'pi-rpc': { resume: true, effort: true, maxTurns: true, reportsCost: true, initTarget: null },
+  // cost.total (0 for models pi cannot price). pi reads AGENTS.md natively:
+  // init target `agents` (AGENTS.md only).
+  pi: { resume: true, effort: true, maxTurns: true, reportsCost: true, initTarget: 'agents' },
+  'pi-rpc': { resume: true, effort: true, maxTurns: true, reportsCost: true, initTarget: 'agents' },
   // cline (#382): a fresh turn runs `--json` (tokens and cost from
   // run_result, effort → --thinking); later turns run over ACP session/load
   // (usage = growth of the `cline history` totals; no effort on resumed
@@ -107,8 +123,8 @@ export const RUNNER_FEATURES: Record<RuntimeKind, RunnerFeatures> = {
   // --patch over the agent-default-model row (DeepSeek routes use
   // off|low|high|max; a curated pi-ai model is clamped to its own levels);
   // maxTurns emulated (step_start count + process-group kill). No USD cost.
-  // No init target: dsh reads AGENTS.md natively.
-  dsh: { resume: true, effort: true, maxTurns: true, reportsCost: false, initTarget: null },
+  // dsh reads AGENTS.md natively: init target `agents`.
+  dsh: { resume: true, effort: true, maxTurns: true, reportsCost: false, initTarget: 'agents' },
   // hermes reports cost_usd: 0 — not a real figure.
   hermes: { resume: false, effort: false, maxTurns: false, reportsCost: false, initTarget: null },
 };

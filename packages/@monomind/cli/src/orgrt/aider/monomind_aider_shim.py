@@ -14,7 +14,7 @@ Protocol (monomind-owned, not aider's):
            {"type":"tool_start","id","name","kind","input"}
            {"type":"tool_end","id","ok","output","exit_code"?}
            {"type":"usage","input_tokens","output_tokens","cost_usd"}
-           {"type":"error","code":"auth"|"quota"|"api"|"runner-error","message"}
+           {"type":"error","code":"auth"|"quota"|"rate-limited"|"api"|"runner-error","message"}
            {"type":"result","stop_reason":"end_turn"|"max_turns","text"}
   exit   0 ok, 1 unexpected failure, 2 bad request, 3 provider/API error,
          4 aider could not be imported (the runner falls back to the CLI).
@@ -172,9 +172,16 @@ def classify_error(err):
         r"api[_ ]?key|unauthori[sz]ed|\b401\b|\b403\b", text, re.I
     ):
         return "auth"
-    if name in ("RateLimitError", "BudgetExceededError") or re.search(
-        r"quota|insufficient.*(balance|credit)|billing", text, re.I
-    ):
+    # A transient 429 (aider already backed off and retried it) is
+    # "rate-limited"; exhausted quota, credits or a daily cap is "quota".
+    rate = name == "RateLimitError" or re.search(
+        r"rate[-_ ]?limit|too many requests", text, re.I
+    )
+    per_minute = re.search(r"per[-_ ]?min|PerMinute", text, re.I)
+    quota = re.search(r"quota|insufficient.*(balance|credit)|billing|per[-_ ]day", text, re.I)
+    if rate and (per_minute or not quota):
+        return "rate-limited"
+    if name == "BudgetExceededError" or rate or quota:
         return "quota"
     return "api"
 

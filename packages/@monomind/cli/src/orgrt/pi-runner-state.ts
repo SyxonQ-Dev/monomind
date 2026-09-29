@@ -73,6 +73,9 @@ export class PiRunTracker {
   aborted = false;
   private lastError?: string;
   private retryError?: string;
+  /** pi's auto-retries since its last success — tags a failure so agent
+   *  exec does not retry a 429 pi already retried (provider-limit.ts). */
+  retries = 0;
 
   addUsage(u: PiMessageUsage): void {
     this.inputTokens += u.input;
@@ -92,7 +95,9 @@ export class PiRunTracker {
       this.lastError =
         end.stopReason === 'error' ? end.errorMessage || 'pi reported an error' : undefined;
     }
+    if (p.retryStart) this.retries += 1;
     if (p.retryEnd) this.retryError = p.retryEnd.success ? undefined : p.retryEnd.finalError;
+    if (p.retryEnd?.success) this.retries = 0;
     if (p.settled || (p.agentEnd && p.agentEnd.willRetry === undefined)) this.settled = true;
   }
 

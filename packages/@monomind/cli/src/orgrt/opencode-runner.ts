@@ -413,9 +413,13 @@ export class OpencodeAgentRunner implements AgentRunner {
 
             if (evType === 'session.error') {
               const err = props.error;
+              // An APIError's status and Retry-After let agent exec tell a 429 (rev 20).
+              const status = err?.data?.statusCode ? ` (HTTP ${err.data.statusCode})` : '';
+              const after = err?.data?.responseHeaders?.['retry-after'];
               throw new Error(
-                `OpencodeAgentRunner: opencode session error: ` +
-                  (err?.data?.message ?? err?.name ?? JSON.stringify(err) ?? 'unknown error'),
+                `OpencodeAgentRunner: opencode session error${status}: ` +
+                  (err?.data?.message ?? err?.name ?? JSON.stringify(err) ?? 'unknown error') +
+                  (after ? ` (Retry-After: ${after})` : ''),
               );
             }
             // Everything else (busy session.status, plugin.*,

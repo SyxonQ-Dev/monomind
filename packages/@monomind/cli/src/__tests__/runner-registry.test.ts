@@ -68,6 +68,7 @@ describe('version handshake (§2)', () => {
         'init-json',
         'knowledge-profile-captures',
         'agent-exec-subagent-events',
+        'agent-exec-rate-limit-retry',
         'agent-exec-access-read',
         'agent-exec-full-access-tools',
       ],
@@ -153,12 +154,22 @@ describe('runner registry', () => {
     expect(byId.get('opencode')?.initTarget).toBe('opencode');
     expect(byId.get('kimicode')?.initTarget).toBe('kimicode');
     expect(byId.get('antigravity')?.initTarget).toBe('antigravity');
-    expect(byId.get('grok')?.initTarget).toBeNull();
     expect(byId.get('cline')?.initTarget).toBe('cline');
     expect(byId.get('aider')?.initTarget).toBe('aider');
-    // pi and dsh read AGENTS.md natively: no init target of their own.
-    expect(byId.get('pi')?.initTarget).toBeNull();
-    expect(byId.get('dsh')?.initTarget).toBeNull();
+    // Runtimes that read AGENTS.md natively get the AGENTS.md-only target.
+    for (const id of [
+      'pi',
+      'pi-rpc',
+      'dsh',
+      'grok',
+      'copilot',
+      'qwen',
+      'qwen-rpc',
+      'crush',
+    ] as const)
+      expect(byId.get(id)?.initTarget, id).toBe('agents');
+    expect(byId.get('vercel')?.initTarget).toBeNull();
+    expect(byId.get('hermes')?.initTarget).toBeNull();
     expect(byId.get('hermes')?.resume).toBe(false);
   });
 
@@ -303,7 +314,8 @@ describe('scanInstalled (§6)', () => {
       init_target: 'claude',
     });
     expect(byId.get('codex')).toMatchObject({ full_access: true, init_target: 'codex' });
-    expect(byId.get('crush')).toMatchObject({ full_access: true, init_target: null });
+    expect(byId.get('crush')).toMatchObject({ full_access: true, init_target: 'agents' });
+    expect(byId.get('hermes')?.init_target).toBeNull();
     expect(byId.get('vercel')?.full_access).toBe(false);
     for (const a of result.agents) {
       expect(a.init_target === null || typeof a.init_target === 'string', a.id).toBe(true);

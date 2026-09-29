@@ -70,6 +70,7 @@ import { PI_INSTALL_HINT } from './pi-runner.js';
 import { type PiEvent, parsePiEvent, piMessageText, piMessageUsage } from './pi-runner-parse.js';
 import { PiRunTracker, PiTextStream, PiTurnBudget, piCliArgs } from './pi-runner-state.js';
 import { omitAnthropicManagedKeys } from './provider.js';
+import { withVendorRetries } from './provider-limit.js';
 import {
   buildToolProtocol,
   formatToolResults,
@@ -350,7 +351,7 @@ export class PiRpcAgentRunner implements AgentRunner {
             if (remainder) yield { type: 'assistant', session_id: sessionId, text: remainder };
 
             const failure = budget.hit ? undefined : tracker.failure();
-            if (failure) throw rpcFailure(failure, stderrTail);
+            if (failure) throw withVendorRetries(rpcFailure(failure, stderrTail), tracker.retries);
             if (budget.hit) break;
 
             const malformed: string[] = [];
