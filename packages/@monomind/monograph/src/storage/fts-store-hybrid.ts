@@ -2,6 +2,7 @@
 // File-size sweep: split out of fts-store.ts.
 
 import type Database from 'better-sqlite3';
+import { NOT_ANONYMOUS_CLOSURE_SQL } from './anonymous-closure.js';
 import { type FtsResult, ftsSearch, relevanceFromFtsRank } from './fts-store-search.js';
 
 export interface HybridSearchResult extends FtsResult {
@@ -98,6 +99,7 @@ export function hybridSearch(
              n.start_line, n.end_line
       FROM nodes n
       WHERE (n.name LIKE ? ESCAPE '\\' OR n.norm_label LIKE ? ESCAPE '\\')
+        AND ${NOT_ANONYMOUS_CLOSURE_SQL}
     `;
     const likeParams: unknown[] = [likePattern, likePattern];
     if (label) {
