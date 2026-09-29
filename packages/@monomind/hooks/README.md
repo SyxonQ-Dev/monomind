@@ -98,7 +98,7 @@ function managed by `WorkerManager`:
 | `map` | Codebase map → `.monomind/metrics/codebase-map.json` |
 | `audit` | Security audit → `.monomind/metrics/security-audit.json` |
 | `consolidate` | Memory consolidation → `.monomind/metrics/consolidation.json` |
-| `reflexion` | Self-learning from failures — reflects on failed tasks, stores lessons for future retrieval |
+| `reflexion` | Turns failed routed tasks in `route-outcomes.jsonl` into templated notes with keywords in `.monomind/reflexion-store.json`, for keyword lookup later (disabled by default) |
 
 The metrics-producing workers run at session start (via the CJS session
 handler) and are staleness-gated: each only runs when its output file is

@@ -36,6 +36,7 @@ import { CLI_PKG, REPO_ROOT, read } from './doc-counts-shared.mjs';
 import {
   countCliCommands,
   countHooksSubcommands,
+  countInstalledAgents,
   countMastermindCommands,
   countNamedFiles,
   countOrgSkills,
@@ -65,6 +66,7 @@ const COUNTS = {
   packages: countPackages(),
   'bundled-agents': SHIPPED_AGENTS.total,
   'pickable-agents': SHIPPED_AGENTS.pickable,
+  'installed-agents': countInstalledAgents(),
   'bundled-skills': countNamedFiles(`${CLI_PKG}/.claude/skills`, 'SKILL.md'),
   'pickable-skills': SHIPPED_INDEX.skills,
   'slash-commands': SHIPPED_INDEX.commands,

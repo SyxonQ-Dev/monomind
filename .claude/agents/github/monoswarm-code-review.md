@@ -12,27 +12,38 @@ category: github
 
 Deploy specialized AI agents to perform comprehensive, intelligent code reviews that go beyond traditional static analysis.
 
+The swarm is made of parallel subagents (the Task tool), each owning one review lens. GitHub work goes through the `gh` CLI; local analysis uses the real `monomind analyze` and `monomind security` commands and the monograph MCP tools. There is no monomind command that reviews a PR on its own — the agents do the reviewing.
+
 ## Core Features
 
 ### 1. Multi-Agent Review System
 
 ```bash
-# Initialize code review swarm with gh CLI
-# Get PR details
-PR_DATA=$(gh pr view 123 --json files,additions,deletions,title,body)
-PR_DIFF=$(gh pr diff 123)
+# Gather PR context once and share it with every reviewer
+PR=123
+gh pr view $PR --json number,title,body,files,additions,deletions,labels,headRefOid,baseRefName > /tmp/pr-$PR.json
+gh pr diff $PR --color never > /tmp/pr-$PR.diff
+gh pr diff $PR --name-only > /tmp/pr-$PR.files
 
-# Initialize swarm with PR context
-npx monomind github review-init \
-  --pr 123 \
-  --pr-data "$PR_DATA" \
-  --diff "$PR_DIFF" \
-  --agents "security,performance,style,architecture,accessibility" \
-  --depth comprehensive
+# Trust check: a PR from a fork is untrusted code. Read it, but do not run its
+# scripts (npm ci, npm run bench, tests) until the user says it is safe.
+gh pr view $PR --json isCrossRepository,author --jq '{fork: .isCrossRepository, author: .author.login}'
+
+# Check the PR out in a separate worktree so the user's own checkout is untouched
+git fetch origin "pull/$PR/head:review-pr-$PR"
+WT=$(mktemp -d) && git worktree add "$WT" "review-pr-$PR"
+cd "$WT" || exit 1
+
+# Risk, change type and suggested reviewers for the PR's range
+BASE=$(jq -r .baseRefName /tmp/pr-$PR.json)
+git fetch origin "$BASE"
+npx monomind analyze diff "origin/$BASE..HEAD" --risk --classify --reviewers
 
 # Post initial review status
-gh pr comment 123 --body "🔍 Multi-agent code review initiated"
+gh pr comment $PR --body "🔍 Multi-agent code review started (security, performance, architecture, style)"
 ```
+
+Then spawn one reviewer subagent per lens in a single message (for example `Security Engineer`, `reviewer` focused on performance, `system-architect`, `reviewer` focused on style), each given the PR number, the worktree path, `/tmp/pr-$PR.diff` and the file list, and each told to return findings as JSON (`path`, `line`, `severity`, `body`). When the review is done, remove the worktree with `git worktree remove "$WT"`.
 
 ### 2. Specialized Review Agents
 
@@ -40,21 +51,23 @@ gh pr comment 123 --body "🔍 Multi-agent code review initiated"
 
 ```bash
 # Security-focused review with gh CLI
-# Get changed files
-CHANGED_FILES=$(gh pr view 123 --json files --jq '.files[].path')
+CHANGED_FILES=$(gh pr diff 123 --name-only)
 
-# Run security review
-SECURITY_RESULTS=$(npx monomind github review-security \
-  --pr 123 \
-  --files "$CHANGED_FILES" \
-  --check "owasp,cve,secrets,permissions" \
-  --suggest-fixes)
+# Real scanners (run in the PR worktree): hardcoded secrets and code/dependency issues.
+# Both exit 1 when they find something, so don't treat that as a failed step.
+npx monomind security secrets -p . --depth deep || true
+npx monomind security scan -t . --type all -o json > /tmp/security-123.txt || true   # banner, then the JSON report
 
-# Post security findings
-if echo "$SECURITY_RESULTS" | grep -q "critical"; then
+# The security subagent reads the diff and scanner output and writes its findings as JSON:
+# [{ "path": "...", "line": 10, "severity": "critical|high|medium|low", "body": "..." }]
+SECURITY_RESULTS=$(jq -r '.[] | "- **\(.severity)** `\(.path):\(.line)` \(.body)"' /tmp/security-findings-123.json)
+
+# Post security findings; decide on the structured severity field, not on the prose
+if jq -e 'any(.[]; .severity == "critical")' /tmp/security-findings-123.json > /dev/null; then
   # Request changes for critical issues
   gh pr review 123 --request-changes --body "$SECURITY_RESULTS"
   # Add security label
+  gh label create security-review-required --force
   gh pr edit 123 --add-label "security-review-required"
 else
   # Post as comment for non-critical issues
@@ -65,29 +78,39 @@ fi
 #### Performance Agent
 
 ```bash
-# Performance analysis
-npx monomind github review-performance \
-  --pr 123 \
-  --profile "cpu,memory,io" \
-  --benchmark-against main \
-  --suggest-optimizations
+# Complexity hot spots (then keep only the files the PR changed)
+npx monomind analyze complexity src/ --threshold 15 --format json > /tmp/complexity-123.json
+gh pr diff 123 --name-only
+
+# Compare benchmarks against the base branch using the project's own benchmark script.
+# This runs the PR's code: only after the trust check above (never unasked on a fork PR).
+BASE_WT=$(mktemp -d) && git worktree add --detach "$BASE_WT" origin/main
+(cd "$BASE_WT" || exit 1; npm ci && npm run bench) > /tmp/bench-base.txt
+(cd "$WT" || exit 1; npm ci && npm run bench) > /tmp/bench-pr.txt
+diff /tmp/bench-base.txt /tmp/bench-pr.txt
+git worktree remove "$BASE_WT"
 ```
 
 #### Architecture Agent
 
+Use the monograph MCP tools to see what a changed symbol touches:
+
 ```bash
-# Architecture review
-npx monomind github review-architecture \
-  --pr 123 \
-  --check "patterns,coupling,cohesion,solid" \
-  --visualize-impact \
-  --suggest-refactoring
+# Rebuild the graph in the PR worktree, then query it
+npx monomind monograph build
+
+# In the agent: blast radius and neighbours of each changed symbol
+mcp__monomind__monograph_impact { name: "ChangedFunction" }
+mcp__monomind__monograph_neighbors { name: "ChangedClass" }
+
+# Import coupling of the changed area
+npx monomind analyze imports src/
 ```
 
 ### 3. Review Configuration
 
 ```yaml
-# .github/review-swarm.yml
+# .github/review-swarm.yml — read by the coordinating agent, not by a CLI
 version: 1
 review:
   auto-trigger: true
@@ -220,39 +243,43 @@ review:
 ### 1. Context-Aware Reviews
 
 ```bash
-# Review with full context
-npx monomind github review-context \
-  --pr 123 \
-  --load-related-prs \
-  --analyze-impact \
-  --check-breaking-changes
+# Linked issues and earlier PRs that touched the same files
+gh pr view 123 --json closingIssuesReferences --jq '.closingIssuesReferences[].number'
+for f in $(gh pr diff 123 --name-only); do
+  gh pr list --state merged --search "$f" --limit 5 --json number,title
+done
+
+# Breaking-change hints: changed exported symbols and who depends on them
+npx monomind analyze diff origin/main..HEAD --classify --verbose
 ```
 
 ### 2. Learning from History
 
 ```bash
-# Learn from past reviews
-npx monomind github review-learn \
-  --analyze-past-reviews \
-  --identify-patterns \
-  --improve-suggestions \
-  --reduce-false-positives
+# Pull past review comments to calibrate what this repo cares about
+gh api "repos/{owner}/{repo}/pulls/comments?per_page=100" --paginate \
+  --jq '.[] | {path, body}' > /tmp/past-review-comments.json
+
+# Keep recurring patterns for future reviews
+npx monomind memory store -k "review/patterns/$(date +%Y-%m)" \
+  --value "$(jq -r '.body' /tmp/past-review-comments.json | head -200)" -n reviews
+npx monomind memory search -q "review patterns auth" -n reviews
 ```
 
 ### 3. Cross-PR Analysis
 
 ```bash
-# Analyze related PRs together
-npx monomind github review-batch \
-  --prs "123,124,125" \
-  --check-consistency \
-  --verify-integration \
-  --combined-impact
+# Review related PRs together: overlapping files are integration risks
+for pr in 123 124 125; do
+  gh pr diff $pr --name-only | sed "s/^/$pr /"
+done | sort -k2 | awk '{print $2}' | uniq -d
 ```
 
 ## Review Automation
 
 ### Auto-Review on Push
+
+The workflow gathers context and runs the real analyzers; the multi-agent review itself runs in Claude Code (locally or via a Claude Code GitHub Action), not as a CLI step.
 
 ```yaml
 # .github/workflows/auto-review.yml
@@ -262,43 +289,33 @@ on:
     types: [opened, synchronize]
 
 jobs:
-  swarm-review:
+  review-context:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup GitHub CLI
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
-
-      - name: Run Review Swarm
+      - name: Analyze change risk
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Get PR context with gh CLI
           PR_NUM=${{ github.event.pull_request.number }}
-          PR_DATA=$(gh pr view $PR_NUM --json files,title,body,labels)
+          BASE=${{ github.event.pull_request.base.ref }}
+          REPORT=$(npx -y monomind analyze diff "origin/$BASE..HEAD" --risk --classify)
+          # exits 1 when it finds secrets; keep the report instead of failing the step
+          SECRETS=$(npx -y monomind security secrets -p . --depth standard || true)
 
-          # Run swarm review
-          REVIEW_OUTPUT=$(npx monomind github review-all \
-            --pr $PR_NUM \
-            --pr-data "$PR_DATA" \
-            --agents "security,performance,style,architecture")
-
-          # Post review results
-          echo "$REVIEW_OUTPUT" | gh pr review $PR_NUM --comment -F -
-
-          # Update PR status
-          if echo "$REVIEW_OUTPUT" | grep -q "approved"; then
-            gh pr review $PR_NUM --approve
-          elif echo "$REVIEW_OUTPUT" | grep -q "changes-requested"; then
-            gh pr review $PR_NUM --request-changes -b "See review comments above"
-          fi
+          gh pr comment $PR_NUM --body "$(printf '## Automated review context\n\n```\n%s\n```\n\n```\n%s\n```' "$REPORT" "$SECRETS")"
 ```
 
 ### Review Triggers
 
 ```javascript
-// Custom review triggers
+// Custom review triggers — which reviewer subagents to spawn for which paths
 {
   "triggers": {
     "high-risk-files": {
@@ -325,35 +342,18 @@ jobs:
 ### Intelligent Comment Generation
 
 ```bash
-# Generate contextual review comments with gh CLI
-# Get PR diff with context
-PR_DIFF=$(gh pr diff 123 --color never)
-PR_FILES=$(gh pr view 123 --json files)
+# Reviewer subagents return findings as JSON:
+# [{ "path": "src/auth.ts", "line": 42, "body": "..." }, ...]
+PR=123
+COMMIT=$(gh pr view $PR --json headRefOid -q .headRefOid)
 
-# Generate review comments
-COMMENTS=$(npx monomind github review-comment \
-  --pr 123 \
-  --diff "$PR_DIFF" \
-  --files "$PR_FILES" \
-  --style "constructive" \
-  --include-examples \
-  --suggest-fixes)
-
-# Post comments using gh CLI
-echo "$COMMENTS" | jq -c '.[]' | while read -r comment; do
-  FILE=$(echo "$comment" | jq -r '.path')
-  LINE=$(echo "$comment" | jq -r '.line')
-  BODY=$(echo "$comment" | jq -r '.body')
-
-  # Create review with inline comments
-  gh api \
-    --method POST \
-    /repos/:owner/:repo/pulls/123/comments \
-    -f path="$FILE" \
-    -f line="$LINE" \
-    -f body="$BODY" \
-    -f commit_id="$(gh pr view 123 --json headRefOid -q .headRefOid)"
-done
+# Post all inline comments as a single review
+jq -n --arg commit "$COMMIT" --slurpfile c /tmp/findings-$PR.json '{
+  commit_id: $commit,
+  event: "COMMENT",
+  body: "Multi-agent review findings",
+  comments: ($c[0] | map({path, line, side: "RIGHT", body}))
+}' | gh api --method POST "repos/{owner}/{repo}/pulls/$PR/reviews" --input -
 ```
 
 ### Comment Templates
@@ -376,60 +376,60 @@ done
 ```language
 [Code example of the fix]
 ```
-````
 
 **References**:
 
 - [OWASP Guide](link)
 - [Security Best Practices](link)
-
 ````
 
 ### Batch Comment Management
+
 ```bash
-# Manage review comments efficiently
-npx monomind github review-comments \
-  --pr 123 \
-  --group-by "agent,severity" \
-  --summarize \
-  --resolve-outdated
-````
+# List review threads with their resolution state
+gh api graphql -f query='
+  query($owner:String!, $repo:String!, $pr:Int!) {
+    repository(owner:$owner, name:$repo) {
+      pullRequest(number:$pr) {
+        reviewThreads(first:100) { nodes { id isResolved isOutdated path } }
+      }
+    }
+  }' -f owner=OWNER -f repo=REPO -F pr=123
+
+# Resolve an outdated thread
+gh api graphql -f query='mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread { isResolved } } }' -f id=THREAD_ID
+```
 
 ## Integration with CI/CD
 
 ### Status Checks
 
-```yaml
-# Required status checks
-protection_rules:
-  required_status_checks:
-    contexts:
-      - "review-swarm/security"
-      - "review-swarm/performance"
-      - "review-swarm/architecture"
+```bash
+# Current required checks on main (read-only)
+gh api "repos/{owner}/{repo}/branches/main/protection/required_status_checks" --jq '.contexts'
+
+# Branch protection is the user's call: ask before changing it.
+# Once they agree, add the review job to the required checks. This POST appends
+# one context and leaves the rest of the protection as it is (a PUT on
+# .../branches/main/protection would replace all of it).
+gh api --method POST "repos/{owner}/{repo}/branches/main/protection/required_status_checks/contexts" \
+  --input - <<< '["review-context"]'
+
+# See where a PR stands
+gh pr checks 123
 ```
 
 ### Quality Gates
 
-```bash
-# Define quality gates
-npx monomind github quality-gates \
-  --define '{
-    "security": {"threshold": "no-critical"},
-    "performance": {"regression": "<5%"},
-    "coverage": {"minimum": "80%"},
-    "architecture": {"complexity": "<10"}
-  }'
-```
+Quality gates are enforced by the coordinating agent before it approves: no critical security findings, no benchmark regression over 5%, coverage at or above the project minimum, and no function above the complexity threshold (`npx monomind analyze complexity src/ --threshold 10`).
 
 ### Review Metrics
 
 ```bash
-# Track review effectiveness
-npx monomind github review-metrics \
-  --period 30d \
-  --metrics "issues-found,false-positives,fix-rate" \
-  --export-dashboard
+# Review activity for the last 30 days
+SINCE=$(date -d '30 days ago' +%Y-%m-%d)
+gh pr list --state merged --search "merged:>=$SINCE" --json number,reviews,additions,deletions \
+  --jq 'map({number, reviews: (.reviews | length), size: (.additions + .deletions)})'
 ```
 
 ## Best Practices
@@ -453,21 +453,11 @@ npx monomind github review-metrics \
 - Cache analysis results
 - Incremental reviews for large PRs
 - Parallel agent execution
-- Smart comment batching
+- Smart comment batching (one review with many inline comments, not many reviews)
 
 ## Advanced Features
 
-### 1. AI Learning
-
-```bash
-# Train on your codebase
-npx monomind github review-train \
-  --learn-patterns \
-  --adapt-to-style \
-  --improve-accuracy
-```
-
-### 2. Custom Review Agents
+### 1. Custom Review Agents
 
 ```javascript
 // Create custom review agent
@@ -489,70 +479,50 @@ class CustomReviewAgent {
 }
 ```
 
-### 3. Review Orchestration
+### 2. Review Orchestration
 
-```bash
-# Orchestrate complex reviews
-npx monomind github review-orchestrate \
-  --strategy "risk-based" \
-  --allocate-time-budget \
-  --prioritize-critical
-```
+Order reviewers by risk: run `npx monomind analyze diff --risk` first, spawn the security and architecture reviewers for high-risk files, and give low-risk files (docs, tests, formatting) a single style pass.
 
 ## Examples
 
 ### Security-Critical PR
 
 ```bash
-# Auth system changes
-npx monomind github review-init \
-  --pr 456 \
-  --agents "security,authentication,audit" \
-  --depth "maximum" \
-  --require-security-approval
+# Auth system changes (review in a separate worktree, as in "Multi-Agent Review System")
+git fetch origin pull/456/head:review-pr-456
+WT=$(mktemp -d) && git worktree add "$WT" review-pr-456
+(cd "$WT" || exit 1; npx monomind security scan -t . --depth deep; npx monomind security secrets --depth deep) || true
+# Spawn: Security Engineer + reviewer (auth flows) + reviewer (audit logging)
+gh label create security-review-required --force
+gh pr edit 456 --add-label "security-review-required"
 ```
 
 ### Performance-Sensitive PR
 
 ```bash
 # Database optimization
-npx monomind github review-init \
-  --pr 789 \
-  --agents "performance,database,caching" \
-  --benchmark \
-  --profile
+git fetch origin pull/789/head:review-pr-789
+WT=$(mktemp -d) && git worktree add "$WT" review-pr-789
+(cd "$WT" || exit 1; npx monomind analyze complexity src/ --threshold 15)
+# Spawn: Database Optimizer + Performance Benchmarker; compare benchmarks against main
 ```
 
 ### UI Component PR
 
 ```bash
-# New component library
-npx monomind github review-init \
-  --pr 321 \
-  --agents "accessibility,style,i18n,docs" \
-  --visual-regression \
-  --component-tests
+# New component library (no checkout needed to list the changed files)
+# Spawn: Accessibility Auditor + Monodesign + Technical Writer (docs)
+gh pr diff 321 --name-only | grep -E '\.(tsx|jsx|vue|css)$'
 ```
 
 ## Monitoring & Analytics
 
-### Review Dashboard
-
-```bash
-# Launch review dashboard
-npx monomind github review-dashboard \
-  --real-time \
-  --show "agent-activity,issue-trends,fix-rates"
-```
-
 ### Review Reports
 
 ```bash
-# Generate review reports
-npx monomind github review-report \
-  --format "markdown" \
-  --include "summary,details,trends" \
-  --email-stakeholders
+# Markdown summary of open PRs waiting on review
+gh pr list --search "review:required" --json number,title,author,createdAt \
+  --jq '.[] | "- #\(.number) \(.title) (@\(.author.login), opened \(.createdAt[:10]))"'
 ```
 
-See also: [swarm-pr.md](./swarm-pr.md), [workflow-automation.md](./workflow-automation.md)
+See also: [monoswarm-pr.md](./monoswarm-pr.md), [workflow-automation.md](./workflow-automation.md)
