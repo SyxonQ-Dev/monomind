@@ -33,6 +33,8 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
   - The SDK sandbox makes the existing authority files read-only, including every org's whole `git-guard/`. The orgs tree and every dir in an org dir can't be renamed or swapped. Bash there can still create a *new* org definition plus its `run` file, which `org serve` would start, or pre-create an authority file the daemon hasn't written yet. `org-runtime.md` ("Authority files") lists these and the other limits.
 
+- **`monomind start` uses the topology and maxAgents from `.monomind/config.yaml`** ([#509](https://github.com/monoes/monomind/issues/509)). `init` writes that section as `swarm:`, but `start` read `monoswarm:`, so it always fell back to `hierarchical-mesh` and 15 agents. It now reads `swarm:` and still accepts a `monoswarm:` section. The `--topology` flag still takes precedence.
+
 ## [2.20.0] — 2026-09-29
 
 ### Added
