@@ -11,100 +11,88 @@ category: github
 ## Overview
 Coordinate AI swarms across multiple repositories, enabling organization-wide automation and intelligent cross-project collaboration.
 
+All GitHub work goes through the `gh` CLI (`gh repo`, `gh search`, `gh api`, `gh pr`, `gh issue`). Edits in each repository are made by subagents spawned with the Task tool, one per repository or batch of repositories. There is no monomind command that operates on many repositories; shared state between the subagents lives in `monomind memory`.
+
 ## Core Features
 
 ### 1. Cross-Repo Initialization
 ```bash
-# Initialize multi-repo swarm with gh CLI
-# List organization repositories
-REPOS=$(gh repo list org --limit 100 --json name,description,languages \
+# List organization repositories that match the rollout
+REPOS=$(gh repo list org --limit 100 --json name,description,primaryLanguage \
   --jq '.[] | select(.name | test("frontend|backend|shared"))')
 
 # Get repository details
 REPO_DETAILS=$(echo "$REPOS" | jq -r '.name' | while read -r repo; do
-  gh api repos/org/$repo --jq '{name, default_branch, languages, topics}'
+  gh api repos/org/$repo --jq '{name, default_branch, language, topics}'
 done | jq -s '.')
 
-# Initialize swarm with repository context
-npx monomind github multi-repo-init \
-  --repo-details "$REPO_DETAILS" \
-  --repos "org/frontend,org/backend,org/shared" \
-  --topology hierarchical \
-  --shared-memory \
-  --sync-strategy eventual
+# Share the rollout plan with every subagent
+npx monomind memory store -k "multi-repo/rollout/plan" -n multi-repo --upsert \
+  --value "$REPO_DETAILS"
 ```
 
 ### 2. Repository Discovery
 ```bash
-# Auto-discover related repositories with gh CLI
-# Search organization repositories
-REPOS=$(gh repo list my-organization --limit 100 \
-  --json name,description,languages,topics \
-  --jq '.[] | select(.languages | keys | contains(["TypeScript"]))')
+# Search organization repositories by language
+REPOS=$(gh repo list my-organization --limit 100 --language TypeScript \
+  --json name,description,repositoryTopics)
 
 # Analyze repository dependencies
-DEPS=$(echo "$REPOS" | jq -r '.name' | while read -r repo; do
-  # Get package.json if it exists
-  if gh api repos/my-organization/$repo/contents/package.json --jq '.content' 2>/dev/null; then
-    gh api repos/my-organization/$repo/contents/package.json \
-      --jq '.content' | base64 -d | jq '{name, dependencies, devDependencies}'
-  fi
+DEPS=$(echo "$REPOS" | jq -r '.[].name' | while read -r repo; do
+  gh api repos/my-organization/$repo/contents/package.json --jq '.content' 2>/dev/null | \
+    base64 -d | jq --arg repo "$repo" '{repo: $repo, name, dependencies, devDependencies}'
 done | jq -s '.')
 
-# Discover and analyze
-npx monomind github discover-repos \
-  --repos "$REPOS" \
-  --dependencies "$DEPS" \
-  --analyze-dependencies \
-  --suggest-swarm-topology
+# Which repositories depend on a given package
+echo "$DEPS" | jq -r '.[] | select((.dependencies // {}) + (.devDependencies // {}) | has("@my-org/shared")) | .repo'
+
+# Code search across the organization
+gh search code "OldAPI" --owner my-organization --json repository,path \
+  --jq '.[] | "\(.repository.nameWithOwner) \(.path)"'
 ```
 
 ### 3. Synchronized Operations
 ```bash
-# Execute synchronized changes across repos with gh CLI
 # Get matching repositories
 MATCHING_REPOS=$(gh repo list org --limit 100 --json name \
   --jq '.[] | select(.name | test("-service$")) | .name')
 
-# Execute task and create PRs
+BRANCH="update-dependencies-$(date +%Y%m%d)"
 echo "$MATCHING_REPOS" | while read -r repo; do
-  # Clone repo
   gh repo clone org/$repo /tmp/$repo -- --depth=1
-  
-  # Execute task
   cd /tmp/$repo
-  npx monomind github task-execute \
-    --task "update-dependencies" \
-    --repo "org/$repo"
-  
+
+  # Apply the change (a subagent does the edits for anything beyond a command)
+  npm update
+
   # Create PR if changes exist
   if [[ -n $(git status --porcelain) ]]; then
-    git checkout -b update-dependencies-$(date +%Y%m%d)
+    git checkout -b "$BRANCH"
     git add -A
-    git commit -m "chore: Update dependencies"
-    
-    # Push and create PR
+    git commit -m "chore: update dependencies"
     git push origin HEAD
-    PR_URL=$(gh pr create \
+
+    gh pr create \
       --title "Update dependencies" \
       --body "Automated dependency update across services" \
-      --label "dependencies,automated")
-    
-    echo "$PR_URL" >> /tmp/created-prs.txt
+      --label "dependencies,automated" >> /tmp/created-prs.txt
   fi
   cd -
 done
 
-# Link related PRs
-PR_URLS=$(cat /tmp/created-prs.txt)
-npx monomind github link-prs --urls "$PR_URLS"
+# Link related PRs: list every PR from the rollout in each one
+LIST=$(sed 's/^/- /' /tmp/created-prs.txt)
+while read -r url; do
+  gh pr comment "$url" --body "Part of a multi-repo rollout:
+$LIST"
+done < /tmp/created-prs.txt
 ```
 
 ## Configuration
 
 ### Multi-Repo Config File
 ```yaml
-# .swarm/multi-repo.yml
+# .swarm/multi-repo.yml — read by this agent to plan a rollout
 version: 1
 organization: my-org
 repositories:
@@ -112,28 +100,25 @@ repositories:
     url: github.com/my-org/frontend
     role: ui
     agents: [coder, designer, tester]
-    
+
   - name: backend
     url: github.com/my-org/backend
     role: api
     agents: [architect, coder, tester]
-    
+
   - name: shared
     url: github.com/my-org/shared
     role: library
     agents: [analyst, coder]
 
-coordination:
-  topology: hierarchical
-  communication: webhook
-  memory: redis://shared-memory
-  
 dependencies:
   - from: frontend
     to: [backend, shared]
   - from: backend
     to: [shared]
 ```
+
+The `dependencies` list sets the rollout order: change `shared` first, then `backend`, then `frontend`.
 
 ### Repository Roles
 ```javascript
@@ -160,49 +145,45 @@ dependencies:
 
 ### Dependency Management
 ```bash
-# Update dependencies across all repos with gh CLI
-# Create tracking issue first
-TRACKING_ISSUE=$(gh issue create \
+# Create tracking issue first (gh issue create prints the new issue's URL)
+TRACKING_URL=$(gh issue create \
   --title "Dependency Update: typescript@5.0.0" \
   --body "Tracking issue for updating TypeScript across all repositories" \
-  --label "dependencies,tracking" \
-  --json number -q .number)
+  --label "dependencies,tracking")
+TRACKING_ISSUE=${TRACKING_URL##*/}
 
 # Get all repos with TypeScript
-TS_REPOS=$(gh repo list org --limit 100 --json name | jq -r '.[].name' | \
+TS_REPOS=$(gh repo list org --limit 100 --json name --jq '.[].name' | \
   while read -r repo; do
-    if gh api repos/org/$repo/contents/package.json 2>/dev/null | \
-       jq -r '.content' | base64 -d | grep -q '"typescript"'; then
+    if gh api repos/org/$repo/contents/package.json --jq '.content' 2>/dev/null | \
+       base64 -d | grep -q '"typescript"'; then
       echo "$repo"
     fi
   done)
 
 # Update each repository
 echo "$TS_REPOS" | while read -r repo; do
-  # Clone and update
   gh repo clone org/$repo /tmp/$repo -- --depth=1
   cd /tmp/$repo
-  
-  # Update dependency
+
   npm install --save-dev typescript@5.0.0
-  
-  # Test changes
+
   if npm test; then
-    # Create PR
     git checkout -b update-typescript-5
     git add package.json package-lock.json
-    git commit -m "chore: Update TypeScript to 5.0.0
+    git commit -m "chore: update TypeScript to 5.0.0
 
-Part of #$TRACKING_ISSUE"
-    
+Part of $TRACKING_URL"
+
     git push origin HEAD
     gh pr create \
       --title "Update TypeScript to 5.0.0" \
-      --body "Updates TypeScript to version 5.0.0\n\nTracking: #$TRACKING_ISSUE" \
+      --body "Updates TypeScript to version 5.0.0
+
+Tracking: $TRACKING_URL" \
       --label "dependencies"
   else
-    # Report failure
-    gh issue comment $TRACKING_ISSUE \
+    gh issue comment "$TRACKING_ISSUE" \
       --body "❌ Failed to update $repo - tests failing"
   fi
   cd -
@@ -211,217 +192,118 @@ done
 
 ### Refactoring Operations
 ```bash
-# Coordinate large-scale refactoring
-npx monomind github multi-repo-refactor \
-  --pattern "rename:OldAPI->NewAPI" \
-  --analyze-impact \
-  --create-migration-guide \
-  --staged-rollout
+# Find every call site of the old API across the organization
+gh search code "OldAPI" --owner org --json repository,path \
+  --jq 'group_by(.repository.nameWithOwner)[] | {repo: .[0].repository.nameWithOwner, files: map(.path)}'
 ```
+
+Give each repository's file list to a `coder` subagent, roll out in dependency order, and open one PR per repository referencing a shared tracking issue.
 
 ### Security Updates
 ```bash
-# Coordinate security patches
-npx monomind github multi-repo-security \
-  --scan-all \
-  --patch-vulnerabilities \
-  --verify-fixes \
-  --compliance-report
+# Open Dependabot alerts per repository
+gh repo list org --limit 100 --json name --jq '.[].name' | while read -r repo; do
+  gh api "repos/org/$repo/dependabot/alerts?state=open" \
+    --jq ".[] | \"$repo \(.security_advisory.severity) \(.dependency.package.name)\"" 2>/dev/null
+done
+
+# In a cloned repository: local scan
+npx monomind security scan -t . --type deps
 ```
 
 ## Communication Strategies
 
-### 1. Webhook-Based Coordination
-```javascript
-// webhook-coordinator.js
-const { MultiRepoSwarm } = require('monomind');
+Subagents working on different repositories coordinate through shared memory, not a webhook or message bus:
 
-const swarm = new MultiRepoSwarm({
-  webhook: {
-    url: 'https://swarm-coordinator.example.com',
-    secret: process.env.WEBHOOK_SECRET
-  }
-});
+```bash
+# A subagent records what it changed
+npx monomind memory store -k "multi-repo/rollout/backend" -n multi-repo --upsert \
+  --value '{"status":"pr-open","pr":"https://github.com/org/backend/pull/42","exports-changed":["UserDTO"]}'
 
-// Handle cross-repo events
-swarm.on('repo:update', async (event) => {
-  await swarm.propagate(event, {
-    to: event.dependencies,
-    strategy: 'eventual-consistency'
-  });
-});
-```
-
-### 2. GraphQL Federation
-```graphql
-# Federated schema for multi-repo queries
-type Repository @key(fields: "id") {
-  id: ID!
-  name: String!
-  swarmStatus: SwarmStatus!
-  dependencies: [Repository!]!
-  agents: [Agent!]!
-}
-
-type SwarmStatus {
-  active: Boolean!
-  topology: Topology!
-  tasks: [Task!]!
-  memory: JSON!
-}
-```
-
-### 3. Event Streaming
-```yaml
-# Kafka configuration for real-time coordination
-kafka:
-  brokers: ['kafka1:9092', 'kafka2:9092']
-  topics:
-    swarm-events: 
-      partitions: 10
-      replication: 3
-    swarm-memory:
-      partitions: 5
-      replication: 3
+# Downstream subagents read it before editing
+npx monomind memory retrieve -k "multi-repo/rollout/backend" -n multi-repo
+npx monomind memory search -q "exports changed UserDTO" -n multi-repo
 ```
 
 ## Advanced Features
 
-### 1. Distributed Task Queue
+### 1. Cross-Repo Testing
 ```bash
-# Create distributed task queue
-npx monomind github multi-repo-queue \
-  --backend redis \
-  --workers 10 \
-  --priority-routing \
-  --dead-letter-queue
+# Check out the rollout branch in each repository and run its tests
+for repo in shared backend frontend; do
+  gh repo clone org/$repo /tmp/it/$repo -- --branch update-typescript-5 --depth=1
+  (cd /tmp/it/$repo && npm ci && npm test) || echo "FAILED: $repo"
+done
+
+# Or watch CI on each rollout PR
+while read -r url; do gh pr checks "$url" --watch --fail-fast; done < /tmp/created-prs.txt
 ```
 
-### 2. Cross-Repo Testing
+### 2. Monorepo Migration
 ```bash
-# Run integration tests across repos
-npx monomind github multi-repo-test \
-  --setup-test-env \
-  --link-services \
-  --run-e2e \
-  --tear-down
-```
-
-### 3. Monorepo Migration
-```bash
-# Assist in monorepo migration
-npx monomind github to-monorepo \
-  --analyze-repos \
-  --suggest-structure \
-  --preserve-history \
-  --create-migration-prs
+# Import a repository into a monorepo subdirectory, keeping its history
+git remote add shared https://github.com/org/shared.git
+git fetch shared
+git merge -s ours --no-commit --allow-unrelated-histories shared/main
+git read-tree --prefix=packages/shared/ -u shared/main
+git commit -m "chore: import org/shared into packages/shared"
 ```
 
 ## Monitoring & Visualization
 
-### Multi-Repo Dashboard
+### Rollout Status
 ```bash
-# Launch monitoring dashboard
-npx monomind github multi-repo-dashboard \
-  --port 3000 \
-  --metrics "agent-activity,task-progress,memory-usage" \
-  --real-time
+# Status of every PR in the rollout
+while read -r url; do
+  gh pr view "$url" --json url,state,mergeable,statusCheckRollup \
+    --jq '{url, state, mergeable, checks: ([.statusCheckRollup[].conclusion] | unique)}'
+done < /tmp/created-prs.txt
+
+# Or find them by branch name across the organization
+gh search prs --owner org --head update-typescript-5 --json repository,url,state
 ```
 
 ### Dependency Graph
 ```bash
-# Visualize repo dependencies
-npx monomind github dep-graph \
-  --format mermaid \
-  --include-agents \
-  --show-data-flow
-```
-
-### Health Monitoring
-```bash
-# Monitor swarm health across repos
-npx monomind github health-check \
-  --repos "org/*" \
-  --check "connectivity,memory,agents" \
-  --alert-on-issues
+# Mermaid graph of internal package dependencies (from the DEPS JSON above)
+echo "$DEPS" | jq -r '"graph TD", (.[] | .repo as $r | (.dependencies // {}) | keys[] | select(startswith("@my-org/")) | "  \($r) --> \(.)")'
 ```
 
 ## Synchronization Patterns
 
 ### 1. Eventually Consistent
-```javascript
-// Eventual consistency for non-critical updates
-{
-  "sync": {
-    "strategy": "eventual",
-    "max-lag": "5m",
-    "retry": {
-      "attempts": 3,
-      "backoff": "exponential"
-    }
-  }
-}
-```
+Open all PRs at once and let each merge when its checks pass. Suited to documentation and non-breaking dependency bumps.
 
 ### 2. Strong Consistency
-```javascript
-// Strong consistency for critical operations
-{
-  "sync": {
-    "strategy": "strong",
-    "consensus": "raft",
-    "quorum": 0.51,
-    "timeout": "30s"
-  }
-}
+Merge in dependency order and wait for each step: release `shared`, bump it in `backend`, then in `frontend`. Suited to breaking API changes and security updates.
+
+```bash
+gh pr merge https://github.com/org/shared/pull/10 --squash
+gh release create v2.0.0 --repo org/shared --generate-notes
+# then update the consumers and repeat
 ```
 
 ### 3. Hybrid Approach
-```javascript
-// Mix of consistency levels
-{
-  "sync": {
-    "default": "eventual",
-    "overrides": {
-      "security-updates": "strong",
-      "dependency-updates": "strong",
-      "documentation": "eventual"
-    }
-  }
-}
-```
+Use strong consistency for security and breaking dependency updates and eventual consistency for everything else.
 
 ## Use Cases
 
 ### 1. Microservices Coordination
-```bash
-# Coordinate microservices development
-npx monomind github microservices \
-  --services "auth,users,orders,payments" \
-  --ensure-compatibility \
-  --sync-contracts \
-  --integration-tests
-```
+Update a shared contract (OpenAPI spec, protobuf, types package) first, then roll the change into each service in dependency order with one PR per service and a tracking issue.
 
 ### 2. Library Updates
 ```bash
-# Update shared library across consumers
-npx monomind github lib-update \
-  --library "org/shared-lib" \
-  --version "2.0.0" \
-  --find-consumers \
-  --update-imports \
-  --run-tests
+# Find consumers of a shared library, then bump it in each one
+gh search code '"@org/shared-lib"' --owner org --filename package.json --json repository \
+  --jq '.[].repository.nameWithOwner' | sort -u
 ```
 
 ### 3. Organization-Wide Changes
 ```bash
-# Apply org-wide policy changes
-npx monomind github org-policy \
-  --policy "add-security-headers" \
-  --repos "org/*" \
-  --validate-compliance \
-  --create-reports
+# Check a policy file across repositories
+gh repo list org --limit 100 --json name --jq '.[].name' | while read -r repo; do
+  gh api repos/org/$repo/contents/SECURITY.md >/dev/null 2>&1 || echo "missing SECURITY.md: $repo"
+done
 ```
 
 ## Best Practices
@@ -434,94 +316,44 @@ npx monomind github org-policy \
 
 ### 2. Communication
 - Use appropriate sync strategies
-- Implement circuit breakers
-- Monitor latency and failures
-- Clear error propagation
+- One tracking issue per rollout, linked from every PR
+- Monitor CI on every rollout PR
+- Clear error propagation (comment failures on the tracking issue)
 
 ### 3. Security
-- Secure cross-repo authentication
-- Encrypted communication channels
-- Audit trail for all operations
+- Use a token scoped to the repositories being changed
+- Audit trail through PRs, never direct pushes to default branches
 - Principle of least privilege
-
-## Performance Optimization
-
-### Caching Strategy
-```bash
-# Implement cross-repo caching
-npx monomind github cache-strategy \
-  --analyze-patterns \
-  --suggest-cache-layers \
-  --implement-invalidation
-```
-
-### Parallel Execution
-```bash
-# Optimize parallel operations
-npx monomind github parallel-optimize \
-  --analyze-dependencies \
-  --identify-parallelizable \
-  --execute-optimal
-```
-
-### Resource Pooling
-```bash
-# Pool resources across repos
-npx monomind github resource-pool \
-  --share-agents \
-  --distribute-load \
-  --monitor-usage
-```
 
 ## Troubleshooting
 
-### Connectivity Issues
+### Permission Issues
 ```bash
-# Diagnose connectivity problems
-npx monomind github diagnose-connectivity \
-  --test-all-repos \
-  --check-permissions \
-  --verify-webhooks
+# Confirm the token and its scopes
+gh auth status
+
+# Check your permission on a repository
+gh api repos/org/backend --jq '.permissions'
 ```
 
-### Memory Synchronization
+### Rate Limits
 ```bash
-# Debug memory sync issues
-npx monomind github debug-memory \
-  --check-consistency \
-  --identify-conflicts \
-  --repair-state
-```
-
-### Performance Bottlenecks
-```bash
-# Identify performance issues
-npx monomind github perf-analysis \
-  --profile-operations \
-  --identify-bottlenecks \
-  --suggest-optimizations
+gh api rate_limit --jq '.resources | {core: .core.remaining, search: .search.remaining, graphql: .graphql.remaining}'
 ```
 
 ## Examples
 
 ### Full-Stack Application Update
 ```bash
-# Update full-stack application
-npx monomind github fullstack-update \
-  --frontend "org/web-app" \
-  --backend "org/api-server" \
-  --database "org/db-migrations" \
-  --coordinate-deployment
+# One tracking issue, then PRs in dependency order
+gh issue create --repo org/web-app --title "Rollout: new session API" --body "Tracks org/db-migrations, org/api-server, org/web-app"
+# Spawn: coder for org/db-migrations, then org/api-server, then org/web-app
 ```
 
 ### Cross-Team Collaboration
 ```bash
-# Facilitate cross-team work
-npx monomind github cross-team \
-  --teams "frontend,backend,devops" \
-  --task "implement-feature-x" \
-  --assign-by-expertise \
-  --track-progress
+# Request reviews from the owning team on each PR
+while read -r url; do gh pr edit "$url" --add-reviewer org/backend-team; done < /tmp/created-prs.txt
 ```
 
-See also: [swarm-pr.md](./swarm-pr.md), [project-board-sync.md](./project-board-sync.md)
+See also: [monoswarm-pr.md](./monoswarm-pr.md), [project-board-sync.md](./project-board-sync.md)

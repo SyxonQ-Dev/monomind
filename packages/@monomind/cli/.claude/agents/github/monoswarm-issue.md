@@ -14,34 +14,32 @@ deprecatedBy: issue-tracker
 ## Overview
 Transform GitHub Issues into intelligent swarm tasks, enabling automatic task decomposition and agent coordination with advanced multi-agent orchestration.
 
+GitHub work goes through the `gh` CLI. Picking agents uses `monomind pick`, and the work itself is done by subagents spawned with the Task tool. There is no monomind command that turns an issue into a swarm; this agent reads the issue, decomposes it, and drives the subagents.
+
 ## Core Features
 
 ### 1. Issue-to-Swarm Conversion
 ```bash
-# Create swarm from issue using gh CLI
 # Get issue details
 ISSUE_DATA=$(gh issue view 456 --json title,body,labels,assignees,comments)
 
-# Create swarm from issue
-npx monomind github issue-to-swarm 456 \
-  --issue-data "$ISSUE_DATA" \
-  --auto-decompose \
-  --assign-agents
+# Pick the agents that fit the issue
+TITLE=$(echo "$ISSUE_DATA" | jq -r .title)
+npx monomind pick -t "$TITLE" --json
 
-# Batch process multiple issues
+# Batch: find issues that are ready for a swarm
 ISSUES=$(gh issue list --label "swarm-ready" --json number,title,body,labels)
-npx monomind github issues-batch \
-  --issues "$ISSUES" \
-  --parallel
 
-# Update issues with swarm status
+# Mark them as being processed
 echo "$ISSUES" | jq -r '.[].number' | while read -r num; do
-  gh issue edit $num --add-label "swarm-processing"
+  gh issue edit $num --add-label "swarm-processing" --remove-label "swarm-ready"
 done
 ```
 
+Then spawn the picked agents in one message with the Task tool, each given the issue number, its body, and the subtask it owns.
+
 ### 2. Issue Comment Commands
-Execute swarm operations via issue comments:
+Swarm operations can be requested in issue comments. These are a convention this agent reads, not commands GitHub or monomind execute on their own:
 
 ```markdown
 <!-- In issue comment -->
@@ -50,6 +48,12 @@ Execute swarm operations via issue comments:
 /swarm assign @agent-coder
 /swarm estimate
 /swarm start
+```
+
+```bash
+# Read the latest /swarm command on an issue
+gh issue view 456 --json comments \
+  --jq '[.comments[] | select(.body | startswith("/swarm"))] | last | {author: .author.login, body}'
 ```
 
 ### 3. Issue Templates for Swarms
@@ -86,7 +90,7 @@ body:
 
 ### Auto-Label Based on Content
 ```javascript
-// .github/swarm-labels.json
+// .github/swarm-labels.json — read by this agent when triaging
 {
   "rules": [
     {
@@ -110,18 +114,15 @@ body:
 
 ### Dynamic Agent Assignment
 ```bash
-# Assign agents based on issue content
-npx monomind github issue-analyze 456 \
-  --suggest-agents \
-  --estimate-complexity \
-  --create-subtasks
+# Suggest agents from the issue's title and body
+BODY=$(gh issue view 456 --json title,body --jq '.title + "\n" + .body')
+npx monomind pick -t "$BODY" --json
 ```
 
 ## Issue Swarm Commands
 
 ### Initialize from Issue
 ```bash
-# Create swarm with full issue context using gh CLI
 # Get complete issue data
 ISSUE=$(gh issue view 456 --json title,body,labels,assignees,comments,projectItems)
 
@@ -133,32 +134,23 @@ REFERENCES=$(gh issue view 456 --json body --jq '.body' | \
     gh pr view $NUM --json number,title,state 2>/dev/null
   done | jq -s '.')
 
-# Initialize swarm
-npx monomind github issue-init 456 \
-  --issue-data "$ISSUE" \
-  --references "$REFERENCES" \
-  --load-comments \
-  --analyze-references \
-  --auto-topology
+# Keep the context where every subagent can read it
+npx monomind memory store -k "issue/456/context" -n issues --upsert \
+  --value "$(jq -n --argjson i "$ISSUE" --argjson r "$REFERENCES" '{issue: $i, references: $r}')"
 
 # Add swarm initialization comment
-gh issue comment 456 --body "🐝 Swarm initialized for this issue"
+gh issue comment 456 --body "🐝 Swarm started for this issue"
 ```
 
 ### Task Decomposition
 ```bash
-# Break down issue into subtasks with gh CLI
-# Get issue body
+# The agent writes subtasks as JSON:
+# {"tasks":[{"title":"...","description":"...","priority":"high"}, ...]}
 ISSUE_BODY=$(gh issue view 456 --json body --jq '.body')
-
-# Decompose into subtasks
-SUBTASKS=$(npx monomind github issue-decompose 456 \
-  --body "$ISSUE_BODY" \
-  --max-subtasks 10 \
-  --assign-priorities)
+SUBTASKS=$(cat /tmp/issue-456-subtasks.json)
 
 # Update issue with checklist
-CHECKLIST=$(echo "$SUBTASKS" | jq -r '.tasks[] | "- [ ] " + .description')
+CHECKLIST=$(echo "$SUBTASKS" | jq -r '.tasks[] | "- [ ] " + .title')
 UPDATED_BODY="$ISSUE_BODY
 
 ## Subtasks
@@ -167,10 +159,10 @@ $CHECKLIST"
 gh issue edit 456 --body "$UPDATED_BODY"
 
 # Create linked issues for major subtasks
-echo "$SUBTASKS" | jq -r '.tasks[] | select(.priority == "high")' | while read -r task; do
+echo "$SUBTASKS" | jq -c '.tasks[] | select(.priority == "high")' | while read -r task; do
   TITLE=$(echo "$task" | jq -r '.title')
   BODY=$(echo "$task" | jq -r '.description')
-  
+
   gh issue create \
     --title "$TITLE" \
     --body "$BODY
@@ -182,43 +174,33 @@ done
 
 ### Progress Tracking
 ```bash
-# Update issue with swarm progress using gh CLI
-# Get current issue state
-CURRENT=$(gh issue view 456 --json body,labels)
+# Progress is the checklist in the issue body
+BODY=$(gh issue view 456 --json body --jq '.body')
+DONE=$(echo "$BODY" | grep -c '^- \[x\]')
+TOTAL=$(echo "$BODY" | grep -cE '^- \[( |x)\]')
 
-# Get swarm progress
-PROGRESS=$(npx monomind github issue-progress 456)
-
-# Update checklist in issue body
-UPDATED_BODY=$(echo "$CURRENT" | jq -r '.body' | \
-  npx monomind github update-checklist --progress "$PROGRESS")
-
-# Edit issue with updated body
+# Tick a finished subtask
+UPDATED_BODY=$(echo "$BODY" | sed 's/^- \[ \] Write unit tests$/- [x] Write unit tests/')
 gh issue edit 456 --body "$UPDATED_BODY"
 
 # Post progress summary as comment
-SUMMARY=$(echo "$PROGRESS" | jq -r '
-"## 📊 Progress Update
+COMPLETED=$(echo "$BODY" | grep '^- \[x\]' | sed 's/^- \[x\] /- ✅ /')
+REMAINING=$(echo "$BODY" | grep '^- \[ \]' | sed 's/^- \[ \] /- ⏳ /')
+gh issue comment 456 --body "## 📊 Progress Update
 
-**Completion**: \(.completion)%
-**ETA**: \(.eta)
+**Completion**: $DONE/$TOTAL
 
 ### Completed Tasks
-\(.completed | map("- ✅ " + .) | join("\n"))
-
-### In Progress
-\(.in_progress | map("- 🔄 " + .) | join("\n"))
+$COMPLETED
 
 ### Remaining
-\(.remaining | map("- ⏳ " + .) | join("\n"))
+$REMAINING
 
 ---
-🤖 Automated update by swarm agent"')
-
-gh issue comment 456 --body "$SUMMARY"
+🤖 Automated update by swarm agent"
 
 # Update labels based on progress
-if [[ $(echo "$PROGRESS" | jq -r '.completion') -eq 100 ]]; then
+if [[ "$DONE" -eq "$TOTAL" ]]; then
   gh issue edit 456 --add-label "ready-for-review" --remove-label "in-progress"
 fi
 ```
@@ -227,29 +209,26 @@ fi
 
 ### 1. Issue Dependencies
 ```bash
-# Handle issue dependencies
-npx monomind github issue-deps 456 \
-  --resolve-order \
-  --parallel-safe \
-  --update-blocking
+# Issues this one is blocked by / blocking (GitHub issue dependencies)
+gh issue view 456 --json number,title --jq .title
+gh api "repos/{owner}/{repo}/issues/456/dependencies/blocked_by" --jq '.[] | {number, title, state}'
+gh api "repos/{owner}/{repo}/issues/456/dependencies/blocking" --jq '.[] | {number, title, state}'
 ```
 
 ### 2. Epic Management
 ```bash
-# Coordinate epic-level swarms
-npx monomind github epic-swarm \
-  --epic 123 \
-  --child-issues "456,457,458" \
-  --orchestrate
+# Sub-issues of an epic and their state
+gh api "repos/{owner}/{repo}/issues/123/sub_issues" --jq '.[] | {number, title, state}'
+
+# Attach an existing issue to the epic (needs the child's numeric id)
+CHILD_ID=$(gh api "repos/{owner}/{repo}/issues/456" --jq .id)
+gh api --method POST "repos/{owner}/{repo}/issues/123/sub_issues" -F sub_issue_id=$CHILD_ID
 ```
 
 ### 3. Issue Templates
 ```bash
-# Generate issue from swarm analysis
-npx monomind github create-issues \
-  --from-analysis \
-  --template "bug-report" \
-  --auto-assign
+# Create an issue from a template in .github/ISSUE_TEMPLATE
+gh issue create --template "bug_report.md" --title "Bug: ..." --assignee @me
 ```
 
 ## Workflow Integration
@@ -260,97 +239,61 @@ npx monomind github create-issues \
 name: Issue Swarm Handler
 on:
   issues:
-    types: [opened, labeled, commented]
+    types: [labeled]
 
 jobs:
   swarm-process:
+    if: github.event.label.name == 'swarm-ready'
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
     steps:
-      - name: Process Issue
-        uses: monoes/swarm-action@v1
-        with:
-          command: |
-            if [[ "${{ github.event.label.name }}" == "swarm-ready" ]]; then
-              npx monomind github issue-init ${{ github.event.issue.number }}
-            fi
+      - name: Acknowledge issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh issue edit ${{ github.event.issue.number }} --add-label "swarm-processing"
+          gh issue comment ${{ github.event.issue.number }} --body "Queued for swarm processing"
 ```
 
 ### Issue Board Integration
 ```bash
-# Sync with project board
-npx monomind github issue-board-sync \
-  --project "Development" \
-  --column-mapping '{
-    "To Do": "pending",
-    "In Progress": "active",
-    "Done": "completed"
-  }'
+# Add the issue to a project board and set its Status (see project-board-sync)
+gh project item-add 1 --owner my-org --url "https://github.com/my-org/my-repo/issues/456"
 ```
 
 ## Issue Types & Strategies
 
-### Bug Reports
-```bash
-# Specialized bug handling
-npx monomind github bug-swarm 456 \
-  --reproduce \
-  --isolate \
-  --fix \
-  --test
-```
+Pick the subagents by issue type (confirm with `npx monomind pick -t "<issue title>" --json`):
 
-### Feature Requests
-```bash
-# Feature implementation swarm
-npx monomind github feature-swarm 456 \
-  --design \
-  --implement \
-  --document \
-  --demo
-```
-
-### Technical Debt
-```bash
-# Refactoring swarm
-npx monomind github debt-swarm 456 \
-  --analyze-impact \
-  --plan-migration \
-  --execute \
-  --validate
-```
+- **Bug reports** — reproduce, isolate, fix, test: `researcher` to reproduce, `coder` to fix, `tester` to add a regression test.
+- **Feature requests** — design, implement, document: `system-architect`, `coder`, `tester`, `Technical Writer`.
+- **Technical debt** — analyze impact, plan, execute, validate: use `mcp__monomind__monograph_impact` on the symbols involved, then `coder` and `reviewer`.
 
 ## Automation Examples
 
 ### Auto-Close Stale Issues
 ```bash
-# Process stale issues with swarm using gh CLI
 # Find stale issues
 STALE_DATE=$(date -d '30 days ago' --iso-8601)
 STALE_ISSUES=$(gh issue list --state open --json number,title,updatedAt,labels \
   --jq ".[] | select(.updatedAt < \"$STALE_DATE\")")
 
-# Analyze each stale issue
+# The agent reads each issue and decides: close, keep or needs-info
 echo "$STALE_ISSUES" | jq -r '.number' | while read -r num; do
-  # Get full issue context
   ISSUE=$(gh issue view $num --json title,body,comments,labels)
-  
-  # Analyze with swarm
-  ACTION=$(npx monomind github analyze-stale \
-    --issue "$ISSUE" \
-    --suggest-action)
-  
+  ACTION=$(jq -r ".\"$num\"" /tmp/stale-decisions.json)
+
   case "$ACTION" in
     "close")
-      # Add stale label and warning comment
       gh issue comment $num --body "This issue has been inactive for 30 days and will be closed in 7 days if there's no further activity."
       gh issue edit $num --add-label "stale"
       ;;
     "keep")
-      # Remove stale label if present
       gh issue edit $num --remove-label "stale" 2>/dev/null || true
       ;;
     "needs-info")
-      # Request more information
       gh issue comment $num --body "This issue needs more information. Please provide additional context or it may be closed as stale."
       gh issue edit $num --add-label "needs-info"
       ;;
@@ -367,68 +310,65 @@ gh issue list --label stale --state open --json number,updatedAt \
 
 ### Issue Triage
 ```bash
-# Automated triage system
-npx monomind github triage \
-  --unlabeled \
-  --analyze-content \
-  --suggest-labels \
-  --assign-priority
+# Unlabeled open issues for the agent to triage
+gh issue list --search "no:label is:open" --json number,title,body
+
+# Apply the labels the agent chose
+gh issue edit 456 --add-label "bug,priority:high"
 ```
 
 ### Duplicate Detection
 ```bash
-# Find duplicate issues
-npx monomind github find-duplicates \
-  --threshold 0.8 \
-  --link-related \
-  --close-duplicates
+# Search for likely duplicates by keywords from the title
+gh issue list --state all --search "memory leak in:title" --json number,title,state
+
+# Close a confirmed duplicate
+gh issue close 457 --reason "not planned" --comment "Duplicate of #456"
 ```
 
 ## Integration Patterns
 
 ### 1. Issue-PR Linking
 ```bash
-# Link issues to PRs automatically
-npx monomind github link-pr \
-  --issue 456 \
-  --pr 789 \
-  --update-both
+# Create a branch linked to the issue
+gh issue develop 456 --checkout
+
+# Closing keywords in the PR body link and auto-close the issue
+gh pr create --title "Fix memory leak" --body "Fixes #456"
 ```
 
 ### 2. Milestone Coordination
 ```bash
-# Coordinate milestone swarms
-npx monomind github milestone-swarm \
-  --milestone "v2.0" \
-  --parallel-issues \
-  --track-progress
+# Open issues in a milestone
+gh issue list --milestone "v2.0" --state open --json number,title,assignees
+
+# Move an issue into the milestone
+gh issue edit 456 --milestone "v2.0"
 ```
 
 ### 3. Cross-Repo Issues
 ```bash
-# Handle issues across repositories
-npx monomind github cross-repo \
-  --issue "org/repo#456" \
-  --related "org/other-repo#123" \
-  --coordinate
+# Read an issue in another repository and cross-reference it
+gh issue view 123 --repo org/other-repo --json title,state
+gh issue comment 456 --body "Related: org/other-repo#123"
 ```
 
 ## Metrics & Analytics
 
 ### Issue Resolution Time
 ```bash
-# Analyze swarm performance
-npx monomind github issue-metrics \
-  --issue 456 \
-  --metrics "time-to-close,agent-efficiency,subtask-completion"
+# Time to close for one issue
+gh issue view 456 --json createdAt,closedAt \
+  --jq '((.closedAt | fromdate) - (.createdAt | fromdate)) / 3600 | "\(.) hours"'
 ```
 
 ### Swarm Effectiveness
 ```bash
-# Generate effectiveness report
-npx monomind github effectiveness \
-  --issues "closed:>2024-01-01" \
-  --compare "with-swarm,without-swarm"
+# Compare time-to-close for swarm-processed issues against the rest
+for q in "label:swarm-processing" "-label:swarm-processing"; do
+  gh issue list --state closed --search "closed:>2024-01-01 $q" --limit 200 --json createdAt,closedAt \
+    --jq "\"$q: \" + (map((.closedAt | fromdate) - (.createdAt | fromdate)) | add / length / 3600 | tostring) + \" h avg\""
+done
 ```
 
 ## Best Practices
@@ -463,31 +403,24 @@ npx monomind github effectiveness \
 ### Complex Bug Investigation
 ```bash
 # Issue #789: Memory leak in production
-npx monomind github issue-init 789 \
-  --topology hierarchical \
-  --agents "debugger,analyst,tester,monitor" \
-  --priority critical \
-  --reproduce-steps
+gh issue view 789 --json title,body,comments
+gh issue edit 789 --add-label "priority:critical,swarm-processing"
+# Spawn: researcher (reproduce) + Performance Benchmarker + coder + tester
 ```
 
 ### Feature Implementation
 ```bash
 # Issue #234: Add OAuth integration
-npx monomind github issue-init 234 \
-  --topology mesh \
-  --agents "architect,coder,security,tester" \
-  --create-design-doc \
-  --estimate-effort
+gh issue view 234 --json title,body
+gh issue develop 234 --checkout
+# Spawn: system-architect + coder + Security Engineer + tester
 ```
 
 ### Documentation Update
 ```bash
 # Issue #567: Update API documentation
-npx monomind github issue-init 567 \
-  --topology ring \
-  --agents "researcher,writer,reviewer" \
-  --check-links \
-  --validate-examples
+gh issue view 567 --json title,body
+# Spawn: researcher + Technical Writer + reviewer
 ```
 
 ## Swarm Coordination Features
@@ -523,7 +456,7 @@ const preHook = async (issue) => {
   // Initialize swarm with issue-specific topology
   const topology = determineTopology(issue.complexity);
   await mcp__monomind__monoswarm_init({ topology, maxAgents: 6 });
-  
+
   // Store issue context for swarm agents
   await mcp__monomind__monoswarm_memory({
     action: "set",
@@ -536,17 +469,17 @@ const preHook = async (issue) => {
 const postHook = async (results) => {
   // Update issue with swarm progress
   await updateIssueProgress(results);
-  
+
   // Generate follow-up tasks
   await createFollowupTasks(results.remainingWork);
-  
+
   // Store completion metrics
   await mcp__monomind__monoswarm_memory({
-    action: "set", 
+    action: "set",
     key: `issue/${issue.number}/completion`,
     value: { metrics: results.metrics, timestamp: Date.now() }
   });
 };
 ```
 
-See also: [swarm-pr.md](./swarm-pr.md), [sync-coordinator.md](./sync-coordinator.md), [workflow-automation.md](./workflow-automation.md)
+See also: [monoswarm-pr.md](./monoswarm-pr.md), [sync-coordinator.md](./sync-coordinator.md), [workflow-automation.md](./workflow-automation.md)

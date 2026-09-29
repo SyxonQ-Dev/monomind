@@ -12,6 +12,8 @@ category: github
 
 Integrate AI swarms with GitHub Actions to create intelligent, self-organizing CI/CD pipelines that adapt to your codebase through advanced multi-agent coordination and automation.
 
+This agent writes and edits workflow YAML itself, inspects runs with `gh run`, `gh workflow` and `gh cache`, and uses real monomind commands where they fit in a pipeline (`monomind analyze diff`, `monomind security scan`, `monomind security secrets`). There is no monomind command that generates, optimizes or heals workflows; that analysis is the agent's job.
+
 ## Core Features
 
 ### 1. Swarm-Powered Actions
@@ -22,45 +24,46 @@ name: Intelligent CI with Swarms
 on: [push, pull_request]
 
 jobs:
-  swarm-analysis:
+  change-analysis:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v1
-
-      - name: Initialize Swarm
-        uses: monoes/swarm-action@v1
+      - uses: actions/checkout@v4
         with:
-          topology: mesh
-          max-agents: 6
+          fetch-depth: 0
 
       - name: Analyze Changes
         run: |
-          npx monomind actions analyze \
-            --commit ${{ github.sha }} \
-            --suggest-tests \
-            --optimize-pipeline
+          BASE=${{ github.event.pull_request.base.sha || github.event.before }}
+          npx -y monomind analyze diff "$BASE..${{ github.sha }}" --risk --classify
 ```
 
 ### 2. Dynamic Workflow Generation
 
+Inspect the repository, then write the workflow file:
+
 ```bash
-# Generate workflows based on code analysis
-npx monomind actions generate-workflow \
-  --analyze-codebase \
-  --detect-languages \
-  --create-optimal-pipeline
+# What already exists
+gh workflow list --all
+ls .github/workflows/
+
+# Detect the stack from manifest files
+ls package.json pnpm-lock.yaml pyproject.toml go.mod Cargo.toml pom.xml 2>/dev/null
+npx monomind analyze deps
 ```
+
+Write `.github/workflows/ci.yml` for the detected stack, then validate it by pushing to a branch and watching the run (`gh run watch`).
 
 ### 3. Intelligent Test Selection
 
 ```yaml
-# Smart test runner
-- name: Swarm Test Selection
+# Smart test runner: run only the tests related to changed files
+- name: Changed files
+  id: files
   run: |
-    npx monomind actions smart-test \
-      --changed-files ${{ steps.files.outputs.all }} \
-      --impact-analysis \
-      --parallel-safe
+    echo "all=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+
+- name: Related tests
+  run: npx vitest related ${{ steps.files.outputs.all }} --run
 ```
 
 ## Workflow Templates
@@ -73,22 +76,30 @@ name: Polyglot Project Handler
 on: push
 
 jobs:
-  detect-and-build:
+  detect:
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v4
 
       - name: Detect Languages
         id: detect
         run: |
-          npx monomind actions detect-stack \
-            --output json > stack.json
+          LANGS=()
+          [ -f package.json ] && LANGS+=('"node"')
+          [ -f pyproject.toml ] && LANGS+=('"python"')
+          [ -f go.mod ] && LANGS+=('"go"')
+          echo "matrix={\"lang\":[$(IFS=,; echo "${LANGS[*]}")]}" >> "$GITHUB_OUTPUT"
 
-      - name: Dynamic Build Matrix
-        run: |
-          npx monomind actions create-matrix \
-            --from stack.json \
-            --parallel-builds
+  build:
+    needs: detect
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.detect.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Building ${{ matrix.lang }}"
 ```
 
 ### Adaptive Security Scanning
@@ -102,55 +113,59 @@ on:
   workflow_dispatch:
 
 jobs:
-  security-swarm:
+  security-scan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
-      - name: Security Analysis Swarm
-        run: |
-          # Use gh CLI for issue creation
-          SECURITY_ISSUES=$(npx monomind actions security \
-            --deep-scan \
-            --format json)
+      - uses: actions/checkout@v4
 
-          # Create issues for complex security problems
-          echo "$SECURITY_ISSUES" | jq -r '.issues[]? | @base64' | while read -r issue; do
-            _jq() {
-              echo ${issue} | base64 --decode | jq -r ${1}
-            }
-            gh issue create \
-              --title "$(_jq '.title')" \
-              --body "$(_jq '.body')" \
-              --label "security,critical"
-          done
+      - name: Security scan (SARIF)
+        # the scan prints a banner before the SARIF document; keep only the JSON
+        run: npx -y monomind security scan -t . --type all -o sarif | sed -n '/^{/,$p' > results.sarif
+
+      - name: Secret detection
+        run: npx -y monomind security secrets -p . --depth deep
+
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
 ```
+
+Code scanning alerts then show in the Security tab, and can be listed with `gh api "repos/{owner}/{repo}/code-scanning/alerts?state=open"`.
 
 ## Action Commands
 
 ### Pipeline Optimization
 
 ```bash
-# Optimize existing workflows
-npx monomind actions optimize \
-  --workflow ".github/workflows/ci.yml" \
-  --suggest-parallelization \
-  --reduce-redundancy \
-  --estimate-savings
+# Slowest jobs across recent runs of a workflow
+gh run list --workflow ci.yml --limit 20 --json databaseId --jq '.[].databaseId' |
+  while read -r id; do
+    gh run view "$id" --json jobs --jq '.jobs[] | select(.completedAt and .startedAt) |
+      {name, seconds: ((.completedAt | fromdate) - (.startedAt | fromdate))}'
+  done | jq -s 'group_by(.name) | map({job: .[0].name, avg_s: (map(.seconds) | add / length)}) | sort_by(-.avg_s)'
 ```
+
+Then edit the workflow: parallelize independent jobs, add `actions/cache` or `setup-node`'s `cache:`, add `concurrency` with `cancel-in-progress`, and drop duplicate steps.
 
 ### Failure Analysis
 
 ```bash
-# Analyze failed runs using gh CLI
-gh run view ${{ github.run_id }} --json jobs,conclusion | \
-  npx monomind actions analyze-failure \
-    --suggest-fixes \
-    --auto-retry-flaky
+# Latest failed run and the logs of its failed steps
+RUN_ID=$(gh run list --status failure --limit 1 --json databaseId -q '.[0].databaseId')
+gh run view "$RUN_ID" --log-failed
+
+# Rerun only the failed jobs (for a suspected flaky failure)
+gh run rerun "$RUN_ID" --failed
 
 # Create issue for persistent failures
-if [ $? -ne 0 ]; then
+if ! gh run watch "$RUN_ID" --exit-status; then
   gh issue create \
-    --title "CI Failure: Run ${{ github.run_id }}" \
-    --body "Automated analysis detected persistent failures" \
+    --title "CI Failure: Run $RUN_ID" \
+    --body "$(gh run view "$RUN_ID" --log-failed | tail -50)" \
     --label "ci-failure"
 fi
 ```
@@ -158,11 +173,13 @@ fi
 ### Resource Management
 
 ```bash
-# Optimize resource usage
-npx monomind actions resources \
-  --analyze-usage \
-  --suggest-runners \
-  --cost-optimize
+# Actions cache usage and the largest entries
+gh cache list --sort size_in_bytes --order desc --limit 20
+gh api "repos/{owner}/{repo}/actions/cache/usage"
+
+# Billable time per workflow for this month
+gh api "repos/{owner}/{repo}/actions/workflows" --jq '.workflows[].id' |
+  while read -r id; do gh api "repos/{owner}/{repo}/actions/workflows/$id/timing" --jq '.billable'; done
 ```
 
 ## Advanced Workflows
@@ -170,93 +187,77 @@ npx monomind actions resources \
 ### 1. Self-Healing CI/CD
 
 ```yaml
-# Auto-fix common CI failures
-name: Self-Healing Pipeline
-on: workflow_run
+# Collect failure context automatically; the agent proposes the fix
+name: Failure Triage
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
 
 jobs:
-  heal-pipeline:
+  triage:
     if: ${{ github.event.workflow_run.conclusion == 'failure' }}
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      issues: write
     steps:
-      - name: Diagnose and Fix
+      - name: Open issue with failed logs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          npx monomind actions self-heal \
-            --run-id ${{ github.event.workflow_run.id }} \
-            --auto-fix-common \
-            --create-pr-complex
+          RUN=${{ github.event.workflow_run.id }}
+          gh issue create --title "CI failed on ${{ github.event.workflow_run.head_branch }} (run $RUN)" \
+            --label ci-failure \
+            --body "$(gh run view $RUN --log-failed | tail -100)"
 ```
 
 ### 2. Progressive Deployment
 
 ```yaml
-# Intelligent deployment strategy
+# Risk-gated deployment
 name: Smart Deployment
 on:
   push:
     branches: [main]
 
 jobs:
-  progressive-deploy:
+  assess:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Analyze Risk
-        id: risk
-        run: |
-          npx monomind actions deploy-risk \
-            --changes ${{ github.sha }} \
-            --history 30d
+        run: npx -y monomind analyze diff "${{ github.event.before }}..${{ github.sha }}" --risk
 
-      - name: Choose Strategy
-        run: |
-          npx monomind actions deploy-strategy \
-            --risk ${{ steps.risk.outputs.level }} \
-            --auto-execute
+  deploy:
+    needs: assess
+    runs-on: ubuntu-latest
+    environment: production   # required reviewers on the environment gate risky deploys
+    steps:
+      - run: echo "deploy"
 ```
 
 ### 3. Performance Regression Detection
 
 ```yaml
-# Automatic performance testing
+# Compare benchmarks against the base branch
 name: Performance Guard
 on: pull_request
 
 jobs:
-  perf-swarm:
+  perf:
     runs-on: ubuntu-latest
     steps:
-      - name: Performance Analysis
-        run: |
-          npx monomind actions perf-test \
-            --baseline main \
-            --threshold 10% \
-            --auto-profile-regression
-```
-
-## Custom Actions
-
-### Swarm Action Development
-
-```javascript
-// action.yml
-name: "Swarm Custom Action";
-description: "Custom swarm-powered action";
-inputs: task: description: "Task for swarm";
-required: true;
-runs: using: "node16";
-main: "dist/index.js";
-
-// index.js
-const { SwarmAction } = require("monomind");
-
-async function run() {
-  const swarm = new SwarmAction({
-    topology: "mesh",
-    agents: ["analyzer", "optimizer"],
-  });
-
-  await swarm.execute(core.getInput("task"));
-}
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: npm ci
+      - run: npm run bench > pr.txt
+      - run: git checkout ${{ github.event.pull_request.base.sha }} && npm ci && npm run bench > base.txt
+      - run: diff base.txt pr.txt || true
 ```
 
 ## Matrix Strategies
@@ -264,66 +265,54 @@ async function run() {
 ### Dynamic Test Matrix
 
 ```yaml
-# Generate test matrix from code analysis
+# Generate test matrix from the repository layout
 jobs:
   generate-matrix:
+    runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
+      - uses: actions/checkout@v4
       - id: set-matrix
         run: |
-          MATRIX=$(npx monomind actions test-matrix \
-            --detect-frameworks \
-            --optimize-coverage)
+          MATRIX=$(ls -d packages/*/ | jq -R -s -c 'split("\n") | map(select(length > 0)) | {package: .}')
           echo "matrix=${MATRIX}" >> $GITHUB_OUTPUT
 
   test:
     needs: generate-matrix
+    runs-on: ubuntu-latest
     strategy:
-      matrix: ${{fromJson(needs.generate-matrix.outputs.matrix)}}
+      matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: cd ${{ matrix.package }} && npm test
 ```
 
 ### Intelligent Parallelization
 
-```bash
-# Determine optimal parallelization
-npx monomind actions parallel-strategy \
-  --analyze-dependencies \
-  --time-estimates \
-  --cost-aware
-```
+Split jobs that do not depend on each other (lint, typecheck, unit tests), give only real dependencies a `needs:`, and shard long test suites (`vitest --shard=${{ matrix.shard }}/4`).
 
 ## Monitoring & Insights
 
 ### Workflow Analytics
 
 ```bash
-# Analyze workflow performance
-npx monomind actions analytics \
-  --workflow "ci.yml" \
-  --period 30d \
-  --identify-bottlenecks \
-  --suggest-improvements
-```
-
-### Cost Optimization
-
-```bash
-# Optimize GitHub Actions costs
-npx monomind actions cost-optimize \
-  --analyze-usage \
-  --suggest-caching \
-  --recommend-self-hosted
+# Success rate and average duration of a workflow over its last 100 runs
+gh run list --workflow ci.yml --limit 100 --json conclusion,createdAt,updatedAt --jq '{
+  runs: length,
+  success_rate: ((map(select(.conclusion == "success")) | length) / length),
+  avg_minutes: (map(((.updatedAt | fromdate) - (.createdAt | fromdate)) / 60) | add / length)
+}'
 ```
 
 ### Failure Patterns
 
 ```bash
-# Identify failure patterns
-npx monomind actions failure-patterns \
-  --period 90d \
-  --classify-failures \
-  --suggest-preventions
+# Which jobs fail most often
+gh run list --status failure --limit 50 --json databaseId --jq '.[].databaseId' |
+  while read -r id; do
+    gh run view "$id" --json jobs --jq '.jobs[] | select(.conclusion == "failure") | .name'
+  done | sort | uniq -c | sort -rn
 ```
 
 ## Integration Examples
@@ -337,27 +326,28 @@ on: pull_request
 jobs:
   validate:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
     steps:
-      - name: Multi-Agent Validation
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate and report
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Get PR details using gh CLI
-          PR_DATA=$(gh pr view ${{ github.event.pull_request.number }} --json files,labels)
+          RISK=$(npx -y monomind analyze diff "origin/${{ github.base_ref }}..HEAD" --risk --classify)
+          SECRETS=$(npx -y monomind security secrets -p . --depth quick)
 
-          # Run validation with swarm
-          RESULTS=$(npx monomind actions pr-validate \
-            --spawn-agents "linter,tester,security,docs" \
-            --parallel \
-            --pr-data "$PR_DATA")
-
-          # Post results as PR comment
           gh pr comment ${{ github.event.pull_request.number }} \
-            --body "$RESULTS"
+            --body "$(printf '## PR validation\n\n```\n%s\n```\n\n```\n%s\n```' "$RISK" "$SECRETS")"
 ```
 
 ### 2. Release Automation
 
 ```yaml
-name: Intelligent Release
+name: Release
 on:
   push:
     tags: ["v*"]
@@ -365,112 +355,63 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Release Swarm
-        run: |
-          npx monomind actions release \
-            --analyze-changes \
-            --generate-notes \
-            --create-artifacts \
-            --publish-smart
+      - uses: actions/checkout@v4
+      - name: Create release with generated notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "${{ github.ref_name }}" --generate-notes
 ```
 
 ### 3. Documentation Updates
 
-```yaml
-name: Auto Documentation
-on:
-  push:
-    paths: ["src/**"]
-
-jobs:
-  docs:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Documentation Swarm
-        run: |
-          npx monomind actions update-docs \
-            --analyze-changes \
-            --update-api-docs \
-            --check-examples
-```
+Trigger a docs check on source changes (`on: push: paths: ["src/**"]`) that runs the project's own docs build and link checker; the agent updates the prose.
 
 ## Best Practices
 
 ### 1. Workflow Organization
 
-- Use reusable workflows for swarm operations
+- Use reusable workflows (`workflow_call`) for shared steps
 - Implement proper caching strategies
-- Set appropriate timeouts
+- Set appropriate timeouts (`timeout-minutes`)
 - Use workflow dependencies wisely
 
 ### 2. Security
 
-- Store swarm configs in secrets
-- Use OIDC for authentication
-- Implement least-privilege principles
-- Audit swarm operations
+- Store credentials in secrets
+- Use OIDC for cloud authentication
+- Set least-privilege `permissions:` per job
+- Pin third-party actions to a commit SHA
 
 ### 3. Performance
 
-- Cache swarm dependencies
+- Cache dependencies
 - Use appropriate runner sizes
-- Implement early termination
+- Cancel superseded runs with `concurrency`
 - Optimize parallel execution
-
-## Advanced Features
-
-### Predictive Failures
-
-```bash
-# Predict potential failures
-npx monomind actions predict \
-  --analyze-history \
-  --identify-risks \
-  --suggest-preventive
-```
-
-### Workflow Recommendations
-
-```bash
-# Get workflow recommendations
-npx monomind actions recommend \
-  --analyze-repo \
-  --suggest-workflows \
-  --industry-best-practices
-```
-
-### Automated Optimization
-
-```bash
-# Continuously optimize workflows
-npx monomind actions auto-optimize \
-  --monitor-performance \
-  --apply-improvements \
-  --track-savings
-```
 
 ## Debugging & Troubleshooting
 
 ### Debug Mode
 
-```yaml
-- name: Debug Swarm
-  run: |
-    npx monomind actions debug \
-      --verbose \
-      --trace-agents \
-      --export-logs
+```bash
+# Rerun with step debug logging
+gh run rerun "$RUN_ID" --debug
+
+# Trigger a workflow_dispatch run on a branch and follow it
+gh workflow run ci.yml --ref my-branch
+gh run watch "$(gh run list --workflow ci.yml --limit 1 --json databaseId -q '.[0].databaseId')"
 ```
 
 ### Performance Profiling
 
 ```bash
-# Profile workflow performance
-npx monomind actions profile \
-  --workflow "ci.yml" \
-  --identify-slow-steps \
-  --suggest-optimizations
+# Step durations of one run
+gh run view "$RUN_ID" --json jobs --jq '.jobs[] | .name as $j | .steps[] |
+  select(.completedAt and .startedAt) |
+  {job: $j, step: .name, seconds: ((.completedAt | fromdate) - (.startedAt | fromdate))}'
 ```
 
 ## Advanced Swarm Workflow Automation
@@ -526,73 +467,10 @@ mcp__monomind__monoswarm_memory {
 }
 ```
 
-### Dynamic Workflow Generation
-
-```javascript
-// Swarm-powered workflow creation
-const createIntelligentWorkflow = async (repoContext) => {
-  // Initialize workflow generation swarm
-  await mcp__monomind__monoswarm_init({ topology: "hierarchical", maxAgents: 8 });
-
-  // Spawn specialized workflow agents
-  await mcp__monomind__agent_spawn({
-    type: "architect",
-    name: "Workflow Architect",
-  });
-  await mcp__monomind__agent_spawn({ type: "coder", name: "YAML Generator" });
-  await mcp__monomind__agent_spawn({
-    type: "optimizer",
-    name: "Performance Optimizer",
-  });
-  await mcp__monomind__agent_spawn({
-    type: "tester",
-    name: "Workflow Validator",
-  });
-
-  // Create adaptive workflow based on repository analysis
-  const workflow = {
-    name: "Intelligent CI/CD Pipeline",
-    steps: [
-      {
-        name: "Smart Code Analysis",
-        agents: ["analyzer", "security_scanner"],
-        parallel: true,
-      },
-      {
-        name: "Adaptive Testing",
-        agents: ["unit_tester", "integration_tester", "e2e_tester"],
-        strategy: "based_on_changes",
-      },
-      {
-        name: "Intelligent Deployment",
-        agents: ["deployment_manager", "rollback_coordinator"],
-        conditions: ["all_tests_pass", "security_approved"],
-      },
-    ],
-    triggers: ["pull_request", "push_to_main", "scheduled_optimization"],
-  };
-
-  // Store workflow configuration in memory
-  await mcp__monomind__monoswarm_memory({
-    action: "set",
-    key: `workflow/${repoContext.name}/config`,
-    value: {
-      workflow,
-      generated_at: Date.now(),
-      optimization_level: "high",
-      estimated_performance_gain: "40%",
-      cost_reduction: "25%",
-    },
-  });
-
-  return workflow;
-};
-```
-
 ### Continuous Learning and Optimization
 
 ```bash
-# Implement continuous workflow learning
+# Record what worked so later runs of this agent can reuse it
 mcp__monomind__monoswarm_memory {
   action: "set",
   key: "workflow/learning/patterns",
@@ -606,12 +484,7 @@ mcp__monomind__monoswarm_memory {
       "sequential_heavy_operations",
       "inefficient_docker_builds",
       "missing_error_recovery"
-    ],
-    optimization_history: {
-      "build_time_reduction": "45%",
-      "resource_efficiency": "60%",
-      "failure_rate_improvement": "78%"
-    }
+    ]
   }
 }
 
@@ -623,4 +496,4 @@ mcp__monomind__task_create {
 }
 ```
 
-See also: [swarm-pr.md](./swarm-pr.md), [swarm-issue.md](./swarm-issue.md), [sync-coordinator.md](./sync-coordinator.md)
+See also: [monoswarm-pr.md](./monoswarm-pr.md), [monoswarm-issue.md](./monoswarm-issue.md), [sync-coordinator.md](./sync-coordinator.md)

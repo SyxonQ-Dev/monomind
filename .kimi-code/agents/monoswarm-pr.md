@@ -15,25 +15,26 @@ deprecatedBy: pr-manager
 
 Create and manage AI swarms directly from GitHub Pull Requests, enabling seamless integration with your development workflow through intelligent multi-agent coordination.
 
+GitHub work goes through the `gh` CLI. Agent picking uses `monomind pick`, the swarm's topology and roster are recorded with the `monoswarm` MCP tools, and the work is done by subagents spawned with the Task tool. There is no monomind command that creates a swarm from a PR; this agent reads the PR and drives the subagents.
+
 ## Core Features
 
 ### 1. PR-Based Swarm Creation
 
 ```bash
-# Create swarm from PR description using gh CLI
-gh pr view 123 --json body,title,labels,files | npx monomind swarm create-from-pr
+# PR context
+gh pr view 123 --json title,body,labels,files,author,assignees > /tmp/pr-123.json
 
-# Auto-spawn agents based on PR labels
-gh pr view 123 --json labels | npx monomind swarm auto-spawn
-
-# Create swarm with PR context
-gh pr view 123 --json body,labels,author,assignees | \
-  npx monomind swarm init --from-pr-data
+# Pick agents from the PR title and labels
+QUERY=$(jq -r '.title + " " + ([.labels[].name] | join(" "))' /tmp/pr-123.json)
+npx monomind pick -t "$QUERY" --agents --json
 ```
+
+Then record the swarm with `mcp__monomind__monoswarm_init` and spawn the picked agents in one message with the Task tool.
 
 ### 2. PR Comment Commands
 
-Execute swarm commands via PR comments:
+Swarm operations can be requested in PR comments. They are a convention this agent reads, not commands GitHub or monomind execute on their own:
 
 ```markdown
 <!-- In PR comment -->
@@ -44,29 +45,35 @@ Execute swarm commands via PR comments:
 /swarm status
 ```
 
+```bash
+# Read /swarm commands on a PR
+gh pr view 123 --json comments \
+  --jq '.comments[] | select(.body | startswith("/swarm")) | {author: .author.login, body}'
+```
+
 ### 3. Automated PR Workflows
 
 ```yaml
-# .github/workflows/swarm-pr.yml
+# .github/workflows/swarm-pr.yml — labels the PR so the agent picks it up
 name: Swarm PR Handler
 on:
-  pull_request:
-    types: [opened, labeled]
   issue_comment:
     types: [created]
 
 jobs:
   swarm-handler:
+    if: github.event.issue.pull_request && startsWith(github.event.comment.body, '/swarm')
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
     steps:
-      - uses: actions/checkout@v1
-      - name: Handle Swarm Command
+      - name: Queue swarm command
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          if [[ "${{ github.event.comment.body }}" == /swarm* ]]; then
-            npx monomind github handle-comment \
-              --pr ${{ github.event.pull_request.number }} \
-              --comment "${{ github.event.comment.body }}"
-          fi
+          gh pr edit ${{ github.event.issue.number }} --add-label "swarm-requested"
+          gh pr comment ${{ github.event.issue.number }} --body "Swarm command queued"
 ```
 
 ## PR Label Integration
@@ -93,7 +100,11 @@ Map PR labels to agent types:
 # Small PR (< 100 lines): ring topology
 # Medium PR (100-500 lines): mesh topology
 # Large PR (> 500 lines): hierarchical topology
-npx monomind github pr-topology --pr 123
+LINES=$(gh pr view 123 --json additions,deletions --jq '.additions + .deletions')
+if   [ "$LINES" -lt 100 ]; then TOPOLOGY=ring
+elif [ "$LINES" -le 500 ]; then TOPOLOGY=mesh
+else TOPOLOGY=hierarchical; fi
+echo "$TOPOLOGY"
 ```
 
 ## PR Swarm Commands
@@ -101,50 +112,42 @@ npx monomind github pr-topology --pr 123
 ### Initialize from PR
 
 ```bash
-# Create swarm with PR context using gh CLI
 PR_DIFF=$(gh pr diff 123)
 PR_INFO=$(gh pr view 123 --json title,body,labels,files,reviews)
 
-npx monomind github pr-init 123 \
-  --auto-agents \
-  --pr-data "$PR_INFO" \
-  --diff "$PR_DIFF" \
-  --analyze-impact
+# Check out the PR and assess the change
+gh pr checkout 123
+npx monomind analyze diff origin/main..HEAD --risk --classify
+
+# Share the context with every subagent
+npx monomind memory store -k "pr/123/context" -n prs --upsert --value "$PR_INFO"
 ```
 
 ### Progress Updates
 
 ```bash
-# Post swarm progress to PR using gh CLI
-PROGRESS=$(npx monomind github pr-progress 123 --format markdown)
+# The agent writes the progress summary; post it to the PR
+gh pr comment 123 --body-file /tmp/pr-123-progress.md
 
-gh pr comment 123 --body "$PROGRESS"
-
-# Update PR labels based on progress
-if [[ $(echo "$PROGRESS" | grep -o '[0-9]\+%' | sed 's/%//') -gt 90 ]]; then
-  gh pr edit 123 --add-label "ready-for-review"
-fi
+# Update PR labels once the swarm's tasks are done
+gh pr edit 123 --add-label "ready-for-review" --remove-label "swarm-in-progress"
 ```
 
 ### Code Review Integration
 
 ```bash
-# Create review agents with gh CLI integration
-PR_FILES=$(gh pr view 123 --json files --jq '.files[].path')
+PR_FILES=$(gh pr diff 123 --name-only)
 
-# Run swarm review
-REVIEW_RESULTS=$(npx monomind github pr-review 123 \
-  --agents "security,performance,style" \
-  --files "$PR_FILES")
+# Review subagents (security, performance, style) return findings as JSON:
+# [{ "path": "...", "line": 10, "body": "..." }]
+COMMIT=$(gh pr view 123 --json headRefOid -q .headRefOid)
 
-# Post review comments using gh CLI
-echo "$REVIEW_RESULTS" | jq -r '.comments[]' | while read -r comment; do
-  FILE=$(echo "$comment" | jq -r '.file')
-  LINE=$(echo "$comment" | jq -r '.line')
-  BODY=$(echo "$comment" | jq -r '.body')
-
-  gh pr review 123 --comment --body "$BODY"
-done
+jq -n --arg commit "$COMMIT" --slurpfile c /tmp/review-123.json '{
+  commit_id: $commit,
+  event: "COMMENT",
+  body: "Swarm review",
+  comments: ($c[0] | map({path, line, side: "RIGHT", body}))
+}' | gh api --method POST "repos/{owner}/{repo}/pulls/123/reviews" --input -
 ```
 
 ## Advanced Features
@@ -152,29 +155,32 @@ done
 ### 1. Multi-PR Swarm Coordination
 
 ```bash
-# Coordinate swarms across related PRs
-npx monomind github multi-pr \
-  --prs "123,124,125" \
-  --strategy "parallel" \
-  --share-memory
+# Files touched by more than one of the related PRs
+for pr in 123 124 125; do gh pr diff $pr --name-only; done | sort | uniq -d
 ```
 
 ### 2. PR Dependency Analysis
 
 ```bash
-# Analyze PR dependencies
-npx monomind github pr-deps 123 \
-  --spawn-agents \
-  --resolve-conflicts
+# Stacked PRs: what each PR is based on
+gh pr list --json number,headRefName,baseRefName \
+  --jq '.[] | "#\(.number): \(.headRefName) -> \(.baseRefName)"'
+
+# Merge conflicts
+gh pr view 123 --json mergeable,mergeStateStatus
 ```
 
 ### 3. Automated PR Fixes
 
 ```bash
-# Auto-fix PR issues
-npx monomind github pr-fix 123 \
-  --issues "lint,test-failures" \
-  --commit-fixes
+# Failing checks and their logs
+gh pr checks 123
+RUN_ID=$(gh run list --branch "$(gh pr view 123 --json headRefName -q .headRefName)" --limit 1 --json databaseId -q '.[0].databaseId')
+gh run view "$RUN_ID" --log-failed
+
+# After a subagent fixes lint/test failures on the checked-out branch
+git commit -am "fix: address lint and test failures"
+git push
 ```
 
 ## Best Practices
@@ -199,54 +205,19 @@ npx monomind github pr-fix 123 \
 
 ### 2. Status Checks
 
-```yaml
-# Require swarm completion before merge
-required_status_checks:
-  contexts:
-    - "swarm/tasks-complete"
-    - "swarm/tests-pass"
-    - "swarm/review-approved"
-```
+Make CI jobs required checks on the base branch (`gh api --method PUT repos/{owner}/{repo}/branches/main/protection ...`) so a PR cannot merge before the swarm's tests and reviews pass. See where a PR stands with `gh pr checks 123`.
 
 ### 3. PR Merge Automation
 
 ```bash
-# Auto-merge when swarm completes using gh CLI
-# Check swarm completion status
-SWARM_STATUS=$(npx monomind github pr-status 123)
+# Merge once all tasks are ticked and reviews are in
+OPEN_TASKS=$(gh pr view 123 --json body --jq '.body' | grep -c '^- \[ \]')
+APPROVALS=$(gh pr view 123 --json reviews --jq '[.reviews[] | select(.state == "APPROVED")] | length')
 
-if [[ "$SWARM_STATUS" == "complete" ]]; then
-  # Check review requirements
-  REVIEWS=$(gh pr view 123 --json reviews --jq '.reviews | length')
-
-  if [[ $REVIEWS -ge 2 ]]; then
-    # Enable auto-merge
-    gh pr merge 123 --auto --squash
-  fi
+if [[ $OPEN_TASKS -eq 0 && $APPROVALS -ge 2 ]]; then
+  # Enable auto-merge
+  gh pr merge 123 --auto --squash
 fi
-```
-
-## Webhook Integration
-
-### Setup Webhook Handler
-
-```javascript
-// webhook-handler.js
-const { createServer } = require("http");
-const { execSync } = require("child_process");
-
-createServer((req, res) => {
-  if (req.url === "/github-webhook") {
-    const event = JSON.parse(body);
-
-    if (event.action === "opened" && event.pull_request) {
-      execSync(`npx monomind github pr-init ${event.pull_request.number}`);
-    }
-
-    res.writeHead(200);
-    res.end("OK");
-  }
-}).listen(3000);
 ```
 
 ## Examples
@@ -255,30 +226,26 @@ createServer((req, res) => {
 
 ```bash
 # PR #456: Add user authentication
-npx monomind github pr-init 456 \
-  --topology hierarchical \
-  --agents "architect,coder,tester,security" \
-  --auto-assign-tasks
+gh pr checkout 456
+npx monomind pick -t "add user authentication" --agents --json
+# Spawn: system-architect + coder + tester + Security Engineer (hierarchical)
 ```
 
 ### Bug Fix PR
 
 ```bash
 # PR #789: Fix memory leak
-npx monomind github pr-init 789 \
-  --topology mesh \
-  --agents "debugger,analyst,tester" \
-  --priority high
+gh pr checkout 789
+gh pr edit 789 --add-label "priority:high"
+# Spawn: researcher + Performance Benchmarker + tester (mesh)
 ```
 
 ### Documentation PR
 
 ```bash
 # PR #321: Update API docs
-npx monomind github pr-init 321 \
-  --topology ring \
-  --agents "researcher,writer,reviewer" \
-  --validate-links
+gh pr checkout 321
+# Spawn: researcher + Technical Writer + reviewer (ring)
 ```
 
 ## Metrics & Reporting
@@ -286,19 +253,12 @@ npx monomind github pr-init 321 \
 ### PR Swarm Analytics
 
 ```bash
-# Generate PR swarm report
-npx monomind github pr-report 123 \
-  --metrics "completion-time,agent-efficiency,token-usage" \
-  --format markdown
-```
-
-### Dashboard Integration
-
-```bash
-# Export to GitHub Insights
-npx monomind github export-metrics \
-  --pr 123 \
-  --to-insights
+# Time from open to merge, review count and size
+gh pr view 123 --json createdAt,mergedAt,reviews,additions,deletions --jq '{
+  hours_to_merge: (((.mergedAt | fromdate) - (.createdAt | fromdate)) / 3600),
+  reviews: (.reviews | length),
+  size: (.additions + .deletions)
+}'
 ```
 
 ## Security Considerations
@@ -428,4 +388,4 @@ mcp__monomind__monoswarm_memory {
 }
 ```
 
-See also: [swarm-issue.md](./swarm-issue.md), [sync-coordinator.md](./sync-coordinator.md), [workflow-automation.md](./workflow-automation.md)
+See also: [monoswarm-issue.md](./monoswarm-issue.md), [sync-coordinator.md](./sync-coordinator.md), [workflow-automation.md](./workflow-automation.md)
