@@ -32,7 +32,7 @@ export const pretrainCommand: Command = {
     },
     {
       name: 'with-embeddings',
-      description: 'Index documents for semantic search during pretraining',
+      description: 'Index documents for semantic search during the scan',
       type: 'boolean',
       default: true,
     },
@@ -51,7 +51,7 @@ export const pretrainCommand: Command = {
     },
   ],
   examples: [
-    { command: 'monomind hooks pretrain', description: 'Pretrain with embeddings indexing' },
+    { command: 'monomind hooks pretrain', description: 'Scan the repository and index documents' },
     {
       command: 'monomind hooks pretrain -p ../my-project --depth deep',
       description: 'Deep analysis of specific project',
@@ -109,7 +109,7 @@ export const pretrainCommand: Command = {
         fileTypes: fileTypes.split(',').map((t: string) => t.trim()),
       });
 
-      spinner.succeed('Pretraining completed');
+      spinner.succeed('Repository scan completed');
 
       if (ctx.flags.format === 'json') {
         output.printJson(result);
@@ -151,7 +151,7 @@ export const pretrainCommand: Command = {
       });
 
       output.writeln();
-      output.printSuccess('Repository intelligence bootstrapped successfully');
+      output.printSuccess('Repository scan stored in the memory store and pattern log');
       if (withEmbeddings && result.stats.documentsIndexed !== undefined) {
         output.writeln(
           output.dim('  Semantic search enabled: Use "embeddings search -q <query>" to search'),
@@ -160,9 +160,9 @@ export const pretrainCommand: Command = {
 
       return { success: true, data: result };
     } catch (error) {
-      spinner.fail('Pretraining failed');
+      spinner.fail('Repository scan failed');
       if (error instanceof MCPClientError) {
-        output.printError(`Pretraining error: ${error.message}`);
+        output.printError(`Repository scan error: ${error.message}`);
       } else {
         output.printError(`Unexpected error: ${String(error)}`);
       }

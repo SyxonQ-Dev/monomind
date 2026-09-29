@@ -82,7 +82,7 @@ Monomind is a domain-driven design architecture for multi-agent AI coordination 
 | Topology | ${options.runtime.topology} |
 | Max Agents | ${options.runtime.maxAgents} |
 | Memory Backend | ${options.runtime.memoryBackend} |
-| \`neural.enabled\` flag | ${options.runtime.enableNeural ? 'On' : 'Off'} (config only; no model is trained) |
+| \`neural.enabled\` | ${options.runtime.enableNeural ? 'On' : 'Off'} (session start loads the local pattern store only when on; no model is trained) |
 
 ---
 
