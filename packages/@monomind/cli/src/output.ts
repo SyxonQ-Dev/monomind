@@ -3,6 +3,7 @@
  * Advanced output formatting with tables, progress bars, and colors
  */
 
+import { Writable } from 'node:stream';
 import { Progress } from './output-progress.js';
 import { Spinner } from './output-spinner.js';
 import { renderTable, stripAnsi } from './output-table.js';
@@ -165,6 +166,43 @@ export class OutputFormatter {
     const previous = this.outputStream;
     this.outputStream = stream;
     return previous;
+  }
+
+  private reserveDepth = 0;
+  private streamBeforeReserve: NodeJS.WriteStream | undefined;
+
+  /**
+   * Run `fn` with stdout reserved for a machine-readable document
+   * (`-o json|sarif`, `--json`): regular output goes to stderr meanwhile, or
+   * nowhere under --quiet. Print the document itself with printDocument().
+   *
+   * The redirect is process-wide on this formatter (the exported `output`
+   * singleton), so anything else writing through it while `fn` runs is
+   * redirected too. Nested or overlapping calls are safe: a depth counter
+   * keeps the first call's redirect and restores the original stream only
+   * when the last one exits, even if `fn` throws.
+   */
+  async reserveStdout<T>(reserve: boolean, fn: () => Promise<T>): Promise<T> {
+    if (!reserve) return fn();
+    if (this.reserveDepth++ === 0) {
+      const sink = this.isQuiet()
+        ? (new Writable({ write: (_c, _e, done) => done() }) as unknown as NodeJS.WriteStream)
+        : process.stderr;
+      this.streamBeforeReserve = this.setOutputStream(sink);
+    }
+    try {
+      return await fn();
+    } finally {
+      if (--this.reserveDepth === 0 && this.streamBeforeReserve) {
+        this.setOutputStream(this.streamBeforeReserve);
+        this.streamBeforeReserve = undefined;
+      }
+    }
+  }
+
+  /** Print a machine-readable document on stdout, even inside reserveStdout(). */
+  printDocument(data: unknown): void {
+    process.stdout.write(`${this.json(data)}\n`);
   }
 
   write(text: string): void {
