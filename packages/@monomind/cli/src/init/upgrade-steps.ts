@@ -135,12 +135,9 @@ export function mergeSettingsForUpgrade(
         taskCompleted: { enabled: true, trainPatterns: true, notifyLead: true },
       },
     },
-    memory: {
-      ...existingMemory,
-      learningBridge: existingMemory.learningBridge ?? { enabled: true },
-      memoryGraph: existingMemory.memoryGraph ?? { enabled: true },
-      agentScopes: existingMemory.agentScopes ?? { enabled: true },
-    },
+    // Kept as-is: learningBridge/memoryGraph/agentScopes from older installs
+    // are carried through untouched, but no longer added (nothing reads them).
+    memory: { ...existingMemory },
   };
 
   return merged;

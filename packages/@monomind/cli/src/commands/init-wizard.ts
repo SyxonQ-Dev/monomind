@@ -258,18 +258,6 @@ export const wizardCommand: Command = {
       });
       options.runtime.enableNeural = enableNeural;
 
-      if (memoryBackend === 'lancedb' || memoryBackend === 'hybrid') {
-        const enableSelfLearning = await confirm({
-          message: 'Enable agent memory scopes? (project/local/user)',
-          default: true,
-        });
-        options.runtime.enableLearningBridge = enableSelfLearning && enableNeural;
-        options.runtime.enableAgentScopes = enableSelfLearning;
-      } else {
-        options.runtime.enableLearningBridge = false;
-        options.runtime.enableAgentScopes = false;
-      }
-
       const enableEmbeddings = await confirm({
         message: 'Enable ONNX embedding system with hyperbolic support?',
         default: true,
@@ -435,10 +423,6 @@ export const wizardCommand: Command = {
           {
             setting: 'neural.enabled flag',
             value: options.runtime.enableNeural ? 'Enabled' : 'Disabled',
-          },
-          {
-            setting: 'Agent Memory Scopes',
-            value: options.runtime.enableAgentScopes ? 'Enabled' : 'Disabled',
           },
           {
             setting: 'Embeddings',
