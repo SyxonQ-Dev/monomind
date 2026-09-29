@@ -86,7 +86,8 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    progress/finished events for native `Task`/`Agent` subagents, joined to
  *    the call's `tool_activity` id; a subagent's own text is an `assistant`
  *    event with `parent_tool_use_id` and stays out of `result.text` (§3.2.1,
- *    rev 17, issue #387)
+ *    rev 17, issue #387). Rev 24: other runtimes get `started`/`finished`
+ *    synthesized from a `kind:"task"` tool call's start and end
  *  - `agent-exec-full-access-any` — `agent exec --access full` on every
  *    runtime whose `agent scan --json` entry has `full_access: true` (not
  *    only claude), with process-group kill, `background_pids` and the audit

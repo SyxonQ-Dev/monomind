@@ -47,6 +47,13 @@
  * Rev 19: every start carries `kind` (tool-kind.ts) — the runner's own
  * `AgentMessage.kind` when set, else derived from the tool name — and an
  * end carries `exit_code` when the runner reported one.
+ *
+ * Rev 24 (#387, doc §3.2.1): with `synthesizeSubagents`, a `kind:"task"`
+ * call with a real id also yields `subagent started` right after its start
+ * and `subagent finished` right after its end — the same shape claude's
+ * SDK-based events have, at lower fidelity (no `progress`, no `usage`).
+ * agent-exec.ts turns it on for every runtime not in
+ * NATIVE_SUBAGENT_RUNTIMES, so claude never gets both.
  */
 
 import type { AgentMessage } from './agent-runner.js';
@@ -62,6 +69,12 @@ const MAX_EVENT_BYTES = 55 * 1024;
 /** The mcp__org__ prefix the Claude SDK reports for a bridged (`--tools
  *  stdio`) tool call — mirrors agent-exec.ts's own `allowedToolNames`. */
 const BRIDGED_PREFIX = 'mcp__org__';
+/** Runtimes whose runner yields real `subagent` AgentMessages (claude: the
+ *  Agent SDK's task_* messages, agent-runner-claude-subagent.ts). Every other
+ *  runtime gets them synthesized from its task-kind tool calls (rev 24). */
+export const NATIVE_SUBAGENT_RUNTIMES: ReadonlySet<string> = new Set(['claude']);
+/** Cap on a synthesized `finished.summary` (the task call's output). */
+const MAX_SUMMARY_CHARS = 500;
 
 function capString(s: string, maxBytes = MAX_FIELD_BYTES): { value: string; truncated: boolean } {
   if (Buffer.byteLength(s, 'utf8') <= maxBytes) return { value: s, truncated: false };
@@ -152,6 +165,8 @@ export class ToolActivityTracker {
    *  and vendor lightweight liveness signals alike) — the "number of native
    *  tool calls" the full-access audit log records per turn (#360). */
   private startCount = 0;
+  /** Task-kind ids a synthesized `subagent started` was emitted for. */
+  private subagents = new Set<string>();
 
   /** `fidelity` is the runtime's own `RunnerSpec.toolActivityFidelity`
    *  (runner-registry.ts) — gates the best-effort vendor-lightweight
@@ -161,6 +176,7 @@ export class ToolActivityTracker {
   constructor(
     private emit: (ev: Record<string, unknown>) => void,
     private fidelity: 'full' | 'start-only' | 'none' = 'full',
+    private synthesizeSubagents = false,
   ) {}
 
   /** Wraps a canUseTool so a `deny` decision is also recorded by id, purely
@@ -186,6 +202,7 @@ export class ToolActivityTracker {
       if (isBridgedToolName(m.tool)) return; // bridged: tool_call/tool_result cover it (§4)
       this.open.set(m.tool_use_id, m.tool);
       this.startCount++;
+      const kind = toolKind(m.tool, m.kind);
       this.emit(
         shrinkToFit({
           v: 1,
@@ -193,11 +210,12 @@ export class ToolActivityTracker {
           id: m.tool_use_id,
           phase: 'start',
           name: m.tool,
-          kind: toolKind(m.tool, m.kind),
+          kind,
           input: capInput((m.input ?? {}) as Record<string, unknown>),
           parent_tool_use_id: m.parent_tool_use_id ?? null,
         }),
       );
+      if (kind === 'task' && this.synthesizeSubagents) this.subagentStarted(m.tool_use_id, m.input);
       return;
     }
     // Vendor lightweight liveness signal (grok/copilot/pi/...): no id to
@@ -241,6 +259,47 @@ export class ToolActivityTracker {
         ...(typeof m.exit_code === 'number' ? { exit_code: m.exit_code } : {}),
       }),
     );
+    const status = denied ? 'denied' : m.is_error === true ? 'failed' : 'completed';
+    this.subagentFinished(id, status, m.text);
+  }
+
+  /** Rev 24: `subagent started` for a task-kind call. The optional fields
+   *  come only from input keys the runtime's task tool really has:
+   *  `subagent_type` (opencode), `description` (opencode, dsh), `prompt`
+   *  (opencode, dsh) or `task` (cline's spawn_agent/team_* delegation text). */
+  private subagentStarted(id: string, input: Record<string, unknown> | undefined): void {
+    this.subagents.add(id);
+    const text = (v: unknown): string | undefined =>
+      typeof v === 'string' && v ? capString(v).value : undefined;
+    const fields: Record<string, string | undefined> = {
+      subagent_type: text(input?.subagent_type),
+      description: text(input?.description),
+      prompt: text(input?.prompt) ?? text(input?.task),
+    };
+    this.emit({
+      v: 1,
+      type: 'subagent',
+      phase: 'started',
+      id,
+      tool_use_id: id,
+      ...Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined)),
+    });
+  }
+
+  /** Rev 24: `subagent finished` for a synthesized start; `summary` is the
+   *  call's output cut to MAX_SUMMARY_CHARS, omitted when empty. */
+  private subagentFinished(id: string, status: string, output?: string): void {
+    if (!this.subagents.delete(id)) return;
+    const summary = output ? output.slice(0, MAX_SUMMARY_CHARS) : '';
+    this.emit({
+      v: 1,
+      type: 'subagent',
+      phase: 'finished',
+      id,
+      tool_use_id: id,
+      status,
+      ...(summary ? { summary } : {}),
+    });
   }
 
   /** Total `tool_activity` "start" events emitted so far this turn — the
@@ -261,6 +320,7 @@ export class ToolActivityTracker {
         ok: false,
         cancelled: true,
       });
+      this.subagentFinished(id, 'stopped');
     }
     this.open.clear();
   }

@@ -4,6 +4,10 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Added
+
+- **`agent exec` reports subagents on every runtime, not only claude** ([#387](https://github.com/monoes/monomind/issues/387), capability `agent-exec-subagent-events`, agent-exec protocol rev 24). On any other runtime, a tool call whose `tool_activity` has `kind:"task"` is now followed by a `subagent` `started` event, and its end by `finished` with `status` (`completed`, `failed`, `denied`, or `stopped` on cancel/timeout) and a `summary` of up to 500 characters of its output. `id` and `tool_use_id` are the call's `tool_activity` id. The events are synthesized from `tool_activity`, so they have no `progress` phase and no `usage`. opencode (`task`), cline (`spawn_agent`, `team_*`) and dsh (`subagent`) mark such calls themselves; other runtimes get `task` from the shared tool-name table (`Task`, `Agent`, `spawn_subagent`, `invoke_subagent`, `browser_subagent`, …). claude keeps its SDK-based events and gets no duplicates. New golden fixture `doc/agent-exec-protocol/fixtures/subagent-synth.ndjson`.
+
 ### Changed
 
 - **The dashboard no longer starts at every session start unless you opt in** ([#423](https://github.com/monoes/monomind/issues/423)). The SessionStart hook `control-start.cjs` started the Control Room server (:4242) for every initialised project, and the servers stayed resident: one machine had 8, two at 0.7–0.9 GB RSS. The hook now does nothing, and prints nothing, unless `MONOMIND_DASHBOARD_AUTOSTART=1` is set or `.monomind/dashboard.json` has `{"autostart": true}` (written by the new `monomind init --dashboard`); `MONOMIND_DASHBOARD_AUTOSTART=0` turns it off for a project that opted in. A server that is already running is left alone. `monomind ui` starts it by hand and `monomind org run` still starts it unless `MONOMIND_DASHBOARD_AUTOSTART=0`. **Existing projects:** the hook ships with the package helpers, so updating turns auto-start off there too; run `monomind init --dashboard` in a project to keep it. Without a running dashboard the per-prompt Second Brain lookup uses its keyword fallback.
