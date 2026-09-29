@@ -1,4 +1,4 @@
-# Agent Exec Protocol — v1 (rev 24) <!-- TODO-REV: renumber if #387 lands first -->
+# Agent Exec Protocol — v1 (rev 25)
 
 - **Status**: Implemented (Phase 0 of the mono-agent delegation plan — see
   `mono-agent:docs/plans/local-agent-monomind-delegation.md`)
@@ -6,7 +6,7 @@
   the Coder mode threat model, the `--access full` guardrails (root refusal, no transitive
   escalation, env hygiene, audit log), what callers own, and residual risks (issue #360).
 - **Revision history**:
-  - rev 24 <!-- TODO-REV --> (2026-09-29): **`agent test --json` takes `--sandbox` and `--env`**
+  - rev 25 (2026-09-29): **`agent test --json` takes `--sandbox` and `--env`**
     (issue #474) — new capability `agent-test-sandbox`. `monomind agent test <id> --json` (§13)
     accepts `--sandbox read-only|workspace-write|full` and repeatable `--env KEY=V` with the same
     meaning and validation as `agent exec` (§3.1). The result gains `native_sandbox`: what the
@@ -1178,7 +1178,7 @@ temporary cwd that is removed afterwards, then prints a single JSON object on st
 | `cost_usd` | The runtime's reported cost; when it reports none, an estimate from monomind's pricing table; `null` when neither exists |
 | `cost_estimated` | `true` when `cost_usd` is the pricing-table estimate |
 | `runtime_version` | From the runtime's install metadata, as `agent scan` reads it (§6); `null` when unknown |
-| `native_sandbox` | rev 24 <!-- TODO-REV -->, capability `agent-test-sandbox`. The vendor CLI's sandbox for this turn, from the `start` event's `native_sandbox` (§3.2): `read-only`, `workspace-write`, `full`, `none` or `monomind`. `null` when the turn never started (missing binary, unsupported `--sandbox`) |
+| `native_sandbox` | rev 25, capability `agent-test-sandbox`. The vendor CLI's sandbox for this turn, from the `start` event's `native_sandbox` (§3.2): `read-only`, `workspace-write`, `full`, `none` or `monomind`. `null` when the turn never started (missing binary, unsupported `--sandbox`) |
 | `error` | `null`, or `{code, message, login_hint?}` for a failed status. `login_hint` comes with `auth` |
 
 | `status` | Meaning | Exit |
@@ -1193,7 +1193,7 @@ temporary cwd that is removed afterwards, then prints a single JSON object on st
 | `missing_binary` | The runtime's CLI is not installed | 1 |
 | `error` | Anything else; `error.code` keeps the §3.4 code (`runner-error`, `no-runner`, …) | 1 |
 
-**`--sandbox` and `--env`** (rev 24 <!-- TODO-REV -->, capability `agent-test-sandbox`, issue
+**`--sandbox` and `--env`** (rev 25, capability `agent-test-sandbox`, issue
 #474) work as in `agent exec` (§3.1): `--sandbox read-only|workspace-write|full` picks the vendor
 CLI's own sandbox where `agent scan --json` lists the mode in `sandbox_modes`, and `--env KEY=V`
 (repeatable) adds to the agent process's environment. The turn's access stays `scoped` whatever
