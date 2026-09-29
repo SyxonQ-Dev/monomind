@@ -33,7 +33,7 @@ export const stopCommand: Command = {
 
     if (ctx.interactive && !force) {
       const confirmed = await confirm({
-        message: `Stop swarm ${swarmId}? Progress will be saved.`,
+        message: `Mark swarm ${swarmId} terminated?`,
         default: false,
       });
 

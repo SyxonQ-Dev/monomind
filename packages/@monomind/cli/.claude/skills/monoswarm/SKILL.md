@@ -1,6 +1,6 @@
 ---
 name: monoswarm
-description: Deprecated, removed in 2.21.0 — Coordinate in-process multi-agent work with monomind — topology selection, agent lifecycle, shared memory, and vote-based consensus. Use when scaling beyond a single agent on tasks with clear decomposition, or when a decision needs a recorded vote before work proceeds.
+description: Deprecated, removed in 2.21.0 — records monoswarm topology, roster, shared memory and votes in a state file; starts no agents. Use the Task tool or `monomind org run` instead.
 ---
 
 # Monoswarm

@@ -11,6 +11,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AUTOPILOT_DEPRECATION,
+  DEPRECATED_TOOL_PREFIX,
   MONOSWARM_AUTOPILOT_REMOVAL_VERSION,
   MONOSWARM_DEPRECATION,
 } from '../deprecations.js';
@@ -132,17 +133,50 @@ describe('autopilot CLI deprecation notice (#418)', () => {
   });
 });
 
+describe('`monomind start` / `start stop` touch monoswarm and say so (#418)', () => {
+  const initProject = () => {
+    fs.mkdirSync(path.join(tmpCwd, '.monomind'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpCwd, '.monomind', 'config.yaml'),
+      'monoswarm:\n  topology: mesh\n',
+    );
+  };
+
+  it('start prints the notice on stderr and no `monoswarm status` hint', async () => {
+    initProject();
+    await run('start');
+    expect(stderr).toContain(MONOSWARM_DEPRECATION);
+    expect(stdout).not.toContain(MONOSWARM_DEPRECATION);
+    expect(stdout).not.toContain('monoswarm status');
+    expect(stdout + stderr).not.toMatch(/Initializing v1 swarm|Swarm initialized/);
+    expect(stdout + stderr).toMatch(/no agents started/);
+  });
+
+  it('start -Q suppresses the notice', async () => {
+    initProject();
+    await run('start', '-Q');
+    expect(stderr).not.toContain(MONOSWARM_DEPRECATION);
+  });
+
+  it('start stop prints the notice and says it marks the state terminated', async () => {
+    initProject();
+    await run('start', 'stop', '--force');
+    expect(stderr).toContain(MONOSWARM_DEPRECATION);
+    expect(stdout + stderr).not.toMatch(/Swarm stopped|Swarm was not running/);
+  });
+});
+
 describe('monoswarm/autopilot MCP tools are marked deprecated (#418)', () => {
-  it('every description carries the deprecation', () => {
-    expect(monoswarmTools.length).toBeGreaterThan(0);
-    for (const tool of monoswarmTools) {
-      expect(tool.description, tool.name).toMatch(/^DEPRECATED: /);
-      expect(tool.description, tool.name).toContain(MONOSWARM_DEPRECATION);
-    }
-    expect(autopilotTools.length).toBeGreaterThan(0);
-    for (const tool of autopilotTools) {
-      expect(tool.description, tool.name).toMatch(/^DEPRECATED: /);
-      expect(tool.description, tool.name).toContain(AUTOPILOT_DEPRECATION);
+  it('every description starts with the short deprecation prefix', () => {
+    expect(DEPRECATED_TOOL_PREFIX).toContain(MONOSWARM_AUTOPILOT_REMOVAL_VERSION);
+    expect(DEPRECATED_TOOL_PREFIX.length).toBeLessThan(80);
+    expect(monoswarmTools).toHaveLength(13);
+    expect(autopilotTools).toHaveLength(8);
+    for (const tool of [...monoswarmTools, ...autopilotTools]) {
+      expect(tool.description.startsWith(`${DEPRECATED_TOOL_PREFIX} `), tool.name).toBe(true);
+      // The full notice lives in the result, not the description.
+      expect(tool.description, tool.name).not.toContain(MONOSWARM_DEPRECATION);
+      expect(tool.description, tool.name).not.toContain(AUTOPILOT_DEPRECATION);
     }
   });
 

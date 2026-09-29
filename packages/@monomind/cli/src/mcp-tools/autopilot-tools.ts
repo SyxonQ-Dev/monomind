@@ -32,7 +32,7 @@ function ok(data: unknown) {
 const autopilotStatus: MCPTool = {
   name: 'autopilot_status',
   description:
-    'Get autopilot state including enabled status, iteration count, task progress, and learning metrics.',
+    'Get the recorded autopilot state: enabled flag, iteration count, limits, and completion counts over locally discovered task files.',
   category: 'autopilot',
   inputSchema: { type: 'object', properties: {} },
   handler: async () => {
@@ -59,7 +59,7 @@ const autopilotStatus: MCPTool = {
 const autopilotEnable: MCPTool = {
   name: 'autopilot_enable',
   description:
-    'Enable autopilot persistent completion. Agents will be re-engaged when tasks remain incomplete.',
+    'Set the autopilot enabled flag in its state file and reset the iteration counter. While it is set, `monomind autopilot check` answers CONTINUE with a prompt listing incomplete local tasks; nothing re-engages agents unless a hook calls that check.',
   category: 'autopilot',
   inputSchema: { type: 'object', properties: {} },
   handler: async () => {
@@ -79,7 +79,8 @@ const autopilotEnable: MCPTool = {
 
 const autopilotDisable: MCPTool = {
   name: 'autopilot_disable',
-  description: 'Disable autopilot. Agents will be allowed to stop even if tasks remain.',
+  description:
+    'Clear the autopilot enabled flag in its state file, so `monomind autopilot check` answers ALLOW STOP.',
   category: 'autopilot',
   inputSchema: { type: 'object', properties: {} },
   handler: async () => {

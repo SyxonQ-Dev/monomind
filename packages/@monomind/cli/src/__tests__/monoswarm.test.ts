@@ -474,10 +474,14 @@ describe('monoswarm status reads real on-disk state', () => {
       strategy: 'development',
       hasActiveSwarm: true,
     });
-    // agents-1/2 count as active (idle|busy), agent-3 (terminated) doesn't
-    expect((result?.data as { agents: { total: number; active: number } }).agents).toMatchObject({
+    // agent-2 (busy) is active, agent-1 (idle) is idle, agent-3 (terminated)
+    // counts only toward the total
+    expect(
+      (result?.data as { agents: { total: number; active: number; idle: number } }).agents,
+    ).toMatchObject({
       total: 3,
-      active: 2,
+      active: 1,
+      idle: 1,
     });
   });
 

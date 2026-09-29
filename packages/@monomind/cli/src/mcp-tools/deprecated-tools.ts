@@ -1,9 +1,11 @@
 /**
  * Marks a family of MCP tools deprecated (#418): the description starts with
- * a `DEPRECATED:` note and every result carries a `deprecated` field. The
- * tools keep working until their removal release.
+ * a short `DEPRECATED (removed in …)` prefix and every result carries the full
+ * notice in a `deprecated` field. The tools keep working until their removal
+ * release.
  */
 
+import { DEPRECATED_TOOL_PREFIX } from '../deprecations.js';
 import type { MCPTool, MCPToolResult } from './types.js';
 
 function isContentResult(value: unknown): value is MCPToolResult {
@@ -40,7 +42,7 @@ export function withDeprecatedField(result: unknown, notice: string): unknown {
 export function deprecateTools(tools: MCPTool[], notice: string): MCPTool[] {
   return tools.map((tool) => ({
     ...tool,
-    description: `DEPRECATED: ${tool.description} ${notice}`,
+    description: `${DEPRECATED_TOOL_PREFIX} ${tool.description}`,
     handler: async (input, context) =>
       withDeprecatedField(await tool.handler(input, context), notice),
   }));

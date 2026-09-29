@@ -60,7 +60,10 @@ export function getSwarmStatus(swarmId?: string) {
 
   // Count agents from the MCP-canonical agent store (the same physical file
   // agent_spawn writes to — see getAgentStoreFile()).
+  // `busy` records count as active and `idle` records as idle; any other
+  // status (e.g. terminated) counts only toward the total.
   let activeAgents = 0;
+  let idleAgents = 0;
   let totalAgents = 0;
   const agentStoreFile = getAgentStoreFile();
   if (fs.existsSync(agentStoreFile)) {
@@ -71,8 +74,10 @@ export function getSwarmStatus(swarmId?: string) {
         if (agentStore?.agents && typeof agentStore.agents === 'object') {
           for (const agent of Object.values(agentStore.agents) as Array<Record<string, unknown>>) {
             totalAgents++;
-            if (agent.status === 'idle' || agent.status === 'busy') {
+            if (agent.status === 'busy') {
               activeAgents++;
+            } else if (agent.status === 'idle') {
+              idleAgents++;
             }
           }
         }
@@ -164,7 +169,7 @@ export function getSwarmStatus(swarmId?: string) {
     agents: {
       total: totalAgents,
       active: activeAgents,
-      idle: Math.max(0, totalAgents - activeAgents),
+      idle: idleAgents,
       // Not tracked anywhere — nothing distinguishes a "completed" agent
       // from an active/idle one in the agent store. '--' rather than a
       // fake 0.

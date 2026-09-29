@@ -33,10 +33,13 @@ export const monoswarmCommand: Command = {
   ),
   options: [],
   examples: [
-    { command: 'monomind monoswarm init --v1-mode', description: 'Initialize monoswarm' },
+    {
+      command: 'monomind monoswarm init --v1-mode',
+      description: 'Record a monoswarm state file (starts no agents)',
+    },
     {
       command: 'monomind monoswarm start -o "Build API" -s development',
-      description: 'Start development monoswarm',
+      description: 'Record a development monoswarm config (starts no agents)',
     },
   ],
   action: async (_ctx: CommandContext): Promise<CommandResult> => {
@@ -54,9 +57,9 @@ export const monoswarmCommand: Command = {
     output.printList([
       `${output.highlight('init')}        - Record a new monoswarm state file`,
       `${output.highlight('start')}       - Record a monoswarm config (starts no agents)`,
-      `${output.highlight('status')}      - Show monoswarm status`,
-      `${output.highlight('stop')}        - Stop monoswarm execution`,
-      `${output.highlight('scale')}       - Scale monoswarm agent count`,
+      `${output.highlight('status')}      - Show the recorded monoswarm state`,
+      `${output.highlight('stop')}        - Mark the recorded swarm state terminated (there is no running process to stop)`,
+      `${output.highlight('scale')}       - Resize the recorded agent roster (starts or stops no processes)`,
     ]);
 
     return { success: true };
