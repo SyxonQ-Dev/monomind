@@ -4,6 +4,10 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The provider API key file and memory databases are gitignored** ([#398](https://github.com/monoes/monomind/issues/398)). `monomind.config.json` (where `providers configure -k` stores the key in plain text), `.swarm/` and `.claude/memory.db` were not ignored after `init`, and doctor's gitignore check still passed. Doctor now requires all three, and `doctor --fix` (which `init` runs) adds any that are missing to the root `.gitignore`. `providers configure` prints where it wrote the key and warns when that file is not gitignored.
+
 ## [2.18.5] — 2026-09-29
 
 ### Added
