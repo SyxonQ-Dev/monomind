@@ -1,51 +1,85 @@
 import { describe, expect, it } from 'vitest';
-import { listMCPTools, searchNonCoreTools } from '../mcp-client.js';
+import { callMCPTool, hasTool, listMCPTools, searchNonCoreTools } from '../mcp-client.js';
 
 /**
- * The default `tools/list` advertises only a core roster (~80 tools) to keep
- * the per-call schema payload small. Non-core tools stay callable by name and
- * discoverable via monomind_tool_search. MONOMIND_MCP_FULL=1 restores the full
- * roster, but that env var is read at module load — these tests run in the
- * default (core) mode.
+ * The default `tools/list` advertises only a lean core roster (issue #410) to
+ * keep the per-call schema payload small. Non-core tools stay callable by name
+ * and discoverable via monomind_tool_search. MONOMIND_MCP_FULL=1 restores the
+ * full roster, but that env var is read at module load — these tests run in
+ * the default (core) mode; mcp-roster-full.test.ts covers FULL=1.
  */
+const CORE = [
+  'monograph_build',
+  'monograph_query',
+  'monograph_suggest',
+  'monograph_impact',
+  'monograph_context',
+  'monograph_neighbors',
+  'pick',
+  'org_skill_show',
+  'monomind_tool_search',
+  'knowledge_search',
+  'knowledge_ingest',
+  'monodesign_detect',
+  'monodesign_fix',
+  'monodesign_palette',
+];
+
+const PLACEBO_PREFIXES = [
+  'agent_',
+  'task_',
+  'session_',
+  'config_',
+  'system_',
+  'guidance_',
+  'hooks_',
+];
+
 describe('MCP core-roster filter', () => {
-  it('advertises the core set and the discovery tool, not the whole registry', async () => {
-    const tools = await listMCPTools();
-    const names = new Set(tools.map((t) => t.name));
-
-    // Core capabilities are advertised.
-    expect(names.has('memory_kg_search')).toBe(true);
-    expect(names.has('monograph_query')).toBe(true);
-    expect(names.has('monomind_tool_search')).toBe(true);
-    // The central agent/skill picker (mcp__monomind__pick).
-    expect(names.has('pick')).toBe(true);
-
-    // Non-core capabilities are NOT advertised by default.
-    expect(names.has('browser_open')).toBe(false);
-    expect(names.has('github_pr_manage')).toBe(false);
-    expect(names.has('monoswarm_init')).toBe(false);
-
-    // The advertised roster is meaningfully smaller than the full registry.
-    expect(tools.length).toBeLessThan(150);
+  it('advertises the lean core set', async () => {
+    const names = new Set((await listMCPTools()).map((t) => t.name));
+    for (const name of CORE) expect(names.has(name), name).toBe(true);
   });
 
-  it('hides most of the hooks family but keeps the routing core', async () => {
+  it('does not advertise state-file tools (agent_/task_/session_/config_/system_/guidance_/hooks_, mcp_status)', async () => {
+    const names = (await listMCPTools()).map((t) => t.name);
+    const leaked = names.filter((n) => PLACEBO_PREFIXES.some((p) => n.startsWith(p)));
+    expect(leaked).toEqual([]);
+    expect(names).not.toContain('mcp_status');
+    // Non-core categories stay unadvertised too.
+    expect(names).not.toContain('browser_open');
+    expect(names).not.toContain('github_pr_manage');
+    expect(names).not.toContain('monoswarm_init');
+  });
+
+  it('keeps the advertised schema payload under a byte budget', async () => {
     const tools = await listMCPTools();
-    const names = new Set(tools.map((t) => t.name));
-    expect(names.has('hooks_route')).toBe(true);
-    expect(names.has('hooks_pre-task')).toBe(true);
-    // Trajectory/intelligence/worker hooks are discovery-only.
-    expect(names.has('hooks_trajectory-start')).toBe(false);
+    const payload = JSON.stringify({
+      tools: tools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        inputSchema: t.inputSchema,
+      })),
+    });
+    expect(tools.length).toBeLessThanOrEqual(25);
+    expect(Buffer.byteLength(payload)).toBeLessThan(16_000);
+  });
+
+  it('keeps hidden tools callable by name', async () => {
+    expect(await hasTool('system_info')).toBe(true);
+    const result = await callMCPTool<Record<string, unknown>>('system_info', {});
+    expect(result).toBeDefined();
   });
 
   it('makes non-core tools discoverable via searchNonCoreTools', async () => {
     const browserHits = await searchNonCoreTools('browser open page navigate', undefined, 5);
-    expect(browserHits.length).toBeGreaterThan(0);
     expect(browserHits.some((t) => t.name === 'browser_open')).toBe(true);
-    // Every returned tool carries a schema so it can be called directly.
     for (const t of browserHits) {
       expect(t.inputSchema).toBeDefined();
       expect(t.category).toBe('browser');
     }
+    // Newly hidden state-file tools are discoverable as well.
+    const agentHits = await searchNonCoreTools('spawn agent', 'agent', 5);
+    expect(agentHits.some((t) => t.name === 'agent_spawn')).toBe(true);
   });
 });

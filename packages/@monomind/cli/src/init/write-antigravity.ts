@@ -82,6 +82,7 @@ export async function writeGeminiFiles(
   const statuslineShPath = path.join(geminiHelpersDir, 'statusline.sh');
   if (!fs.existsSync(statuslineShPath) || options.force) {
     atomicWriteFile(statuslineShPath, generateStatuslineSh());
+    guardFor(targetDir, options, result).record(statuslineShPath);
     try {
       fs.chmodSync(statuslineShPath, 0o755);
     } catch {
