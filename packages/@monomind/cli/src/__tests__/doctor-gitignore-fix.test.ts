@@ -81,7 +81,7 @@ describe('directory ignores count as covering their contents', () => {
   it('a blanket .monomind/ satisfies every .monomind/* requirement', async () => {
     writeFileSync(
       gitignore(),
-      '.monomind/\n.hive-mind/\n.swarm/\n**/.claude-flow/\ndata/sessions/\ndata/mastermind-*.json\ndata/mastermind-*.jsonl\n',
+      '.monomind/\n.hive-mind/\n.swarm/\nmonomind.config.json\n.claude/memory.db\n**/.claude-flow/\ndata/sessions/\ndata/mastermind-*.json\ndata/mastermind-*.jsonl\n',
     );
     const result = await checkGitignoreCoverage();
     expect(result.status).toBe('pass');
