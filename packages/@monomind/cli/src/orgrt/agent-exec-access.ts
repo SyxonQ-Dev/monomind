@@ -17,8 +17,9 @@ import { type RunnerSpec, runnerSpec } from './runner-registry.js';
 export type AccessMode = 'scoped' | 'full';
 
 /**
- * `canUseTool` for `--access full`: every call is allowed. This is passed to
- * ClaudeAgentRunner exactly like the scoped gate, so it still goes through
+ * `canUseTool` for `--access full`: every call is allowed. Subprocess
+ * runners never consult it for native tools (their CLI runs its own yolo
+ * mode); it is passed to ClaudeAgentRunner exactly like the scoped gate, so it still goes through
  * `coverEveryToolCall`'s PreToolUse hook — every call remains OBSERVED (the
  * hook still fires and could feed #357's tool_activity) even though none are
  * denied.
@@ -38,9 +39,10 @@ export interface AccessGuardError {
 /**
  * Guards checked before a full-access turn starts, regardless of what a
  * caller already validated:
- *  - refuse root (uid 0) — Claude Code itself refuses bypassPermissions as
- *    root, so give a clear message instead of an opaque runner failure.
- *  - refuse a runtime whose RunnerSpec doesn't advertise supportsFullAccess.
+ *  - refuse root (uid 0) on every runtime — Claude Code itself refuses
+ *    bypassPermissions as root, and no other CLI's yolo mode is safer there.
+ *  - refuse a runtime whose RunnerSpec doesn't advertise supportsFullAccess
+ *    (rev 19: every coding runtime does — see runner-registry.ts).
  *  - require an explicit, existing, directory `--cwd` — no silent inherit.
  */
 export function checkFullAccessGuards(opts: {
@@ -54,7 +56,7 @@ export function checkFullAccessGuards(opts: {
     return {
       code: 'unsafe',
       message:
-        '--access full refuses to run as root (uid 0) — the same restriction Claude Code itself applies to bypassPermissions.',
+        '--access full refuses to run as root (uid 0) on any runtime — the same restriction Claude Code itself applies to bypassPermissions.',
     };
   }
   if (!opts.spec?.supportsFullAccess) {

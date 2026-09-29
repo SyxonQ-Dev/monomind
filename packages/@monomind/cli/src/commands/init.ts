@@ -109,9 +109,20 @@ export const initCommand: Command = {
     {
       name: 'target',
       short: 't',
-      description: 'Coding system to initialize (default: all)',
+      description:
+        'Coding system to initialize (default: all). `agents` writes only AGENTS.md (not part of all)',
       type: 'string',
-      choices: ['all', 'claude', 'antigravity', 'opencode', 'kimicode', 'codex'],
+      choices: [
+        'all',
+        'claude',
+        'antigravity',
+        'opencode',
+        'kimicode',
+        'codex',
+        'cline',
+        'aider',
+        'agents',
+      ],
     },
     {
       name: 'platform',

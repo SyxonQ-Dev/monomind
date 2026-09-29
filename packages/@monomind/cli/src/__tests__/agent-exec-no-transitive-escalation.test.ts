@@ -123,10 +123,28 @@ describe('#360: no transitive escalation to --access full', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('RUNNER_SPECS: only "claude" advertises supportsFullAccess (every other runtime rejects --access full)', async () => {
+  it('RUNNER_SPECS: exactly the pinned full_access set advertises supportsFullAccess (every other runtime rejects --access full)', async () => {
     const { RUNNER_SPECS } = await import('../orgrt/runner-registry.js');
     const fullAccessRuntimes = RUNNER_SPECS.filter((s) => s.supportsFullAccess).map((s) => s.id);
-    expect(fullAccessRuntimes).toEqual(['claude']);
+    // Widening this set is a security decision: update doc/concepts/coder-mode-security.md with it.
+    expect(fullAccessRuntimes.sort()).toEqual(
+      [
+        'antigravity',
+        'claude',
+        'codex',
+        'copilot',
+        'crush',
+        'grok',
+        'kimicode',
+        'opencode',
+        'pi',
+        'pi-rpc',
+        'qwen',
+        'cline',
+        'aider',
+        'dsh',
+      ].sort(),
+    );
   });
 });
 

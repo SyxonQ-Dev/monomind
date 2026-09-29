@@ -1,16 +1,57 @@
 // packages/@monomind/cli/src/orgrt/codex-runner-stream.ts
-import { spawn } from 'node:child_process';
 import type { AgentRunArgs } from './agent-runner.js';
 import { killOnAbort } from './agent-runner.js';
 import { maskedCommand } from './authority-mask.js';
 import { codexSandboxArgs, roleGitLevel } from './cli-sandbox.js';
-import { codexEffortArgs } from './codex-runner-tools.js';
+import { CodexToolItems, codexEffortArgs } from './codex-runner-tools.js';
 import type { CodexEvent, CodexStreamEvent, TurnOutcome } from './codex-runner-types.js';
 import { classifyStderr } from './kimicode-runner.js';
+import { spawnRunnerProcess } from './process-group-spawn.js';
 import { omitAnthropicManagedKeys } from './provider.js';
 import { TOOL_CALL_RE } from './tool-fence.js';
 
 export const TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours, matching kimi/antigravity runners
+
+/**
+ * `codex exec` argv for one turn. ARG ORDER — see file header for the
+ * live-verified citation:
+ *   codex exec --json [--model X] [-c model_reasoning_effort=L] [--cd Y]
+ *              [--skip-git-repo-check] [--sandbox <mode> | --dangerously-…]
+ *              [resume <threadId>] -- -
+ * The prompt goes over STDIN, not argv: a single argv element is capped
+ * at 128 KiB on Linux (E2BIG), and a system prompt + tool protocol +
+ * tool results routinely exceeds that. `-` is codex's documented "read
+ * instructions from stdin" marker on both `exec` and `exec resume`
+ * (confirmed live, v0.153.2); `--` ends option parsing so nothing
+ * positional is ever mistaken for a flag.
+ *
+ * Coder mode (`access: 'full'`, rev 19): `--dangerously-bypass-approvals-
+ * and-sandbox` (no approvals, no codex sandbox — codex-cli 0.156.1 `exec`
+ * and `exec resume` both accept it) replaces the role's `--sandbox`. The
+ * user's codex config (`$CODEX_HOME/config.toml`, its MCP servers, project
+ * AGENTS.md) is never isolated by this runner in any mode — no CODEX_HOME
+ * override, no `--ignore-user-config` — so `settingSources` needs nothing
+ * here; agent-exec names what codex loads in a `status` notice.
+ */
+export function codexExecArgs(args: AgentRunArgs, threadId: string | undefined): string[] {
+  const cliArgs: string[] = ['exec', '--json'];
+  if (args.model) cliArgs.push('--model', args.model);
+  cliArgs.push(...codexEffortArgs(args.effort));
+  cliArgs.push('--cd', args.cwd);
+  cliArgs.push('--skip-git-repo-check');
+  if (args.access === 'full') {
+    cliArgs.push('--dangerously-bypass-approvals-and-sandbox');
+  } else {
+    // #263: codex's own sandbox follows the role's policy.git level — only a
+    // 'push' role still gets danger-full-access. See cli-sandbox.ts.
+    cliArgs.push(...codexSandboxArgs(roleGitLevel(args.env)));
+  }
+  if (threadId) {
+    cliArgs.push('resume', threadId);
+  }
+  cliArgs.push('--', '-');
+  return cliArgs;
+}
 
 /**
  * Run one `codex exec` invocation and stream its JSONL output
@@ -19,6 +60,8 @@ export const TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours, matching kimi/ant
  * buffering until process exit was a bug, #204). End-of-turn facts (exit
  * code, stderr tail, thread id, usage, error, timeout flag) are written
  * into `outcome`, which the caller reads after this generator completes.
+ * `idPrefix` keeps tool-call ids unique across spawns (codex restarts its
+ * item numbering per process — codex-runner-tools.ts).
  */
 export async function* streamTurn(
   bin: string,
@@ -26,37 +69,26 @@ export async function* streamTurn(
   threadId: string | undefined,
   args: AgentRunArgs,
   outcome: TurnOutcome,
+  idPrefix = '',
 ): AsyncGenerator<CodexStreamEvent> {
-  // ARG ORDER — see file header for the live-verified citation:
-  //   codex exec --json [--model X] [-c model_reasoning_effort=L] [--cd Y]
-  //              [--skip-git-repo-check] [--sandbox <mode>]
-  //              [resume <threadId>] -- -
-  // The prompt goes over STDIN, not argv: a single argv element is capped
-  // at 128 KiB on Linux (E2BIG), and a system prompt + tool protocol +
-  // tool results routinely exceeds that. `-` is codex's documented "read
-  // instructions from stdin" marker on both `exec` and `exec resume`
-  // (confirmed live, v0.153.2); `--` ends option parsing so nothing
-  // positional is ever mistaken for a flag.
-  const cliArgs: string[] = ['exec', '--json'];
-  if (args.model) cliArgs.push('--model', args.model);
-  cliArgs.push(...codexEffortArgs(args.effort));
-  cliArgs.push('--cd', args.cwd);
-  cliArgs.push('--skip-git-repo-check');
-  // #263: codex's own sandbox follows the role's policy.git level — only a
-  // 'push' role still gets danger-full-access. See cli-sandbox.ts.
-  cliArgs.push(...codexSandboxArgs(roleGitLevel(args.env)));
-  if (threadId) {
-    cliArgs.push('resume', threadId);
-  }
-  cliArgs.push('--', '-');
+  const cliArgs = codexExecArgs(args, threadId);
 
-  const child = spawn(...maskedCommand(args.authorityMask, bin, cliArgs), {
-    cwd: args.cwd,
-    // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
-    // vendor CLI; an explicit value in args.env still wins below.
-    env: { ...omitAnthropicManagedKeys(process.env), ...args.env },
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  // Full access: own process group + tree tracking (process-group-spawn.ts),
+  // so cancel reaches every descendant and agent-exec can report
+  // background_pids. Any other access: a plain spawn, as before.
+  const proc = spawnRunnerProcess(
+    ...maskedCommand(args.authorityMask, bin, cliArgs),
+    {
+      cwd: args.cwd,
+      // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
+      // vendor CLI; an explicit value in args.env still wins below.
+      env: { ...omitAnthropicManagedKeys(process.env), ...args.env },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    },
+    args,
+  );
+  const child = proc.child;
+  const toolItems = new CodexToolItems(idPrefix);
   // A CLI that exits before reading stdin (bad args, auth failure) makes
   // this write EPIPE — surfaced via the exit code/stderr below, not as an
   // unhandled stream error.
@@ -74,18 +106,8 @@ export async function* streamTurn(
   const KILL_GRACE_MS = 5000;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
   const killChild = (): void => {
-    try {
-      child.kill('SIGTERM');
-    } catch {
-      /* already gone */
-    }
-    killTimer = setTimeout(() => {
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        /* already gone */
-      }
-    }, KILL_GRACE_MS);
+    proc.target.kill('SIGTERM');
+    killTimer = setTimeout(() => proc.target.kill('SIGKILL'), KILL_GRACE_MS);
     killTimer.unref?.();
   };
 
@@ -96,7 +118,7 @@ export async function* streamTurn(
     timedOut = true;
     killChild();
   }, TURN_TIMEOUT_MS);
-  const unsubscribeAbort = killOnAbort(args.signal, child, KILL_GRACE_MS);
+  const unsubscribeAbort = killOnAbort(args.signal, proc.target, KILL_GRACE_MS);
 
   // Attach the exit promise BEFORE consuming stdout: on a spawn failure
   // (ENOENT, bad binary) the 'error' event fires almost immediately — if
@@ -114,8 +136,26 @@ export async function* streamTurn(
 
   // Normalize one parsed wire event: capture the thread id from ANY event
   // that carries it (resume needs it on the next turn), record
-  // error/usage state, and return the CodexStreamEvent to yield (or null).
-  const handleEvent = (ev: CodexEvent): CodexStreamEvent | null => {
+  // error/usage state, and return the CodexStreamEvents to yield.
+  const handleEvent = (ev: CodexEvent): CodexStreamEvent[] => {
+    if ((ev.type === 'item.started' || ev.type === 'item.completed') && ev.item) {
+      const tools = toolItems.onItem(
+        ev.type === 'item.started' ? 'started' : 'completed',
+        ev.item,
+        lastThreadId,
+      );
+      if (tools.length > 0) {
+        // Codex's own tool activity: matched start/end with canonical
+        // inputs (codex-runner-tools.ts); an extra tree sample brackets
+        // each call, as the claude runner does (#359).
+        proc.sampleNow();
+        return tools;
+      }
+    }
+    const one = handleOne(ev);
+    return one ? [one] : [];
+  };
+  const handleOne = (ev: CodexEvent): CodexStreamEvent | null => {
     if (
       (ev.type === 'session_configured' || ev.type === 'thread.started') &&
       (ev.session_id || ev.thread_id)
@@ -147,17 +187,6 @@ export async function* streamTurn(
         threadId: lastThreadId,
       };
     }
-    if (ev.type === 'item.started' && ev.item?.type === 'command_execution') {
-      // CURRENT: liveness for codex's own shell tool calls — mirrors
-      // agy's 'tool' step_type forwarding (header's "Streaming / liveness"
-      // note). Only item.started fires this (not item.completed too) to
-      // avoid a duplicate liveness ping per command.
-      return {
-        kind: 'tool',
-        toolName: (ev.item.command ?? 'shell').slice(0, 200),
-        threadId: lastThreadId,
-      };
-    }
     if (ev.type === 'token_count' && ev.info?.last_token_usage) {
       // LEGACY: last_token_usage is per-TURN; total_token_usage is
       // cumulative for the whole session — using the latter here would
@@ -181,6 +210,12 @@ export async function* streamTurn(
       // last_agent_message is a convenience summary already covered by the
       // agent_message events collected above — not surfaced again here to
       // avoid duplicating the same text.
+      return null;
+    }
+    if (ev.type === 'turn.failed' && ev.error?.message) {
+      // CURRENT: a failed turn (e.g. the API rejecting a request) — seen
+      // live with codex-cli 0.156.1 right after a top-level `error` event.
+      outcome.error = ev.error.message;
       return null;
     }
     if (ev.type === 'error' && ev.message) {
@@ -212,22 +247,28 @@ export async function* streamTurn(
         } catch {
           continue;
         }
-        const out = handleEvent(ev);
-        if (out) yield out;
+        yield* handleEvent(ev);
       }
     }
     const tail = buf.trim();
     if (tail?.startsWith('{')) {
+      let ev: CodexEvent | undefined;
       try {
-        const out = handleEvent(JSON.parse(tail) as CodexEvent);
-        if (out) yield out;
+        ev = JSON.parse(tail) as CodexEvent;
       } catch {
         /* not JSON, skip */
       }
+      if (ev) yield* handleEvent(ev);
     }
+    // Calls codex never completed before exiting get a failed end, so
+    // every start has an end — unless this turn was aborted or timed out,
+    // where the caller's own close (ToolActivityTracker.closeInFlight)
+    // reports them as cancelled.
+    if (!timedOut && !args.signal?.aborted) yield* toolItems.flush(lastThreadId);
   } finally {
     clearTimeout(timer);
     unsubscribeAbort();
+    proc.stop();
     if (child.exitCode === null && child.signalCode === null) {
       // NOT confirmed dead. Either the consumer abandoned this stream
       // mid-turn (session.ts's silent abort calls iterator.return(), the
@@ -236,7 +277,9 @@ export async function* streamTurn(
       // still inside its grace period: leave that escalation armed, since
       // clearing it here would orphan a CLI that ignores SIGTERM and then
       // wait on `exitPromise` forever (same fix as pi-rpc-runner.ts).
-      if (!child.killed) killChild();
+      // (`child.killed` stays false after a full-access group kill — the
+      // signal goes to the tree, not this handle — hence the extra checks.)
+      if (!child.killed && !killTimer && !args.signal?.aborted) killChild();
     } else if (killTimer) {
       clearTimeout(killTimer);
     }

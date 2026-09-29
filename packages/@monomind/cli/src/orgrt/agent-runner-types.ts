@@ -26,10 +26,11 @@ export interface OrgToolDef {
 export interface AgentRunArgs {
   tools: OrgToolDef[];
   /** #355. `full` = ClaudeAgentRunner sets `permissionMode: 'bypassPermissions'`
-   *  + `allowDangerouslySkipPermissions: true`. Unset/`scoped` = today's
-   *  `permissionMode: 'default'`, byte-identical SDK options. Only
-   *  `orgrt/agent-exec.ts` sets this today — session.ts (org runtime) never
-   *  does (see #365 for the future opt-in path). Other runners ignore it. */
+   *  + `allowDangerouslySkipPermissions: true`; a subprocess runner whose
+   *  RunnerSpec.supportsFullAccess is true runs its CLI's own no-approval,
+   *  no-sandbox mode in a process group (process-group-spawn.ts). Unset/
+   *  `scoped` = today's behavior, byte-identical. Set by agent-exec.ts and
+   *  full-access org roles (#365). Runners without full access ignore it. */
   access?: 'scoped' | 'full';
   /** The mailbox prompt stream (or any async iterable of prompt messages). */
   prompt: AsyncIterable<any>;
@@ -92,13 +93,15 @@ export interface AgentRunArgs {
   authorityMask?: string[];
   /** Coder mode (#356): `--settings` sources to load via the SDK's own
    *  discovery ('user'/'project'/'local' settings.json, CLAUDE.md, skills,
-   *  hooks, project+user MCP servers). ClaudeAgentRunner-only; other runners
-   *  ignore it. Unset/`[]` = today's isolated behavior (settingSources: [],
+   *  hooks, project+user MCP servers). A subprocess runner reads non-empty
+   *  as "do not isolate the CLI's own config" (its sources are all or
+   *  nothing); runners with no such isolation ignore it. Unset/`[]` = today's isolated behavior (settingSources: [],
    *  strictMcpConfig: true, plain-string system prompt) — see
    *  agent-runner-claude-settings.ts. */
   settingSources?: Array<'user' | 'project' | 'local'>;
-  /** #359: full-access only. Called synchronously once ClaudeAgentRunner
-   *  spawns the underlying `claude` CLI process, with its pid and a handle
+  /** #359: full-access only. Called synchronously once a runner spawns
+   *  its agent CLI process (ClaudeAgentRunner, and every subprocess runner
+   *  via process-group-spawn.ts's `spawnRunnerProcess`), with its pid and a handle
    *  onto the tree tracker (`process-tree.ts`'s `trackDescendants`) that
    *  has been sampling its process tree since spawn — lets a caller
    *  (agent-exec.ts) discover background survivors on a normal end_turn,
@@ -207,8 +210,15 @@ export interface AgentMessage {
   is_error?: boolean; // result, tool_result
   tool_use_id?: string; // tool_use (#357), tool_result
   tool?: string; // tool_use (#357), tool_result
-  /** #357: raw tool input as the model sent it (native tool_use only). */
+  /** #357: raw tool input as the model sent it (native tool_use only).
+   *  Rev 19: a vendor runner translates its CLI's native shape into the
+   *  canonical keys for `kind` (doc §3.2); claude keeps its own input. */
   input?: Record<string, unknown>; // tool_use
+  /** Rev 19: normalized tool kind (tool-kind.ts's ToolKind) when the runner
+   *  knows it; unset = derived from `tool`'s name. */
+  kind?: string; // tool_use
+  /** Rev 19: a shell call's exit code, when the CLI reports one. */
+  exit_code?: number; // tool_result
   /** #357: non-null when produced inside a Task/Agent subagent's own turn —
    *  lets a caller nest tool_activity events under the subagent's call. */
   parent_tool_use_id?: string | null; // tool_use
@@ -217,6 +227,10 @@ export interface AgentMessage {
    *  subagent's own text, not the main agent's. */
   subagent?: SubagentEvent; // subagent
   duration_ms?: number; // tool_result
+  /** Rev 20: the runner's own policy refused the call (it never ran) — the
+   *  tool_activity end then carries `ok:false, denied:true`, as a denial by
+   *  claude's canUseTool does. */
+  denied?: boolean; // tool_result
   input_tokens?: number; // result, assistant (that turn's own usage)
   output_tokens?: number; // result, assistant (that turn's own usage)
   /** ADR-O001 D1: cache tokens are SIBLINGS of input_tokens in the Anthropic

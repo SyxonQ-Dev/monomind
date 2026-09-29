@@ -430,6 +430,7 @@ describe('privacy-claims (i-078)', () => {
       'docs.x.ai',
       'docs.openclaw.ai',
       'hermes-agent.nousresearch.com',
+      'pi.dev', // pi-runner.ts install hint (display text, never fetched)
       'qwenlm.github.io',
       'www.kimi.com',
       'learn.chatgpt.com',

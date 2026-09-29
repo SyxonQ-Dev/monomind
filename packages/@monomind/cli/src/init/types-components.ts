@@ -38,6 +38,13 @@ export interface InitComponents {
   /** Emit Codex artifacts (.codex/config.toml + AGENTS.md). Opt-in — default
    *  false so standard `monomind init` is unchanged. */
   codex: boolean;
+  /** Emit cline artifacts (.clinerules/monomind.md). Opt-in via `--target
+   *  cline`; absent means false. */
+  cline?: boolean;
+  /** `--target agents`: write AGENTS.md and nothing else (no Claude files,
+   *  no `.monomind/` state) — for runtimes that read AGENTS.md natively.
+   *  Absent means false. */
+  agentsOnly?: boolean;
 }
 
 /**

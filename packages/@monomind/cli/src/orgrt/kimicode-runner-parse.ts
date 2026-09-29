@@ -1,6 +1,7 @@
 // packages/@monomind/cli/src/orgrt/kimicode-runner-parse.ts
 // Split out of kimicode-runner.ts (file-size sweep) — kimi stream-json wire
 // format parsing and stderr fatal-error classification.
+import { classifyProviderLimit } from './provider-limit.js';
 import { TOOL_CALL_RE } from './tool-fence.js';
 
 /**
@@ -8,16 +9,36 @@ import { TOOL_CALL_RE } from './tool-fence.js';
  *   - 'assistant': rawText is the full assistant text (fences intact) for
  *     end-of-turn tool-call parsing; text is the fence-stripped prose,
  *     present only when non-empty.
- *   - 'tool':      kimi's own tool activity ({"role":"tool",...}) — forwarded
- *     by run() as a `tool_use` liveness AgentMessage (see header).
+ *     `toolCalls` carries the native tool calls the same message started.
+ *   - 'native':    a tool-call-only assistant message (`toolCalls`) or a
+ *     tool result ({"role":"tool","tool_call_id",...} → `toolResult`) —
+ *     forwarded by run() as rich tool_use/tool_result AgentMessages.
+ *   - 'tool':      a {"role":"tool",...} event with no call id — forwarded by
+ *     run() as a `tool_use` liveness AgentMessage (see header).
  *   - 'meta':      any other event that only carries a session id.
  */
 export interface KimiStreamEvent {
-  kind: 'assistant' | 'tool' | 'meta';
+  kind: 'assistant' | 'native' | 'tool' | 'meta';
   text?: string;
   rawText?: string;
   toolName?: string;
+  toolCalls?: Array<{ id: string; name: string; input: unknown }>;
+  toolResult?: { id: string; output: unknown };
   sessionId?: string;
+}
+
+/** OpenAI-style `tool_calls` on a kimi assistant message (kimi-code 2.x
+ *  PromptJsonWriter: {type:'function', id, function:{name, arguments}},
+ *  `arguments` a JSON string). */
+function parseToolCallsField(v: unknown): Array<{ id: string; name: string; input: unknown }> {
+  if (!Array.isArray(v)) return [];
+  const out: Array<{ id: string; name: string; input: unknown }> = [];
+  for (const c of v) {
+    const call = c as { id?: unknown; function?: { name?: unknown; arguments?: unknown } };
+    if (typeof call?.id !== 'string' || typeof call.function?.name !== 'string') continue;
+    out.push({ id: call.id, name: call.function.name, input: call.function.arguments ?? {} });
+  }
+  return out;
 }
 
 /**
@@ -31,6 +52,10 @@ export interface KimiStreamEvent {
  *   {"role":"assistant","content":[{"type":"text",...}]} — block form
  *   {"role":"meta","type":"session.resume_hint",session_id} — resume hint
  *   {"role":"tool","content":"Bash(ls ...)"}             — tool progress
+ * kimi-code 2.x stream-json (read from its PromptJsonWriter, not live —
+ * no kimi install here) adds the call/result pairing:
+ *   {"role":"assistant","content":...,"tool_calls":[{id,function:{name,arguments}}]}
+ *   {"role":"tool","tool_call_id":"...","content":"<output>"}
  */
 export function parseStreamJsonLine(line: string): KimiStreamEvent | null {
   const t = line.trim();
@@ -63,11 +88,22 @@ export function parseStreamJsonLine(line: string): KimiStreamEvent | null {
     } else if (typeof ev.text === 'string') {
       text = ev.text;
     }
+    const toolCalls = parseToolCallsField(ev.tool_calls);
     if (text) {
       const stripped = text.replace(TOOL_CALL_RE, '').trim();
-      return { kind: 'assistant', rawText: text, text: stripped || undefined, sessionId };
+      return {
+        kind: 'assistant',
+        rawText: text,
+        text: stripped || undefined,
+        sessionId,
+        ...(toolCalls.length > 0 ? { toolCalls } : {}),
+      };
     }
+    if (toolCalls.length > 0) return { kind: 'native', toolCalls, sessionId };
   } else if (role === 'tool') {
+    if (typeof ev.tool_call_id === 'string') {
+      return { kind: 'native', toolResult: { id: ev.tool_call_id, output: ev.content }, sessionId };
+    }
     return { kind: 'tool', toolName: describeToolEvent(ev), sessionId };
   }
   // Meta/unknown events matter only when they carry a session id.
@@ -136,24 +172,25 @@ export function extractStderrSessionId(stderr: string): string | undefined {
 
 /** Stderr patterns that mark a turn failure as FATAL (non-retryable): auth,
  *  quota, and billing errors can never be fixed by restarting the session —
- *  the daemon must not burn its crash-restart budget on them. */
-const FATAL_PATTERNS: Array<{ re: RegExp; label: string }> = [
-  { re: /auth_error|401|403/i, label: 'authentication/permission error' },
-  {
-    re: /usage limit|quota|billing cycle|insufficient.*balance|rate.?limit/i,
-    label: 'provider quota/billing limit',
-  },
-];
+ *  the daemon must not burn its crash-restart budget on them. A transient
+ *  rate limit is fatal to the daemon too, but carries `rateLimited` so
+ *  `agent exec` can retry it after a backoff (provider-limit.ts). */
+const AUTH_FATAL_RE = /auth_error|401|403/i;
 
 export interface FatalErrorInfo {
   fatal: boolean;
   label?: string;
+  /** A transient provider rate limit (429), not exhausted quota. */
+  rateLimited?: boolean;
 }
 
 /** Classify a CLI turn's stderr: is this a fatal (non-retryable) failure? */
 export function classifyStderr(stderrTail: string): FatalErrorInfo {
-  for (const p of FATAL_PATTERNS) {
-    if (p.re.test(stderrTail)) return { fatal: true, label: p.label };
-  }
+  if (AUTH_FATAL_RE.test(stderrTail))
+    return { fatal: true, label: 'authentication/permission error' };
+  const limit = classifyProviderLimit(stderrTail);
+  if (limit === 'rate-limited')
+    return { fatal: true, label: 'provider rate limit (429)', rateLimited: true };
+  if (limit === 'quota') return { fatal: true, label: 'provider quota/billing limit' };
   return { fatal: false };
 }

@@ -115,6 +115,15 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
       return { success: false, exitCode: 1 };
     }
 
+    // `--target agents` wrote AGENTS.md alone: no sample org, services or
+    // summary of files it did not create.
+    if (options.components.agentsOnly) {
+      spinner.succeed(
+        result.created.files.length > 0 ? 'Wrote AGENTS.md' : 'AGENTS.md already exists (kept)',
+      );
+      return { success: true, data: result };
+    }
+
     spinner.succeed('Monomind initialized successfully!');
 
     // C5: ensure a runnable sample org exists so the README quickstart

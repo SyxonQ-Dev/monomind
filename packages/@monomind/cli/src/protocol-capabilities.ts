@@ -26,8 +26,8 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    runtime's own model list (§12, issue #369)
  *  - `agent-test-json` — `monomind agent test <id> [--model M] --json`: one
  *    "reply ok" turn reported as a single object with a `status` (ok,
- *    ok_unexpected, auth, quota, model_unavailable, timeout, missing_binary,
- *    error), latency, tokens and cost (rev 18, issue #390)
+ *    ok_unexpected, auth, quota, rate_limited (rev 20), model_unavailable,
+ *    timeout, missing_binary, error), latency, tokens and cost (rev 18, issue #390)
  *  - `org-json-v1`  — `--json`/`--format json` output on org observe commands (§7)
  *  - `org-tool-providers` — role `tool_providers` (stdio MCP), `policy.approvalTools`,
  *    operator-authenticated `/api/xdeliver` and live `org inbox --format json`
@@ -78,12 +78,27 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    profile:<id>` read that store (rev 15)
  *  - `agent-exec-effort` — `agent exec --effort <level>` maps the turn's
  *    reasoning effort onto the runtime: claude (SDK `effort`) and codex
- *    (`-c model_reasoning_effort`); other runtimes ignore it (rev 16, §3.1)
+ *    (`-c model_reasoning_effort`) since rev 16; rev 19/20 extend it to the
+ *    other runtimes whose `agent scan --json` entry has `effort: true`, and
+ *    one with `effort: false` emits a `status` notice that it was ignored
+ *    (§3.1)
  *  - `agent-exec-subagent-events` — claude runtime: `subagent` started/
  *    progress/finished events for native `Task`/`Agent` subagents, joined to
  *    the call's `tool_activity` id; a subagent's own text is an `assistant`
  *    event with `parent_tool_use_id` and stays out of `result.text` (§3.2.1,
  *    rev 17, issue #387)
+ *  - `agent-exec-full-access-any` — `agent exec --access full` on every
+ *    runtime whose `agent scan --json` entry has `full_access: true` (not
+ *    only claude), with process-group kill, `background_pids` and the audit
+ *    line on each; `--settings` on a non-claude runtime leaves the CLI's own
+ *    config un-isolated and emits a `status` naming what it loads; scan
+ *    entries carry `resume`, `effort`, `max_turns`, `reports_cost`,
+ *    `init_target`; `tool_activity` start events carry `kind` (§3, §6,
+ *    rev 19)
+ *  - `agent-exec-rate-limit-retry` — `agent exec` retries a turn that failed
+ *    on a transient provider rate limit (429) up to 3 attempts with backoff,
+ *    emitting a `status` notice before each retry; giving up is `error
+ *    {code:"rate-limited", fatal:true}`, distinct from `quota` (§3.4, rev 20)
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
@@ -91,6 +106,7 @@ export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec-settings',
   'agent-exec-tool-activity',
   'agent-exec-background-pids',
+  'agent-exec-full-access-any',
   'agent-exec-effort',
   'agent-scan',
   'agent-scan-read-only',
@@ -109,6 +125,7 @@ export const AGENT_PROTOCOL_CAPABILITIES = [
   'init-json',
   'knowledge-profile-captures',
   'agent-exec-subagent-events',
+  'agent-exec-rate-limit-retry',
 ] as const;
 
 /** The exact handshake object emitted by `monomind --version --json`. */
