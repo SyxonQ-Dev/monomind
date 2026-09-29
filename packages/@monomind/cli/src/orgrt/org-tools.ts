@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import type { OrgToolDef } from './agent-runner.js';
 import type { TaskEvidence } from './completion-gate.js';
+import { approvalDeniedMessage, approvalPendingMessage } from './session-gate.js';
 import { resolveSessionScope } from './session-ledger.js';
 import type { SessionOpts } from './session-types.js';
 import { skillTools } from './skill-tools.js';
@@ -357,11 +358,8 @@ export function buildOrgTools(opts: SessionOpts): OrgToolDef[] {
     handler: async (args) => {
       if (opts.beforeTool) {
         const approved = await opts.beforeTool(role.id, 'org_send', args);
-        if (approved === false) return text('Tool "org_send" was denied by guardrail approval');
-        if (approved === null)
-          return text(
-            'Tool "org_send" is pending human approval - you will receive the result when it is approved or denied.',
-          );
+        if (approved === false) return text(approvalDeniedMessage('org_send'));
+        if (approved === null) return text(approvalPendingMessage('org_send'));
       }
       const receipt = await deliver(
         role.id,

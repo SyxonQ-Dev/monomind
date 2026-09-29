@@ -15,6 +15,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { ClaudeAgentRunner } from '../../src/orgrt/agent-runner-claude.js';
 import { OrgBus } from '../../src/orgrt/bus.js';
 import { fileToolRoots } from '../../src/orgrt/file-roots.js';
 import { prepareGitGuard } from '../../src/orgrt/git-guard.js';
@@ -155,6 +156,18 @@ describe('session env', () => {
       roleTmpdir,
     } as unknown as SessionOpts;
   };
+  const runArgsBase = {
+    runner: {} as never,
+    tools: [],
+    streamOpts: undefined,
+    gitEnforcement: { env: {} },
+    model: 'm',
+    tier: undefined,
+    prov: { cfg: undefined } as never,
+    resume: undefined,
+    authorityMask: undefined,
+    abort: new AbortController(),
+  };
   const args = (o: SessionOpts, gitEnv: Record<string, string> = {}) =>
     sessionRunArgs(o, {
       runner: {} as never,
@@ -169,9 +182,31 @@ describe('session env', () => {
       abort: new AbortController(),
     }).env as Record<string, string>;
 
-  it('exports the session TMPDIR as TMPDIR, TMP and TEMP', () => {
+  it('exports the session TMPDIR as TMPDIR, TMP, TEMP and CLAUDE_CODE_TMPDIR', () => {
     const env = args(opts('/b/o-w-abc123'));
-    expect([env.TMPDIR, env.TMP, env.TEMP]).toEqual(['/b/o-w-abc123', '/b/o-w-abc123', '/b/o-w-abc123']);
+    expect([env.TMPDIR, env.TMP, env.TEMP, env.CLAUDE_CODE_TMPDIR]).toEqual(Array(4).fill('/b/o-w-abc123'));
+  });
+
+  // #503: an org started from a Claude Code session's Bash tool inherits that
+  // session's CLAUDE_CODE_TMPDIR, which Claude Code reads before TMPDIR.
+  it('a claude role gets the role dir in every temp var the SDK sees, over an inherited CLAUDE_CODE_TMPDIR', async () => {
+    const dir = createRoleTmpdir({ org: 'o', role: 'w', run: 'rc5', root, base })!;
+    const saved = process.env.CLAUDE_CODE_TMPDIR;
+    process.env.CLAUDE_CODE_TMPDIR = join(base, 'claude-1000');
+    try {
+      let sdkEnv: Record<string, string> = {};
+      const runner = new ClaudeAgentRunner(((q: { options: { env: Record<string, string> } }) => {
+        sdkEnv = q.options.env;
+        return (async function* () {})();
+      }) as never);
+      const o = opts(dir);
+      for await (const _ of runner.run({ ...sessionRunArgs(o, { ...runArgsBase, runner }), prompt: (async function* () {})() }));
+      for (const k of ['TMPDIR', 'TMP', 'TEMP', 'CLAUDE_CODE_TMPDIR']) expect(sdkEnv[k], k).toBe(dir);
+    } finally {
+      if (saved === undefined) delete process.env.CLAUDE_CODE_TMPDIR;
+      else process.env.CLAUDE_CODE_TMPDIR = saved;
+      releaseRunTmpdirs('o', 'rc5');
+    }
   });
 
   it('an explicit TMPDIR from a role-specific env overlay wins over isolation', () => {

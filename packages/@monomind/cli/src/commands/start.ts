@@ -128,7 +128,10 @@ const startAction = async (ctx: CommandContext): Promise<CommandResult> => {
 
   // Load configuration
   const config = loadConfig(cwd);
-  const swarmConfig = (config?.monoswarm as Record<string, unknown>) || {};
+  // init writes the section as `swarm:` (#509); `monoswarm:` is still honoured
+  // for configs hand-edited to match the old reader.
+  const swarmConfig =
+    ((config?.swarm ?? config?.monoswarm) as Record<string, unknown> | undefined) || {};
   const VALID_TOPOLOGIES = new Set(['hierarchical-mesh', 'mesh', 'hierarchical', 'ring', 'star']);
   const rawTopology = topology || (swarmConfig.topology as string) || DEFAULT_TOPOLOGY;
   const finalTopology = VALID_TOPOLOGIES.has(rawTopology) ? rawTopology : DEFAULT_TOPOLOGY;

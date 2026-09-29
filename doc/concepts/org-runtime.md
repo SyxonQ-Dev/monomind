@@ -293,8 +293,8 @@ alongside the shared `'worktree'` mode ([`org-stop.ts → finishStop`](packages/
 |---|---|---|
 | `allowTools` | _(unset)_ | Allowlist of tool names |
 | `denyTools` | `[]` | Explicit tool block list |
-| `fileWrite` | `[]` | Glob patterns allowed for writes — relative (matched against the org workdir) or absolute (an explicit, author-written grant; see the file-tool roots note below) |
-| `fileRead` | `[]` | Glob patterns allowed for reads — same absolute/relative rule as `fileWrite` |
+| `fileWrite` | `[]` | Paths or globs allowed for writes — relative (resolved against the org workdir) or absolute (an explicit, author-written grant; see the file-tool roots note below). An entry with no glob characters (`*`, `?`, `[`, `{`), such as `/srv/growth/site` or `reports`, grants that path **and everything beneath it** (`…/site-old` is not inside `…/site`); an entry with glob characters matches only what the glob says (`src/*.ts` does not reach `src/deep/a.ts`). A directory entry's real path is fixed when the role starts ([`policy-scopes.ts`](packages/@monomind/cli/src/orgrt/policy-scopes.ts)): an entry that is a symlink, or is `/`, a drive root, `$HOME` or an ancestor of `$HOME`, grants nothing (`org validate` reports it as an error; write an explicit glob such as `/home/me/**` if you really mean it), and one that later stops resolving to that path (swapped for or created as a symlink) refuses every file-tool call under that scope. |
+| `fileRead` | `[]` | Paths or globs allowed for reads — same directory/glob and absolute/relative rules as `fileWrite` |
 | `webAllow` | _(unset)_ | Domain allowlist for WebFetch/WebSearch: exact host, suffix match, `*.example.com`, or `*` for any host; `[]` = no web |
 | `maxTokens` | _(unset)_ | Per-role token budget override |
 | `maxUsd` | _(unset)_ | Per-role USD spend cap — `PolicyEngine.decide()` denies once accumulated cost meets or exceeds it, the same way `maxTokens` works |
@@ -353,9 +353,44 @@ The guard protects the git common directories of the role's cwd and of the org r
 
 Every other hook passes through to the repository's own hooks (husky, lint-staged), so they keep running for `commit` roles.
 
-**File-tool roots (`file-roots.ts`, #303).** Until this item, `Read`/`Write`/`Edit`/`Glob`/`Grep` (`policy.ts`'s `PolicyEngine`) were confined to the role's cwd alone — even though the OS sandbox above already made `$TMPDIR`, the org root and `policy.sandbox.allowWrite` writable for Bash, so a role could create a scratch file with Bash but not read or edit it back, and degraded to heredocs. `fileToolRoots()` widens the file tools to match: cwd, `$TMPDIR`, the org root and `policy.sandbox.allowWrite` entries are now all roots, plus an absolute `fileRead`/`fileWrite` glob is honoured as its own explicit grant (independent of any root). Every root is checked on `realpath()`-resolved output, so a symlink inside one root cannot resolve outside all of them.
+**File-tool roots (`file-roots.ts`, #303).** Until this item, `Read`/`Write`/`Edit`/`Glob`/`Grep` (`policy.ts`'s `PolicyEngine`) were confined to the role's cwd alone — even though the OS sandbox above already made `$TMPDIR`, the org root and `policy.sandbox.allowWrite` writable for Bash, so a role could create a scratch file with Bash but not read or edit it back, and degraded to heredocs. `fileToolRoots()` widens the file tools to match: cwd, `$TMPDIR`, the org root and `policy.sandbox.allowWrite` entries are now all roots, plus an absolute `fileRead`/`fileWrite` entry (a glob, or a plain directory that grants everything beneath it, #492) is honoured as its own explicit grant (independent of any root). Every root is checked on `realpath()`-resolved output, so a symlink inside one root cannot resolve outside all of them.
 
 `$HOME` is deliberately **not** one of these roots, even though it is already writable for Bash above. Bash needs a writable `$HOME` for package-manager caches and installs; the file tools do not, and every denial in the reproduction that motivated this item was under `$TMPDIR`. Granting it to the file tools would make the operator's entire home directory — every other checkout, every note, everything outside the deny list below — readable and editable by an autonomous role, which is a far larger widening than the issue needed and buys nothing the reproduction required. If a future item wants `$HOME` as a file-tool root, it needs its own issue and its own justification; this decision should not silently erode.
+
+**Authority files (#498).** The org root is a file-tool root, and with the default `workspace` it is also the role's cwd, so a scope such as `fileWrite: ["../**"]`, or the unrestricted default, reaches `.monomind/orgs/`. Some files there control a role's own authority or record a human's decisions. `Write`, `Edit`, `MultiEdit` and `NotebookEdit` are refused on them regardless of scope, root or `allowWrite` ([`org-authority-files.ts → isAuthorityFile`](packages/@monomind/cli/src/orgrt/org-authority-files.ts#isAuthorityFile)). Every path argument of a call is checked (`file_path`, `path`, `notebook_path`, each MultiEdit edit's `file_path`). Reads are still allowed.
+
+| Path under `<orgRoot>/.monomind/orgs/` | Why it is protected |
+|---|---|
+| any file directly in it: `<org>.json`/`.yaml`, `<org>-state.json`, `-secrets`, `-runstate`, `-threads.jsonl`, `remote-hosts.json`, … | The org definition holds every role's `policy` (scopes, git level, `sandbox.allowWrite`, `access_ack`), and it applies on `org reload` or the next run. The files beside it are org state. A new file there would be a new org. |
+| any file directly in `<org>/`: `gates.json`, `approvals.json`, `questions.json`, `inbox.jsonl`, `decisions.jsonl` | A human's decisions, read back by the daemon or the next run. |
+| `<org>/runtime.json`, `history.jsonl`, `idle-watchdog.json` | The resume checkpoint (roles, queue, abandoned roles), run history and the idle deadline. |
+| `<org>/run`, `stop`, `pause`, `reload` | Control files that `org serve` acts on: `run` starts the org. |
+| `<org>/run-*/bus.jsonl`, `sessions.json` (also in `replay-*/` and `scenario/`) | The run's event log, which records every approval and gate decision and is replayed from checkpoints, and its session ledger. The same names elsewhere (`reports/`, `work/`) are ordinary files. |
+| `<org>/git-guard/**` | Each role's git guard: the hooks and config that enforce `policy.git`. |
+
+Roles still write in subdirectories: `reports/`, `work/` (the release org's reports and checkouts), `workspace/`, `worktree/`, `worktree-<role>/`, `.mail/`, and the org memory under `<x>-memory/`. A `<x>-memory/` dir counts as memory only while there is no `<x>-memory.json` (an org of that name). Even in a memory dir, the decision, state and control files listed above are refused.
+
+How a path is matched:
+- **Anchored at the org root.** Only the org root's own `.monomind/orgs/` counts. A checkout's `.monomind/orgs/<org>.json` (for example under `work/src/`) or a `$TMPDIR` fixture is an ordinary file.
+- **Symlinks and links.** The path is classified as written and after `realpath()`. A dangling symlink is followed to where the write would land. The path is also checked against the real target of every entry in the orgs dir, or in an org dir, that is itself a symlink. So a symlinked `.monomind`, an org definition that links to `config/orgs/<org>.json`, a link into the tree from `reports/`, and a hard link to an authority file are all refused.
+- **Spelling.** Path segments are compared the way the filesystem compares them ([`policy-paths.ts → normalizeSegment`](packages/@monomind/cli/src/orgrt/policy-paths.ts#normalizeSegment)): case-insensitively on macOS and Windows, and on Windows without trailing dots and spaces or a `:stream` suffix. `realpath()` is the native one, so existing parts come back in their on-disk case and long (not 8.3) form. The `.git` write check (#258) uses the same comparison. The rest of the policy's scope globs are still case-sensitive (#496).
+
+**Bash, and CLI runtimes' own file tools.** The refusal above is enforced in `canUseTool`, which only the Claude runtime calls for every tool. A subprocess runtime's native file tools (codex `apply_patch`, kimi, opencode, …) never reach it, so they are in the same position as Bash:
+- **Authority mask (bubblewrap).** Applies to a `push` role, a role whose SDK sandbox is off or unavailable, and every non-Claude CLI runtime.
+  - The orgs dir is bound read-only, and only the subdirectories above are bound read-write again. Bash cannot write, create, delete, rename or hard-link any file directly in the orgs dir or an org dir, nor any run log.
+  - The org root and `.monomind` are mount points, so they cannot be renamed away.
+  - A symlinked org definition's target is read-only too.
+  - A subdirectory can only be written in if it exists when the role starts. Before building the mask, the daemon creates each org's `work`, `reports`, `runs`, `scratch`, `workspace` and `.mail`, plus the `<dir>` of any role `fileWrite` glob of the form `.monomind/orgs/<org>/<dir>/…`. So `git worktree add … .monomind/orgs/release/work/src` works in a masked role. Any other new subdirectory of an org dir cannot be created from inside the mask.
+  - The credential tmpfs and `/dev/null` binds come last, so no bind of the orgs tree can uncover them.
+  - A symlink someone plants in the orgs dir, such as `ln -s .. orgs/foo`, `ln -s .. orgs/z-memory` or `ln -s $HOME orgs/foo`, is ignored when its target is `/`, `$HOME`, the org root, `.monomind`, the orgs dir or an authority dir, when it holds one of them, or when it points back inside the orgs tree. No read-write dir may hold the orgs dir or an authority dir. If a work dir is swapped for a symlink after the layout is computed, bwrap refuses to mount on it and the role does not start.
+- **SDK sandbox (Claude roles below `push`).** The SDK binds its `denyWrite` paths after its `allowWrite` paths, so a writable subdirectory of a denied directory would stay read-only. The orgs dir as a whole therefore cannot be denied.
+  - Instead, the existing authority files are denied (for run logs, the current run's only), along with every org's whole `git-guard/`, not only the role's own. `Edit(...)` deny rules cover the known names.
+  - `.monomind`, the orgs dir, every org dir and every dir inside an org dir (`reports/`, `work/`, …) are mount points. So the tree cannot be renamed aside, and a work dir cannot be swapped for a symlink: `mv .monomind/orgs …` fails with "Device or resource busy".
+  - **What remains:**
+    - Bash can still create a *new* file there. That includes a new `<name>.json` org definition together with a `<name>/run` file, which `org serve`'s runfile poller would then start. A role could launch a new org with a policy of its choosing. A durable fix needs org definitions that the operator signs.
+    - An authority file that does not exist yet when the role starts can be pre-created, for example a `gates.json` or `questions.json` the daemon has not written yet.
+    - A role can plant a symlink in the orgs dir. File tools and later masked sessions ignore or refuse it, as described above.
+- **Neither.** A role with no SDK sandbox and no mask can write every one of these files with Bash. This covers a role on a host without bubblewrap (an `authority-mask-unavailable` audit event says so), an in-process runtime, and an active full-access role, which has no policy gate at all.
 
 Regardless of which root admits a path, a deny pass (`fileToolDenied()`) still blocks credential stores (`~/.ssh`, `~/.git-credentials`, `~/.config/git/credentials`, `~/.config/gh`, `~/.netrc`), guard-undoing config (`~/.gitconfig`, `~/.config/git`, shell rc files, `~/.claude`, `~/.claude.json`), the daemon sockets and the XDG runtime dir listed above — the same lists the OS sandbox already enforces for Bash, now shared from one module so the two boundaries cannot drift apart. This deny pass runs for **reads as well as writes**: `policy.ts`'s `SENSITIVE_FILE` pattern only suppresses bus snapshots of a write, it was never a deny, so before this item a credential file was unreachable by the file tools purely because it sat outside cwd — an accident that would otherwise have vanished the moment a widened root (e.g. `policy.sandbox.allowWrite: [$HOME]`) admitted it.
 
@@ -1059,7 +1094,7 @@ shell is not running (`sandbox-fault-exhausted` audit event), and later faults a
 Every role session gets its own temp directory (#480), created by
 [`role-tmpdir.ts → createRoleTmpdir`](packages/@monomind/cli/src/orgrt/role-tmpdir.ts#createRoleTmpdir)
 before the runner starts: `<base>/<org>-<role>-XXXXXX/`, mode 0700, exported to the runner as
-`TMPDIR`, `TMP` and `TEMP`. `<base>` is the TMPDIR the role would have had without it, i.e. the
+`TMPDIR`, `TMP`, `TEMP` and `CLAUDE_CODE_TMPDIR`. `<base>` is the TMPDIR the role would have had without it, i.e. the
 daemon's own (`$TMPDIR`, else `$TMP`/`$TEMP`, else the OS default), so the release org's
 `TMPDIR=$HOME/mrg-tmp` becomes `$HOME/mrg-tmp/release-builder-a1B2c3/`. In role scope the role has
 one for its session's life; with `session_scope: "task"` each task session has its own. Before, every
@@ -1067,6 +1102,14 @@ role shared the base: a bare `mktemp -d` put `tmp.XXXXXXXXXX` straight into it, 
 `rm -rf tmp.*` there deleted the scratch of every other role running at the same time (13 matches
 where 3 were meant, 2.19.0 release run). Each role's prompt now says its `$TMPDIR` is private and
 that a cleanup glob must never run in a directory other roles also use.
+
+`CLAUDE_CODE_TMPDIR` is for the claude runtime (#503). Claude Code reads it before `TMPDIR`, and its
+Bash tool exports it to every command it runs, so an org started from a Claude Code session's Bash
+tool (the release org's QA roles start drill orgs that way) inherited the outer session's value. In
+the 2.20.0 release run a sandboxed claude role's Bash then saw
+`TMPDIR=$HOME/mrg-tmp/claude-1000/claude-1000`, a directory every such role shared. With it set to the
+role's directory, the sandboxed Bash tool gets that directory as `$TMPDIR`, and Claude Code keeps its
+own files in `claude-<uid>/` inside it.
 
 The subdirectory sits under the base, so the OS sandbox's writable temp root and the file-tool
 roots (both built from the base, see `file-roots.ts` above) already cover it. It separates scratch;

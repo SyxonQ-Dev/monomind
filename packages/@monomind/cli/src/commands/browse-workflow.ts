@@ -132,7 +132,7 @@ const runSubcommand: Command = {
     });
 
     if (record.status === 'completed') {
-      spinner.succeed(
+      spinner.result(
         `Done — ${record.itemsProcessed} items in ${((record.completedAt! - record.startedAt) / 1000).toFixed(1)}s`,
       );
     } else {

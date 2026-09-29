@@ -106,6 +106,39 @@ describe('gatedCanUseTool — approval gate composition', () => {
     expect(decision.behavior === 'deny' && decision.message).toMatch(/pending human approval/);
   });
 
+  // #492: roles read these per-call results as "the task queue is stuck".
+  // The text must say it is ONE call, waiting for / refused by a human, and
+  // what to do meanwhile.
+  it('the pending message says one call waits on a human and what to do meanwhile', async () => {
+    const canUseTool = gatedCanUseTool(fakePolicy('allow'), async () => null, 'boss');
+    const decision = await canUseTool('Bash', { command: 'npm publish' });
+    const m = decision.behavior === 'deny' ? decision.message : '';
+    expect(m).toMatch(/this one Bash call/i);
+    expect(m).toMatch(/not stuck/);
+    expect(m).toMatch(/continue with other work/i);
+    expect(m).toMatch(/do not retry this identical call while it is pending/i);
+  });
+
+  it('the denied message says a human refused this one call and to choose another approach', async () => {
+    const canUseTool = gatedCanUseTool(fakePolicy('allow'), async () => false, 'boss');
+    const decision = await canUseTool('Bash', { command: 'npm publish' });
+    const m = decision.behavior === 'deny' ? decision.message : '';
+    expect(m).toMatch(/a human refused this one Bash call/i);
+    expect(m).toMatch(/not stuck/);
+    expect(m).toMatch(/choose another approach/i);
+    expect(m).toMatch(/do not retry/i);
+    expect(m).toMatch(/report the blocker via org_send/);
+  });
+
+  it('the denied message for org_send does not tell the role to use org_send', async () => {
+    const canUseTool = gatedCanUseTool(fakePolicy('allow'), async () => false, 'boss');
+    const decision = await canUseTool('org_send', { to: 'x', subject: 's', message: 'm' });
+    const m = decision.behavior === 'deny' ? decision.message : '';
+    expect(m).toMatch(/a human refused this one org_send call/);
+    expect(m).not.toMatch(/via org_send/);
+    expect(m).toMatch(/choose another approach/);
+  });
+
   it('allows through once beforeTool approves', async () => {
     const canUseTool = gatedCanUseTool(fakePolicy('allow'), async () => true, 'boss');
     const decision = await canUseTool('Bash', { command: 'ls' });
@@ -164,6 +197,26 @@ describe('checkApproval / setApproval — end-to-end state machine', () => {
 
     const result = await checkApproval(daemon, 'myorg', 'boss', 'WebFetch');
     expect(result).toBe(false);
+  });
+
+  it('#492: the verdict pushed to the waiting role says what to do next, keeping the [approval] prefix', async () => {
+    const pushed: string[] = [];
+    const agent = { mailbox: { isClosed: false, push: (t: string) => pushed.push(t) } };
+    (daemon.orgs as Map<string, unknown>).set('myorg', {
+      agents: new Map([['boss', agent]]),
+      bus: { emit: () => {} },
+      def: { roles: [] },
+    });
+    await checkApproval(daemon, 'myorg', 'boss', 'Bash', { command: 'a' });
+    await setApproval(daemon, 'myorg', 'boss', 'Bash', true);
+    await checkApproval(daemon, 'myorg', 'boss', 'WebFetch', { url: 'https://x' });
+    await setApproval(daemon, 'myorg', 'boss', 'WebFetch', false);
+    expect(pushed[0]).toMatch(/^\[approval\] Bash: APPROVED — /);
+    expect(pushed[0]).toMatch(/your pending Bash call\(s\); repeat the identical call now/);
+    expect(pushed[1]).toMatch(/^\[approval\] WebFetch: DENIED — /);
+    expect(pushed[1]).toMatch(
+      /your pending WebFetch call\(s\); do not retry them — choose another approach/,
+    );
   });
 
   it('setApproval on a nonexistent pending entry reports an error instead of silently succeeding', async () => {
