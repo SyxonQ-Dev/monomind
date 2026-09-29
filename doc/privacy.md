@@ -66,6 +66,31 @@ test, not just this page, if you need the full reasoning.
 - **`api.openai.com`** (`packages/@monomind/monograph/src/wiki/providers.ts:67`) — **unreachable in practice**. Its one caller, `wiki-generator.ts:156`, is gated on an `llmConfig` value that no non-test code path ever sets; the MCP `monograph_wiki_build` tool takes the local `claude --print` branch instead. Dead in the sense that nothing in this repo currently drives execution there — flagged here rather than removed, since a future caller supplying `llmConfig` would be a legitimate, user-configured use (same category as the external-provider bullet below), not a defect.
 - **`github.com` (`api.version` update check)** (`packages/@monoes/monodesign/skill/scripts/context-update.mjs`'s `fetchLatestSkillVersion`) — **unreachable**. `computeUpdateDirective()` returns `null` unconditionally before this call is ever reached (an explicit `eslint-disable-next-line no-unreachable` marks the rest as a deliberate stub) — the monodesign skill's own update checking was disabled in favor of monomind's own update flow. Dead code, not a live leak.
 
+## Install-time downloads
+
+The table above covers what monomind does once installed. Installing it is
+a separate matter: some dependencies run install scripts that download
+binaries. Measured with `npm install monomind@2.18.5` into an empty prefix
+(Linux x64, Node 22, npm 11), with a cold npm cache:
+
+| Package (pulled in by) | Script | What it does |
+|---|---|---|
+| `puppeteer` (optional dependency of `@monoes/monodesign`) | `postinstall` | Downloads Chrome and chrome-headless-shell from `storage.googleapis.com/chrome-for-testing-public` into `~/.cache/puppeteer` (394 MB + 263 MB), outside `node_modules`. monodesign only uses it as a fallback when monobrowse can't find a system browser for URL scans. Skip with `PUPPETEER_SKIP_DOWNLOAD=1`. |
+| `onnxruntime-node` (via `@huggingface/transformers`, optional, for local embeddings) | `postinstall` | On Linux x64, downloads the CUDA execution-provider libraries from `api.nuget.org` (260 MB, on top of the 288 MB package). Skip with `ONNXRUNTIME_NODE_INSTALL=skip`; CPU embeddings still work. |
+| `better-sqlite3` (via `@monoes/monograph` and `@monoes/memory`) | `install` | `prebuild-install` fetches a prebuilt native addon from the package's GitHub releases, and compiles it with `node-gyp` when no prebuilt matches. |
+| `protobufjs` (via `onnxruntime-web`) | `postinstall` | Checks the version scheme of the packages that depend on it. No download. |
+| `monomind` itself | `postinstall` | Deletes macOS `._*` resource-fork files under `node_modules` (skipped on Windows). No download. |
+
+Result: 362 packages and 1.3 GB in `node_modules`, plus the 657 MB of
+Chrome in `~/.cache/puppeteer`. The largest entries are `onnxruntime-node`
+(548 MB with the CUDA libraries), the Claude Code binary in
+`@anthropic-ai/claude-agent-sdk-<platform>` (232 MB; the SDK installs it as
+an optional dependency, and Claude-backed org roles run it), and
+`onnxruntime-web` (141 MB).
+
+- `PUPPETEER_SKIP_DOWNLOAD=1 ONNXRUNTIME_NODE_INSTALL=skip npm install monomind`: same 362 packages, 981 MB, no Chrome and no NuGet download.
+- `npm install monomind --omit=optional`: 236 packages, 171 MB. This drops local embeddings, the memory, hooks, routing and MCP packages, the AI-SDK providers, puppeteer, and the Claude Code binary, so Claude-backed org roles cannot start.
+
 ## What's not in this table, on purpose
 
 Monomind also makes network requests when *you* tell it to, using your own
