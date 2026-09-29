@@ -31,6 +31,17 @@ try {
 } catch {
   appendAuditEvent = () => {};
 }
+// Same reasoning: if the command parser is missing, fall back to scanning the
+// raw command (the stricter pre-#427 behaviour) rather than failing.
+let bashScan;
+try {
+  bashScan = require('./bash-command-scan.cjs');
+} catch {
+  bashScan = {
+    destructiveScanTargets: (cmd) => [cmd],
+    pipesNetworkIntoShell: () => true,
+  };
+}
 
 // ─── monofence-ai integration (additional layer on top of regex gates) ───────
 //
@@ -332,11 +343,21 @@ function redact(match) {
     : '*'.repeat(match.length);
 }
 
+// Patterns are matched per command segment with non-executed quoted literals
+// and heredoc bodies masked (see bash-command-scan.cjs, issue #427).
 function checkDestructive(command, patterns) {
   var list = patterns || FALLBACK_DESTRUCTIVE_PATTERNS;
+  for (const target of bashScan.destructiveScanTargets(command)) {
+    const found = matchFirst(target, list);
+    if (found) return found;
+  }
+  return { triggered: false };
+}
+
+function matchFirst(text, list) {
   for (const pattern of list) {
     pattern.lastIndex = 0;
-    const match = pattern.exec(command);
+    const match = pattern.exec(text);
     if (match) {
       return {
         triggered: true,
@@ -345,7 +366,7 @@ function checkDestructive(command, patterns) {
       };
     }
   }
-  return { triggered: false };
+  return null;
 }
 
 function checkSecrets(content, patterns) {
@@ -469,13 +490,20 @@ async function handlePreBash(hCtx) {
 
   // Additional layer: monofence-ai threat detection (prompt injection, evasion, etc.)
   // Fails open — never blocks a command just because monofence is unavailable/slow.
+  // Warn-only for Bash (#427): commands routinely quote injection-like text
+  // (grep patterns, commit messages). It blocks only when the command also
+  // pipes downloaded content into a shell.
   var mf = await monofenceScan(cmd);
   var worst = monofenceWorstThreat(mf, cmd);
-  if (worst) {
-    emitBlock('[monofence] Threat detected in command — ' + worst.type +
-      ' (confidence ' + Math.round(worst.confidence * 100) + '%): ' + worst.description,
+  if (!worst) return;
+  var summary = worst.type + ' (confidence ' + Math.round(worst.confidence * 100) + '%): ' + worst.description;
+  if (bashScan.pipesNetworkIntoShell(cmd)) {
+    emitBlock('[monofence] Threat detected in command that pipes network content into a shell — ' + summary,
       { source: 'monofence-command', tool: hCtx.toolName, cwd: hCtx.CWD });
+    return;
   }
+  process.stderr.write('[monofence] warning (not blocked): possible threat in command — ' + summary + '\n');
+  appendAuditEvent({ source: 'monofence-command', decision: 'warn', tool: hCtx.toolName, reason: summary }, hCtx.CWD);
 }
 
 /**
