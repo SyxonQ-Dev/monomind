@@ -13,7 +13,7 @@ import { documentsCapability } from '../capabilities/cap-documents.js';
 import { graphCapability } from '../capabilities/cap-graph.js';
 import { mediaCapability } from '../capabilities/cap-media.js';
 import { timelineCapability } from '../capabilities/cap-timeline.js';
-import { CapabilityManager } from '../capabilities/manager.js';
+import { ACTIVATION_THRESHOLD, CapabilityManager } from '../capabilities/manager.js';
 import {
   listFiles,
   loadFingerprint,
@@ -21,6 +21,8 @@ import {
   scanDirectory,
 } from '../capabilities/scanner.js';
 import type { CapabilityName, DirectoryScan, SearchResult } from '../capabilities/types.js';
+import { hasKnowledgeMetadata, readMetadata } from '../knowledge/document-index.js';
+import { getProjectRoot } from '../memory/memory-bridge-paths.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 
 const TYPE_ICONS: Record<string, string> = {
@@ -108,6 +110,31 @@ function isFingerprintStale(scannedAt: string): boolean {
   return Number.isNaN(ts) || Date.now() - ts > FINGERPRINT_MAX_AGE_MS;
 }
 
+/**
+ * Issue #479: the fingerprint decides which content types `search` looks at,
+ * and it is only refreshed by `search scan` or once it is a day old. A
+ * document `doc ingest` (or MCP `knowledge_ingest`, or the session-start
+ * auto-ingest) just indexed was therefore invisible to `search` whenever the
+ * last scan predated it, or whenever documents were under the activation
+ * threshold's share of the tree. Live documents in the project's doc store
+ * are an explicit signal that documents matter here, so they switch the
+ * documents type on for this search — no rescan, and the saved fingerprint is
+ * left alone. The documents type still reads files from the working tree; the
+ * doc store only decides that it runs.
+ */
+export function withIngestedDocuments(scan: DirectoryScan, cwd: string): DirectoryScan {
+  if (scan.capabilities.documents.confidence >= ACTIVATION_THRESHOLD) return scan;
+  const root = getProjectRoot(cwd);
+  if (!hasKnowledgeMetadata(root) || readMetadata(root).length === 0) return scan;
+  return {
+    ...scan,
+    capabilities: {
+      ...scan.capabilities,
+      documents: { ...scan.capabilities.documents, confidence: 1 },
+    },
+  };
+}
+
 const scanSubcommand: Command = {
   name: 'scan',
   description: 'Scan directory and update capability fingerprint',
@@ -141,7 +168,8 @@ const scanSubcommand: Command = {
 
 export const searchUniversalCommand: Command = {
   name: 'search',
-  description: 'Search across all content types',
+  description:
+    'Search across all content types in this directory. Documents are searched whenever the doc store has any (no rescan after `doc ingest`); other newly added content types need `search scan` or the daily automatic rescan',
   subcommands: [scanSubcommand],
   options: [
     { name: 'limit', description: 'Max results', type: 'number' },
@@ -190,7 +218,7 @@ export const searchUniversalCommand: Command = {
     mgr.register(timelineCapability);
 
     try {
-      await mgr.activateFromScan(fingerprint, ctx.cwd, false);
+      await mgr.activateFromScan(withIngestedDocuments(fingerprint, ctx.cwd), ctx.cwd, false);
 
       const files = listFiles(ctx.cwd);
       for (const module of mgr.getActive()) {

@@ -166,3 +166,129 @@ describe('search command — code symbols from the monograph index', () => {
   });
 });
 
+// Issue #479: `monomind search X` missed a document `doc ingest` had just
+// indexed until `monomind search scan` was run — the fingerprint taken before
+// the document existed kept the documents capability switched off.
+describe('search command — freshly ingested documents (#479)', () => {
+  let dir: string;
+  let logs: string[];
+  const fpPath = () => path.join(dir, '.monomind', 'fingerprint.json');
+
+  async function run(query: string): Promise<string> {
+    logs = [];
+    const res = await searchUniversalCommand.action?.({
+      args: [query],
+      flags: { _: [] },
+      cwd: dir,
+      interactive: false,
+    } as never);
+    expect(res?.success).toBe(true);
+    return logs.join('\n');
+  }
+
+  /** What `doc ingest` leaves behind: the file plus a metadata-log record. */
+  function ingest(rel: string, content: string): void {
+    const abs = path.join(dir, rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, content);
+    const knowledge = path.join(dir, '.monomind', 'knowledge');
+    fs.mkdirSync(knowledge, { recursive: true });
+    fs.appendFileSync(
+      path.join(knowledge, 'doc-metadata.jsonl'),
+      `${JSON.stringify({
+        filePath: abs,
+        contentHash: 'h',
+        chunkCount: 1,
+        indexedAt: new Date().toISOString(),
+        scope: 'shared',
+        size: content.length,
+        version: 1,
+      })}\n`,
+    );
+  }
+
+  /** A code-only fingerprint, taken (as `init` takes one) an hour ago. */
+  function writeCodeOnlyFingerprint(): void {
+    const none = { confidence: 0, files: 0, signals: [] };
+    fs.writeFileSync(
+      fpPath(),
+      JSON.stringify({
+        version: 1,
+        root: dir,
+        totalFiles: 2,
+        git: true,
+        scannedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+        capabilities: {
+          code: { confidence: 1, files: 2, signals: ['.ts'] },
+          documents: none,
+          media: none,
+          data: none,
+          graph: none,
+          timeline: none,
+        },
+        filesByExtension: { '.ts': 2 },
+      }),
+    );
+  }
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'monomind-search-479-'));
+    // A `.git` marker makes `dir` the project root the doc store resolves to.
+    fs.mkdirSync(path.join(dir, '.git'));
+    fs.mkdirSync(path.join(dir, '.monomind'));
+    fs.mkdirSync(path.join(dir, 'src'));
+    fs.writeFileSync(path.join(dir, 'src', 'a.ts'), 'export const a = 1;\n');
+    fs.writeFileSync(path.join(dir, 'src', 'b.ts'), 'export const b = 2;\n');
+    fs.writeFileSync(path.join(dir, '.monomind', 'monograph.db'), '');
+    ftsSearch.mockReturnValue([]);
+    vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => {
+      logs.push(a.join(' '));
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('finds a document ingested after the last scan, with no manual scan', async () => {
+    writeCodeOnlyFingerprint();
+    ingest('docs/ingest-me.md', 'Notes about QUOKKA-PARROT-9921 here.');
+    const out = await run('QUOKKA-PARROT-9921');
+    expect(out).toContain('Documents:');
+    expect(out).toContain(path.join('docs', 'ingest-me.md'));
+  });
+
+  it('finds an ingested document even when documents are a tiny share of the tree', async () => {
+    for (let i = 0; i < 40; i++) {
+      fs.writeFileSync(path.join(dir, 'src', `m${i}.ts`), `export const m${i} = ${i};\n`);
+    }
+    writeCodeOnlyFingerprint();
+    ingest('docs/ingest-me.md', 'Notes about QUOKKA-PARROT-9921 here.');
+    const out = await run('QUOKKA-PARROT-9921');
+    expect(out).toContain(path.join('docs', 'ingest-me.md'));
+  });
+
+  it('does not rescan when the doc store has not changed since the last scan', async () => {
+    ingest('docs/ingest-me.md', 'Notes about QUOKKA-PARROT-9921 here.');
+    const logFile = path.join(dir, '.monomind', 'knowledge', 'doc-metadata.jsonl');
+    const past = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    fs.utimesSync(logFile, past, past);
+    writeCodeOnlyFingerprint();
+    const before = fs.readFileSync(fpPath(), 'utf-8');
+    const out = await run('QUOKKA-PARROT-9921');
+    expect(out).not.toContain('rescanning');
+    expect(fs.readFileSync(fpPath(), 'utf-8')).toBe(before);
+    // Still found: ingested documents switch the documents type on.
+    expect(out).toContain(path.join('docs', 'ingest-me.md'));
+  });
+
+  it('does not rescan when there is no doc store at all', async () => {
+    writeCodeOnlyFingerprint();
+    const before = fs.readFileSync(fpPath(), 'utf-8');
+    const out = await run('anything');
+    expect(out).not.toContain('rescanning');
+    expect(fs.readFileSync(fpPath(), 'utf-8')).toBe(before);
+  });
+});
+
