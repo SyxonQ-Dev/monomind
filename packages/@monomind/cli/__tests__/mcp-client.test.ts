@@ -321,10 +321,14 @@ describe('MCP Client', () => {
     });
 
     it('should filter tools by category', async () => {
-      const agentTools = await listMCPTools('agent');
+      const memoryTools = await listMCPTools('memory');
 
-      expect(agentTools.length).toBeGreaterThan(0);
-      expect(agentTools.every(t => t.category === 'agent')).toBe(true);
+      expect(memoryTools.length).toBeGreaterThan(0);
+      expect(memoryTools.every(t => t.category === 'memory')).toBe(true);
+    });
+
+    it('should not advertise agent_* state-file tools by default (#410)', async () => {
+      expect(await listMCPTools('agent')).toEqual([]);
     });
 
     it('should return empty array for non-existent category', async () => {

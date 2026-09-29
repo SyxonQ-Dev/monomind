@@ -479,7 +479,7 @@ npx monomind actions profile \
 
 ```bash
 # Initialize comprehensive workflow automation swarm
-mcp__monomind__swarm_init { topology: "mesh", maxAgents: 12 }
+mcp__monomind__monoswarm_init { topology: "mesh", maxAgents: 12 }
 mcp__monomind__agent_spawn { type: "coordinator", name: "Workflow Coordinator" }
 mcp__monomind__agent_spawn { type: "architect", name: "Pipeline Architect" }
 mcp__monomind__agent_spawn { type: "coder", name: "Workflow Developer" }
@@ -488,25 +488,10 @@ mcp__monomind__agent_spawn { type: "optimizer", name: "Performance Optimizer" }
 mcp__monomind__agent_spawn { type: "monitor", name: "Automation Monitor" }
 mcp__monomind__agent_spawn { type: "analyst", name: "Workflow Analyzer" }
 
-# Create intelligent workflow automation rules
-mcp__monomind__automation_setup {
-  rules: [
-    {
-      trigger: "pull_request",
-      conditions: ["files_changed > 10", "complexity_high"],
-      actions: ["spawn_review_swarm", "parallel_testing", "security_scan"]
-    },
-    {
-      trigger: "push_to_main",
-      conditions: ["all_tests_pass", "security_cleared"],
-      actions: ["deploy_staging", "performance_test", "notify_stakeholders"]
-    }
-  ]
-}
 
 # Orchestrate adaptive workflow management
-mcp__monomind__task_orchestrate {
-  task: "Manage intelligent CI/CD pipeline with continuous optimization",
+mcp__monomind__task_create {
+  description: "Manage intelligent CI/CD pipeline with continuous optimization",
   strategy: "adaptive",
   priority: "high",
   dependencies: ["code_analysis", "test_optimization", "deployment_strategy"]
@@ -523,14 +508,14 @@ mcp__monomind__performance_report {
 }
 
 # Analyze workflow bottlenecks with swarm intelligence
-mcp__monomind__bottleneck_analyze {
+mcp__monomind__performance_bottleneck {
   component: "github_actions_workflow",
   metrics: ["build_time", "test_duration", "deployment_latency", "resource_utilization"]
 }
 
 # Store performance insights in swarm memory
-mcp__monomind__memory_usage {
-  action: "store",
+mcp__monomind__monoswarm_memory {
+  action: "set",
   key: "workflow/performance/analysis",
   value: {
     bottlenecks_identified: ["slow_test_suite", "inefficient_caching"],
@@ -547,7 +532,7 @@ mcp__monomind__memory_usage {
 // Swarm-powered workflow creation
 const createIntelligentWorkflow = async (repoContext) => {
   // Initialize workflow generation swarm
-  await mcp__monomind__swarm_init({ topology: "hierarchical", maxAgents: 8 });
+  await mcp__monomind__monoswarm_init({ topology: "hierarchical", maxAgents: 8 });
 
   // Spawn specialized workflow agents
   await mcp__monomind__agent_spawn({
@@ -565,7 +550,7 @@ const createIntelligentWorkflow = async (repoContext) => {
   });
 
   // Create adaptive workflow based on repository analysis
-  const workflow = await mcp__monomind__workflow_create({
+  const workflow = {
     name: "Intelligent CI/CD Pipeline",
     steps: [
       {
@@ -585,11 +570,11 @@ const createIntelligentWorkflow = async (repoContext) => {
       },
     ],
     triggers: ["pull_request", "push_to_main", "scheduled_optimization"],
-  });
+  };
 
   // Store workflow configuration in memory
-  await mcp__monomind__memory_usage({
-    action: "store",
+  await mcp__monomind__monoswarm_memory({
+    action: "set",
     key: `workflow/${repoContext.name}/config`,
     value: {
       workflow,
@@ -608,8 +593,8 @@ const createIntelligentWorkflow = async (repoContext) => {
 
 ```bash
 # Implement continuous workflow learning
-mcp__monomind__memory_usage {
-  action: "store",
+mcp__monomind__monoswarm_memory {
+  action: "set",
   key: "workflow/learning/patterns",
   value: {
     successful_patterns: [
@@ -631,8 +616,8 @@ mcp__monomind__memory_usage {
 }
 
 # Generate workflow optimization recommendations
-mcp__monomind__task_orchestrate {
-  task: "Analyze workflow performance and generate optimization recommendations",
+mcp__monomind__task_create {
+  description: "Analyze workflow performance and generate optimization recommendations",
   strategy: "parallel",
   priority: "medium"
 }
