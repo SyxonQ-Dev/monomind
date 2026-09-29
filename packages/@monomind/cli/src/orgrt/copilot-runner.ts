@@ -115,6 +115,11 @@ export class CopilotAgentRunner implements AgentRunner {
     const withSystem = (body: string): string =>
       sessionId ? body : `${args.systemPrompt}${buildToolProtocol(args.tools)}\n\n---\n\n${body}`;
     const tools = new NativeToolCalls();
+    // copilot rejects --reasoning-effort outright for a model without it
+    // (verified live: `Model "auto" does not support reasoning effort
+    // configuration`, exit 1 before any model call). The first such refusal
+    // drops the effort for the rest of the run and retries the invocation.
+    let turnArgs = args;
 
     try {
       for await (const p of args.prompt) {
@@ -140,7 +145,7 @@ export class CopilotAgentRunner implements AgentRunner {
           // collected here while the stripped prose streams out live below.
           const rawTexts: string[] = [];
 
-          for await (const ev of streamTurn(bin, nextPrompt, sessionId, args, outcome)) {
+          for await (const ev of streamTurn(bin, nextPrompt, sessionId, turnArgs, outcome)) {
             if (ev.kind === 'assistant' && ev.rawText !== undefined) {
               rawTexts.push(ev.rawText);
               // Yield assistant prose AS IT ARRIVES (per NDJSON line, not
@@ -182,6 +187,15 @@ export class CopilotAgentRunner implements AgentRunner {
                 'manually in a real terminal in this project to accept any prompts (and confirm --add-dir ' +
                 `covers every path it needs), then retry.${outcome.stderrTail ? `\nstderr: ${outcome.stderrTail.slice(-500)}` : ''}`,
             );
+          }
+          if (
+            outcome.exitCode !== 0 &&
+            turnArgs.effort &&
+            /does not support reasoning effort/i.test(outcome.stderrTail)
+          ) {
+            turnArgs = { ...args, effort: undefined };
+            round--;
+            continue;
           }
           if (outcome.exitCode !== 0) {
             throw turnError(outcome);

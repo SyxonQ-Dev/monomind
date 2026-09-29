@@ -100,6 +100,21 @@ describe('canonicalTool', () => {
     });
   });
 
+  it('patch: the files of an apply_patch envelope (copilot, live shape)', () => {
+    const value =
+      '*** Begin Patch\n*** Add File: b.txt\n+hi\n*** Update File: a.txt\n@@\n-x\n+y\n*** Delete File: c.txt\n*** End Patch\n';
+    expect(canonicalTool('apply_patch', { value })).toEqual({
+      kind: 'patch',
+      input: {
+        files: [
+          { file_path: 'b.txt', action: 'add', diff: '+hi' },
+          { file_path: 'a.txt', action: 'update', diff: '@@\n-x\n+y' },
+          { file_path: 'c.txt', action: 'delete' },
+        ],
+      },
+    });
+  });
+
   it('parses a JSON-string argument payload (OpenAI-style function.arguments)', () => {
     expect(canonicalTool('Bash', '{"command":"pwd"}')).toEqual({
       kind: 'shell',

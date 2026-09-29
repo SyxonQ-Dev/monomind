@@ -228,9 +228,49 @@ export function canonicalTool(
         input: { server, tool, arguments: asRecord(raw.Arguments ?? raw.arguments ?? {}) },
       };
     }
+    case 'patch': {
+      const text = pick(raw, ['value', 'input', 'patch']);
+      const files = text === undefined ? [] : patchFiles(text);
+      return files.length > 0 ? { kind, input: { files } } : other;
+    }
     default:
       return { kind, input: raw };
   }
+}
+
+const PATCH_HEADER_RE = /^\*\*\* (Add|Update|Delete) File: (.+)$/;
+const PATCH_ACTION = { Add: 'add', Update: 'update', Delete: 'delete' } as const;
+
+/** Files of an `apply_patch` envelope (`*** Begin Patch` / `*** Add|Update|
+ *  Delete File: <path>` sections — the format copilot's apply_patch takes,
+ *  verified live), each with its own section as the diff. */
+function patchFiles(
+  text: string,
+): Array<{ file_path: string; action: 'add' | 'update' | 'delete'; diff?: string }> {
+  const files: Array<{ file_path: string; action: 'add' | 'update' | 'delete'; diff?: string }> =
+    [];
+  let body: string[] = [];
+  const flush = () => {
+    const last = files.at(-1);
+    if (last && body.length > 0) last.diff = body.join('\n');
+    body = [];
+  };
+  for (const line of text.split('\n')) {
+    const m = PATCH_HEADER_RE.exec(line);
+    if (m) {
+      flush();
+      files.push({
+        file_path: m[2].trim(),
+        action: PATCH_ACTION[m[1] as keyof typeof PATCH_ACTION],
+      });
+    } else if (line.startsWith('*** End Patch')) {
+      break;
+    } else if (files.length > 0) {
+      body.push(line);
+    }
+  }
+  flush();
+  return files;
 }
 
 /** Text of a tool result in whatever shape the CLI reports it: a string, a

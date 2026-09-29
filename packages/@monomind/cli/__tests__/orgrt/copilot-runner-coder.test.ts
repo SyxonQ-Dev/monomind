@@ -13,16 +13,17 @@ import { CopilotAgentRunner } from '../../src/orgrt/copilot-runner.js';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 
-function mockChild(lines: string[]): cp.ChildProcess {
+function mockChild(lines: string[], exitCode = 0, stderr = ''): cp.ChildProcess {
   const child = new EventEmitter() as any;
   child.stdout = new EventEmitter();
   child.stdout[Symbol.asyncIterator] = async function* () {
+    if (stderr) child.stderr.emit('data', Buffer.from(stderr));
     for (const line of lines) yield Buffer.from(`${line}\n`);
   };
   child.stderr = new EventEmitter();
   child.kill = vi.fn();
-  child.exitCode = 0;
-  setTimeout(() => child.emit('close', 0), 5);
+  child.exitCode = exitCode;
+  setTimeout(() => child.emit('close', exitCode), 5);
   return child as cp.ChildProcess;
 }
 
@@ -142,6 +143,18 @@ describe('CopilotAgentRunner coder mode', () => {
     vi.mocked(cp.spawn).mockReturnValue(mockChild(LIVE));
     await collect({ resume: 'old-session' });
     expect(argvAt(0)).toContain('--resume=old-session');
+  });
+
+  it('retries without --reasoning-effort when the model refuses it (verified live on copilot 1.0.88)', async () => {
+    vi.mocked(cp.spawn)
+      .mockReturnValueOnce(
+        mockChild([], 1, 'Error: Model "auto" does not support reasoning effort configuration (requested: "low").\n'),
+      )
+      .mockReturnValueOnce(mockChild(LIVE));
+    const msgs = await collect({ effort: 'low' });
+    expect(argvAt(0)).toContain('--reasoning-effort');
+    expect(argvAt(1)).not.toContain('--reasoning-effort');
+    expect(msgs.at(-1)).toMatchObject({ type: 'result', subtype: 'success' });
   });
 
   it('full access runs --allow-all; scoped keeps --allow-all-tools; effort maps 1:1 (off → none)', async () => {
