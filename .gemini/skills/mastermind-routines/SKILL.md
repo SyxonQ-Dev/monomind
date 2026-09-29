@@ -8,7 +8,7 @@ pick: low
 
 # Mastermind Routines
 
-This skill is invoked by `mastermind:routines` or directly via `/mastermind-routines`.
+This skill is invoked directly via `/mastermind-routines`.
 
 The Org Runtime has exactly one recurring trigger: the `schedule` field of the org definition
 `.monomind/orgs/<org>.json` (`OrgDefSchema` in `packages/@monomind/cli/src/orgrt/types.ts`).
