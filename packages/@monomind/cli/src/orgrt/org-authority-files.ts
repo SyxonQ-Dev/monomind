@@ -13,9 +13,9 @@
  * Segments compare as the filesystem does (policy-paths.ts's
  * normalizeSegment): case-insensitively on darwin and win32.
  */
-import { existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
-import { normalizeSegment, realPath, segmentsBelow } from './policy-paths.js';
+import { existsSync, lstatSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { isAbsolute, join, resolve } from 'node:path';
+import { normalizeSegment, realPath, segmentsBelow, uniq } from './policy-paths.js';
 
 /** Files in an org dir that record a human's decisions. */
 export const DECISION_FILES = ['gates.json', 'approvals.json', 'questions.json', 'inbox.jsonl'];
@@ -83,11 +83,32 @@ const statOf = (p: string) => {
     return undefined;
   }
 };
+const lstatOf = (p: string) => {
+  try {
+    return lstatSync(p);
+  } catch {
+    return undefined;
+  }
+};
 
 /** Where a path below the orgs dir may really live: the orgs dir itself
  *  (lexical and real), plus the real target of every entry of it, or of an
  *  org dir, that is a symlink — with the segments that entry stands for. */
+const anchorCache = new Map<string, { at: number; value: ReturnType<typeof listAnchors> }>();
+/** How long a listing of the orgs tree is reused: a burst of file-tool calls
+ *  reads it once, and a symlink planted since is seen a moment later. */
+const ANCHOR_TTL_MS = 1000;
+
 function anchors(orgRoot: string, platform: NodeJS.Platform) {
+  const key = `${platform}\0${orgRoot}`;
+  const hit = anchorCache.get(key);
+  if (hit && Date.now() - hit.at < ANCHOR_TTL_MS) return hit.value;
+  const value = listAnchors(orgRoot, platform);
+  anchorCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+function listAnchors(orgRoot: string, platform: NodeJS.Platform) {
   const lexical = orgsDir(orgRoot);
   const real = realPath(lexical);
   const out: Array<{ base: string; prefix: string[] }> = [
@@ -173,34 +194,105 @@ export function authorityFilePaths(
 }
 
 /**
- * `.monomind`, the orgs dir and every dir directly in it, as real paths: the
- * SDK sandbox binds each one writable onto itself (it lies under the
- * writable org root anyway), which makes it a mount point that cannot be
- * renamed — so no role can move the tree aside and plant a forged one.
+ * `.monomind`, the orgs dir, every dir directly in it and every dir directly
+ * in an org dir, as real paths: the SDK sandbox binds each one writable onto
+ * itself (it lies under the writable org root anyway), which makes it a
+ * mount point that cannot be renamed — so no role can move the tree, or an
+ * org's `reports/`, aside and plant a symlink or a forged copy in its place.
  */
 export function orgsMountPoints(orgRoot: string | undefined): string[] {
   if (!orgRoot) return [];
   const orgs = realPath(orgsDir(orgRoot));
   if (!statOf(orgs)?.isDirectory()) return [];
-  return [
-    realPath(join(orgRoot, '.monomind')),
-    orgs,
-    ...list(orgs)
-      .filter((e) => e.isDirectory())
-      .map((e) => join(orgs, e.name)),
-  ];
+  const out = [realPath(join(orgRoot, '.monomind')), orgs];
+  for (const e of list(orgs)) {
+    if (!e.isDirectory()) continue;
+    const org = join(orgs, e.name);
+    out.push(
+      org,
+      ...list(org)
+        .filter((c) => c.isDirectory())
+        .map((c) => join(org, c.name)),
+    );
+  }
+  return out;
+}
+
+/** Every org's guard dir (real dirs only): the SDK sandbox denies each one
+ *  whole, so no role rewrites another role's hooks. */
+export function gitGuardDirs(orgRoot: string | undefined): string[] {
+  if (!orgRoot) return [];
+  const orgs = realPath(orgsDir(orgRoot));
+  return list(orgs)
+    .filter((e) => e.isDirectory())
+    .map((e) => join(orgs, e.name, GIT_GUARD_DIR))
+    .filter((d) => lstatOf(d)?.isDirectory());
+}
+
+/** The dirs in an org dir roles work in, created before a masked role
+ *  starts: the mask binds only existing dirs read-write, and the orgs dir
+ *  around them is read-only (a worktree added under `work/src` needs
+ *  `work/` to exist). */
+export const ORG_WORK_DIRS = ['work', 'reports', 'runs', 'scratch', 'workspace', '.mail'];
+
+/**
+ * `mkdir -p` each org's work dirs (ORG_WORK_DIRS), plus the `<dir>` of every
+ * `fileWrite` glob of the form `.monomind/orgs/<org>/<dir>/…` (relative to
+ * `cwd`, or absolute) — only for orgs that exist, never the guard dir or a
+ * run dir.
+ */
+export function ensureOrgWorkDirs(
+  orgRoot: string | undefined,
+  fileWrite: string[] = [],
+  cwd = orgRoot,
+): void {
+  if (!orgRoot || !cwd) return;
+  const orgs = realPath(orgsDir(orgRoot));
+  if (!statOf(orgs)?.isDirectory()) return;
+  const isOrg = (name: string) =>
+    lstatOf(join(orgs, name))?.isDirectory() === true &&
+    DEF_EXTS.some((x) => existsSync(join(orgs, name + x)));
+  const dirs: string[] = [];
+  for (const e of list(orgs))
+    if (isOrg(e.name)) dirs.push(...ORG_WORK_DIRS.map((d) => join(orgs, e.name, d)));
+  const literal = (s: string | undefined): s is string =>
+    !!s && !/[*?[\]{}]/.test(s) && s !== '.' && s !== '..';
+  for (const g of fileWrite) {
+    const abs = isAbsolute(g) ? g : resolve(cwd, g);
+    const [org, dir, next] = segmentsBelow(orgs, abs) ?? segmentsBelow(orgsDir(orgRoot), abs) ?? [];
+    if (next === undefined || !literal(org) || !literal(dir) || !isOrg(org)) continue;
+    if (dir === GIT_GUARD_DIR || RUN_DIR.test(dir)) continue;
+    dirs.push(join(orgs, org, dir));
+  }
+  for (const d of dirs) {
+    try {
+      mkdirSync(d, { recursive: true });
+    } catch {
+      /* stays read-only under the mask; the role's own write reports why */
+    }
+  }
 }
 
 /**
  * The layout the bubblewrap mask needs (authority-mask.ts): the orgs dir and
  * every symlinked org dir to bind read-only, then the dirs roles write in to
- * bind back read-write — each real subdirectory of an org dir except
- * git-guard/ and the run dirs, and each org memory dir — then the authority
+ * bind back read-write — each real subdirectory of an org dir except the
+ * guard dir and the run dirs, and each org memory dir — then the authority
  * files inside those (a memory dir's decision, state and control files, and
  * symlink targets that live outside the read-only dirs) read-only again.
  * All real paths; empty when there is no orgs dir.
+ *
+ * A symlinked org or memory entry is skipped when its target is `/`, the org
+ * root, `.monomind`, the orgs dir or one of `protectedDirs` ($HOME, the
+ * authority dirs), or holds one of them, or lies inside the orgs tree: a
+ * planted `ln -s .. orgs/foo` must not bind the tree read-write, nor
+ * `ln -s $HOME orgs/foo` bind over the hidden credentials. No writable dir
+ * may hold the orgs dir or a protected dir either.
  */
-export function orgsMaskLayout(orgRoot: string | undefined): {
+export function orgsMaskLayout(
+  orgRoot: string | undefined,
+  protectedDirs: string[] = [],
+): {
   readOnly: string[];
   writable: string[];
   files: string[];
@@ -209,13 +301,23 @@ export function orgsMaskLayout(orgRoot: string | undefined): {
   if (!orgRoot) return layout;
   const orgs = realPath(orgsDir(orgRoot));
   if (!statOf(orgs)?.isDirectory()) return layout;
+  const hidden = protectedDirs.map(realPath);
+  const critical = uniq([
+    '/',
+    realPath(orgRoot),
+    realPath(join(orgRoot, '.monomind')),
+    orgs,
+    ...hidden,
+  ]);
+  const holds = (outer: string, inner: string) => segmentsBelow(outer, inner) !== null;
+  const unsafeTarget = (t: string) => critical.some((c) => holds(t, c)) || holds(orgs, t);
   layout.readOnly.push(orgs);
   for (const e of list(orgs)) {
     const lp = join(orgs, e.name);
     const p = realPath(lp);
-    const st = statOf(p);
-    if (!st?.isDirectory()) continue;
-    const linked = lstatSync(lp).isSymbolicLink();
+    if (!statOf(p)?.isDirectory()) continue;
+    const linked = lstatOf(lp)?.isSymbolicLink() === true;
+    if (linked && unsafeTarget(p)) continue;
     if (isMemoryDir(orgs, e.name)) {
       layout.writable.push(p);
       continue;
@@ -225,6 +327,9 @@ export function orgsMaskLayout(orgRoot: string | undefined): {
       if (c.isDirectory() && c.name !== GIT_GUARD_DIR && !RUN_DIR.test(c.name))
         layout.writable.push(join(p, c.name));
   }
+  layout.writable = layout.writable.filter(
+    (w) => !holds(w, orgs) && !hidden.some((d) => holds(w, d)),
+  );
   const within = (f: string) =>
     layout.readOnly.some((d) => {
       const below = segmentsBelow(d, f);

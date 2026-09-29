@@ -20,9 +20,9 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
   For Bash, and for the native file tools of other CLI runtimes (codex `apply_patch`, kimi, …), which never reach that check:
 
-  - The bubblewrap authority mask binds the orgs dir read-only and binds only the role work dirs back read-write. The org root and `.monomind` can't be renamed.
+  - The bubblewrap authority mask binds the orgs dir read-only and binds only the role work dirs back read-write. Each org's `work`, `reports`, `runs`, `scratch`, `workspace` and `.mail`, and any `<dir>` a role's `fileWrite` names, are created first, so `git worktree add … work/src` still works. The org root and `.monomind` can't be renamed. A planted symlink (`ln -s .. orgs/foo`, `ln -s $HOME orgs/foo`) can't loosen the mask or uncover the hidden credentials.
 
-  - The SDK sandbox makes the existing authority files read-only and the orgs tree unrenameable. Bash there can still create a *new* org definition plus its `run` file, which `org serve` would start. `org-runtime.md` ("Authority files") lists this and the other limits.
+  - The SDK sandbox makes the existing authority files read-only, including every org's whole `git-guard/`. The orgs tree and every dir in an org dir can't be renamed or swapped. Bash there can still create a *new* org definition plus its `run` file, which `org serve` would start, or pre-create an authority file the daemon hasn't written yet. `org-runtime.md` ("Authority files") lists these and the other limits.
 
 ## [2.20.0] — 2026-09-29
 

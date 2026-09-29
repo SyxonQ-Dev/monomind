@@ -28,14 +28,18 @@ import { OrgBus } from '../../src/orgrt/bus.js';
 import { gitCommonDir, prepareGitGuard } from '../../src/orgrt/git-guard.js';
 import {
   authorityFilePaths,
+  ensureOrgWorkDirs,
+  gitGuardDirs,
   isAuthorityBelowOrgs,
   isAuthorityFile,
+  ORG_WORK_DIRS,
   orgsMountPoints,
 } from '../../src/orgrt/org-authority-files.js';
 import { PolicyEngine } from '../../src/orgrt/policy.js';
 import {
   gitWriteViolation,
   normalizeSegment,
+  pathSegments,
   segmentsBelow,
 } from '../../src/orgrt/policy-paths.js';
 import { buildClaudeRestrictions } from '../../src/orgrt/role-sandbox.js';
@@ -313,6 +317,42 @@ describe('Bash-side lists', () => {
     for (const d of orgsMountPoints(root)) expect(fs.allowWrite).toContain(d);
     expect(fs.allowWrite).toContain(orgs);
     expect(fs.allowWrite).toContain(join(root, '.monomind'));
+    // Org-dir children are mount points too, so reports/ cannot be swapped
+    // for a symlink; every role's guard dir is denied whole.
+    expect(fs.allowWrite).toContain(join(orgs, 'acme/reports'));
+    expect(gitGuardDirs(root)).toEqual([join(orgs, 'acme/git-guard')]);
+    expect(fs.denyWrite).toContain(join(orgs, 'acme/git-guard'));
+  });
+
+  it('creates the work dirs of every org, and the dirs a role fileWrite names', () => {
+    const root = scratch('oa-work-');
+    const orgs = join(root, '.monomind/orgs');
+    mkdirSync(join(orgs, 'acme'), { recursive: true });
+    writeFileSync(join(orgs, 'acme.json'), '{}');
+    mkdirSync(join(orgs, 'stray'), { recursive: true }); // no definition: not an org
+    ensureOrgWorkDirs(root, [
+      '.monomind/orgs/acme/drafts/**',
+      `${orgs}/acme/notes/*.md`,
+      '.monomind/orgs/ghost/work/**', // no such org
+      '.monomind/orgs/acme/git-guard/**',
+      '.monomind/orgs/acme/run-9/**',
+      '.monomind/orgs/*/wild/**',
+    ]);
+    for (const d of [...ORG_WORK_DIRS, 'drafts', 'notes'])
+      expect(existsSync(join(orgs, 'acme', d)), d).toBe(true);
+    for (const d of ['stray/work', 'ghost', 'acme/git-guard', 'acme/run-9', 'acme/wild'])
+      expect(existsSync(join(orgs, d)), d).toBe(false);
+  });
+
+  it('collapses . and .. before classifying', () => {
+    expect(pathSegments('/p/.monomind/orgs/acme/Reports/../gates.json', 'darwin')).toEqual([
+      'p',
+      '.monomind',
+      'orgs',
+      'acme',
+      'gates.json',
+    ]);
+    expect(isAuthorityFile('/p/.monomind/orgs/acme/reports/./../gates.json', '/p', 'linux')).toBe(true);
   });
 });
 
@@ -376,5 +416,57 @@ describe.runIf(authorityMaskAvailability().available)('the mask keeps Bash out o
     inMask(root, `echo x > ${root}/config/orgs/release.json; echo ok > ${root}/config/orgs/other.json`);
     expect(readFileSync(join(root, 'config/orgs/release.json'), 'utf8')).toBe('ORIGINAL');
     expect(readFileSync(join(root, 'config/orgs/other.json'), 'utf8')).toBe('ok\n');
+  });
+
+  it('lets a masked role add a worktree under work/ that did not exist yet', () => {
+    const root = scratch('oa-mwt-');
+    spawnSync('git', ['init', '-q', root]);
+    spawnSync('git', ['-C', root, '-c', 'user.email=x@y', '-c', 'user.name=x', 'commit', '-q', '--allow-empty', '-m', 'i']);
+    mkdirSync(join(root, '.monomind/orgs/release/reports'), { recursive: true });
+    writeFileSync(join(root, '.monomind/orgs/release.json'), '{}');
+    const r = inMask(
+      root,
+      `git -C ${root} worktree add -q -b release/9.9.9 .monomind/orgs/release/work/src HEAD && echo ok`,
+    );
+    expect(r.stdout + r.stderr).toMatch(/^ok$/m);
+    expect(existsSync(join(root, '.monomind/orgs/release/work/src/.git'))).toBe(true);
+  });
+
+  /** A planted symlink in the orgs dir must not loosen the next session's mask. */
+  it.each([
+    ['foo', '..'],
+    ['z-memory', '..'],
+    ['foo', 'HOME'],
+  ])('ignores a planted %s -> %s', (name, target) => {
+    const root = orgTree();
+    const orgs = join(root, '.monomind/orgs');
+    const home = scratch('oa-phome-');
+    mkdirSync(join(home, '.monomind/orgrt-operator'), { recursive: true });
+    writeFileSync(join(home, '.monomind/orgrt-operator/secret'), 'OPERATOR-SECRET');
+    symlinkSync(target === 'HOME' ? home : target, join(orgs, name));
+    const [cmd, argv] = maskedCommand(
+      authorityMaskArgs({ home, env: {}, roots: [root], orgRoot: root }),
+      'bash',
+      [
+        '-c',
+        [
+          `echo x > ${orgs}/evil.json`,
+          `echo x > ${orgs}/acme/run`,
+          `echo x >> ${orgs}/acme/run-1/bus.jsonl`,
+          `touch ${orgs}/acme/git-guard/x`,
+          `echo x > ${orgs}/acme.json`,
+          `cat ${home}/.monomind/orgrt-operator/secret`,
+          `echo ok > ${orgs}/acme/reports/r.md`,
+        ].join('; '),
+      ],
+    );
+    const r = spawnSync(cmd, argv, { encoding: 'utf8' });
+    expect(r.stdout).not.toMatch(/OPERATOR-SECRET/);
+    expect(existsSync(join(orgs, 'evil.json'))).toBe(false);
+    expect(readFileSync(join(orgs, 'acme/run'), 'utf8')).toBe('ORIGINAL');
+    expect(readFileSync(join(orgs, 'acme/run-1/bus.jsonl'), 'utf8')).toBe('ORIGINAL');
+    expect(existsSync(join(orgs, 'acme/git-guard/x'))).toBe(false);
+    expect(readFileSync(join(orgs, 'acme.json'), 'utf8')).toBe('ORIGINAL');
+    expect(readFileSync(join(orgs, 'acme/reports/r.md'), 'utf8')).toBe('ok\n');
   });
 });

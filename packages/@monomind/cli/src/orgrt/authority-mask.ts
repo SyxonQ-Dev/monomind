@@ -39,7 +39,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { dashboardCredentialPaths, operatorDirOverride } from './file-roots.js';
-import { orgsMaskLayout } from './org-authority-files.js';
+import { ensureOrgWorkDirs, orgsMaskLayout } from './org-authority-files.js';
 import { realPath } from './policy-paths.js';
 
 /** Under $HOME: the dashboard's human-auth secret (ui/server.mjs). */
@@ -87,22 +87,30 @@ export function authorityMaskArgs(ctx: {
   env: NodeJS.ProcessEnv;
   roots: Array<string | undefined>;
   orgRoot?: string;
+  /** The role's cwd and `policy.fileWrite`, for the work dirs to create. */
+  cwd?: string;
+  fileWrite?: string[];
 }): string[] {
   const args = ['--dev-bind', '/', '/'];
+  // #498: the mask binds only existing work dirs read-write, so create them
+  // first (a `git worktree add … work/src` in a masked role needs `work/`).
+  ensureOrgWorkDirs(ctx.orgRoot, ctx.fileWrite, ctx.cwd ?? ctx.orgRoot);
   // #498: the org root and its .monomind become mount points, so neither can
   // be renamed away and replaced by a tree with a forged org definition.
   if (ctx.orgRoot)
     for (const d of [ctx.orgRoot, join(ctx.orgRoot, '.monomind')].map(realPath))
       if (existsSync(d)) args.push('--bind', d, d);
-  for (const d of authorityDirs(ctx.home, ctx.env)) if (existsSync(d)) args.push('--tmpfs', d);
-  for (const f of dashboardCredentialPaths(ctx.roots)) args.push('--ro-bind', '/dev/null', f);
   // The orgs dir read-only (no new org definition, runfile or decision file,
   // no rename), the dirs roles work in read-write again, then the authority
   // files those still hold read-only (org-authority-files.ts).
-  const orgs = orgsMaskLayout(ctx.orgRoot);
+  const hidden = authorityDirs(ctx.home, ctx.env);
+  const orgs = orgsMaskLayout(ctx.orgRoot, [ctx.home, ...hidden]);
   for (const d of orgs.readOnly) args.push('--ro-bind', d, d);
   for (const d of orgs.writable) args.push('--bind', d, d);
   for (const f of orgs.files) args.push('--ro-bind', f, f);
+  // Last, so that no bind above can uncover them.
+  for (const d of hidden) if (existsSync(d)) args.push('--tmpfs', d);
+  for (const f of dashboardCredentialPaths(ctx.roots)) args.push('--ro-bind', '/dev/null', f);
   return args;
 }
 

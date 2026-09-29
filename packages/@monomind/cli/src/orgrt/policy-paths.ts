@@ -120,12 +120,18 @@ export function normalizeSegment(
   return platform === 'darwin' || platform === 'win32' ? s.toLowerCase() : s;
 }
 
-/** The normalized segments of an absolute path (see normalizeSegment). */
+/** The normalized segments of an absolute path (see normalizeSegment), with
+ *  `.` and `..` collapsed lexically, as `path.resolve()` would. */
 export function pathSegments(p: string, platform: NodeJS.Platform = process.platform): string[] {
-  return p
-    .split(platform === 'win32' ? /[\\/]+/ : /\/+/)
-    .filter(Boolean)
-    .map((s) => normalizeSegment(s, platform));
+  const out: string[] = [];
+  for (const raw of p.split(platform === 'win32' ? /[\\/]+/ : /\/+/)) {
+    if (!raw) continue;
+    const s = normalizeSegment(raw, platform);
+    if (s === '.' || s === '') continue;
+    if (s === '..') out.pop();
+    else out.push(s);
+  }
+  return out;
 }
 
 /** The normalized segments of `target` below `base`, or null when `target`

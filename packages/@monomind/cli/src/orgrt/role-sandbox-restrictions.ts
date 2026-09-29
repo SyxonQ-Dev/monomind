@@ -18,7 +18,7 @@ import {
   runtimeDir,
 } from './file-roots.js';
 import { type GitGuard, gitLocalRemotePaths } from './git-guard.js';
-import { orgsMountPoints } from './org-authority-files.js';
+import { gitGuardDirs, orgsMountPoints } from './org-authority-files.js';
 import { ORG_DISALLOWED_HARNESS_TOOLS } from './org-harness-tools.js';
 import { expandDenyWrite, underAnyRoot } from './sandbox-deny-write.js';
 
@@ -204,6 +204,8 @@ export function buildClaudeRestrictions(
       ...gitDirs.flatMap(gitLocalRemotePaths),
       ...HOME_DENY_WRITE.map((p) => join(home, p)),
       ...authorityFilePaths(ctx.orgRoot, ctx.current),
+      // Every role's guard dir, not only this one's (#498).
+      ...gitGuardDirs(ctx.orgRoot),
       ...roleDenyWrite,
     ]),
     [ctx.cwd, join(home, '.claude')],

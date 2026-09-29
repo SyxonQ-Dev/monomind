@@ -184,6 +184,7 @@ export async function runOneSession(
             inProcess: (role.runtime ?? opts.def?.runtime) === 'vercel',
             cwd,
             orgRoot: opts.orgRoot,
+            fileWrite: role.policy?.fileWrite,
           });
     const stream = runner.run(
       sessionRunArgs(opts, {

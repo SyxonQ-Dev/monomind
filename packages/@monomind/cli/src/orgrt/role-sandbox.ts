@@ -91,6 +91,8 @@ export function roleAuthorityMask(args: {
   inProcess: boolean;
   cwd: string;
   orgRoot?: string;
+  /** The role's `policy.fileWrite`: dirs it names under an org dir are created. */
+  fileWrite?: string[];
   home?: string;
   env?: NodeJS.ProcessEnv;
   availability?: { available: boolean; reason?: string };
@@ -112,6 +114,8 @@ export function roleAuthorityMask(args: {
     env: args.env ?? process.env,
     roots: [args.cwd, args.orgRoot],
     orgRoot: args.orgRoot,
+    cwd: args.cwd,
+    fileWrite: args.fileWrite,
   });
 }
 
