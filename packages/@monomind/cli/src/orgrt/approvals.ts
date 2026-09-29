@@ -329,7 +329,14 @@ export async function setApproval(
     const running = daemon.orgs.get(org);
     const agent = running?.agents.get(role);
     if (agent && !agent.mailbox.isClosed) {
-      agent.mailbox.push(`[approval] ${action}: ${approved ? 'APPROVED' : 'DENIED'}`);
+      // #492: the `[approval] <action>: APPROVED|DENIED` prefix is unchanged;
+      // the rest tells the role what the verdict means for its next step.
+      agent.mailbox.push(
+        `[approval] ${action}: ${approved ? 'APPROVED' : 'DENIED'} — ` +
+          (approved
+            ? `a human approved your pending ${action} call(s); repeat the identical call now and it will run.`
+            : `a human refused your pending ${action} call(s); do not retry them — choose another approach. Your task queue is not stuck.`),
+      );
     }
 
     running?.bus.emit({
