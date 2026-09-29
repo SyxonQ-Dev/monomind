@@ -182,6 +182,7 @@ const edit = (p: PolicyEngine, file: string) =>
 describe('file tools cannot write authority files', () => {
   const scopes: Array<[string, (root: string) => PolicyEngine]> = [
     ["fileWrite ['../**'] from a subdir", (root) => engine(root, { fileWrite: ['../**'] })],
+    ["fileWrite ['..'] (a directory scope, #493) from a subdir", (root) => engine(root, { fileWrite: ['..'] })],
     ['the default unrestricted scope at the org root', (root) => engine(root, {}, root)],
     ['a directory scope covering the org root', (root) => engine(root, { fileWrite: ['.monomind/**'] }, root)],
     ['an absolute glob over .monomind/orgs', (root) => engine(root, { fileWrite: [`${root}/.monomind/orgs/**`] })],

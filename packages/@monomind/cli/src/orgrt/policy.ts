@@ -17,6 +17,13 @@ import {
   uniq,
   webDomainMatches,
 } from './policy-paths.js';
+import {
+  describeScope,
+  isGlobScope,
+  type ScopeSnapshot,
+  scopeDrift,
+  snapshotScopes,
+} from './policy-scopes.js';
 import { redactSecrets, summarize } from './policy-secrets.js';
 import type { RolePolicy } from './types.js';
 
@@ -87,6 +94,9 @@ export class PolicyEngine {
   private usedUsd = 0;
   private toolContext: PolicyToolContext = {};
   private osSandboxed = false;
+  /** #492: real paths of the non-glob fileWrite/fileRead entries, taken from
+   *  the operator's config before the role runs (and again on `org reload`). */
+  private scopeSnapshots: Map<string, ScopeSnapshot>;
   constructor(
     readonly role: string,
     public policy: RolePolicy,
@@ -101,7 +111,11 @@ export class PolicyEngine {
     /** #498: the org root, whose `.monomind/orgs/` holds the authority files
      *  (org-authority-files.ts). Without it, cwd and every root count as one. */
     private orgRoot?: string,
-  ) {}
+  ) {
+    // A caller may build an engine with no policy at all — treat it as {}.
+    this.policy = policy ?? {};
+    this.scopeSnapshots = snapshotScopes(this.policy, cwd);
+  }
 
   /** Whether this role's current session runs Bash inside the SDK's OS
    *  sandbox — set by session.ts from the runtime result of
@@ -122,10 +136,11 @@ export class PolicyEngine {
    *  sets them itself. */
   updatePolicy(next: RolePolicy): void {
     this.policy = {
-      ...(this.policy.maxTokens != null ? { maxTokens: this.policy.maxTokens } : {}),
-      ...(this.policy.maxUsd != null ? { maxUsd: this.policy.maxUsd } : {}),
+      ...(this.policy?.maxTokens != null ? { maxTokens: this.policy.maxTokens } : {}),
+      ...(this.policy?.maxUsd != null ? { maxUsd: this.policy.maxUsd } : {}),
       ...(next ?? {}),
     };
+    this.scopeSnapshots = snapshotScopes(this.policy, this.cwd);
   }
 
   /** #343 hot reload of budget_tokens / budget_usd: replace the ceilings and
@@ -305,7 +320,7 @@ export class PolicyEngine {
         // sailed straight through to allow() and bypassed fileRead/fileWrite
         // scoping entirely. Deny rather than guess which files it would touch.
         return deny(
-          `${tool} has no path argument, but role ${this.role}'s ${WRITE_TOOLS.has(tool) ? 'write' : 'read'} scope is restricted — refusing an unscoped call; pass a path inside ${globs.join(', ')} (relative to org workdir ${this.cwd})`,
+          `${tool} has no path argument, but role ${this.role}'s ${WRITE_TOOLS.has(tool) ? 'write' : 'read'} scope is restricted — refusing an unscoped call; pass a path inside ${globs.map(describeScope).join(', ')} (relative to org workdir ${this.cwd})`,
         );
       }
       for (const p of paths) {
@@ -355,13 +370,34 @@ export class PolicyEngine {
     const rel = relative(realCwd, real);
     const relPosix = rel.split(sep).join('/');
     const realPosix = real.split(sep).join('/');
-    // #303: an absolute fileRead/fileWrite glob is an explicit, author-
+    // #492: an entry with no glob characters is a path — it grants that
+    // path AND everything beneath it (a relative one resolves against the
+    // org workdir). Matched on REAL paths via isWithin, so a symlink out of
+    // the directory and a shared-prefix sibling (`site-old` vs `site`) both
+    // miss. Glob entries keep their glob semantics.
+    // B1: a directory entry matches against its SNAPSHOT, never a fresh
+    // realpath — the role can't widen it by swapping it for a symlink. An
+    // entry that no longer resolves to its snapshot refuses the call.
+    const snaps = globs.map((g) => [g, this.scopeSnapshots.get(g)] as const);
+    for (const [g, s] of snaps) {
+      const drift = s && scopeDrift(g, s);
+      if (drift) return drift;
+    }
+    const inScope = (g: string): boolean => {
+      if (isGlobScope(g)) return globToRegExp(g).test(isAbsolute(g) ? realPosix : relPosix);
+      const s = this.scopeSnapshots.get(g);
+      return !!s && !s.refused && isWithin(s.real, real);
+    };
+    const refusedNote = snaps
+      .map(([, s]) => s?.refused)
+      .filter(Boolean)
+      .map((r) => `; ${r}`)
+      .join('');
+    // #303: an absolute fileRead/fileWrite entry is an explicit, author-
     // written grant — it authorizes a path on its own, independent of
     // cwd/roots, the same way `policy.sandbox.allowWrite` does for Bash.
-    const grantedByAbsoluteGlob = globs.some(
-      (g) => isAbsolute(g) && globToRegExp(g).test(realPosix),
-    );
-    if (!grantedByAbsoluteGlob) {
+    const grantedByAbsoluteScope = globs.some((g) => isAbsolute(g) && inScope(g));
+    if (!grantedByAbsoluteScope) {
       // #303: beyond cwd, a role may also reach $TMPDIR, the org root, and
       // any operator-granted policy.sandbox.allowWrite entries — the same
       // roots the Bash sandbox already treats as writable (file-roots.ts).
@@ -371,8 +407,11 @@ export class PolicyEngine {
       // #291: naming only the rejected path leaves the role guessing another
       // absolute path — it never learns the roots it is confined to. Name
       // the boundary and how paths resolve so the next turn can be correct.
+      // #492: an absolute scope entry is a grant of its own — name it too,
+      // with how it matches, or the role never learns it exists.
+      const absGrants = globs.filter((g) => isAbsolute(g));
       if (!realRoots.some((root) => isWithin(root, real)))
-        return `path escapes every root this role may use: ${p} (roots: ${realRoots.join(', ')} — paths are resolved relative to org workdir ${this.cwd}; retry with a path inside one of them)`;
+        return `path escapes every root this role may use: ${p} (roots: ${realRoots.join(', ')}${absGrants.length ? `; ${WRITE_TOOLS.has(tool) ? 'write' : 'read'} scope also grants ${absGrants.map(describeScope).join(', ')}` : ''} — paths are resolved relative to org workdir ${this.cwd}; retry with a path inside one of them)${refusedNote}`;
     }
     // #303: a widened root must not make credential stores, guard-undoing
     // config, sockets, or the XDG runtime dir reachable — today they are
@@ -401,11 +440,8 @@ export class PolicyEngine {
       return `path ${p} is org authority state (an org definition, a human's decisions, or runtime state under .monomind/orgs/) — no role may write it, regardless of scope, root, or allowWrite; only the operator and the org daemon do`;
     if (isDashboardCredential(real))
       return `path ${p} is a dashboard credential, which no role may touch regardless of scope, root, or allowWrite`;
-    if (
-      !grantedByAbsoluteGlob &&
-      !globs.some((g) => !isAbsolute(g) && globToRegExp(g).test(relPosix))
-    )
-      return `path ${rel} outside ${WRITE_TOOLS.has(tool) ? 'write' : 'read'} scope — role ${this.role} may use ${globs.join(', ')} (relative to org workdir ${this.cwd})`;
+    if (!grantedByAbsoluteScope && !globs.some((g) => !isAbsolute(g) && inScope(g)))
+      return `path ${rel} outside ${WRITE_TOOLS.has(tool) ? 'write' : 'read'} scope — role ${this.role} may use ${globs.map(describeScope).join(', ')} (relative to org workdir ${this.cwd})${refusedNote}`;
     // #258: Write/Edit run in-process, so the OS sandbox never sees them —
     // without this a 'read' role could write refs and objects straight into
     // .git, and a 'commit' role could rewrite the shared identity (#250) or
