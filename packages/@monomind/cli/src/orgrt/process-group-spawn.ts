@@ -45,8 +45,8 @@
 import { type ChildProcess, type SpawnOptions, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { AgentRunArgs } from './agent-runner-types.js';
-import { EXEC_TREE_ENV } from './process-tree-marker.js';
 import { type DescendantTracker, trackDescendants } from './process-tree.js';
+import { EXEC_TREE_ENV } from './process-tree-marker.js';
 
 export interface RunnerProcess {
   child: ChildProcess;
