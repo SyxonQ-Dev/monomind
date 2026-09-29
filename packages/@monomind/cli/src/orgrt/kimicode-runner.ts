@@ -26,10 +26,12 @@
  *   parses stdout LINE BY LINE as data arrives: a liveness `tool_use`
  *   message is yielded the moment the subprocess spawns (deterministically
  *   winning the first-pull race regardless of model-thinking latency),
- *   assistant text is yielded as each event lands, and kimi's own
- *   {"role":"tool",...} progress events are forwarded as `tool_use`
- *   liveness messages so the StateDetector/idle watchdog see a working
- *   agent throughout the turn. Tool_call fences are still collected from
+ *   assistant text is yielded as each event lands, and kimi's own tool
+ *   calls (an assistant message's `tool_calls`) and results
+ *   ({"role":"tool","tool_call_id",...}) are forwarded as rich
+ *   `tool_use`/`tool_result` pairs matched by kimi's call id, so the
+ *   StateDetector/idle watchdog see a working agent throughout the turn and
+ *   agent exec gets full-fidelity tool_activity. Tool_call fences are still collected from
  *   the raw texts and parsed at end of turn (fence parsing needs the
  *   complete text).
  *
@@ -74,6 +76,7 @@ import * as path from 'node:path';
 import type { AgentMessage, AgentRunArgs, AgentRunner } from './agent-runner.js';
 import type { TurnOutcome } from './kimicode-runner-stream.js';
 import { readUsageDelta, streamTurn, turnError } from './kimicode-runner-stream.js';
+import { NativeToolCalls } from './kimicode-runner-tools.js';
 import {
   buildToolProtocol,
   formatToolResults,
@@ -89,12 +92,20 @@ export {
 } from './kimicode-runner-parse.js';
 
 export class KimiCodeAgentRunner implements AgentRunner {
-  private emptySkillsDir = '';
+  private emptySkillsDir: string | undefined = '';
 
   constructor(private kimiBin?: string) {}
 
   async *run(args: AgentRunArgs): AsyncIterable<AgentMessage> {
     const bin = this.kimiBin || process.env.KIMI_CLI_BIN || 'kimi';
+    // Coder mode. Full access drops the role agent file — its `tools:`
+    // allowlist is an org-role gate — so the user's default kimi agent
+    // runs with its whole tool surface; the system prompt then rides on the
+    // first prompt instead (as codex/antigravity already carry theirs).
+    // Full access or `--settings` also keeps the user's own skills (no
+    // empty --skills-dir) and thinking config.
+    const fullAccess = args.access === 'full';
+    const userSetup = fullAccess || (args.settingSources?.length ?? 0) > 0;
 
     // The system prompt reaches kimi as an agent file (--agent-file binds the
     // agent at session creation; resume restores it, so later turns only need
@@ -110,7 +121,7 @@ export class KimiCodeAgentRunner implements AgentRunner {
     //      tools), so this allowlist IS the tool gate for kimi org roles.
     //      Keep it minimal — org-specific denials belong here, not prose.
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'monomind-kimi-'));
-    const agentFile = path.join(tmpDir, 'org-role.md');
+    const agentFile = fullAccess ? undefined : path.join(tmpDir, 'org-role.md');
     // kimi rejects an agent file whose body (everything after the frontmatter)
     // is empty with "Missing prompt body". `args.systemPrompt` is legitimately
     // '' for bare `agent exec` calls with no --system-file (agent.ask, `chat`
@@ -119,21 +130,24 @@ export class KimiCodeAgentRunner implements AgentRunner {
     // Fall back to a minimal default so the file body is never empty.
     const body =
       (args.systemPrompt || 'You are a helpful assistant.') + buildToolProtocol(args.tools);
-    fs.writeFileSync(
-      agentFile,
-      `---\nname: monomind-org-role\ndescription: Monomind org role (managed by monomind orgrt)\n` +
-        `tools: [Bash, Read, Write, Edit, Glob, Grep]\n---\n\n` +
-        body,
-    );
+    if (agentFile) {
+      fs.writeFileSync(
+        agentFile,
+        `---\nname: monomind-org-role\ndescription: Monomind org role (managed by monomind orgrt)\n` +
+          `tools: [Bash, Read, Write, Edit, Glob, Grep]\n---\n\n` +
+          body,
+      );
+    }
 
     // Empty skills dir: kimi loads every user/project skill's description
     // into the system prompt on launch (measured: 47 skills ≈ several KB per
     // turn). Org roles get their instructions from the role prompt — user
     // skills are pure overhead and a source of instruction drift.
-    this.emptySkillsDir = path.join(tmpDir, 'no-skills');
-    fs.mkdirSync(this.emptySkillsDir, { recursive: true });
+    this.emptySkillsDir = userSetup ? undefined : path.join(tmpDir, 'no-skills');
+    if (this.emptySkillsDir) fs.mkdirSync(this.emptySkillsDir, { recursive: true });
 
     let sessionId: string | undefined = args.resume;
+    const tools = new NativeToolCalls();
 
     try {
       for await (const p of args.prompt) {
@@ -153,10 +167,15 @@ export class KimiCodeAgentRunner implements AgentRunner {
           // parsing — fence parsing needs the complete text, so fences are
           // collected here while the stripped prose streams out live below.
           const rawTexts: string[] = [];
+          // No agent file (full access): a fresh session gets the system
+          // prompt and tool protocol ahead of the first prompt.
+          const prefix = `${args.systemPrompt ?? ''}${buildToolProtocol(args.tools)}`;
+          const promptText =
+            !agentFile && !sessionId && prefix ? `${prefix}\n\n---\n\n${nextPrompt}` : nextPrompt;
 
           for await (const ev of streamTurn(
             bin,
-            nextPrompt,
+            promptText,
             sessionId,
             args,
             agentFile,
@@ -172,7 +191,16 @@ export class KimiCodeAgentRunner implements AgentRunner {
               // output may already be yielded when a turn later exits
               // non-zero — preferable to losing it entirely.
               if (ev.text) yield { type: 'assistant', session_id: sessionId, text: ev.text };
-            } else if (ev.kind === 'tool') {
+            }
+            // kimi's own tool calls and results, paired by its call id.
+            for (const c of ev.toolCalls ?? []) {
+              const m = tools.start(c.id, c.name, c.input, sessionId);
+              if (m) yield m;
+            }
+            if (ev.toolResult) {
+              yield* tools.end(ev.toolResult.id, ev.toolResult.output, false, sessionId);
+            }
+            if (ev.kind === 'tool') {
               // Liveness for kimi's own tool activity: session.ts never
               // renders tool_use as chat — it only feeds the StateDetector
               // ('tool-call' state) and refreshes last-activity.

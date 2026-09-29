@@ -8,16 +8,36 @@ import { TOOL_CALL_RE } from './tool-fence.js';
  *   - 'assistant': rawText is the full assistant text (fences intact) for
  *     end-of-turn tool-call parsing; text is the fence-stripped prose,
  *     present only when non-empty.
- *   - 'tool':      kimi's own tool activity ({"role":"tool",...}) — forwarded
- *     by run() as a `tool_use` liveness AgentMessage (see header).
+ *     `toolCalls` carries the native tool calls the same message started.
+ *   - 'native':    a tool-call-only assistant message (`toolCalls`) or a
+ *     tool result ({"role":"tool","tool_call_id",...} → `toolResult`) —
+ *     forwarded by run() as rich tool_use/tool_result AgentMessages.
+ *   - 'tool':      a {"role":"tool",...} event with no call id — forwarded by
+ *     run() as a `tool_use` liveness AgentMessage (see header).
  *   - 'meta':      any other event that only carries a session id.
  */
 export interface KimiStreamEvent {
-  kind: 'assistant' | 'tool' | 'meta';
+  kind: 'assistant' | 'native' | 'tool' | 'meta';
   text?: string;
   rawText?: string;
   toolName?: string;
+  toolCalls?: Array<{ id: string; name: string; input: unknown }>;
+  toolResult?: { id: string; output: unknown };
   sessionId?: string;
+}
+
+/** OpenAI-style `tool_calls` on a kimi assistant message (kimi-code 2.x
+ *  PromptJsonWriter: {type:'function', id, function:{name, arguments}},
+ *  `arguments` a JSON string). */
+function parseToolCallsField(v: unknown): Array<{ id: string; name: string; input: unknown }> {
+  if (!Array.isArray(v)) return [];
+  const out: Array<{ id: string; name: string; input: unknown }> = [];
+  for (const c of v) {
+    const call = c as { id?: unknown; function?: { name?: unknown; arguments?: unknown } };
+    if (typeof call?.id !== 'string' || typeof call.function?.name !== 'string') continue;
+    out.push({ id: call.id, name: call.function.name, input: call.function.arguments ?? {} });
+  }
+  return out;
 }
 
 /**
@@ -31,6 +51,10 @@ export interface KimiStreamEvent {
  *   {"role":"assistant","content":[{"type":"text",...}]} — block form
  *   {"role":"meta","type":"session.resume_hint",session_id} — resume hint
  *   {"role":"tool","content":"Bash(ls ...)"}             — tool progress
+ * kimi-code 2.x stream-json (read from its PromptJsonWriter, not live —
+ * no kimi install here) adds the call/result pairing:
+ *   {"role":"assistant","content":...,"tool_calls":[{id,function:{name,arguments}}]}
+ *   {"role":"tool","tool_call_id":"...","content":"<output>"}
  */
 export function parseStreamJsonLine(line: string): KimiStreamEvent | null {
   const t = line.trim();
@@ -63,11 +87,22 @@ export function parseStreamJsonLine(line: string): KimiStreamEvent | null {
     } else if (typeof ev.text === 'string') {
       text = ev.text;
     }
+    const toolCalls = parseToolCallsField(ev.tool_calls);
     if (text) {
       const stripped = text.replace(TOOL_CALL_RE, '').trim();
-      return { kind: 'assistant', rawText: text, text: stripped || undefined, sessionId };
+      return {
+        kind: 'assistant',
+        rawText: text,
+        text: stripped || undefined,
+        sessionId,
+        ...(toolCalls.length > 0 ? { toolCalls } : {}),
+      };
     }
+    if (toolCalls.length > 0) return { kind: 'native', toolCalls, sessionId };
   } else if (role === 'tool') {
+    if (typeof ev.tool_call_id === 'string') {
+      return { kind: 'native', toolResult: { id: ev.tool_call_id, output: ev.content }, sessionId };
+    }
     return { kind: 'tool', toolName: describeToolEvent(ev), sessionId };
   }
   // Meta/unknown events matter only when they carry a session id.
