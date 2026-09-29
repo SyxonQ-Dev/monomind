@@ -129,7 +129,14 @@ export class PiAgentRunner implements AgentRunner {
           // collected here while the stripped prose streams out live below.
           const rawTexts: string[] = [];
 
-          for await (const ev of streamTurn(bin, nextPrompt, sessionDir, sessionId, args, outcome)) {
+          for await (const ev of streamTurn(
+            bin,
+            nextPrompt,
+            sessionDir,
+            sessionId,
+            args,
+            outcome,
+          )) {
             if (outcome.sessionId) sessionId = outcome.sessionId;
             if (ev.kind === 'assistant' && ev.rawText !== undefined) {
               rawTexts.push(ev.rawText);

@@ -58,8 +58,8 @@
  * them from here.
  */
 import type { AgentMessage, AgentRunArgs, AgentRunner } from './agent-runner.js';
-import type { TurnOutcome } from './qwen-runner-parse.js';
 import { NativeToolCalls } from './kimicode-runner-tools.js';
+import type { TurnOutcome } from './qwen-runner-parse.js';
 import { STARTUP_GRACE_MS, streamTurn, turnError } from './qwen-runner-stream.js';
 import {
   buildToolProtocol,

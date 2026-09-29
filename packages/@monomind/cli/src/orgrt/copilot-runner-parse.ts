@@ -95,7 +95,11 @@ export function handleLine(line: string): CopilotStreamEvent | null {
   if (kind === 'tool.execution_start' && typeof data?.toolCallId === 'string') {
     return {
       kind: 'native',
-      toolStart: { id: data.toolCallId, name: String(data.toolName ?? 'tool'), input: data.arguments },
+      toolStart: {
+        id: data.toolCallId,
+        name: String(data.toolName ?? 'tool'),
+        input: data.arguments,
+      },
     };
   }
   if (kind === 'tool.execution_complete' && typeof data?.toolCallId === 'string') {
