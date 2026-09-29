@@ -6,6 +6,32 @@ import type { Decision, PolicyEngine } from './policy.js';
 import type { SessionOpts } from './session-types.js';
 import type { DecisionKind } from './types.js';
 
+/** #492: the tool result a role sees while ONE call waits for a human's
+ *  approve/deny. Roles read the old one-liner as "the task queue is stuck";
+ *  this says what is waiting and what to do meanwhile. Keeps the leading
+ *  "pending human approval" phrase the old text had. */
+export function approvalPendingMessage(toolName: string): string {
+  return (
+    `Tool "${toolName}" is pending human approval — this one ${toolName} call is waiting for a human to approve or deny it via 'monomind org approve/deny'. ` +
+    `Only this call is held; your task queue is not stuck and your other tools still work. ` +
+    `Meanwhile, continue with other work that does not need this call, and do not retry this identical call while it is pending. ` +
+    `Once it is approved, repeat the identical call and it will run; if it is denied, choose another approach.`
+  );
+}
+
+/** #492: the tool result after a human denied ONE call. The identical call
+ *  stays denied (checkApproval keys decisions on the call's fingerprint). */
+export function approvalDeniedMessage(toolName: string): string {
+  return (
+    `Tool "${toolName}" was denied by guardrail approval — a human refused this one ${toolName} call. ` +
+    `Your task queue is not stuck and your other tools still work. ` +
+    `Do not retry the identical call (it stays denied); ` +
+    (toolName === 'org_send'
+      ? `choose another approach, for example record what you needed to send in your task result.`
+      : `choose another approach, or report the blocker via org_send.`)
+  );
+}
+
 /** The SDK's `canUseTool` gate, composed from two independent layers: PolicyEngine's
  *  static config checks (deny/allow lists, path scoping, git level, web allowlist,
  *  budget), then — only for calls policy would allow — the human-approval guardrail
@@ -82,7 +108,7 @@ export function gatedCanUseTool(
     if (approved === false) {
       const denied: Decision = {
         behavior: 'deny',
-        message: `Tool "${toolName}" was denied by guardrail approval`,
+        message: approvalDeniedMessage(toolName),
       };
       onDeny?.(toolName, input, denied, 'approval-denied');
       return denied;
@@ -90,7 +116,7 @@ export function gatedCanUseTool(
     if (approved === null) {
       const pending: Decision = {
         behavior: 'deny',
-        message: `Tool "${toolName}" is pending human approval — it will be available once approved or denied via 'monomind org approve/deny'.`,
+        message: approvalPendingMessage(toolName),
       };
       onDeny?.(toolName, input, pending, 'approval-pending');
       return pending;
