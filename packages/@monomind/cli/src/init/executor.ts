@@ -467,9 +467,7 @@ function countEnabledHooks(options: InitOptions): number {
   if (hooks.postToolUse) count++;
   if (hooks.userPromptSubmit) count++;
   if (hooks.sessionStart) count++;
-  if (hooks.stop) count++;
   if (hooks.preCompact) count++;
-  if (hooks.notification) count++;
 
   return count;
 }

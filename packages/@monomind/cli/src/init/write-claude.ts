@@ -140,9 +140,8 @@ export async function writeHelpers(
 
   // Always run the fallback generator too — it only fills in files still missing
   // after the source copy above (it no-ops on anything the copy already wrote).
-  // Without this, a source dir that's present but incomplete (e.g. missing
-  // auto-memory-hook.mjs) silently ships a project wired to hooks that reference
-  // a file that was never installed.
+  // Without this, a source dir that's present but incomplete silently ships a
+  // project wired to hooks that reference a file that was never installed.
   const helpers: Record<string, string> = Object.fromEntries(
     Object.entries(INIT_FALLBACK_HELPERS).map(([name, generate]) => [name, generate()]),
   );

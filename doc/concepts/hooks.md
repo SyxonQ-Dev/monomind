@@ -16,8 +16,7 @@ Claude Code event (JSON via stdin)
   ├── router.cjs                  ← Legacy skill keyword matcher (not used by the prompt hook)
   ├── session.cjs                 ← Session state
   ├── memory.cjs                  ← KV store
-  ├── intelligence.cjs            ← Pattern matching + context injection
-  ├── learning-service.mjs        ← SQLite-backed learning (singleton)
+  ├── intelligence.cjs            ← Pattern store: edits, outcomes, consolidation
   ├── utils/telemetry.cjs         ← Budget tracking, hook latency
   ├── utils/monograph.cjs         ← Knowledge graph integration
   └── utils/micro-agents.cjs      ← MicroAgent trigger scanning
@@ -35,7 +34,7 @@ All async operations use a 1500ms timeout guard (`runWithTimeout`) to prevent bl
 
 ### `SessionStart` → `session-restore`
 
-Runs 8 sequential phases at the start of every session:
+Runs 7 sequential phases at the start of every session:
 
 | Phase | Operation | Output |
 |---|---|---|
@@ -44,9 +43,8 @@ Runs 8 sequential phases at the start of every session:
 | 3 | Init <!-- doc-count:workers -->9<!-- /doc-count:workers --> background workers | Metrics workers refresh if output is missing or older than 6 hours |
 | 4 | Knowledge base preload | CLAUDE.md + docs chunked → `[KNOWLEDGE_PRELOADED]` |
 | 5 | Shared instructions | `.agents/shared_instructions.md` → `[SHARED_INSTRUCTIONS]` |
-| 6 | Memory Palace wakeUp | identity.md + top-5 drawers → `[MEMORY_PALACE_L0/L1]` |
-| 7 | Token usage summary | Scan JSONL → `[TOKEN_USAGE]` |
-| 8 | MicroAgent trigger cache | `.claude/agents/**/*.md` patterns cached |
+| 6 | Token usage summary | Scan JSONL → `[TOKEN_USAGE]` |
+| 7 | MicroAgent trigger cache | `.claude/agents/**/*.md` patterns cached |
 
 ### `UserPromptSubmit` → `route`
 
@@ -54,10 +52,9 @@ Runs for every user message:
 
 1. **Simple command detection** — trivial prompts and slash commands skip routing (the statusline's `last-route.json` still names the command).
 2. **System prompts skipped** — task notifications, reminder-only turns, slash-command expansions and local-command output get no pick and no record.
-3. **Intelligence context** — top-5 memory entries via Jaccard scoring → `[INTELLIGENCE]` (advisory).
-4. **The pick** — the central picker over the agent registry and the skill index (see [Routing](./routing.md#4-delivery-the-pick-line)): a Jev decision-model answer at or above `MONOMIND_JEV_MIN_CONFIDENCE` (0.6), else a keyword agent with a relevance score of at least 2 and a 1.5× lead over the runner-up, and a keyword skill with a score of at least 3 and a 1.25× lead. When confident it prints one line, `[PICK] agent: <name> · skill: <invoke>`, where `<name>` is a spawnable Task `subagent_type`. The line is printed even under `MONOMIND_HOOK_QUIET=1`. Keyword agents and skills both come from the shared catalogs ranked by `pick-rank.cjs`; `router.cjs` no longer takes part.
-5. **Route record** — `.monomind/route-outcomes.jsonl` (prompt hash, redacted preview, pick, candidates, method, provider, session id, `shown`), `.monomind/routes/<sessionId>.json` and `.monomind/last-route.json`.
-6. **Advisory enrichment** (skipped under `MONOMIND_HOOK_QUIET`) — embedding suggestion, monograph hints, MicroAgent trigger scan and the other banners.
+3. **The pick** — the central picker over the agent registry and the skill index (see [Routing](./routing.md#4-delivery-the-pick-line)): a Jev decision-model answer at or above `MONOMIND_JEV_MIN_CONFIDENCE` (0.6), else a keyword agent with a relevance score of at least 2 and a 1.5× lead over the runner-up, and a keyword skill with a score of at least 3 and a 1.25× lead. When confident it prints one line, `[PICK] agent: <name> · skill: <invoke>`, where `<name>` is a spawnable Task `subagent_type`. The line is printed even under `MONOMIND_HOOK_QUIET=1`. Keyword agents and skills both come from the shared catalogs ranked by `pick-rank.cjs`; `router.cjs` no longer takes part.
+4. **Route record** — `.monomind/route-outcomes.jsonl` (prompt hash, redacted preview, pick, candidates, method, provider, session id, `shown`), `.monomind/routes/<sessionId>.json` and `.monomind/last-route.json`.
+5. **Advisory enrichment** (skipped under `MONOMIND_HOOK_QUIET`) — embedding suggestion, monograph hints, MicroAgent trigger scan and the other banners.
 
 When a Jev decision model is configured (`MONOMIND_JEV_URL`, or `TYPESAFE_API_KEY` + `MONOMIND_JEV_HOSTED=1`), the prompt waits up to `MONOMIND_JEV_HOOK_TIMEOUT_MS` for it (default 1500; larger values are capped at 3000); a slow model therefore delays every prompt by up to that limit, and after a failed or timed-out pick the hook skips Jev for 5 minutes (`.monomind/jev-breaker.json`). Every hook process force-exits after 5 s, which leaves the `route` hook time to record its route after the capped Jev window. The `pre-bash`/`pre-write` security gates always keep 5 s.
 
@@ -87,14 +84,12 @@ Calls `intelligence.recordEdit(file)` — appends to `pending-insights.jsonl` fo
 
 ### `TeammateIdle / TaskCompleted` → `post-task`
 
-1. `memory-palace.storeVerbatim()` — chunks task content → `drawers.jsonl`
-2. Routing pattern save
+1. Routing pattern save
 
 ### `SessionEnd` → `session-end`
 
 1. `intelligence.consolidate()` — clears `pending-insights.jsonl`
 2. `session.end()` — archives `current.json` → `session-{id}.json`
-3. Memory Palace archive — session-end marker + KG triple
 
 ---
 
@@ -314,8 +309,7 @@ Hooks are wired in `.claude/settings.json`:
 {
   "hooks": {
     "SessionStart": [
-      {"command": "node .claude/helpers/hook-handler.cjs session-restore", "timeout": 15000},
-      {"command": "node .claude/helpers/auto-memory-hook.mjs import", "timeout": 8000}
+      {"command": "node .claude/helpers/hook-handler.cjs session-restore", "timeout": 15000}
     ],
     "UserPromptSubmit": [
       {"command": "node .claude/helpers/hook-handler.cjs route", "timeout": 10000}
@@ -334,9 +328,6 @@ Hooks are wired in `.claude/settings.json`:
     ],
     "SessionEnd": [
       {"command": "node .claude/helpers/hook-handler.cjs session-end", "timeout": 10000}
-    ],
-    "Stop": [
-      {"command": "node .claude/helpers/auto-memory-hook.mjs sync", "timeout": 10000}
     ]
   }
 }

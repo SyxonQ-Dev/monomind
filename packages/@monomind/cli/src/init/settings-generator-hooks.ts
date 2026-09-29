@@ -44,11 +44,6 @@ function hookHandlerCmd(subcommand: string): string {
   return hookCmd('.claude/helpers/hook-handler.cjs', subcommand);
 }
 
-/** Shorthand for ESM auto-memory-hook commands */
-function autoMemoryCmd(subcommand: string): string {
-  return hookCmd('.claude/helpers/auto-memory-hook.mjs', subcommand);
-}
-
 /** Shorthand for capture-handler (agent telemetry for org dashboard) */
 function captureHandlerCmd(subcommand: string): string {
   // capture-handler reads stdin directly — no sh -c/exec wrapper, so the
@@ -211,18 +206,13 @@ export function generateHooksConfig(config: HooksConfig, monograph = true): obje
     ];
   }
 
-  // SessionStart — restore session state + import auto memory + build knowledge graph
+  // SessionStart — restore session state + build knowledge graph
   if (config.sessionStart) {
     const sessionStartHooks: object[] = [
       {
         type: 'command',
         command: hookHandlerCmd('session-restore'),
         timeout: 15,
-      },
-      {
-        type: 'command',
-        command: autoMemoryCmd('import'),
-        timeout: 8,
       },
     ];
 
@@ -264,21 +254,6 @@ export function generateHooksConfig(config: HooksConfig, monograph = true): obje
     ];
   }
 
-  // Stop — sync auto memory on exit
-  if (config.stop) {
-    hooks.Stop = [
-      {
-        hooks: [
-          {
-            type: 'command',
-            command: autoMemoryCmd('sync'),
-            timeout: 10,
-          },
-        ],
-      },
-    ];
-  }
-
   // PreCompact — preserve context before compaction
   if (config.preCompact) {
     hooks.PreCompact = [
@@ -313,15 +288,10 @@ export function generateHooksConfig(config: HooksConfig, monograph = true): obje
     ];
   }
 
-  // SubagentStart — status update + capture-handler telemetry for org dashboard + lean mode propagation
+  // SubagentStart — capture-handler telemetry for org dashboard + lean mode propagation
   hooks.SubagentStart = [
     {
       hooks: [
-        {
-          type: 'command',
-          command: hookHandlerCmd('status'),
-          timeout: 3,
-        },
         {
           type: 'command',
           command: captureHandlerCmd('subagent-start'),
@@ -355,21 +325,8 @@ export function generateHooksConfig(config: HooksConfig, monograph = true): obje
     },
   ];
 
-  // Notification — capture Claude Code notifications for logging
-  if (config.notification) {
-    hooks.Notification = [
-      {
-        hooks: [
-          {
-            type: 'command',
-            command: hookHandlerCmd('notify'),
-            timeout: 3,
-          },
-        ],
-      },
-    ];
-  }
-
+  // NOTE: Stop and Notification get no hook: their only hooks (the
+  // auto-memory sync and hook-handler `notify`) did nothing (#417).
   // NOTE: TeammateIdle, TaskCompleted, and PostCompact are NOT accepted by
   // Claude Code's settings.json validator (rejected as "Invalid key in record").
   // Agent Teams coordination lives in monomind.agentTeams.hooks instead.
