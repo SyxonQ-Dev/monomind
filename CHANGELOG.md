@@ -2,6 +2,12 @@
 
 All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
+## [Unreleased]
+
+### Added
+
+- **`knowledge-profile-captures` capability** (agent-exec protocol rev 15). `monomind --version --json` now advertises the per-profile web capture behaviour that shipped in 2.18.3: profile envelopes ingest into `profile:<id>` (query-string URLs included), `transcript.md` / `summary.md` are indexed beside `readable.md` instead of superseding it, and `doc search|cite|related|lookup|list --scope profile:<id>` read that store. 2.18.3 itself has the behaviour but not the flag, so callers accept version ≥ 2.18.3 **or** the capability.
+
 ## [2.18.3] — 2026-09-29
 
 ### Fixed
