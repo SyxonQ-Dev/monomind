@@ -198,7 +198,9 @@ describe('runAgentSession', () => {
     process.env.TMPDIR = base;
   });
   afterEach(() => {
-    process.env.TMPDIR = savedTmp;
+    // Assigning undefined would store the string "undefined" (CI has no TMPDIR).
+    if (savedTmp === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = savedTmp;
   });
   const run = async (role: string, extra: Partial<SessionOpts> = {}) => {
     const def = OrgDefSchema.parse({ name: 'o', roles: [{ id: role }] });
