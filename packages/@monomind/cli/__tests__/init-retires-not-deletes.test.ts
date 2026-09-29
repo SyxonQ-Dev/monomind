@@ -110,7 +110,7 @@ describe('init retires stale skills/commands/agents instead of deleting them (o-
     process.env.HOME = fakeHome;
     ctx = {
       args: [],
-      flags: { _: [], yes: true, 'no-watch': true, 'no-start-all': true, 'no-install': true },
+      flags: { _: [], yes: true, 'no-watch': true, 'no-start-all': true, 'no-install': true, 'all-platforms': true },
       cwd: tmpDir,
       interactive: false,
     };

@@ -9,6 +9,13 @@ import {
   type InitOptions,
   MINIMAL_INIT_OPTIONS,
 } from '../init/index.js';
+import {
+  applyPlatformSelection,
+  chooseDefaultPlatforms,
+  detectInstalledPlatforms,
+  INIT_PLATFORM_LABELS,
+  INIT_PLATFORMS,
+} from '../init/detect-platforms.js';
 import { reportProjectMemory } from '../init/init-memory.js';
 import { OPTIONAL_PACKS } from '../init/packs.js';
 import { ingestDirectory } from '../knowledge/document-pipeline.js';
@@ -158,6 +165,23 @@ export const wizardCommand: Command = {
           options.hooks.sessionStart = hooks.includes('sessionStart');
         }
       }
+
+      // #420: the installed platforms come pre-selected (Claude Code if none is).
+      const platformDefault = chooseDefaultPlatforms(detectInstalledPlatforms());
+      const detectedNote =
+        platformDefault.source === 'detected'
+          ? 'pre-selected: installed here'
+          : 'none detected, Claude Code pre-selected';
+      const platforms = await multiSelect({
+        message: `Coding platforms to set up (${detectedNote}):`,
+        options: INIT_PLATFORMS.map((id) => ({
+          value: id,
+          label: INIT_PLATFORM_LABELS[id],
+          hint: platformDefault.detected.find((d) => d.id === id)?.via.join(', ') ?? 'not detected',
+          selected: platformDefault.platforms.includes(id),
+        })),
+      });
+      applyPlatformSelection(options, platforms.length > 0 ? platforms : ['claude']);
 
       // Core is always installed; the rest are opt-in (GH #411). Full has them all.
       const { components } = options;

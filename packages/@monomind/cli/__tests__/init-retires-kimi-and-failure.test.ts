@@ -154,7 +154,7 @@ describe('the .opencode/skills mirror (o-38 revision: it is a DEFAULT mirror too
     process.env.HOME = fakeHome;
     ctx = {
       args: [],
-      flags: { _: [], yes: true, 'no-watch': true, 'no-start-all': true, 'no-install': true },
+      flags: { _: [], yes: true, 'no-watch': true, 'no-start-all': true, 'no-install': true, 'all-platforms': true },
       cwd: tmpDir,
       interactive: false,
     };
