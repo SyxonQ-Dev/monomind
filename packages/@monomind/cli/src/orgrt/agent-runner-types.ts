@@ -227,6 +227,10 @@ export interface AgentMessage {
    *  subagent's own text, not the main agent's. */
   subagent?: SubagentEvent; // subagent
   duration_ms?: number; // tool_result
+  /** Rev 20: the runner's own policy refused the call (it never ran) — the
+   *  tool_activity end then carries `ok:false, denied:true`, as a denial by
+   *  claude's canUseTool does. */
+  denied?: boolean; // tool_result
   input_tokens?: number; // result, assistant (that turn's own usage)
   output_tokens?: number; // result, assistant (that turn's own usage)
   /** ADR-O001 D1: cache tokens are SIBLINGS of input_tokens in the Anthropic

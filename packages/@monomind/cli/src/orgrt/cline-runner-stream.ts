@@ -9,7 +9,9 @@
  *   FIFO stdin (cline-runner-proc.ts). Never `-y/--yolo`: it narrows the
  *   toolset. `--act` and `--auto-approve true` pin act mode and approvals
  *   even when the user's persisted cline settings say plan / ask — a
- *   headless turn has nobody to answer an approval.
+ *   headless turn has nobody to answer an approval. A scoped turn passes
+ *   `--auto-approve false` instead and refuses what needs approval
+ *   (cline-runner-scoped.ts).
  * Provider: `CLINE_PROVIDER` from the turn env (the variable cline's ACP
  *   mode reads natively) becomes `-P`; unset leaves cline's last-used one.
  * Max turns: cline has no iteration flag (only loop detection and
@@ -44,7 +46,15 @@ export const CLINE_THINKING: Record<OrgEffortLevel, string> = {
 };
 
 export function jsonTurnArgs(setup: ClineSetup, args: AgentRunArgs): string[] {
-  const out = ['--json', '--act', '--auto-approve', 'true', '-c', args.cwd];
+  // Scoped: fail closed; the plugin re-approves the safe tools only.
+  const out = [
+    '--json',
+    '--act',
+    '--auto-approve',
+    setup.scoped ? 'false' : 'true',
+    '-c',
+    args.cwd,
+  ];
   out.push(...setup.configArgs, ...setup.dataDirArgs);
   if (setup.env.CLINE_PROVIDER) out.push('-P', setup.env.CLINE_PROVIDER);
   if (args.model) out.push('-m', args.model);

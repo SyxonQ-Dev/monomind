@@ -223,7 +223,8 @@ export class ToolActivityTracker {
     const id = m.tool_use_id;
     if (!id || !this.open.has(id)) return;
     this.open.delete(id);
-    const denied = this.denied.delete(id);
+    // A canUseTool denial, or one the runner itself reports (rev 20).
+    const denied = this.denied.delete(id) || m.denied === true;
     const { value: output, truncated } = capString(m.text ?? '');
     this.emit(
       shrinkToFit({

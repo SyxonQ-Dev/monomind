@@ -18,7 +18,15 @@ export type ClineEvent =
   /** A finished assistant text block. */
   | { kind: 'text'; text: string }
   | { kind: 'tool_start'; id: string; name: string; input: unknown }
-  | { kind: 'tool_end'; id: string; name?: string; output: unknown; error?: string }
+  /** `denied`: the call was refused (never run) rather than failing. */
+  | {
+      kind: 'tool_end';
+      id: string;
+      name?: string;
+      output: unknown;
+      error?: string;
+      denied?: boolean;
+    }
   /** Liveness only (turn start, reasoning, tool progress, notices). */
   | { kind: 'ping' };
 

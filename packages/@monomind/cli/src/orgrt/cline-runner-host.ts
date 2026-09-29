@@ -19,6 +19,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentRunArgs } from './agent-runner.js';
+import { installScopedPlugin } from './cline-runner-scoped.js';
 import type { ClineHistoryRow, ClineHost } from './cline-runner-types.js';
 import { omitAnthropicManagedKeys } from './provider.js';
 
@@ -135,6 +136,8 @@ export interface ClineSetup {
  * CLINE_MCP_SETTINGS_PATH at an empty server list, so no user MCP server or
  * hook loads; auth then comes from the environment (CLINE_PROVIDER plus the
  * provider's key variable, e.g. ANTHROPIC_API_KEY / OPENROUTER_API_KEY).
+ * Scoped turns also refuse every tool call that needs approval
+ * (cline-runner-scoped.ts): the config dir carries the refusal plugin.
  */
 export function prepareClineSetup(args: AgentRunArgs, bin: string, host: ClineHost): ClineSetup {
   const env = { ...omitAnthropicManagedKeys(process.env), ...args.env };
@@ -155,6 +158,11 @@ export function prepareClineSetup(args: AgentRunArgs, bin: string, host: ClineHo
   const mcpPath = join(dir, 'cline_mcp_settings.json');
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   if (!existsSync(mcpPath)) writeFileSync(mcpPath, '{"mcpServers":{}}\n', { mode: 0o600 });
+  // Refuse, never approve or wait (cline-runner-scoped.ts): the plugin, and
+  // no desktop approval IPC, whose unanswered request would block 5 minutes.
+  installScopedPlugin(dir);
+  delete env.CLINE_TOOL_APPROVAL_MODE;
+  delete env.CLINE_TOOL_APPROVAL_DIR;
   env.CLINE_DATA_DIR = dataDir;
   env.CLINE_MCP_SETTINGS_PATH = mcpPath;
   return {

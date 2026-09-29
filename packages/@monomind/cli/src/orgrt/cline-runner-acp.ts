@@ -1,6 +1,8 @@
 // packages/@monomind/cli/src/orgrt/cline-runner-acp.ts
 /**
- * A resumed cline turn over ACP (`cline --acp --auto-approve true`).
+ * A resumed cline turn over ACP (`cline --acp --auto-approve true`; scoped
+ * `--auto-approve false`, refusing what needs approval — see
+ * cline-runner-scoped.ts).
  *
  * Why ACP: `cline --id <session>` cannot be combined with `--json` (it forces
  * the interactive UI and drops the prompt), so the one headless way to add a
@@ -34,6 +36,7 @@ import type { AgentRunArgs } from './agent-runner.js';
 import type { ClineSetup } from './cline-runner-host.js';
 import { parseAcpUpdate, toUsage } from './cline-runner-parse.js';
 import { launchCline } from './cline-runner-proc.js';
+import { acpPermissionOutcome, permissionToolName, SCOPED_REFUSAL } from './cline-runner-scoped.js';
 import { MAX_TURNS_KILL_GRACE_MS } from './cline-runner-stream.js';
 import { acpToolName } from './cline-runner-tools.js';
 import type {
@@ -149,7 +152,11 @@ export async function* streamAcpTurn(
     return;
   }
   const acpSetup: ClineSetup = { ...setup, env: auth.env };
-  const cli = ['--acp', '--auto-approve', 'true', ...setup.configArgs, ...setup.dataDirArgs];
+  // Scoped: no auto-approval; the plugin and the permission answers below
+  // refuse what needs approval (cline-runner-scoped.ts).
+  const approve = setup.scoped ? 'false' : 'true';
+  const cli = ['--acp', '--auto-approve', approve, ...setup.configArgs, ...setup.dataDirArgs];
+  const deniedIds = new Set<string>();
   const launch = launchCline(acpSetup, cli, args, host, { interactive: true });
   const stdin = launch.child.stdin;
   const send = (o: Record<string, unknown>) => {
@@ -199,22 +206,26 @@ export async function* streamAcpTurn(
     }
     const out: ClineEvent[] = [];
     if (m.method !== undefined && m.id !== undefined) {
-      // A request from cline (auto-approve makes permission requests rare):
-      // allow a permission request, refuse anything else.
+      // A request from cline. A permission request is answered at once —
+      // allowed under full access (auto-approve makes it rare), under scoped
+      // allowed for cline's safe tools and rejected otherwise — so a turn
+      // never waits on it. Anything else is refused.
       if (m.method === 'session/request_permission') {
-        const opts = Array.isArray(m.params?.options)
-          ? (m.params.options as Array<Record<string, unknown>>)
-          : [];
-        const allow =
-          opts.find((o) => o.kind === 'allow_always') ?? opts.find((o) => o.kind === 'allow_once');
-        send({
-          id: m.id,
-          result: {
-            outcome: allow
-              ? { outcome: 'selected', optionId: allow.optionId }
-              : { outcome: 'cancelled' },
-          },
-        });
+        const { outcome: answer, denied } = acpPermissionOutcome(m.params, setup.scoped);
+        const tc = m.params?.toolCall as Record<string, unknown> | undefined;
+        if (typeof tc?.toolCallId === 'string') {
+          // cline announces this call only as a pending tool_call_update.
+          step();
+          flush(out);
+          out.push({
+            kind: 'tool_start',
+            id: tc.toolCallId,
+            name: permissionToolName(tc) || acpToolName(tc.kind, tc.rawInput, tc.title),
+            input: tc.rawInput,
+          });
+          if (denied) deniedIds.add(tc.toolCallId);
+        }
+        send({ id: m.id, result: { outcome: answer } });
       } else {
         send({ id: m.id, error: { code: -32601, message: `unsupported: ${m.method}` } });
       }
@@ -245,11 +256,15 @@ export async function* streamAcpTurn(
           typeof u.toolEnd.output === 'string'
             ? parseMaybeJson(u.toolEnd.output)
             : u.toolEnd.output;
+        const denied = deniedIds.has(u.toolEnd.id);
         out.push({
           kind: 'tool_end',
           id: u.toolEnd.id,
           output,
-          ...(u.toolEnd.failed ? { error: stringOutput(output) || 'tool failed' } : {}),
+          ...(u.toolEnd.failed
+            ? { error: stringOutput(output) || (denied ? SCOPED_REFUSAL : 'tool failed') }
+            : {}),
+          ...(denied ? { denied: true } : {}),
         });
       }
       return out;

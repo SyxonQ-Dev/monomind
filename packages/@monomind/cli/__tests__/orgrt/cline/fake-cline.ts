@@ -14,6 +14,15 @@
  *                              turn above) + session/prompt that ran `ls`.
  *                              Only the id:2 load response is shortened (its
  *                              model list was cut in the capture).
+ *   json-scoped-refused.ndjson live scoped turn (`--auto-approve false` + the
+ *                              monomind-scoped plugin): read_files ran,
+ *                              run_commands was refused, run_result
+ *                              completed. Reasoning chunks dropped.
+ *   json-refused-aborted.ndjson live `--auto-approve false` turn WITHOUT the
+ *                              plugin: every tool refused ("requires approval
+ *                              in a TTY session"), cline's mistake limit then
+ *                              ended it (run_result aborted). Reasoning and
+ *                              error stacks dropped.
  */
 import type * as cp from 'node:child_process';
 import { EventEmitter } from 'node:events';

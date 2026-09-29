@@ -20,9 +20,11 @@
  *
  * Access: never `-y/--yolo` (it narrows the toolset). Full access, or
  * `--settings`, runs on the user's own ~/.cline — auth, rules, hooks, MCP —
- * untouched, with auto-approve on and CLINE_COMMAND_PERMISSIONS left as the
- * user has it. Scoped isolates state with `--config`/`--data-dir` and an
- * empty CLINE_MCP_SETTINGS_PATH (cline-runner-host.ts).
+ * untouched, with auto-approve on. Scoped isolates state with
+ * `--config`/`--data-dir` and an empty CLINE_MCP_SETTINGS_PATH
+ * (cline-runner-host.ts), and refuses every tool call that needs approval —
+ * commands, edits, subagents, MCP tools — instead of approving it; a refused
+ * call ends `denied` and the turn goes on (cline-runner-scoped.ts).
  *
  * Hub daemon: cline starts a detached `cline --cline-hub-daemon` that
  * outlives the run. Every process the runner spawns carries a per-turn
@@ -62,6 +64,21 @@ function fatal(message: string): Error {
   const err = new Error(message);
   (err as Error & { fatal?: boolean }).fatal = true;
   return err;
+}
+
+/**
+ * cline stops a run after consecutive failed tool calls (its mistake limit,
+ * `--retries`, default 3; verified live: `run_result.finishReason
+ * "aborted"`). When the last call was a limited-mode refusal, the turn ended
+ * on refusals — a normal end, not an error.
+ */
+export function endedOnRefusals(o: ClineTurnOutcome, lastCallRefused: boolean): boolean {
+  return (
+    lastCallRefused &&
+    !o.timedOut &&
+    !o.fatal &&
+    ['aborted', 'mistake_limit', 'cancelled'].includes(o.finishReason ?? '')
+  );
 }
 
 /** The error of a finished turn, or undefined when it completed. */
@@ -121,6 +138,7 @@ export class ClineAgentRunner implements AgentRunner {
             ? streamAcpTurn(setup, resumed, prompt, args, this.host, outcome, known)
             : streamJsonTurn(setup, prompt, args, this.host, outcome);
           const rawTexts: string[] = [];
+          tools.lastDenied = false;
           for await (const ev of stream) {
             if (ev.kind === 'text') {
               rawTexts.push(ev.text);
@@ -130,7 +148,7 @@ export class ClineAgentRunner implements AgentRunner {
               const m = tools.start(ev.id, ev.name, ev.input, sessionId);
               if (m) yield m;
             } else if (ev.kind === 'tool_end') {
-              yield* tools.end(ev.id, ev.name, ev.output, ev.error, sessionId);
+              yield* tools.end(ev.id, ev.name, ev.output, ev.error, sessionId, ev.denied);
             } else if (Date.now() - lastPing >= PING_INTERVAL_MS) {
               // Liveness only (a bare tool_use never becomes tool_activity),
               // throttled: cline streams reasoning one chunk per event.
@@ -143,7 +161,13 @@ export class ClineAgentRunner implements AgentRunner {
           if (outcome.provider) known.provider = outcome.provider;
           if (outcome.model) known.model = outcome.model;
           const failure = clineTurnFailure(outcome, !!resumed);
-          if (failure) throw failure;
+          if (failure && endedOnRefusals(outcome, tools.lastDenied && !args.signal?.aborted)) {
+            yield {
+              type: 'assistant',
+              session_id: sessionId,
+              text: '[monomind] cline ended the turn after refused tool calls (limited mode refuses commands, edits, subagents and MCP tools)',
+            };
+          } else if (failure) throw failure;
           if (outcome.usage) {
             usage.input += outcome.usage.inputTokens;
             usage.output += outcome.usage.outputTokens;
