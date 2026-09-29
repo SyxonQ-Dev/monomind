@@ -11,11 +11,18 @@
  * is itself a symlink. A `.monomind/orgs/` inside a checkout (`work/src/…`)
  * or a temp-dir fixture is someone else's tree and is not protected.
  * Segments compare as the filesystem does (policy-paths.ts's
- * normalizeSegment): case-insensitively on darwin and win32.
+ * normalizeSegment): case-insensitively on darwin and win32, and wherever
+ * the caller's fold says the filesystem may fold case (#496).
  */
 import { existsSync, lstatSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { normalizeSegment, realPath, segmentsBelow, uniq } from './policy-paths.js';
+import {
+  normalizeSegment,
+  realPath,
+  type SegmentFold,
+  segmentsBelow,
+  uniq,
+} from './policy-paths.js';
 
 /** Files in an org dir that record a human's decisions. */
 export const DECISION_FILES = ['gates.json', 'approvals.json', 'questions.json', 'inbox.jsonl'];
@@ -99,16 +106,16 @@ const anchorCache = new Map<string, { at: number; value: ReturnType<typeof listA
  *  reads it once, and a symlink planted since is seen a moment later. */
 const ANCHOR_TTL_MS = 1000;
 
-function anchors(orgRoot: string, platform: NodeJS.Platform) {
-  const key = `${platform}\0${orgRoot}`;
+function anchors(orgRoot: string, platform: NodeJS.Platform, fold?: SegmentFold) {
+  const key = `${platform}\0${fold}\0${orgRoot}`;
   const hit = anchorCache.get(key);
   if (hit && Date.now() - hit.at < ANCHOR_TTL_MS) return hit.value;
-  const value = listAnchors(orgRoot, platform);
+  const value = listAnchors(orgRoot, platform, fold);
   anchorCache.set(key, { at: Date.now(), value });
   return value;
 }
 
-function listAnchors(orgRoot: string, platform: NodeJS.Platform) {
+function listAnchors(orgRoot: string, platform: NodeJS.Platform, fold?: SegmentFold) {
   const lexical = orgsDir(orgRoot);
   const real = realPath(lexical);
   const out: Array<{ base: string; prefix: string[] }> = [
@@ -118,7 +125,7 @@ function listAnchors(orgRoot: string, platform: NodeJS.Platform) {
   const linked = (dir: string, prefix: string[]) => {
     for (const e of list(dir)) {
       const p = join(dir, e.name);
-      const at = [...prefix, normalizeSegment(e.name, platform)];
+      const at = [...prefix, normalizeSegment(e.name, platform, fold)];
       if (e.isSymbolicLink()) out.push({ base: realPath(p), prefix: at });
       if (prefix.length === 0 && (e.isDirectory() || statOf(p)?.isDirectory())) linked(p, at);
     }
@@ -133,20 +140,23 @@ function listAnchors(orgRoot: string, platform: NodeJS.Platform) {
  * path (a plain string is taken as both); both are classified, below each
  * of `orgRoots`. An existing file with more than one link is also compared
  * with the authority files by inode, so a hard link to one is refused.
+ * `fold` (#496): how segments compare — the policy passes the target's
+ * `pathFolds().deny`; by default, case-folded on darwin and win32.
  */
 export function isAuthorityFile(
   target: string | { real: string; lexical: string },
   orgRoots: string | string[],
   platform: NodeJS.Platform = process.platform,
+  fold?: SegmentFold,
 ): boolean {
   const paths = typeof target === 'string' ? [target] : [target.real, target.lexical];
   const roots = typeof orgRoots === 'string' ? [orgRoots] : orgRoots;
   for (const orgRoot of roots) {
-    const { real, anchors: bases } = anchors(orgRoot, platform);
+    const { real, anchors: bases } = anchors(orgRoot, platform, fold);
     const isMemory = (org: string) => isMemoryDir(real, org);
     for (const { base, prefix } of bases)
       for (const p of paths) {
-        const below = segmentsBelow(base, p, platform);
+        const below = segmentsBelow(base, p, platform, fold);
         if (below && isAuthorityBelowOrgs([...prefix, ...below], isMemory)) return true;
       }
   }

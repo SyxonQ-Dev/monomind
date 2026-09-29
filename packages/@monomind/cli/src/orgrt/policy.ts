@@ -12,6 +12,7 @@ import {
   gitWriteViolation,
   globToRegExp,
   isWithin,
+  pathFolds,
   realPath,
   safeHost,
   uniq,
@@ -360,6 +361,11 @@ export class PolicyEngine {
     // the .git check (#258) all key off the same real path.
     const real = realPath(resolve(this.cwd, p));
     const realCwd = realPath(this.cwd);
+    // #496: on a case-insensitive filesystem `.SSH`, `.GIT` and `Site` are
+    // `.ssh`, `.git` and `site`. Deny checks compare with `fold.deny` (case-
+    // and NFC-folded unless the filesystem is known case-sensitive), grants
+    // with `fold.allow` (folded only where it is known case-insensitive).
+    const fold = pathFolds(real);
     // fileWrite/fileRead globs are always authored with '/' separators (POSIX
     // convention, matches every example in types.ts and the skill docs) — but
     // path.relative()/path.resolve() return '\'-separated paths on Windows, and
@@ -384,9 +390,10 @@ export class PolicyEngine {
       if (drift) return drift;
     }
     const inScope = (g: string): boolean => {
-      if (isGlobScope(g)) return globToRegExp(g).test(isAbsolute(g) ? realPosix : relPosix);
+      if (isGlobScope(g))
+        return globToRegExp(g, fold.allow).test(isAbsolute(g) ? realPosix : relPosix);
       const s = this.scopeSnapshots.get(g);
-      return !!s && !s.refused && isWithin(s.real, real);
+      return !!s && !s.refused && isWithin(s.real, real, fold.allow);
     };
     const refusedNote = snaps
       .map(([, s]) => s?.refused)
@@ -410,7 +417,7 @@ export class PolicyEngine {
       // #492: an absolute scope entry is a grant of its own — name it too,
       // with how it matches, or the role never learns it exists.
       const absGrants = globs.filter((g) => isAbsolute(g));
-      if (!realRoots.some((root) => isWithin(root, real)))
+      if (!realRoots.some((root) => isWithin(root, real, fold.allow)))
         return `path escapes every root this role may use: ${p} (roots: ${realRoots.join(', ')}${absGrants.length ? `; ${WRITE_TOOLS.has(tool) ? 'write' : 'read'} scope also grants ${absGrants.map(describeScope).join(', ')}` : ''} — paths are resolved relative to org workdir ${this.cwd}; retry with a path inside one of them)${refusedNote}`;
     }
     // #303: a widened root must not make credential stores, guard-undoing
@@ -420,7 +427,7 @@ export class PolicyEngine {
     // [$HOME]). Runs for READ_TOOLS too, unlike the .git check below,
     // which is write-only.
     const deniedHit = fileToolDenied(homedir(), process.env).find((d) =>
-      isWithin(realPath(d), real),
+      isWithin(realPath(d), real, fold.deny),
     );
     if (deniedHit)
       return `path ${p} resolves inside ${deniedHit}, which no role may touch regardless of scope, root, or allowWrite (credential store, guard config, socket, or runtime dir)`;
@@ -435,10 +442,12 @@ export class PolicyEngine {
       isAuthorityFile(
         { real, lexical: resolve(this.cwd, p) },
         this.orgRoot ? [this.orgRoot] : uniq([this.cwd, ...this.roots]),
+        process.platform,
+        fold.deny,
       )
     )
       return `path ${p} is org authority state (an org definition, a human's decisions, or runtime state under .monomind/orgs/) — no role may write it, regardless of scope, root, or allowWrite; only the operator and the org daemon do`;
-    if (isDashboardCredential(real))
+    if (isDashboardCredential(real, fold.deny))
       return `path ${p} is a dashboard credential, which no role may touch regardless of scope, root, or allowWrite`;
     if (!grantedByAbsoluteScope && !globs.some((g) => !isAbsolute(g) && inScope(g)))
       return `path ${rel} outside ${WRITE_TOOLS.has(tool) ? 'write' : 'read'} scope — role ${this.role} may use ${globs.map(describeScope).join(', ')} (relative to org workdir ${this.cwd})${refusedNote}`;
@@ -449,7 +458,7 @@ export class PolicyEngine {
     // via a root other than cwd (#303) — it does not depend on `rel`.
     if (WRITE_TOOLS.has(tool)) {
       const gitLevel = this.policy.git ?? 'read';
-      const inGit = gitWriteViolation(real, gitLevel);
+      const inGit = gitWriteViolation(real, gitLevel, process.platform, fold.deny);
       if (inGit) return `writes into ${inGit} are not allowed (policy.git: ${gitLevel})`;
     }
     return null;

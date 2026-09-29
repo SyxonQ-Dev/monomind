@@ -23,6 +23,7 @@
 import { readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
+import { normalizeSegment, type SegmentFold } from './policy-paths.js';
 
 /** Files under $HOME that would undo the guard (git/shell/Claude config) —
  *  writable $HOME must not include them. Moved verbatim from
@@ -65,8 +66,12 @@ export const HOME_DENY_READ = [
  *  credential, so its token carries the same human authority. */
 const DASHBOARD_CREDENTIAL = /^dashboard-token(-\d+)?$/;
 
-export function isDashboardCredential(p: string): boolean {
-  return DASHBOARD_CREDENTIAL.test(basename(p));
+export function isDashboardCredential(p: string, fold: SegmentFold = 'exact'): boolean {
+  const name = basename(p);
+  // #496: `Dashboard-Token` is the same file where the filesystem folds case.
+  return DASHBOARD_CREDENTIAL.test(
+    fold === 'exact' ? name : normalizeSegment(name, process.platform, fold),
+  );
 }
 
 /** Existing dashboard credential files in each root's `.monomind/` — the

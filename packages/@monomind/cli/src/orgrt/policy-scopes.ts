@@ -7,7 +7,7 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, normalize, parse, resolve, sep } from 'node:path';
-import { isWithin, realPath } from './policy-paths.js';
+import { isWithin, pathFolds, realPath, samePath } from './policy-paths.js';
 
 /** An entry containing none of these is a plain path; any other is a glob
  *  matched by globToRegExp. */
@@ -34,10 +34,15 @@ export interface ScopeSnapshot {
 
 /** Why `entry` cannot be a directory grant, or undefined when it can. */
 function refusal(entry: string, lexical: string, real: string, home: string): string | undefined {
-  if (real !== lexical)
+  // #496: realPath() returns the on-disk case, so on a case-insensitive
+  // filesystem `site` for a directory named `Site` is the same path, not a
+  // symlink. Refusing a too-broad grant is a deny: it folds whenever the
+  // filesystem might.
+  const fold = pathFolds(real);
+  if (!samePath(real, lexical, fold.allow))
     return `scope entry ${entry} resolves through a symlink (to ${real}) — name the real path instead`;
   const realHome = realPath(home);
-  if (parse(real).root === real || isWithin(real, realHome)) {
+  if (parse(real).root === real || isWithin(real, realHome, fold.deny)) {
     const glob = `${entry.replace(/[/\\]+$/, '')}/**`;
     return `scope entry ${entry} is the filesystem root, $HOME or an ancestor of $HOME — too broad for a directory grant; if you really mean it, write the explicit glob ${glob}`;
   }
