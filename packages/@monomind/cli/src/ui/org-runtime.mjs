@@ -54,13 +54,21 @@ function readJson(p) {
   }
 }
 
+/** Add a usage event's cost to a running total. A missing/null cost is
+ *  unknown (the runtime reports none, rev 28): it adds nothing and a total
+ *  that never saw a real cost stays null — shown as unknown, never $0. */
+const addCost = (total, cost) =>
+  cost === null || cost === undefined || cost === '' || !Number.isFinite(Number(cost))
+    ? total
+    : (total ?? 0) + Number(cost);
+
 const zeroUsage = () => ({
   tokens: 0,
   tokens_in: 0,
   tokens_out: 0,
   cache_read: 0,
   cache_creation: 0,
-  cost_usd: 0,
+  cost_usd: null,
   turns: 0,
   // Tokens from usage events recorded before the four-way split (ADR-O001
   // D1). Their `tokens` counted input + output only — no cache — so they add
@@ -109,7 +117,7 @@ export function readRunDigest(root, org, run) {
       const d = e.data ?? {};
       if (d.tokens_in === undefined) {
         u.legacy_tokens += Number(d.tokens) || 0;
-        u.cost_usd += Number(d.cost_usd) || 0;
+        u.cost_usd = addCost(u.cost_usd, d.cost_usd);
         u.turns += 1;
         continue;
       }
@@ -118,7 +126,7 @@ export function readRunDigest(root, org, run) {
       u.tokens_out += Number(d.tokens_out) || 0;
       u.cache_read += Number(d.cache_read) || 0;
       u.cache_creation += Number(d.cache_creation) || 0;
-      u.cost_usd += Number(d.cost_usd) || 0;
+      u.cost_usd = addCost(u.cost_usd, d.cost_usd);
       u.turns += 1;
     } else if ((e.type === 'audit' || e.type === 'status') && RUNTIME_AUDIT_REASONS.has(e.reason)) {
       audit.push({
@@ -246,7 +254,9 @@ export async function runtimeView(root, org) {
     };
   });
   const totals = roles.reduce((t, r) => {
-    for (const k of Object.keys(t)) t[k] += r.usage[k];
+    for (const k of Object.keys(t)) {
+      t[k] = k === 'cost_usd' ? addCost(t[k], r.usage[k]) : t[k] + r.usage[k];
+    }
     return t;
   }, zeroUsage());
   const basis = rc.budget_tokens_basis ?? 'uncached';

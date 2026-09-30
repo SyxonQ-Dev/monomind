@@ -18,6 +18,9 @@ export interface RoleStats {
   /** Sum of the USD costs the runtime reported; null when no usage event
    *  carried one (the runtime reports no cost — unknown, never $0). */
   costUsd: number | null;
+  /** false when any of the role's usage events carried no cost: `costUsd` is
+   *  then a lower bound (or null when none did). */
+  costComplete: boolean;
   crashed: boolean;
 }
 
@@ -84,6 +87,9 @@ export interface RunSummary {
   totalTokens: number;
   /** Sum of the reported USD costs; null when no role reported any. */
   totalCostUsd: number | null;
+  /** false when any usage event carried no cost: `totalCostUsd` is then a
+   *  lower bound (or null when none did). */
+  costComplete: boolean;
 }
 
 const roleStats = (): RoleStats => ({
@@ -93,6 +99,7 @@ const roleStats = (): RoleStats => ({
   tokens: 0,
   uncachedTokens: 0,
   costUsd: null,
+  costComplete: true,
   crashed: false,
 });
 
@@ -115,6 +122,7 @@ export function summarizeRun(events: BusEvent[]): RunSummary {
     roles: {},
     totalTokens: 0,
     totalCostUsd: null,
+    costComplete: true,
   };
   if (s.startedAt !== null && s.endedAt !== null) s.durationMs = s.endedAt - s.startedAt;
   const role = (id: string | undefined): RoleStats => {
@@ -156,6 +164,9 @@ export function summarizeRun(events: BusEvent[]): RunSummary {
         if (Number.isFinite(cost)) {
           r.costUsd = (r.costUsd ?? 0) + cost;
           s.totalCostUsd = (s.totalCostUsd ?? 0) + cost;
+        } else {
+          r.costComplete = false;
+          s.costComplete = false;
         }
         break;
       }

@@ -16,7 +16,9 @@
     follow: a `usage` bus event carries `cost_usd: null`, and `org report --json`'s
     `total_cost_usd`, its per-role `roles[].costUsd`, and `org costs --json`'s
     `items[].cost_usd` / `totals.cost_usd` are `null` when no usage event of that scope
-    reported a cost (otherwise the sum of the reported costs). Callers that summed the field
+    reported a cost, otherwise the sum of the reported costs — a lower bound when some usage
+    had no cost, which `org report --json`'s `cost_complete` and `org costs --json`'s
+    `totals.cost_complete` (`false`) say. Callers that summed the field
     must treat `null` as "unknown", not `0`. **Same rev** (issue #534), capability
     `agent-models-alias-of`: `agent models --json` (§12) keeps every entry, and one that
     resolves to the same model as an earlier entry carries `alias_of: <that entry's id>` (claude
