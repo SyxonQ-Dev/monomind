@@ -16,6 +16,8 @@
  * the monoswarm-*-tools.ts siblings and registered here in their original order.
  */
 
+import { MONOSWARM_DEPRECATION } from '../deprecations.js';
+import { deprecateTools } from './deprecated-tools.js';
 import { monoswarmCoordinationTools } from './monoswarm-coordination-tools.js';
 import { monoswarmLifecycleTools } from './monoswarm-lifecycle-tools.js';
 import { monoswarmMembershipTools } from './monoswarm-membership-tools.js';
@@ -26,9 +28,13 @@ import type { MCPTool } from './types.js';
 // Tools
 // ---------------------------------------------------------------------------
 
-export const monoswarmTools: MCPTool[] = [
-  ...monoswarmLifecycleTools,
-  ...monoswarmMembershipTools,
-  ...monoswarmVoteTools,
-  ...monoswarmCoordinationTools,
-];
+// Deprecated (#418): each description and result carries the removal note.
+export const monoswarmTools: MCPTool[] = deprecateTools(
+  [
+    ...monoswarmLifecycleTools,
+    ...monoswarmMembershipTools,
+    ...monoswarmVoteTools,
+    ...monoswarmCoordinationTools,
+  ],
+  MONOSWARM_DEPRECATION,
+);

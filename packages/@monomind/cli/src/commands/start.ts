@@ -5,6 +5,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { MONOSWARM_DEPRECATION, printDeprecationNotice } from '../deprecations.js';
 import { callMCPTool, MCPClientError } from '../mcp-client.js';
 import { output } from '../output.js';
 import { confirm } from '../prompt.js';
@@ -146,10 +147,14 @@ const startAction = async (ctx: CommandContext): Promise<CommandResult> => {
 
   const spinner = output.createSpinner({ text: 'Initializing system...' });
 
+  // `start` records a monoswarm state file, and monoswarm is deprecated
+  // (#418). At its removal `start` stops recording that state.
+  printDeprecationNotice(ctx, MONOSWARM_DEPRECATION);
+
   try {
-    // Step 1: Initialize swarm
+    // Step 1: Record monoswarm state (starts no agents)
     spinner.start();
-    spinner.setText('Initializing v1 swarm...');
+    spinner.setText('Recording monoswarm state (deprecated; starts no agents)...');
 
     const swarmResult = await callMCPTool<{
       monoswarmId: string;
@@ -161,7 +166,7 @@ const startAction = async (ctx: CommandContext): Promise<CommandResult> => {
       maxAgents,
     });
 
-    spinner.succeed(`Swarm initialized (${finalTopology})`);
+    spinner.succeed(`Monoswarm state recorded (${finalTopology}; no agents started)`);
 
     // Step 2: Run health check
     spinner.setText('Running health checks...');
@@ -201,7 +206,6 @@ const startAction = async (ctx: CommandContext): Promise<CommandResult> => {
     output.printList([
       `${output.highlight('monomind status')} - View system status`,
       `${output.highlight('monomind agent spawn -t coder')} - Spawn an agent`,
-      `${output.highlight('monomind monoswarm status')} - View swarm details`,
       `${output.highlight('monomind stop')} - Stop the system`,
     ]);
 
@@ -272,18 +276,21 @@ const stopCommand: Command = {
     const spinner = output.createSpinner({ text: 'Stopping system...' });
     spinner.start();
 
+    // `stop` marks the deprecated monoswarm state terminated (#418).
+    printDeprecationNotice(ctx, MONOSWARM_DEPRECATION);
+
     try {
-      // Stop swarm
-      spinner.setText('Stopping swarm...');
+      // Mark the recorded monoswarm state terminated (no process to stop)
+      spinner.setText('Marking monoswarm state terminated...');
       spinner.start();
       try {
         await callMCPTool('monoswarm_shutdown', {
           graceful: !force,
           force,
         });
-        spinner.succeed('Swarm stopped');
+        spinner.succeed('Monoswarm state marked terminated');
       } catch {
-        spinner.fail('Swarm was not running');
+        spinner.fail('No monoswarm state recorded');
       }
 
       // Stop the daemon process itself: read its real pid, verify liveness,

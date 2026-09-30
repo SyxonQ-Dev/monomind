@@ -19,6 +19,11 @@ import {
   validateNumber,
   validateTaskSources,
 } from '../autopilot-state.js';
+import {
+  AUTOPILOT_DEPRECATION,
+  MONOSWARM_AUTOPILOT_REMOVAL_VERSION,
+  withDeprecationNotice,
+} from '../deprecations.js';
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 
@@ -177,15 +182,14 @@ const statusCommand: Command = {
       return { success: true };
     }
 
-    output.writeln(
-      output.warning('Deprecated: autopilot is superseded by `monomind org run` (#418).'),
-    );
     output.writeln(`Autopilot: ${state.enabled ? '✓ ENABLED' : '✗ DISABLED'}`);
     output.writeln(`Session: ${state.sessionId.slice(0, 8)}...`);
     output.writeln(`Iterations: ${state.iterations}/${state.maxIterations}`);
     output.writeln(`Timeout: ${state.timeoutMinutes} min`);
     output.writeln(`Elapsed: ${Math.round(elapsed / 60000)} min`);
-    output.writeln(`Tasks: ${progress.completed}/${progress.total} (${progress.percent}%)`);
+    output.writeln(
+      `Tasks: ${progress.completed}/${progress.total} (${progress.total > 0 ? `${progress.percent}%` : 'n/a'})`,
+    );
     output.writeln(`Sources: ${state.taskSources.join(', ')}`);
     if (progress.total === 0) {
       // Nothing in monomind writes .monomind/swarm-tasks.json (#418).
@@ -404,6 +408,7 @@ export const autopilotCommand: Command = {
   description:
     'Deprecated: re-engagement loop over locally discovered task files; nothing in monomind writes its swarm-tasks source. Use `monomind org run`.',
   aliases: ['ap'],
+  // Each subcommand prints the deprecation notice on stderr first (#418).
   subcommands: [
     statusCommand,
     enableCommand,
@@ -413,7 +418,7 @@ export const autopilotCommand: Command = {
     logCommand,
     predictCommand,
     checkCommand,
-  ],
+  ].map((sub) => withDeprecationNotice(sub, AUTOPILOT_DEPRECATION)),
   examples: [
     { command: 'monomind autopilot status', description: 'Show current state and progress' },
     { command: 'monomind autopilot enable', description: 'Enable persistent completion' },
@@ -432,12 +437,13 @@ export const autopilotCommand: Command = {
       output.dim('  The org runtime provides the same autonomous-completion capability with'),
     );
     output.writeln(
-      output.dim('  governance, budgets, and dashboard support. Autopilot will be collapsed into'),
+      output.dim(
+        `  governance, budgets, and dashboard support. Autopilot will be removed in ${MONOSWARM_AUTOPILOT_REMOVAL_VERSION} (#418).`,
+      ),
     );
-    output.writeln(output.dim('  org run in a future release (doc 06 P3-1).'));
     output.writeln();
     output.writeln(output.bold('Autopilot — Persistent Swarm Completion'));
-    output.writeln(output.dim('Keeps agents working until ALL tasks are done'));
+    output.writeln(output.dim('Re-engagement loop over local task files; it starts no agents'));
     output.writeln();
     output.printList([
       'status    — Show state, iterations, and task progress',
