@@ -19,9 +19,10 @@
  *      async iterable. We loop over args.prompt, running one streamText per
  *      mailbox message and accumulating into messages[].
  *
- * Streaming asymmetry (documented): Vercel yields per-token text-delta events
- * (real-time token streaming), while the Codex runner yields whole
- * agent_message items at once. This matches each vendor's native behavior.
+ * Streaming: Vercel streams per-token text-delta events. The runner joins
+ * them into one `assistant` message per model step (one org chat event,
+ * #563) and yields the raw deltas only when extras.includePartialMessages
+ * is set, like the other runners.
  */
 import type { AgentMessage, AgentRunArgs, AgentRunner } from './agent-runner.js';
 import { toolInputSchema } from './tool-fence.js';
@@ -111,6 +112,8 @@ export class VercelAgentRunner implements AgentRunner {
       return vercelTools;
     };
 
+    const streamPartials = args.extras?.includePartialMessages === true;
+
     // Mailbox turn-loop: streamText takes one prompt at a time. The mailbox
     // (args.prompt) is an async iterable of incoming messages; we consume
     // each one, run a full streamText turn, and accumulate history.
@@ -135,14 +138,42 @@ export class VercelAgentRunner implements AgentRunner {
         });
 
         let assistantText = '';
-        for await (const part of result.fullStream) {
-          // ai-sdk v7's text-delta stream part carries the chunk under `text`,
-          // not `textDelta` — the latter is always undefined, which silently
-          // concatenates the literal string "undefined" into assistantText.
-          if (part.type === 'text-delta') {
-            assistantText += part.text;
-            yield { type: 'assistant', session_id: store.sessionId, text: part.text };
+        // #563: session-run.ts emits one org bus `chat` event per `assistant`
+        // message, so deltas are joined into one message per model step, as
+        // the claude/codex/aider runners do. Per-delta streaming stays for
+        // callers that opt in (agent exec sets includePartialMessages).
+        let stepText = '';
+        const takeStepText = (): string => {
+          const text = stepText;
+          stepText = '';
+          return text;
+        };
+        try {
+          for await (const part of result.fullStream) {
+            // ai-sdk v7's text-delta stream part carries the chunk under `text`,
+            // not `textDelta` — the latter is always undefined, which silently
+            // concatenates the literal string "undefined" into assistantText.
+            if (part.type === 'text-delta') {
+              assistantText += part.text;
+              if (streamPartials) {
+                yield { type: 'assistant', session_id: store.sessionId, text: part.text };
+              } else {
+                stepText += part.text;
+              }
+            } else if (part.type === 'finish-step' && stepText) {
+              yield { type: 'assistant', session_id: store.sessionId, text: takeStepText() };
+            }
           }
+        } catch (err) {
+          // An aborted or failed turn still reports the text it got so far, once.
+          if (stepText) {
+            yield { type: 'assistant', session_id: store.sessionId, text: takeStepText() };
+          }
+          throw err;
+        }
+        // A stream that ends without a finish-step (e.g. an 'abort' part).
+        if (stepText) {
+          yield { type: 'assistant', session_id: store.sessionId, text: takeStepText() };
         }
 
         messages.push({ role: 'assistant', content: assistantText });
