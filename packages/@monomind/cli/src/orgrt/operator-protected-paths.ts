@@ -94,7 +94,8 @@ export function monomindMaskLayout(
 /** Under $HOME, beyond file-roots.ts's HOME_DENY_WRITE. */
 export const HOME_OPERATOR_EXEC = [
   '.npm/_npx',
-  '.npmrc',
+  // (.npmrc, .config/npm and .monomind/deps are in file-roots.ts's
+  // HOME_DENY_WRITE since #518, applied in the same places.)
   '.local/bin',
   '.config/fish',
   '.bashrc.d',
@@ -248,52 +249,59 @@ export function ensureOperatorProtectedPaths(ctx: {
   } catch {
     /* exists (the operator's own choice) or unwritable */
   }
-  ensureHomeDenyWriteStubs(ctx.home, ctx.env);
+  ensureHomeDenyWriteStubs(ctx.home);
 }
 
-/** #526: HOME_DENY_WRITE entries that are created empty when missing, so
- *  the SDK sandbox's denyWrite (which drops missing paths) and the mask's
- *  read-only binds cover them too. Each empty one means what its absence
- *  meant. Directories are created 0700. */
+/** #526: HOME_DENY_WRITE entries created in the operator's HOME when they
+ *  are absent, at org or session start (never overwriting), so the SDK
+ *  sandbox's denyWrite (which drops missing paths) and the mask's read-only
+ *  binds cover them too. Each is either an empty file or an empty 0700
+ *  directory, and each means exactly what its absence meant:
+ *  - `.npmrc`: npm merges an empty user config into nothing;
+ *  - `.bashrc`: read only by interactive bash, which runs nothing from it;
+ *  - `.profile`: read by sh/dash login shells, and by bash only when
+ *    `.bash_profile` and `.bash_login` are absent; zsh never reads it;
+ *    empty, it runs nothing in any of them;
+ *  - `.ssh`, `.config/git`, `.config/gh`, `.config/npm`: tools read files
+ *    inside them, never the directory itself (git's `--global` target
+ *    depends on `~/.config/git/config`, a file, not on the directory).
+ *  `~/.config` is created too when it is missing. */
 export const HOME_DENY_WRITE_STUB_DIRS = ['.ssh', '.config/git', '.config/gh', '.config/npm'];
 export const HOME_DENY_WRITE_STUB_FILES = ['.npmrc', '.bashrc', '.profile'];
-/** Created only when git has no XDG config: with one, an empty ~/.gitconfig
- *  would take `git config --global` writes away from it. */
-export const GITCONFIG_STUB = '.gitconfig';
-/** Created only when one of them exists already: with none, an empty one
- *  would stop zsh's new-user setup from running. */
-export const ZSH_STUBS = ['.zshrc', '.zprofile', '.zshenv', '.zlogin'];
-/** Never created, each for its reason. `.bash_profile` / `.bash_login`: an
- *  empty one makes a bash login shell skip ~/.profile. `.claude`,
- *  `.claude.json`: Claude Code's own state (an empty .claude.json is a
- *  corrupt config). `.monomind/deps`: optional-deps.ts creates it. A role
- *  that creates one of these is caught by the planted-path watch
- *  (planted-paths.ts), and on macOS the SDK's seatbelt denies it by path
- *  (role-sandbox-restrictions.ts). */
+/** Never created, left to the planted-path watch (planted-paths.ts; on
+ *  macOS the SDK's seatbelt also denies creating them, by path):
+ *  - `.bash_profile`, `.bash_login`: an empty one makes a bash login shell
+ *    skip `~/.profile`;
+ *  - `.gitconfig`: once it exists, `git config --global` writes go to it
+ *    instead of a `~/.config/git/config` the operator creates later;
+ *  - `.zshrc`, `.zprofile`, `.zshenv`, `.zlogin`: with none of them, zsh
+ *    runs its new-user setup, and an empty one would stop that;
+ *  - `.claude`, `.claude.json`: Claude Code's own state (an empty
+ *    `.claude.json` is a corrupt config);
+ *  - `.monomind/deps`: optional-deps.ts creates it. */
 export const HOME_DENY_WRITE_NOT_STUBBED = [
   '.bash_profile',
   '.bash_login',
+  '.gitconfig',
+  '.zshrc',
+  '.zprofile',
+  '.zshenv',
+  '.zlogin',
   '.claude',
   '.claude.json',
   '.monomind/deps',
 ];
 
-function ensureHomeDenyWriteStubs(home: string, env: NodeJS.ProcessEnv): void {
-  const xdg = env.XDG_CONFIG_HOME ? resolve(env.XDG_CONFIG_HOME) : join(home, '.config');
-  const files = [
-    ...HOME_DENY_WRITE_STUB_FILES,
-    ...(existsSync(join(xdg, 'git', 'config')) ? [] : [GITCONFIG_STUB]),
-    ...(ZSH_STUBS.some((f) => existsSync(join(home, f))) ? ZSH_STUBS : []),
-  ];
+function ensureHomeDenyWriteStubs(home: string): void {
   for (const d of HOME_DENY_WRITE_STUB_DIRS) {
     try {
       mkdirSync(dirname(join(home, d)), { recursive: true });
       mkdirSync(join(home, d), { mode: 0o700 });
     } catch {
-      /* unwritable: nothing can plant it either */
+      /* exists, or unwritable: nothing can plant it either */
     }
   }
-  for (const f of files) {
+  for (const f of HOME_DENY_WRITE_STUB_FILES) {
     try {
       writeFileSync(join(home, f), '', { flag: 'wx', mode: 0o600 });
     } catch {

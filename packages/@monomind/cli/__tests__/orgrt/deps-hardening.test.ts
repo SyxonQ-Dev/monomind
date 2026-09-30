@@ -33,11 +33,9 @@ import { HOME_DENY_WRITE } from '../../src/orgrt/file-roots.js';
 import { gitCommonDir, prepareGitGuard } from '../../src/orgrt/git-guard.js';
 import {
   ensureOperatorProtectedPaths,
-  GITCONFIG_STUB,
   HOME_DENY_WRITE_NOT_STUBBED,
   HOME_DENY_WRITE_STUB_DIRS,
   HOME_DENY_WRITE_STUB_FILES,
-  ZSH_STUBS,
 } from '../../src/orgrt/operator-protected-paths.js';
 import { buildClaudeRestrictions } from '../../src/orgrt/role-sandbox.js';
 import { renameGuardDirs } from '../../src/orgrt/sandbox-deny-write.js';
@@ -87,7 +85,7 @@ describe('(2) missing HOME_DENY_WRITE entries are stubbed before a role starts',
   it('creates the harmless ones empty, and none that would change behaviour', () => {
     const home = scratch('dh-home-');
     ensureOperatorProtectedPaths({ home, env: {} });
-    for (const f of [...HOME_DENY_WRITE_STUB_FILES, GITCONFIG_STUB]) {
+    for (const f of HOME_DENY_WRITE_STUB_FILES) {
       expect(lstatSync(join(home, f)).isFile(), f).toBe(true);
       expect(readFileSync(join(home, f), 'utf8'), f).toBe('');
     }
@@ -97,37 +95,41 @@ describe('(2) missing HOME_DENY_WRITE entries are stubbed before a role starts',
       expect(st.mode & 0o777, d).toBe(0o700);
       expect(readdirSync(join(home, d)), d).toEqual([]);
     }
-    for (const f of ['.bash_profile', '.bash_login', '.claude.json', ...ZSH_STUBS])
+    for (const f of HOME_DENY_WRITE_NOT_STUBBED)
       expect(existsSync(join(home, f)), f).toBe(false);
     expect(existsSync(join(home, '.claude', '.config.json'))).toBe(false);
   });
 
-  it('leaves existing files alone, adds zsh stubs only beside a zsh file, and ~/.gitconfig only without an XDG git config', () => {
+  it('never overwrites what exists, nor changes an existing directory', () => {
     const home = scratch('dh-home-');
     writeFileSync(join(home, '.npmrc'), 'registry=https://example.invalid/\n');
-    writeFileSync(join(home, '.zshrc'), 'echo hi\n');
-    mkdirSync(join(home, '.config', 'git'), { recursive: true });
-    writeFileSync(join(home, '.config', 'git', 'config'), '[user]\n');
+    writeFileSync(join(home, '.profile'), 'export A=1\n');
+    mkdirSync(join(home, '.ssh'), { mode: 0o755 });
+    writeFileSync(join(home, '.ssh', 'config'), 'Host x\n');
     ensureOperatorProtectedPaths({ home, env: {} });
     expect(readFileSync(join(home, '.npmrc'), 'utf8')).toBe('registry=https://example.invalid/\n');
-    expect(readFileSync(join(home, '.zshrc'), 'utf8')).toBe('echo hi\n');
-    for (const f of ZSH_STUBS) expect(existsSync(join(home, f)), f).toBe(true);
-    expect(existsSync(join(home, '.gitconfig'))).toBe(false);
-    // $XDG_CONFIG_HOME moves git's XDG config.
-    const home2 = scratch('dh-home-');
-    const xdg = scratch('dh-xdg-');
-    mkdirSync(join(xdg, 'git'));
-    writeFileSync(join(xdg, 'git', 'config'), '[user]\n');
-    ensureOperatorProtectedPaths({ home: home2, env: { XDG_CONFIG_HOME: xdg } });
-    expect(existsSync(join(home2, '.gitconfig'))).toBe(false);
+    expect(readFileSync(join(home, '.profile'), 'utf8')).toBe('export A=1\n');
+    expect(lstatSync(join(home, '.ssh')).mode & 0o777).toBe(0o755);
+    expect(readdirSync(join(home, '.ssh'))).toEqual(['config']);
+  });
+
+  it('an empty ~/.profile and ~/.bashrc leave a login and an interactive bash as they were', () => {
+    const run = (home: string, args: string[]) =>
+      spawnSync('bash', [...args, '-c', 'echo "PS1=${PS1:-} A=${A:-}"; alias'], {
+        env: { HOME: home, PATH: process.env.PATH },
+        encoding: 'utf8',
+      }).stdout;
+    const bare = scratch('dh-home-');
+    const stubbed = scratch('dh-home-');
+    ensureOperatorProtectedPaths({ home: stubbed, env: {} });
+    for (const args of [['-l'], ['-i'], ['-l', '-i']])
+      expect(run(stubbed, args), args.join(' ')).toBe(run(bare, args));
   });
 
   it('accounts for every HOME_DENY_WRITE entry', () => {
     const handled = [
       ...HOME_DENY_WRITE_STUB_DIRS,
       ...HOME_DENY_WRITE_STUB_FILES,
-      GITCONFIG_STUB,
-      ...ZSH_STUBS,
       ...HOME_DENY_WRITE_NOT_STUBBED,
     ];
     expect([...HOME_DENY_WRITE].sort()).toEqual([...new Set(handled)].sort());
@@ -139,7 +141,7 @@ describe('(2) missing HOME_DENY_WRITE entries are stubbed before a role starts',
     ensureOperatorProtectedPaths({ home, env: {}, orgRoot: base });
     const fs = restrictions({ home, base, platform: 'linux' }).filesystem;
     const args = authorityMaskArgs({ home, env: {}, roots: [base], orgRoot: base });
-    for (const p of ['.npmrc', '.config/npm', '.config/git', '.bashrc', '.gitconfig', '.ssh']) {
+    for (const p of ['.npmrc', '.config/npm', '.config/git', '.bashrc', '.profile', '.ssh']) {
       expect(fs.denyWrite, p).toContain(join(home, p));
       expect(bound(args, '--ro-bind', join(home, p)), p).toBeGreaterThan(-1);
     }
@@ -226,6 +228,27 @@ describe.runIf(authorityMaskAvailability().available)('inside the real mask', ()
     expect(out).not.toMatch(/RENAMED|PLANTED/);
     expect(existsSync(join(base, 'a-aside'))).toBe(false);
     expect(readdirSync(join(mm, 'deps'))).toEqual([]);
+  });
+
+  it('(3) an org root at $HOME does not make ~/.monomind writable again', () => {
+    const home = scratch('dh-home-');
+    const mm = join(home, '.monomind');
+    const [cmd, argv] = maskedCommand(
+      authorityMaskArgs({ home, env: {}, roots: [home], orgRoot: home, cwd: home }),
+      'bash',
+      [
+        '-c',
+        `touch ${mm}/planted 2>/dev/null && echo PLANTED; ` +
+          `mkdir ${mm}/deps/x 2>/dev/null && echo DEPS; ` +
+          `mv ${mm}/org-skills ${mm}/org-skills-aside 2>/dev/null && echo MOVED; ` +
+          `touch ${mm}/cache/ok && echo CACHE; ` +
+          `touch ${home}/ok && echo HOMEW; true`,
+      ],
+    );
+    const out = spawnSync(cmd, argv, { encoding: 'utf8' }).stdout;
+    expect(out).not.toMatch(/PLANTED|DEPS|MOVED/);
+    expect(out).toMatch(/CACHE[\s\S]*HOMEW/);
+    expect(existsSync(join(mm, 'planted'))).toBe(false);
   });
 
   it('(2) a role can write none of the stubbed npm and shell config', () => {

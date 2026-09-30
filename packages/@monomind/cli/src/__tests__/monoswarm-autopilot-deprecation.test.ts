@@ -1,6 +1,6 @@
 /**
- * #418: monoswarm and autopilot are deprecated and removed in the next minor
- * release. Every subcommand prints a one-line notice on stderr — never on
+ * #418: monoswarm and autopilot are deprecated (first shipped in 2.21.0) and
+ * removed in 2.22.0. Every subcommand prints a one-line notice on stderr — never on
  * stdout, so `--format json` / `--json` output still parses — and `-Q` drops
  * it. The MCP tools carry the note in their descriptions and results.
  */
@@ -64,8 +64,8 @@ const run = (...args: string[]) => new CLI({ interactive: false }).run([...args,
 
 describe('monoswarm CLI deprecation notice (#418)', () => {
   it('names the removal release and the replacements', () => {
-    expect(MONOSWARM_AUTOPILOT_REMOVAL_VERSION).toBe('2.21.0');
-    expect(MONOSWARM_DEPRECATION).toMatch(/deprecated.*next minor release/);
+    expect(MONOSWARM_AUTOPILOT_REMOVAL_VERSION).toBe('2.22.0');
+    expect(MONOSWARM_DEPRECATION).toMatch(/deprecated and will be removed in 2\.22\.0/);
     expect(MONOSWARM_DEPRECATION).toMatch(/starts no agents/);
     expect(MONOSWARM_DEPRECATION).toMatch(/Task tool/);
     expect(MONOSWARM_DEPRECATION).toMatch(/monomind org run/);

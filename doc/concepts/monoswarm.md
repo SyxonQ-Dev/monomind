@@ -8,7 +8,7 @@
 > there are none). To run agents, use Claude Code's Task tool,
 > `monomind agent exec`, or `monomind org run`. The `autopilot` command is
 > deprecated too — nothing in monomind writes its `swarm-tasks` source. Both
-> are removed in 2.21.0, the next minor release
+> are removed in 2.22.0
 > ([#418](https://github.com/monoes/monomind/issues/418)). Until then every
 > `monoswarm` and `autopilot` subcommand, and `monomind start` / `start stop`,
 > prints a one-line deprecation notice on stderr (`-Q` drops it). The notice
