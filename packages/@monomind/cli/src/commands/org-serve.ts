@@ -21,6 +21,7 @@ import {
   listOrgConfigFiles,
 } from './org-control.js';
 import { pollReloadfiles, pollRunfiles, pollStopfiles } from './org-poll.js';
+import { reconcileAllStaleRuns } from './org-stale-run.js';
 
 const log = (text: string): void => {
   console.log(text);
@@ -174,6 +175,15 @@ export const serveAction = async (ctx: CommandContext): Promise<CommandResult> =
     log(
       output.warning(
         'org serve: cleaned up a stale heartbeat left by a previous daemon that did not shut down cleanly.',
+      ),
+    );
+  }
+  // #573: runs killed without their stop/crash handlers left runtime.json
+  // saying 'running' — close those out before scheduling anything.
+  for (const c of reconcileAllStaleRuns(ctx.cwd, 'org serve')) {
+    log(
+      output.warning(
+        `org serve: ${c.org} run${c.run ? ` ${c.run}` : ''} was not running (${c.reason}) — marked crashed`,
       ),
     );
   }

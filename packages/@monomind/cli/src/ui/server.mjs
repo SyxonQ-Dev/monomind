@@ -7,6 +7,7 @@ import {
   detectDashboardTokenLeak,
   formatDashboardTokenLeakWarning,
 } from '../mcp/monoes-mcp-entry.mjs';
+import { recordedPidLiveness } from '../orgrt/run-liveness.js';
 import { issueLoginNonce } from './human-auth.mjs';
 import { _isOpenRoute, createAuthGate } from './server-auth.mjs';
 import { buildDocsState, SESSION_ID_RE } from './server-constants.mjs';
@@ -310,13 +311,10 @@ export async function startServer({
           // Mirrors org.ts's statusAction: a "running" record whose pid is
           // gone means the daemon died without its stopOrg cleanup — treat
           // that as not-active too, not just a literal status !== 'running'.
+          // #573: a pid now held by another process counts as gone too.
           let _gfActive = _gfRt.status === 'running';
           if (_gfActive && typeof _gfRt.pid === 'number') {
-            try {
-              process.kill(_gfRt.pid, 0);
-            } catch {
-              _gfActive = false;
-            }
+            _gfActive = recordedPidLiveness(_gfRt.pid, _gfRt.pidStart) === 'alive';
           }
           if (_gfActive) activeOrgRuns.set(_gfOrg, _gfId);
         } catch (_) {}

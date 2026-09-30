@@ -15,6 +15,7 @@ import {
   summarizeRun,
   utcTime,
 } from '../orgrt/reporting.js';
+import { deadPidReason, recordedPidLiveness } from '../orgrt/run-liveness.js';
 import { ORG_DIR, OrgDefSchema } from '../orgrt/types.js';
 import { output } from '../output.js';
 import type { CommandContext, CommandResult } from '../types.js';
@@ -25,6 +26,7 @@ import {
   listOrgConfigFiles,
   validateOrgName,
 } from './org-control.js';
+import { reconcileStaleRun, STALE_RUN_CLOSED_BY } from './org-stale-run.js';
 
 const log = (text: string): void => {
   console.log(text);
@@ -54,7 +56,7 @@ export const stopAction = async (ctx: CommandContext): Promise<CommandResult> =>
   // The stopfile is only meaningful to a process that polls it (`org run` and, since
   // this fix, `org serve`). Writing it for an org that nothing is running was a silent
   // no-op that still reported "daemon exits within 2s" — say what's actually true.
-  let rt: { status?: string; run?: string; pid?: number } | undefined;
+  let rt: { status?: string; run?: string; pid?: number; pidStart?: string } | undefined;
   try {
     rt = JSON.parse(readFileSync(join(ctx.cwd, ORG_DIR, name, 'runtime.json'), 'utf8'));
   } catch {
@@ -69,16 +71,12 @@ export const stopAction = async (ctx: CommandContext): Promise<CommandResult> =>
     return { success: false, message: 'org not running' };
   }
   if (rt.pid) {
-    let alive = true;
-    try {
-      process.kill(rt.pid, 0);
-    } catch {
-      alive = false;
-    }
-    if (!alive) {
+    // #573: a pid now held by another process is as gone as a dead one.
+    const liveness = recordedPidLiveness(rt.pid, rt.pidStart);
+    if (liveness !== 'alive') {
       log(
         output.warning(
-          `Org "${name}" is not running — runtime.json says running but pid ${rt.pid} is gone (crashed daemon).`,
+          `Org "${name}" is not running — runtime.json says running but ${deadPidReason(rt.pid, liveness)} (crashed daemon).`,
         ),
       );
       log(output.info(`Clear the stale record with: monomind org mark-complete ${name}`));
@@ -187,6 +185,8 @@ export const statusAction = async (ctx: CommandContext): Promise<CommandResult> 
       return accessRoles.length ? { roles_access: accessRoles } : {};
     };
     const readState = (t: string) => {
+      // #573: a 'running' record whose run is dead is closed out first.
+      reconcileStaleRun(ctx.cwd, t, 'org status');
       const rt = join(orgDir, t, 'runtime.json');
       if (!existsSync(rt)) return { name: t, status: 'never run', ...rolesAccess(t) };
       try {
@@ -236,6 +236,7 @@ export const statusAction = async (ctx: CommandContext): Promise<CommandResult> 
       ? listOrgConfigFiles(orgDir).map((f) => f.replace(/\.json$/, ''))
       : [];
   for (const t of targets) {
+    reconcileStaleRun(ctx.cwd, t, 'org status'); // #573
     const rt = join(orgDir, t, 'runtime.json');
     let state: { status: string; run?: string; pid?: number; abandonedRoles?: string[] } = {
       status: 'never run',
@@ -268,11 +269,13 @@ export const statusAction = async (ctx: CommandContext): Promise<CommandResult> 
         } catch {
           /* no heartbeat file — daemon predates this change or was already cleaned up */
         }
-        const closedBy = (state as { closedBy?: string }).closedBy;
+        const { closedBy, error } = state as { closedBy?: string; error?: string };
         const label =
           closedBy === 'crash-handler'
             ? 'crashed (caught by crash handler)'
-            : `crashed (runtime.json says ${state.status} but pid ${state.pid} is gone and the run has been silent)`;
+            : closedBy === STALE_RUN_CLOSED_BY && error
+              ? `crashed (${error})`
+              : `crashed (runtime.json says ${state.status} but pid ${state.pid} is gone and the run has been silent)`;
         log(
           output.warning(
             `${t}: ${label}${heartbeatHint}${state.run ? ` — run ${state.run}` : ''} — close it out with "monomind org mark-complete ${t}"`,

@@ -7,7 +7,13 @@ import { writeJsonFileAtomic } from '../utils/json-file.js';
 import { captureCheckpoint, generateChecksum, type OrgCheckpoint } from './checkpoint.js';
 import type { OrgDaemon } from './daemon.js';
 import type { RunningOrg } from './daemon-types.js';
+import { ownStartId } from './run-liveness.js';
 import { ORG_DIR } from './types.js';
+
+function pidStartField(): { pidStart?: string } {
+  const pidStart = ownStartId();
+  return pidStart ? { pidStart } : {};
+}
 
 export function persistState(
   daemon: OrgDaemon,
@@ -59,6 +65,9 @@ export function persistState(
     status,
     run,
     pid: process.pid,
+    // #573: the pid's start identity, so a reader can tell this process from
+    // an unrelated one that later got the same pid.
+    ...pidStartField(),
     updated: new Date().toISOString(),
     ...(missing.length ? { abandonedRoles: missing } : {}),
     ...(memoryError ? { memoryError } : {}),
@@ -87,6 +96,7 @@ export function persistCrashStateAll(daemon: OrgDaemon, error?: string): void {
         status: 'crashed',
         run: org.run,
         pid: process.pid,
+        ...pidStartField(),
         updated: new Date().toISOString(),
         closedBy: 'crash-handler',
         ...(checkpoint ? { checkpoint } : {}),
