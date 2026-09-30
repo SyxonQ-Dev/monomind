@@ -134,7 +134,7 @@ export function askHuman(
     writeQuestions(daemon.root, org, data);
     running?.bus.emit({ type: 'question', from: role, data: { questionId, question, blocking } });
     return blocking
-      ? `Question recorded (id ${questionId}) — a human will answer it; you'll receive the answer as a new message. It is marked BLOCKING, so it pauses the org's idle watchdog for up to an hour; after that the run resumes its normal idle checks whether or not the answer has arrived.`
+      ? `Question recorded (id ${questionId}) — a human will answer it; you'll receive the answer as a new message. It is marked BLOCKING: end your turn now and wait for the answer — do not assume or invent it, and do not call org_complete until it arrives (org_complete is refused while it is open). It pauses the org's idle watchdog for up to an hour; after that the run resumes its normal idle checks whether or not the answer has arrived.`
       : `Question recorded (id ${questionId}) — a human will answer it; you'll receive the answer as a new message. It is marked non-blocking, so it does NOT pause the run: keep working.`;
   });
 }

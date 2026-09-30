@@ -3,7 +3,8 @@
  * `monomind agent test <runtime> --json` engine (issue #390, protocol rev 18).
  *
  * Sends one "Reply with the single word: ok" turn through the same
- * in-process engine `agent exec` uses (runAgentExec) — max turns 1, no
+ * in-process engine `agent exec` uses (runAgentExec) — max turns
+ * AGENT_TEST_MAX_TURNS, no
  * caller tools, scoped access, a fresh temporary cwd, and optionally
  * `--sandbox` / `--env` as in `agent exec` (#474) — and folds the NDJSON
  * events into one result object with a status a caller can store:
@@ -23,6 +24,13 @@ import type { NativeSandbox, SandboxFallback, SandboxMode } from './runner-sandb
 import { detectVersion } from './version-probe.js';
 
 export const AGENT_TEST_PROMPT = 'Reply with the single word: ok';
+
+/** #564: a runtime counts one turn per model call, so a model that runs one
+ *  of its CLI's own tools (pi's ls/read, say) before answering needs a second
+ *  turn. With a cap of 1 the runner aborted that answer and the test failed
+ *  with error_max_turns although the runtime worked. A little headroom keeps
+ *  the test about the runtime, not about whether the model looked around. */
+export const AGENT_TEST_MAX_TURNS = 3;
 
 export type AgentTestStatus = 'ok' | 'ok_unexpected' | AgentFailureStatus;
 
@@ -211,7 +219,7 @@ export async function runAgentTest(opts: AgentTestOptions): Promise<AgentTestRes
       ...(opts.sandbox ? { sandbox: opts.sandbox } : {}),
       ...(opts.sandboxFallback ? { sandboxFallback: opts.sandboxFallback } : {}),
       ...(opts.env ? { env: opts.env } : {}),
-      maxTurns: 1,
+      maxTurns: AGENT_TEST_MAX_TURNS,
       timeoutMs: opts.timeoutMs,
       toolTimeoutMs: opts.timeoutMs,
       toolSpecs: null,
