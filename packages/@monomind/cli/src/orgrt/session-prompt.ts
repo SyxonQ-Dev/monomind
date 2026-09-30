@@ -2,6 +2,7 @@
 // Extracted from session.ts — a role session's system prompt and model.
 import { readFileSync } from 'node:fs';
 import { endpointBriefingLines } from './endpoint-roles.js';
+import { resolveInstructionsFile } from './instructions-file.js';
 import { expandRolePromptVars, promptVarsFor } from './prompt-vars.js';
 import type { SessionOpts } from './session-types.js';
 import { roleSkillGuidance } from './skill-library.js';
@@ -20,11 +21,17 @@ export function resolveRoleExtraGuidance(role: OrgRole, projectRoot?: string): s
   const skills = roleSkillGuidance(role, projectRoot);
   if (skills) parts.push(skills);
   if (role.instructions_file) {
-    try {
-      const custom = readFileSync(role.instructions_file, 'utf-8').trim();
-      if (custom) parts.push(custom);
-    } catch {
-      // missing/unreadable custom instructions file — skip, don't crash session start
+    // #502 review: only a file inside the project, and nothing a role may not read.
+    const file = resolveInstructionsFile(role.instructions_file, projectRoot ?? process.cwd());
+    if (file.path === undefined) {
+      console.warn(`[orgrt] role ${role.id}: ${file.refused} — not read`);
+    } else {
+      try {
+        const custom = readFileSync(file.path, 'utf-8').trim();
+        if (custom) parts.push(custom);
+      } catch {
+        // missing/unreadable custom instructions file — skip, don't crash session start
+      }
     }
   }
   return parts.length ? parts.join('\n\n') : undefined;

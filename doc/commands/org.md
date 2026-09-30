@@ -761,34 +761,45 @@ monomind org sign --all [--yes]
 | Flag | Purpose |
 |---|---|
 | `--all` | Sign every org definition in the project (the one-time migration) |
-| `--yes`, `-y` | Skip the per-org confirmation. Required when not on a TTY |
+| `--yes`, `-y` | Skip the per-org confirmation. Without a TTY and without it, `sign` prints the review and signs nothing |
 
-For each org it prints what the definition may do (each role's runtime, git level, access,
-`fileWrite` and tool providers; the schedule, workspace, prechecks and unattended full access),
-then asks before signing.
+For each org it prints everything that decides what a role may run, reach or be granted: each
+role's runtime, git level and access, `adapter_config`, `provider`, `endpoint`,
+`instructions_file`, `skills`/`skill_pool`, budgets, every `policy` scope (`fileWrite`,
+`fileRead`, tools, `webAllow`, `sandbox` with `allowWrite` and `allowedDomains`), and each tool
+provider's command, arguments and env variable names (never values); then the org's runtime,
+schedule, workspace, each precheck command, the full-access knobs, `federation`, `fence` and
+`loadouts`. It names every role that would run with neither the SDK sandbox nor the bubblewrap
+mask on this machine ("can read the operator key and sign anything"), and shows what changed
+since the last signature (a copy of the signed projection is kept beside it). Then it asks
+before signing.
 
 **What is signed:** every field of `.monomind/orgs/<org>.json` as written, except the org's `goal`
-and `status` and each role's `title`, `responsibilities`, `instructions_file`, `skills`,
-`skill_pool` and `ui`. So each role's whole `policy`, the role list, runtimes, `adapter_config`,
-`provider`, `tool_providers`, budgets, `endpoint`, the org's `run_config`, `schedule`, `runtime`,
-`fence` and `federation` are covered, and so is any field added later. A goal or prompt edit needs
-no new signature.
+and `status` and each role's `title`, `responsibilities` and `ui`. So each role's whole `policy`,
+the role list, runtimes, `adapter_config`, `provider`, `tool_providers`, budgets, `endpoint`,
+`instructions_file`, `skills` and `skill_pool`, the org's `run_config`, `schedule`, `runtime`,
+`fence`, `federation` and `loadouts` are covered, and so is any field added later. A goal or
+responsibilities edit needs no new signature. A definition with a `__proto__`, `constructor` or
+`prototype` key is refused.
 
 **The key and the signature:** an HMAC-SHA256 under the same machine-local key as
 [`role set-access`](#role-set-access)'s full-access grants, created on first use in the
 operator-credential directory (`~/.monomind/orgrt-operator/`, or `MONOMIND_ORGRT_OPERATOR_DIR`).
 The signature is kept there too, in `org-signatures/<project id>/<org>.json`, not in the org file:
-roles are denied Read and Edit on that directory, a tracked org file is not changed, and a
-signature does not carry over to another checkout or machine. Each checkout (and each worktree
+roles can neither read nor write that directory, a tracked org file is not changed, and a
+signature does not carry over to another checkout or machine. The key and signature files must be
+the operator's own, mode 0600 and not symlinks; a key replaced after a daemon loaded it is refused
+until that daemon restarts. Each checkout (and each worktree
 you run an org from) is signed separately.
 
 **Who may sign:** `sign` refuses inside an org role's or `agent exec`'s process tree
 (`MONOMIND_ORG_ROLE`, `MONOMIND_SDK_AGENT`, `MONOMIND_AGENT_EXEC`, `MONOMIND_CLINE_TURN`,
-`MONOMIND_AIDER`). Unlike `role set-access … full`, it runs from your own Claude Code session, so
-`/mastermind:createorg` signs the org you just confirmed. `org create` signs the org it writes.
+`MONOMIND_AIDER`). Unlike `role set-access … full`, it runs from your own Claude Code session.
+`/mastermind:createorg` runs `org sign` without `--yes`, shows you the review and asks you to sign
+in your own terminal. `org create` signs the org it writes.
 
-**Migration.** Orgs made before this release have no signature. `org run` on a TTY offers a
-one-time review and sign for such an org. A changed or unverifiable signature, or any run without
+**Migration.** Orgs made before this release have no signature. `org run` on a TTY shows the
+full review and offers a one-time sign for such an org. A changed or unverifiable signature, or any run without
 a TTY (`org serve`, a detached `org run`, the mastermind skills), is refused with the message
 above. Run `monomind org sign --all` once per checkout, including for the shipped
 `.monomind/orgs/*.json` and `config/orgs/release.json`, whose signatures are per machine and never

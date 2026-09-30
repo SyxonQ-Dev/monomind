@@ -7,9 +7,11 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { describeOrgAuthority, projectionDiff } from '../orgrt/org-sign-review.js';
 import {
-  describeOrgAuthority,
+  lastSignedProjection,
   orgSignatureEnforced,
+  orgSignatureInput,
   roleContextMarker,
   signOrgDef,
   verifyOrgDef,
@@ -27,11 +29,25 @@ function readRaw(cwd: string, name: string): unknown {
   return JSON.parse(readFileSync(join(cwd, ORG_DIR, `${name}.json`), 'utf8'));
 }
 
+/** The whole review: state, every authority-relevant setting, the
+ *  unconfined roles, and what changed since the last signature. */
 function printReview(cwd: string, name: string, raw: unknown): void {
   const check = verifyOrgDef(cwd, name, raw);
   const state = check.ok ? 'signed, unchanged' : check.reason;
   log(output.bold(`\norg ${name} (${state}):`));
   for (const line of describeOrgAuthority(raw)) log(line);
+  const before = lastSignedProjection(cwd, name);
+  if (before === undefined) {
+    log(output.dim('  (no earlier signature on this machine to compare with)'));
+    return;
+  }
+  const diff = projectionDiff(before, JSON.parse(JSON.stringify(orgSignatureInput(raw))));
+  log(
+    output.bold(
+      diff.length ? '  Changed since the last signature:' : '  No change since the last signature.',
+    ),
+  );
+  for (const line of diff) log(line);
 }
 
 /** Sign one org. Returns an error string, or undefined on success. */
@@ -92,9 +108,17 @@ export const signAction = async (ctx: CommandContext): Promise<CommandResult> =>
   }
   const yes = ctx.flags.yes === true;
   if (!ctx.interactive && !yes) {
+    // Show what would be signed (the createorg skill relies on this), sign nothing.
+    for (const name of names) {
+      try {
+        printReview(ctx.cwd, name, readRaw(ctx.cwd, name));
+      } catch (err) {
+        log(output.error(`org ${name}: ${(err as Error).message}`));
+      }
+    }
     log(
       output.error(
-        'Non-interactive: review the definition, then pass --yes to sign it (monomind org sign <org> --yes).',
+        'Not signed. Review the above, then sign it yourself in a terminal: monomind org sign <org> (or pass --yes).',
       ),
     );
     return { success: false, message: 'confirmation required (--yes)' };

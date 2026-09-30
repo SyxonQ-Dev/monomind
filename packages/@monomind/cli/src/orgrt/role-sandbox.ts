@@ -93,6 +93,8 @@ export function roleAuthorityMask(args: {
   orgRoot?: string;
   /** The role's `policy.fileWrite`: dirs it names under an org dir are created. */
   fileWrite?: string[];
+  /** The role's signed `policy.sandbox.allowWrite`. */
+  allowWrite?: string[];
   home?: string;
   env?: NodeJS.ProcessEnv;
   availability?: { available: boolean; reason?: string };
@@ -116,6 +118,7 @@ export function roleAuthorityMask(args: {
     orgRoot: args.orgRoot,
     cwd: args.cwd,
     fileWrite: args.fileWrite,
+    allowWrite: args.allowWrite,
   });
 }
 

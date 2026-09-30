@@ -33,10 +33,10 @@ import type { OrgDef, OrgRole } from './types.js';
 
 /** Recursively sort object keys so the same logical config always serializes
  *  identically regardless of property insertion order. */
-export function canonical(value: unknown): unknown {
+function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
   if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
+    const out = Object.create(null) as Record<string, unknown>; // #502: no prototype to swallow a __proto__ key
     for (const key of Object.keys(value as Record<string, unknown>).sort()) {
       out[key] = canonical((value as Record<string, unknown>)[key]);
     }

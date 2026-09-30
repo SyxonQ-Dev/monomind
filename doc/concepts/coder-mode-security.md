@@ -371,6 +371,16 @@ uses them must read `sandbox_applied` (and `native_sandbox`) rather than assume 
 These are known, accepted trade-offs of "full access by design" (§1) — listed explicitly so they
 are never mistaken for oversights:
 
+- **Unconfined org roles can sign org definitions (#502, open decision)**: a role that runs with
+  neither the SDK sandbox nor the bubblewrap authority mask can read the operator key in
+  `~/.monomind/orgrt-operator/`, and with it sign any org definition and forge any full-access
+  grant. That is an active full-access role; a `policy.git: push` role or one with
+  `policy.sandbox.mode: 'off'` on a host without bubblewrap; a CLI runtime other than claude
+  there (codex on macOS, for example); and any role when bubblewrap is missing or cannot start.
+  Whether to refuse to start such roles is not decided yet. Until then `monomind org sign` lists
+  them in its review ("can read the operator key and sign anything") and every org start prints
+  the same warning.
+
 - **`WebFetch`/`WebSearch` under `--access full`**: a fetched page can contain instructions the
   model may act on with a real, unrestricted shell — identical to interactive Claude Code with
   `--dangerously-skip-permissions` (or any other CLI's yolo mode). Mitigation is observability only: every native tool call

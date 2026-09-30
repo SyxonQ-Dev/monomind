@@ -38,7 +38,8 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { dashboardCredentialPaths, operatorDirOverride } from './file-roots.js';
+import { dashboardCredentialPaths, HOME_DENY_WRITE, operatorDirOverride } from './file-roots.js';
+import { maskReadOnlyPaths } from './operator-protected-paths.js';
 import { ensureOrgWorkDirs, orgsMaskLayout } from './org-authority-files.js';
 import { realPath } from './policy-paths.js';
 
@@ -90,6 +91,8 @@ export function authorityMaskArgs(ctx: {
   /** The role's cwd and `policy.fileWrite`, for the work dirs to create. */
   cwd?: string;
   fileWrite?: string[];
+  /** The role's signed `policy.sandbox.allowWrite` (operator-protected-paths.ts). */
+  allowWrite?: string[];
 }): string[] {
   const args = ['--dev-bind', '/', '/'];
   // #498: the mask binds only existing work dirs read-write, so create them
@@ -108,6 +111,10 @@ export function authorityMaskArgs(ctx: {
   for (const d of orgs.readOnly) args.push('--ro-bind', d, d);
   for (const d of orgs.writable) args.push('--bind', d, d);
   for (const f of orgs.files) args.push('--ro-bind', f, f);
+  // #502 review: what the operator's own processes run or trust, and the
+  // shell/git config that would undo the guard.
+  for (const p of maskReadOnlyPaths({ ...ctx, homeDenyWrite: HOME_DENY_WRITE }).map(realPath))
+    args.push('--ro-bind', p, p);
   // Last, so that no bind above can uncover them.
   for (const d of hidden) if (existsSync(d)) args.push('--tmpfs', d);
   for (const f of dashboardCredentialPaths(ctx.roots)) args.push('--ro-bind', '/dev/null', f);

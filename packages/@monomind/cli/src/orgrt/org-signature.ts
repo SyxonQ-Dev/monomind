@@ -13,59 +13,62 @@
  *   defaults) EXCEPT the prompt-only and cosmetic ones listed in
  *   `UNSIGNED_ORG_FIELDS` / `UNSIGNED_ROLE_FIELDS`. Deny-by-default: each
  *   role's whole `policy`, its id/runtime/adapter_config/provider/tool
- *   providers/budgets/endpoint, the role list itself, `run_config` (sandbox,
- *   workspace, prechecks, budgets, allow_unattended_full_access, ...),
- *   `schedule`, `runtime`, `fence` and `federation` are all covered, and so
- *   is any field added later.
+ *   providers/budgets/endpoint, its `instructions_file` (a path the daemon
+ *   reads into the prompt) and `skills`/`skill_pool` (they decide the MCP
+ *   tools the daemon grants), the role list itself, `run_config`,
+ *   `schedule`, `runtime`, `fence`, `federation` and `loadouts` are all
+ *   covered, and so is any field added later. A definition holding a
+ *   `__proto__`, `constructor` or `prototype` key anywhere is refused.
  * - THE KEY: the same machine-local HMAC key #365 uses for `access_ack.sig`
- *   (access-grant-key.ts), in the operator-credential directory that the
- *   authority mask denies Read/Edit on for every scoped/sandboxed role.
+ *   (access-grant-key.ts: owner-only, not a symlink, and a key swapped
+ *   after this process loaded it is refused), in the operator-credential
+ *   directory, which every role sandbox denies reading and writing.
  * - WHERE the signature lives: a sidecar in that same directory,
  *   `org-signatures/<project id>/<org>.json`, never in the org JSON — so a
  *   role can't write it, a tracked org file is not dirtied on every
  *   machine, and a signature can't be committed and replayed elsewhere. The
- *   HMAC input binds the project root and org name too.
+ *   HMAC input binds the project root and org name too. The signed
+ *   projection is kept beside it, so `org sign` can show what changed.
  * - WHERE it is enforced: `assertOrgDefSigned`, called with the exact bytes
  *   about to be used by `prepareOrgStart` (org run, serve's runfile poll and
  *   schedule, resume) and `reloadOrgDef` (org reload / hot reload), plus
  *   early checks in the CLI paths for a clearer message.
  *
  * Residual (same as #365's key): a role that can already read the operator
- * directory — full access, or a scoped role whose Bash runs without the
- * bubblewrap mask — can read the key and sign. The barrier is against
- * sandboxed roles and config-writing paths without a shell.
+ * directory — full access, or a role that runs with neither the SDK sandbox
+ * nor the bubblewrap mask — can read the key and sign. `org sign` names
+ * those roles (org-sign-review.ts).
  */
 
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import {
   chmodSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   realpathSync,
   renameSync,
   writeFileSync,
 } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { canonical } from './access-ack.js';
-import { ensureFullAccessGrantKey, readFullAccessGrantKey } from './access-grant-key.js';
+import { dirname, join, resolve } from 'node:path';
+import {
+  ensureFullAccessGrantKey,
+  loadOperatorKey,
+  untrustedFileReason,
+} from './access-grant-key.js';
 import { defaultOperatorDir } from './broker.js';
 
 /** Top-level fields left out of the signature: the goal is a prompt, and
  *  `status` is informational. */
 const UNSIGNED_ORG_FIELDS = new Set(['goal', 'status']);
 /** Role fields left out: prompt text and dashboard layout only. */
-const UNSIGNED_ROLE_FIELDS = new Set([
-  'title',
-  'responsibilities',
-  'instructions_file',
-  'skills',
-  'skill_pool',
-  'ui',
-]);
+const UNSIGNED_ROLE_FIELDS = new Set(['title', 'responsibilities', 'ui']);
+/** Keys that would reach an object's prototype once parsed into one. */
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 const SIGNATURE_VERSION = 1;
 
-export type OrgSignatureReason = 'unsigned' | 'changed' | 'invalid-signature';
+export type OrgSignatureReason = 'unsigned' | 'changed' | 'invalid-signature' | 'forbidden-key';
 
 export type OrgSignatureCheck =
   | { ok: true }
@@ -95,10 +98,45 @@ export function orgSignatureEnforced(): boolean {
   return enforced;
 }
 
+/** The first `__proto__` / `constructor` / `prototype` key in `value`, as a
+ *  dotted path, or undefined. JSON.parse makes such a key an own property;
+ *  copied into a plain object it would set that object's prototype. */
+export function forbiddenKeyPath(value: unknown, path = ''): string | undefined {
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      const hit = forbiddenKeyPath(value[i], `${path}[${i}]`);
+      if (hit) return hit;
+    }
+    return undefined;
+  }
+  if (!value || typeof value !== 'object') return undefined;
+  for (const key of Object.keys(value)) {
+    const here = path ? `${path}.${key}` : key;
+    if (FORBIDDEN_KEYS.has(key)) return here;
+    const hit = forbiddenKeyPath((value as Record<string, unknown>)[key], here);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/** Sorted keys, on prototype-less objects, so the same logical value always
+ *  serializes the same way and no key can be swallowed by a prototype. */
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === 'object') {
+    const out = Object.create(null) as Record<string, unknown>;
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      out[key] = canonical((value as Record<string, unknown>)[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
 /** The canonical, signed projection of a raw (as-authored) org JSON. */
 export function orgSignatureInput(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return canonical(raw);
-  const out: Record<string, unknown> = {};
+  const out = Object.create(null) as Record<string, unknown>;
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     if (UNSIGNED_ORG_FIELDS.has(key)) continue;
     out[key] = key === 'roles' && Array.isArray(value) ? value.map(signedRole) : value;
@@ -108,7 +146,7 @@ export function orgSignatureInput(raw: unknown): unknown {
 
 function signedRole(role: unknown): unknown {
   if (!role || typeof role !== 'object' || Array.isArray(role)) return role;
-  const out: Record<string, unknown> = {};
+  const out = Object.create(null) as Record<string, unknown>;
   for (const [key, value] of Object.entries(role as Record<string, unknown>)) {
     if (!UNSIGNED_ROLE_FIELDS.has(key)) out[key] = value;
   }
@@ -140,6 +178,11 @@ export function orgSignaturePath(root: string, org: string, dir = defaultOperato
   return join(dir, 'org-signatures', projectId, `${org}.json`);
 }
 
+/** The signed projection kept beside the signature, for `org sign`'s diff. */
+export function orgProjectionPath(root: string, org: string, dir = defaultOperatorDir()): string {
+  return orgSignaturePath(root, org, dir).replace(/\.json$/, '.projection.json');
+}
+
 interface SignatureRecord {
   v: number;
   org: string;
@@ -161,22 +204,40 @@ function hmac(key: Buffer, rec: Omit<SignatureRecord, 'sig'>): string {
   return createHmac('sha256', key).update(input).digest('hex');
 }
 
-function readRecord(path: string): SignatureRecord | undefined {
+/** A signature file, or why it can't be trusted (a symlink, another user's
+ *  file, or readable/writable by others). Undefined when there is none. */
+function readRecord(path: string): { rec?: SignatureRecord; problem?: string } | undefined {
+  let st: ReturnType<typeof lstatSync>;
   try {
-    const rec = JSON.parse(readFileSync(path, 'utf8')) as SignatureRecord;
-    return rec && typeof rec === 'object' ? rec : undefined;
+    st = lstatSync(path);
   } catch {
     return undefined;
   }
+  const bad = untrustedFileReason(st, `signature ${path}`);
+  if (bad) return { problem: bad };
+  try {
+    const rec = JSON.parse(readFileSync(path, 'utf8')) as SignatureRecord;
+    return rec && typeof rec === 'object'
+      ? { rec }
+      : { problem: `signature ${path} is not an object` };
+  } catch (err) {
+    return { problem: `signature ${path} is unreadable (${(err as Error).message})` };
+  }
 }
 
-export function orgSignatureMessage(org: string, reason: OrgSignatureReason): string {
+export function orgSignatureMessage(
+  org: string,
+  reason: OrgSignatureReason,
+  problem?: string,
+): string {
   const detail =
     reason === 'unsigned'
       ? 'has no operator signature'
       : reason === 'changed'
-        ? 'changed since the operator signed it (policy, roles, runtime, schedule or run_config)'
-        : 'has an operator signature that does not verify (the signing key is missing on this host, or the signature was not made with it)';
+        ? 'changed since the operator signed it (policy, roles, runtime, skills, instructions_file, schedule or run_config)'
+        : reason === 'forbidden-key'
+          ? `holds a forbidden key (${problem}) — remove it`
+          : `has an operator signature that does not verify (${problem ?? 'the signing key is missing on this host, or the signature was not made with it'})`;
   return `org ${org}: the definition ${detail} — run \`monomind org sign ${org}\` as the operator after reviewing the change`;
 }
 
@@ -190,19 +251,24 @@ export function verifyOrgDef(
   opts: { dir?: string } = {},
 ): OrgSignatureCheck {
   const dir = opts.dir ?? defaultOperatorDir();
-  const fail = (reason: OrgSignatureReason): OrgSignatureCheck => ({
+  const fail = (reason: OrgSignatureReason, problem?: string): OrgSignatureCheck => ({
     ok: false,
     reason,
-    message: orgSignatureMessage(org, reason),
+    message: orgSignatureMessage(org, reason, problem),
   });
-  const rec = readRecord(orgSignaturePath(root, org, dir));
-  if (!rec) return fail('unsigned');
-  const key = readFullAccessGrantKey(dir);
-  if (!key || typeof rec.sig !== 'string' || typeof rec.hash !== 'string') {
-    return fail('invalid-signature');
+  const forbidden = forbiddenKeyPath(raw);
+  if (forbidden) return fail('forbidden-key', forbidden);
+  const read = readRecord(orgSignaturePath(root, org, dir));
+  if (!read) return fail('unsigned');
+  if (!read.rec) return fail('invalid-signature', read.problem);
+  const rec = read.rec;
+  const loaded = loadOperatorKey(dir);
+  if (!loaded.key) return fail('invalid-signature', loaded.problem);
+  if (typeof rec.sig !== 'string' || typeof rec.hash !== 'string') {
+    return fail('invalid-signature', 'the signature file is malformed');
   }
   const expected = Buffer.from(
-    hmac(key, {
+    hmac(loaded.key, {
       v: rec.v,
       org,
       root: projectRoot(root),
@@ -213,7 +279,7 @@ export function verifyOrgDef(
   );
   const actual = Buffer.from(rec.sig, 'hex');
   if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
-    return fail('invalid-signature');
+    return fail('invalid-signature', 'the HMAC does not match the operator key');
   }
   if (rec.hash !== computeOrgDefHash(raw)) return fail('changed');
   return { ok: true };
@@ -231,16 +297,29 @@ export function assertOrgDefSigned(
   if (!check.ok) throw new OrgSignatureError(check.message, check.reason);
 }
 
+function writePrivate(path: string, text: string): void {
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, text, { mode: 0o600 });
+  try {
+    chmodSync(tmp, 0o600);
+  } catch {
+    /* best effort on platforms without POSIX file modes */
+  }
+  renameSync(tmp, path);
+}
+
 /** Sign `raw` as the operator: creates the key on first use (same key and
- *  directory as #365's full-access grants) and writes the sidecar
- *  atomically. Callers are the human-only paths (`org sign`, `org create`,
- *  `org role set-access`) — never the runtime. */
+ *  directory as #365's full-access grants) and writes the sidecar and the
+ *  signed projection atomically. Callers are the human-only paths (`org
+ *  sign`, `org create`, `org role set-access`) — never the runtime. */
 export function signOrgDef(
   root: string,
   org: string,
   raw: unknown,
   opts: { dir?: string; now?: Date } = {},
 ): { hash: string; at: string; path: string } {
+  const forbidden = forbiddenKeyPath(raw);
+  if (forbidden) throw new Error(orgSignatureMessage(org, 'forbidden-key', forbidden));
   const dir = opts.dir ?? defaultOperatorDir();
   const key = ensureFullAccessGrantKey(dir);
   const base = {
@@ -252,16 +331,31 @@ export function signOrgDef(
   };
   const rec: SignatureRecord = { ...base, sig: hmac(key, base) };
   const path = orgSignaturePath(root, org, dir);
-  mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 });
-  const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(rec, null, 2)}\n`, { mode: 0o600 });
-  try {
-    chmodSync(tmp, 0o600);
-  } catch {
-    /* best effort on platforms without POSIX file modes */
+  for (const d of [dirname(dirname(path)), dirname(path)]) {
+    mkdirSync(d, { recursive: true, mode: 0o700 });
+    chmodSync(d, 0o700);
   }
-  renameSync(tmp, path);
+  writePrivate(
+    orgProjectionPath(root, org, dir),
+    `${JSON.stringify(orgSignatureInput(raw), null, 2)}\n`,
+  );
+  writePrivate(path, `${JSON.stringify(rec, null, 2)}\n`);
   return { hash: base.hash, at: base.at, path };
+}
+
+/** The projection that was last signed for `org`, if its copy is there. */
+export function lastSignedProjection(
+  root: string,
+  org: string,
+  dir = defaultOperatorDir(),
+): unknown | undefined {
+  const path = orgProjectionPath(root, org, dir);
+  try {
+    if (untrustedFileReason(lstatSync(path), path)) return undefined;
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return undefined;
+  }
 }
 
 /** Env markers monomind itself sets on a role's (or `agent exec`'s) process
@@ -278,42 +372,4 @@ const ROLE_CONTEXT_MARKERS = [
 
 export function roleContextMarker(env: NodeJS.ProcessEnv = process.env): string | undefined {
   return ROLE_CONTEXT_MARKERS.find((k) => !!env[k]);
-}
-
-/** One line per role plus the org-level knobs, for `org sign`'s review. */
-export function describeOrgAuthority(raw: unknown): string[] {
-  const def = (raw ?? {}) as {
-    runtime?: string;
-    schedule?: unknown;
-    run_config?: Record<string, unknown>;
-    roles?: Array<{
-      id?: string;
-      runtime?: string;
-      adapter_config?: { model?: string };
-      tool_providers?: unknown[];
-      policy?: Record<string, unknown>;
-    }>;
-  };
-  const lines: string[] = [];
-  for (const role of def.roles ?? []) {
-    const policy = role.policy ?? {};
-    const parts = [
-      `runtime ${role.runtime ?? def.runtime ?? 'claude'}`,
-      `git ${String(policy.git ?? 'read')}`,
-      `access ${String(policy.access ?? 'scoped')}`,
-    ];
-    if (Array.isArray(policy.fileWrite))
-      parts.push(`fileWrite ${JSON.stringify(policy.fileWrite)}`);
-    if (role.tool_providers?.length) parts.push(`${role.tool_providers.length} tool provider(s)`);
-    lines.push(`  ${String(role.id)}: ${parts.join(' · ')}`);
-  }
-  const rc = def.run_config ?? {};
-  const org: string[] = [];
-  if (def.schedule != null) org.push(`schedule ${String(def.schedule)}`);
-  if (rc.workspace !== undefined) org.push(`workspace ${String(rc.workspace)}`);
-  if (Array.isArray(rc.prechecks) && rc.prechecks.length)
-    org.push(`${rc.prechecks.length} precheck command(s)`);
-  if (rc.allow_unattended_full_access === true) org.push('allow_unattended_full_access');
-  if (org.length) lines.push(`  org: ${org.join(' · ')}`);
-  return lines;
 }

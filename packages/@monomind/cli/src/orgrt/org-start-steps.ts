@@ -32,6 +32,7 @@ import {
   type RoleFence,
 } from './fence.js';
 import { drainInbox, newMessageId, queueMessage } from './inbox.js';
+import { unconfinedRoles } from './org-sign-review.js';
 import { assertOrgDefSigned } from './org-signature.js';
 import { expandOrgPolicyPathVars, promptVarsFor } from './prompt-vars.js';
 import * as questionOps from './questions.js';
@@ -82,6 +83,12 @@ export async function prepareOrgStart(
   const bp = resolveOrgDefBlueprints(parsedDef, daemon.root);
   // {{home}} / {{org_root}} in policy paths, before any root or sandbox sees them.
   const def = expandOrgPolicyPathVars(bp.def, promptVarsFor(daemon.root));
+  // #502 review: a role with neither the SDK sandbox nor the mask can read
+  // the operator key, and so sign any org definition. Say so at every start.
+  for (const r of unconfinedRoles(def))
+    console.warn(
+      `[orgrt] org ${name}: role ${r.id} runs unconfined (${r.why}) — it can read the operator key and sign any org definition`,
+    );
   const autoApproveError = approvalOps.unknownAutoApproveError(
     options?.autoApprove ?? [],
     def.roles,

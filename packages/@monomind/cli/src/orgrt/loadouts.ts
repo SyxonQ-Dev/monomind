@@ -27,6 +27,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { resolveInstructionsFile } from './instructions-file.js';
 import { getSkill } from './skill-library.js';
 import type { OrgTask, TaskDag } from './task-dag.js';
 import type { OrgDef } from './types.js';
@@ -93,6 +94,9 @@ export function validateLoadouts(
     }
     if (l.instructions_file && !existsSync(filePath(l.instructions_file, root))) {
       errors.push(`loadout "${name}": instructions_file not found: ${l.instructions_file}`);
+    } else if (l.instructions_file) {
+      const file = resolveInstructionsFile(l.instructions_file, root);
+      if (file.refused) errors.push(`loadout "${name}": ${file.refused}`);
     }
   }
   return { errors, warnings };
@@ -128,7 +132,9 @@ export function resolveLoadout(
     if (text) parts.push(text);
   }
   if (l.instructions_file) {
-    const text = readFileSync(filePath(l.instructions_file, root), 'utf-8').trim();
+    const file = resolveInstructionsFile(l.instructions_file, root);
+    if (file.path === undefined) throw new Error(`loadout "${name}": ${file.refused}`);
+    const text = readFileSync(file.path, 'utf-8').trim();
     if (text) parts.push(text);
   }
   return { name, guidance: parts.join('\n\n') };
