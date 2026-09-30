@@ -148,6 +148,18 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    marks one that resolves to the same model as an earlier entry with
  *    `alias_of: <canonical id>`; the canonical entry lists `aliases` (§12,
  *    rev 28)
+ *  - `org-sign-check` — `org sign <org>|--all --check [--format json]`
+ *    reports each org's signature state without prompting, signing or
+ *    writing, and `--project <dir>` names the project root (issue #561,
+ *    doc/commands/org.md; §7.2, rev 29)
+ *  - `org-sign-expect-hash` — `org sign --expect-hash <hex>` (with `--all`,
+ *    `<org>=<hex>` per org) signs only the hash the caller computed, else
+ *    exits 1 and writes nothing; `--check --format json` entries carry that
+ *    `hash`. Since the same rev `org sign` exits 2 on any option it does not
+ *    know and signs nothing (§7.2, rev 29)
+ *  - `org-sign-review-json` — `org sign <org> --format json` without `--yes`
+ *    prints the review (what signing would approve) with its `hash` as one
+ *    JSON object and signs nothing, even on a TTY (§7.2, rev 29)
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
@@ -183,6 +195,9 @@ export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec-sandbox-fallback',
   'agent-exec-cost-null',
   'agent-models-alias-of',
+  'org-sign-check',
+  'org-sign-expect-hash',
+  'org-sign-review-json',
 ] as const;
 
 /** The exact handshake object emitted by `monomind --version --json`. */

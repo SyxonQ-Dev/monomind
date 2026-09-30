@@ -77,6 +77,9 @@ describe('version handshake (§2)', () => {
         'agent-exec-sandbox-fallback',
         'agent-exec-cost-null',
         'agent-models-alias-of',
+        'org-sign-check',
+        'org-sign-expect-hash',
+        'org-sign-review-json',
       ],
     });
     expect(p.capabilities).toContain('agent-exec');
