@@ -1,13 +1,13 @@
 ---
 name: mastermind-research
-description: Mastermind research domain — market research, competitor analysis, user research, trend scanning. Spawns a Research Manager coordinating a mesh of researcher agents for comprehensive intelligence gathering.
+description: "Research: market, competitors, users, trends. A Research Manager coordinates researcher agents and reports the findings."
 type: domain-skill
 default_mode: auto
 ---
 
 # Mastermind Research Domain
 
-This skill is invoked by `mastermind:master` or directly via `/mastermind:research`.
+This skill is invoked directly via `/mastermind:research`, or by `/mastermind:master` (pack extras — `monomind packs add extras`).
 
 ---
 

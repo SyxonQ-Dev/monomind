@@ -45,6 +45,8 @@ cd your-project && monomind init
 claude mcp add monomind -- npx -y monomind@latest mcp start
 ```
 
+`monomind init` installs the **core pack**: the everyday `/mastermind:*` workflows (plan, execute, review, debug, do, …), 20 core agents and the memory, GitHub and browser toolkits, small enough that Claude Code shows every description. Everything else ships as opt-in packs (`orgs`, `org-admin`, `swarm`, `github`, `testing`, `specialists`, `business`, `extras`): pick them with `monomind init --packs orgs,github` or `--all-packs`, or add one later with `monomind packs add <pack>`. `monomind packs list` shows each pack and how much of the listing it uses.
+
 `monomind init` itself writes `.mcp.json` (and the Codex/OpenCode/Kimi/Antigravity configs) pinned to the installed version, so a start reuses the npx cache instead of re-resolving `@latest`; `--pin latest` keeps the floating `monomind@latest`, and `monomind init --force` re-pins after an upgrade.
 
 <details>
@@ -243,7 +245,7 @@ monomind doctor --fix
 
 > **Native module install blocked?** If `doctor` reports a missing `better-sqlite3` binding (`Could not locate the bindings file`, or npm logs an install script that was "blocked because it is not covered by allowScripts"), your npm's `allowScripts` policy blocked its native build — this isn't a Monomind bug. Run `npm install-scripts approve better-sqlite3 && npm rebuild better-sqlite3`, then re-run `monomind doctor --fix`.
 
-Open Claude Code. You now have <!-- doc-count:mastermind-commands -->42<!-- /doc-count:mastermind-commands --> `/mastermind:*` workflows available:
+Open Claude Code. The core `/mastermind:*` workflows are available (all <!-- doc-count:mastermind-commands -->42<!-- /doc-count:mastermind-commands --> come with `monomind packs add` or `init --all-packs`):
 
 ```bash
 /mastermind:review --tillend      # review and fix until nothing is left
@@ -401,7 +403,7 @@ Everything runs from inside Claude Code via slash commands. Here's the highlight
 | Package | npm | Purpose |
 |---|---|---|
 | `monomind` | [![npm](https://img.shields.io/npm/v/monomind?style=flat-square&color=00D2AA)](https://www.npmjs.com/package/monomind) | Umbrella shim — **install this one** |
-| `@monoes/monomindcli` | [![npm](https://img.shields.io/npm/v/@monoes/monomindcli?style=flat-square&color=4F46E5)](https://www.npmjs.com/package/@monoes/monomindcli) | CLI engine (<!-- doc-count:cli-commands -->38<!-- /doc-count:cli-commands --> commands, MCP server) |
+| `@monoes/monomindcli` | [![npm](https://img.shields.io/npm/v/@monoes/monomindcli?style=flat-square&color=4F46E5)](https://www.npmjs.com/package/@monoes/monomindcli) | CLI engine (<!-- doc-count:cli-commands -->39<!-- /doc-count:cli-commands --> commands, MCP server) |
 | `@monoes/monograph` | [![npm](https://img.shields.io/npm/v/@monoes/monograph?style=flat-square&color=F59E0B)](https://www.npmjs.com/package/@monoes/monograph) | Code knowledge graph (tree-sitter + SQLite) |
 | `@monoes/memory` | [![npm](https://img.shields.io/npm/v/@monoes/memory?style=flat-square&color=8B5CF6)](https://www.npmjs.com/package/@monoes/memory) | Persistent memory backends (SQLite + vectors) |
 | `@monoes/hooks` | [![npm](https://img.shields.io/npm/v/@monoes/hooks?style=flat-square&color=10B981)](https://www.npmjs.com/package/@monoes/hooks) | Hook registry + 9 on-demand workers |
@@ -411,7 +413,7 @@ Everything runs from inside Claude Code via slash commands. Here's the highlight
 | `@monoes/monodesign` | [![npm](https://img.shields.io/npm/v/@monoes/monodesign?style=flat-square&color=EC4899)](https://www.npmjs.com/package/@monoes/monodesign) | Frontend design intelligence |
 | `monofence-ai` | [![npm](https://img.shields.io/npm/v/monofence-ai?style=flat-square&color=EF4444)](https://www.npmjs.com/package/monofence-ai) | AI manipulation defence |
 
-See [CLI Reference](./doc/commands/cli-reference.md) for the full <!-- doc-count:cli-commands -->38<!-- /doc-count:cli-commands -->-command index.
+See [CLI Reference](./doc/commands/cli-reference.md) for the full <!-- doc-count:cli-commands -->39<!-- /doc-count:cli-commands -->-command index.
 
 ---
 

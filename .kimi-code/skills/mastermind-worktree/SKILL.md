@@ -1,6 +1,6 @@
 ---
 name: mastermind-worktree
-description: Use when starting feature work that needs isolation from the current workspace or before executing implementation plans — ensures an isolated workspace exists via native tools or git worktree fallback
+description: "Use when feature work needs isolation or before executing a plan: sets up an isolated workspace via native tools or a git worktree."
 ---
 
 # Using Git Worktrees

@@ -10,6 +10,7 @@ import {
   type InitOptions,
   MINIMAL_INIT_OPTIONS,
 } from '../init/index.js';
+import { parsePackList } from '../init/packs.js';
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 
@@ -66,12 +67,25 @@ export const skillsCommand: Command = {
   name: 'skills',
   description: 'Initialize only skills',
   options: [
-    { name: 'all', description: 'Install all skills', type: 'boolean', default: false },
-    { name: 'core', description: 'Install core skills', type: 'boolean', default: true },
-    { name: 'memory', description: 'Install memory skills', type: 'boolean', default: false },
-    { name: 'github', description: 'Install GitHub skills', type: 'boolean', default: false },
+    {
+      name: 'all',
+      description: 'Install the skills of every pack',
+      type: 'boolean',
+      default: false,
+    },
+    { name: 'core', description: 'Install the core pack skills', type: 'boolean', default: true },
+    {
+      name: 'packs',
+      description: 'Also install the skills of these packs (comma-separated)',
+      type: 'string',
+    },
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
+    const packs = parsePackList((ctx.flags.packs as string | undefined) ?? '');
+    if (!packs.ok) {
+      output.printError(packs.message);
+      return { success: false, exitCode: 1 };
+    }
     const options: InitOptions = {
       ...MINIMAL_INIT_OPTIONS,
       targetDir: ctx.cwd,
@@ -92,13 +106,10 @@ export const skillsCommand: Command = {
         kimicode: false,
         codex: false,
       },
+      packs: packs.packs,
       skills: {
         all: ctx.flags.all as boolean,
         core: ctx.flags.core as boolean,
-        memory: ctx.flags.memory as boolean,
-        github: ctx.flags.github as boolean,
-        browser: false,
-        advanced: false,
       },
     };
 

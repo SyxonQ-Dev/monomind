@@ -1,6 +1,6 @@
 ---
 name: stop-slop
-description: Remove AI writing patterns from prose. Use when drafting, editing, or reviewing any text to eliminate predictable AI tells — phrases, structural clichés, false agency, passive voice.
+description: "Remove AI writing patterns from prose: predictable phrases, structural clichés, false agency, passive voice. Use when drafting, editing or reviewing text."
 type: writing-skill
 ---
 

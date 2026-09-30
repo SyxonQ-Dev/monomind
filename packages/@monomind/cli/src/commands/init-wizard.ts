@@ -10,6 +10,7 @@ import {
   MINIMAL_INIT_OPTIONS,
 } from '../init/index.js';
 import { reportProjectMemory } from '../init/init-memory.js';
+import { OPTIONAL_PACKS } from '../init/packs.js';
 import { ingestDirectory } from '../knowledge/document-pipeline.js';
 import { output } from '../output.js';
 import { confirm, input, multiSelect, select } from '../prompt.js';
@@ -114,60 +115,6 @@ export const wizardCommand: Command = {
         options.components.mcp = components.includes('mcp');
         options.components.runtime = components.includes('runtime');
 
-        if (options.components.skills) {
-          const skillSets = await multiSelect({
-            message: 'Select skill sets:',
-            options: [
-              {
-                value: 'core',
-                label: 'Core',
-                hint: 'Mastermind workflows, monolean, monodesign',
-                selected: true,
-              },
-              {
-                value: 'extended',
-                label: 'Extended',
-                hint: 'Mastermind org admin, monoswarm, hooks, monomotion',
-                selected: false,
-              },
-              {
-                value: 'memory',
-                label: 'Memory (SQLite)',
-                hint: 'Vector database skills',
-                selected: true,
-              },
-              {
-                value: 'github',
-                label: 'GitHub',
-                hint: 'GitHub integration skills',
-                selected: true,
-              },
-              {
-                value: 'browser',
-                label: 'Browser',
-                hint: 'Browser testing and automation',
-                selected: true,
-              },
-              {
-                value: 'advanced',
-                label: 'Advanced',
-                hint: 'agentic-jujutsu, performance analysis',
-                selected: false,
-              },
-            ],
-          });
-
-          options.skills = {
-            core: skillSets.includes('core'),
-            extended: skillSets.includes('extended'),
-            memory: skillSets.includes('memory'),
-            github: skillSets.includes('github'),
-            browser: skillSets.includes('browser'),
-            advanced: skillSets.includes('advanced'),
-            all: false,
-          };
-        }
-
         if (options.components.settings) {
           const hooks = await multiSelect({
             message: 'Select hooks to enable:',
@@ -210,6 +157,20 @@ export const wizardCommand: Command = {
           options.hooks.userPromptSubmit = hooks.includes('userPromptSubmit');
           options.hooks.sessionStart = hooks.includes('sessionStart');
         }
+      }
+
+      // Core is always installed; the rest are opt-in (GH #411). Full has them all.
+      const { components } = options;
+      if (preset !== 'full' && (components.skills || components.commands || components.agents)) {
+        options.packs = await multiSelect({
+          message: 'Add opt-in packs (core is always installed):',
+          options: OPTIONAL_PACKS.map((p) => ({
+            value: p.name,
+            label: p.name,
+            hint: p.description,
+            selected: false,
+          })),
+        });
       }
 
       const topology = await select({
@@ -428,6 +389,10 @@ export const wizardCommand: Command = {
           {
             setting: 'Embeddings',
             value: enableEmbeddings ? `${embeddingModel} (hyperbolic)` : 'Disabled',
+          },
+          {
+            setting: 'Packs',
+            value: preset === 'full' ? 'all' : ['core', ...(options.packs ?? [])].join(', '),
           },
           { setting: 'Skills', value: `${result.summary.skillsCount} installed` },
           { setting: 'Commands', value: `${result.summary.commandsCount} installed` },

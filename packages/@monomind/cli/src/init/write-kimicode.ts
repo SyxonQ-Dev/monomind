@@ -83,6 +83,55 @@ export async function writeKimiFiles(
     result.skipped.push('AGENTS.md');
   }
 
+  const { agentCount, skillCount, commandCount } = writeKimiTree(targetDir, options, result);
+  const pluginDir = path.join(kimiDir, 'plugin');
+
+  // Tier 2: hook gate bridge script.
+  const hooksDir = path.join(pluginDir, 'hooks');
+  const gatePath = path.join(hooksDir, 'monomind-gate.mjs');
+  if (!fs.existsSync(gatePath) || options.force) {
+    fs.mkdirSync(hooksDir, { recursive: true });
+    atomicWriteFile(gatePath, generateKimiGateScript());
+    result.created.files.push('.kimi-code/plugin/hooks/monomind-gate.mjs');
+  } else {
+    result.skipped.push('.kimi-code/plugin/hooks/monomind-gate.mjs');
+  }
+
+  // Tier 3: plugin manifest.
+  const manifestPath = path.join(pluginDir, 'kimi.plugin.json');
+  if (!fs.existsSync(manifestPath) || options.force) {
+    fs.mkdirSync(pluginDir, { recursive: true });
+    atomicWriteFile(manifestPath, generateKimiPluginManifest(options));
+    // Recorded so cleanup removes it along with the hooks/ and commands/ it names.
+    guardFor(targetDir, options, result).record(manifestPath);
+    result.created.files.push('.kimi-code/plugin/kimi.plugin.json');
+  } else {
+    result.skipped.push('.kimi-code/plugin/kimi.plugin.json');
+  }
+
+  if (agentCount) result.created.files.push(`.kimi-code/agents/ (${agentCount} agents)`);
+  if (skillCount) result.created.files.push(`.kimi-code/skills/ (${skillCount} skills)`);
+  if (commandCount)
+    result.created.files.push(`.kimi-code/plugin/commands/ (${commandCount} commands)`);
+
+  // Kimi's status-line configuration is user-scoped. Project init must not
+  // infer consent from an existing ~/.kimi-code directory; it is configured
+  // only through the explicit user-scope platform lifecycle command.
+}
+
+/**
+ * Convert the project's `.claude/{agents,commands,skills}` into
+ * `.kimi-code/{agents,skills,plugin/commands}` and retire what a previous run
+ * generated and this one no longer does. Split out of writeKimiFiles so
+ * `monomind packs add|remove` can refresh the tree without touching
+ * `.kimi-code/mcp.json`, AGENTS.md or the plugin files.
+ */
+export function writeKimiTree(
+  targetDir: string,
+  options: InitOptions,
+  result: InitResult,
+): { agentCount: number; skillCount: number; commandCount: number } {
+  const kimiDir = path.join(targetDir, '.kimi-code');
   // Convert the .claude/{agents,commands,skills} tree that copyAgents/Skills/
   // Commands just wrote into kimi shape — same approach as writeOpencodeFiles:
   // reading from the target .claude/ dir means only the user's selected subset
@@ -203,37 +252,7 @@ export async function writeKimiFiles(
     ...retainedKimiPluginCommands,
   ]);
 
-  // Tier 2: hook gate bridge script.
-  const hooksDir = path.join(pluginDir, 'hooks');
-  const gatePath = path.join(hooksDir, 'monomind-gate.mjs');
-  if (!fs.existsSync(gatePath) || options.force) {
-    fs.mkdirSync(hooksDir, { recursive: true });
-    atomicWriteFile(gatePath, generateKimiGateScript());
-    result.created.files.push('.kimi-code/plugin/hooks/monomind-gate.mjs');
-  } else {
-    result.skipped.push('.kimi-code/plugin/hooks/monomind-gate.mjs');
-  }
-
-  // Tier 3: plugin manifest.
-  const manifestPath = path.join(pluginDir, 'kimi.plugin.json');
-  if (!fs.existsSync(manifestPath) || options.force) {
-    fs.mkdirSync(pluginDir, { recursive: true });
-    atomicWriteFile(manifestPath, generateKimiPluginManifest(options));
-    // Recorded so cleanup removes it along with the hooks/ and commands/ it names.
-    guardFor(targetDir, options, result).record(manifestPath);
-    result.created.files.push('.kimi-code/plugin/kimi.plugin.json');
-  } else {
-    result.skipped.push('.kimi-code/plugin/kimi.plugin.json');
-  }
-
-  if (agentCount) result.created.files.push(`.kimi-code/agents/ (${agentCount} agents)`);
-  if (skillCount) result.created.files.push(`.kimi-code/skills/ (${skillCount} skills)`);
-  if (commandCount)
-    result.created.files.push(`.kimi-code/plugin/commands/ (${commandCount} commands)`);
-
-  // Kimi's status-line configuration is user-scoped. Project init must not
-  // infer consent from an existing ~/.kimi-code directory; it is configured
-  // only through the explicit user-scope platform lifecycle command.
+  return { agentCount, skillCount, commandCount };
 }
 
 /**

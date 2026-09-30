@@ -1,6 +1,6 @@
 ---
 name: agent-browser-testing
-description: Comprehensive UI QA and browser automation using the native monomind browse CDP client — full test lifecycle from discovery through performance profiling, with structured pass/fail/warn reporting.
+description: "UI QA and browser automation with the native monomind browse CDP client: discovery, user flows, performance profiling, and pass/fail/warn reports."
 version: 4.0.0
 triggers:
   - /agent-browser-testing

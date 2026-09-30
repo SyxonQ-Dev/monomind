@@ -1,5 +1,5 @@
 ---
-description: Mastermind — Execute tasks from a task file (default, docs/tasks/) or monotask board (--monotask flag) with parallel, minimal, or sequential agent modes, context group routing, and review cycles
+description: "Execute tasks from docs/tasks/ or a monotask board (--monotask) in parallel, minimal or sequential agent modes, with review cycles."
 type: flow
 name: mastermind-do
 ---

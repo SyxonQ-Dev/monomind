@@ -2,6 +2,8 @@
  * GH #411: the init wizard's Custom "skill sets" answer was ignored — it set
  * skills.core/memory/github but left skills.all = true, so every skill was
  * installed anyway — and its answers were written into the shared presets.
+ * The skill sets are now opt-in packs on top of core, asked for every preset
+ * but Full.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -39,31 +41,37 @@ beforeEach(() => {
   executed.options.length = 0;
 });
 
-async function runCustom(skillSets: string[]): Promise<InitOptions> {
-  answers.select = ['custom', 'mesh', 'memory'];
-  answers.multiSelect = [['skills', 'commands'], skillSets, []];
+async function run(preset: string, multiSelects: string[][]): Promise<InitOptions> {
+  answers.select = [preset, 'mesh', 'memory'];
+  answers.multiSelect = multiSelects;
   await wizardCommand.action!({ args: [], flags: { _: [] }, cwd: '/tmp/x', interactive: true });
   expect(executed.options).toHaveLength(1);
   return executed.options[0];
 }
 
-describe('init wizard skill sets', () => {
-  it('installs only the skill sets the user picked', async () => {
-    const options = await runCustom(['core', 'github']);
-    expect(options.skills).toEqual({
-      core: true,
-      extended: false,
-      memory: false,
-      github: true,
-      browser: false,
-      advanced: false,
-      all: false,
-    });
+describe('init wizard packs (GH #411)', () => {
+  it('installs core plus the packs the user picked', async () => {
+    const options = await run('default', [['orgs', 'github']]);
+    expect(options.packs).toEqual(['orgs', 'github']);
+    expect(options.skills).toEqual({ core: true, all: false });
+    expect(options.agents).toEqual({ core: true, all: false });
+  });
+
+  it('asks for packs after the Custom component choice', async () => {
+    const options = await run('custom', [['skills', 'commands'], ['extras']]);
+    expect(options.components.agents).toBe(false);
+    expect(options.packs).toEqual(['extras']);
+  });
+
+  it('Full installs every pack without asking', async () => {
+    const options = await run('full', []);
+    expect(options.packs).toBeUndefined();
+    expect(options.skills.all).toBe(true);
   });
 
   it('leaves the shared default presets untouched', async () => {
     const before = structuredClone(DEFAULT_INIT_OPTIONS);
-    await runCustom(['memory']);
+    await run('custom', [['skills'], ['business']]);
     expect(DEFAULT_INIT_OPTIONS).toEqual(before);
   });
 });

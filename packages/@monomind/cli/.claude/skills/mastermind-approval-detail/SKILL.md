@@ -1,6 +1,6 @@
 ---
 name: mastermind-approval-detail
-description: Mastermind approval-detail — inspect and resolve a single tool/action approval request from an org's agents via `monomind org approvals`, `org approve` and `org deny` (the queue in `.monomind/orgs/<org>/approvals.json`).
+description: "Mastermind approval-detail — inspect and resolve one approval request from an org's agents via `monomind org approvals`, `org approve` and `org deny`."
 type: domain-skill
 default_mode: confirm
 pick: low

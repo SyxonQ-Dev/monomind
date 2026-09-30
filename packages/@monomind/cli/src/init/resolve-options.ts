@@ -19,6 +19,7 @@ import {
   type InitOptions,
   MINIMAL_INIT_OPTIONS,
 } from './index.js';
+import { PACK_NAMES, parsePackList } from './packs.js';
 
 export type ResolveInitOptionsResult =
   | { ok: true; options: InitOptions }
@@ -74,6 +75,16 @@ export function resolveInitOptions(
       force,
       components: { ...DEFAULT_INIT_OPTIONS.components },
     };
+  }
+
+  // Opt-in packs on top of core (GH #411): `--packs a,b` or `--all-packs`.
+  const packFlag = ctx.flags.packs;
+  if (ctx.flags['all-packs'] === true || ctx.flags.allPacks === true) {
+    options.packs = [...PACK_NAMES];
+  } else if (typeof packFlag === 'string') {
+    const parsed = parsePackList(packFlag);
+    if (!parsed.ok) return { ok: false, message: parsed.message };
+    options.packs = parsed.packs;
   }
 
   const legacyTargets = ['opencode', 'kimicode', 'codex'].filter(

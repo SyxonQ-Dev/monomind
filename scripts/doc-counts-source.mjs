@@ -172,34 +172,35 @@ export function countShippedAgents() {
   return { total, pickable: total - deprecated };
 }
 
-/** Agents `monomind init` installs: every `.md` under the package's
- *  `.claude/agents/<category>/` for each category listed in AGENTS_MAP
- *  (packages/@monomind/cli/src/init/asset-maps.ts), minus files whose
- *  frontmatter says `deprecated: true` — the same rule copyAgents applies. */
+/** Agents a default `monomind init` installs: the core pack's agent entries
+ *  (CORE_PACK in packages/@monomind/cli/src/init/packs.ts) — a category
+ *  directory counts every `.md` in it — minus files whose frontmatter says
+ *  `deprecated: true`, the same rule copyAgents applies. */
 export function countInstalledAgents() {
-  const src = read(`${CLI_PKG}/src/init/asset-maps.ts`);
-  const start = src.indexOf('export const AGENTS_MAP');
-  if (start === -1) throw new Error('AGENTS_MAP not found in asset-maps.ts');
-  const body = src.slice(start, src.indexOf('\n};', start));
-  const categories = new Set(
-    [...body.matchAll(/\[([^\]]*)\]/g)].flatMap((m) =>
-      [...m[1].matchAll(/'([^']+)'/g)].map((q) => q[1]),
-    ),
-  );
+  const src = read(`${CLI_PKG}/src/init/packs.ts`);
+  const start = src.indexOf('export const CORE_PACK');
+  if (start === -1) throw new Error('CORE_PACK not found in packs.ts');
+  const agentsAt = src.indexOf('  agents: [', start);
+  const body = src.slice(agentsAt, src.indexOf('\n  ],', agentsAt));
+  const entries = [...body.matchAll(/'([^']+)'/g)].map((q) => q[1]);
   let installed = 0;
+  const add = (full) => {
+    if (!full.endsWith('.md') || !counts(full.slice(REPO_ROOT.length + 1))) return;
+    const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(readFileSync(full, 'utf8'));
+    if (!(fm && /^deprecated:\s*true\s*$/m.test(fm[1]))) installed++;
+  };
   const walk = (dir) => {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, e.name);
       if (e.isDirectory()) walk(full);
-      else if (e.name.endsWith('.md') && counts(full.slice(REPO_ROOT.length + 1))) {
-        const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(readFileSync(full, 'utf8'));
-        if (!(fm && /^deprecated:\s*true\s*$/m.test(fm[1]))) installed++;
-      }
+      else add(full);
     }
   };
-  for (const cat of categories) {
-    const dir = join(REPO_ROOT, CLI_PKG, '.claude/agents', cat);
-    if (existsSync(dir)) walk(dir);
+  for (const entry of entries) {
+    const full = join(REPO_ROOT, CLI_PKG, '.claude/agents', entry);
+    if (!existsSync(full)) continue;
+    if (statSync(full).isDirectory()) walk(full);
+    else add(full);
   }
   return installed;
 }

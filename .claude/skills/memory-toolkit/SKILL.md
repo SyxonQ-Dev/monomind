@@ -1,12 +1,6 @@
 ---
 name: memory-toolkit
-description: >
-  Use monomind's persistent memory store (local SQLite + local embeddings) to
-  save, search, list, and retrieve cross-session knowledge — patterns,
-  solutions, decisions. Trigger on "remember this", "store in memory",
-  "search memory", "have we solved this before", "recall past decisions", or
-  before starting work that benefits from prior context (debugging,
-  refactors, repeated tasks).
+description: "Save and search cross-session knowledge in monomind's local memory. Use for \"remember this\", \"store in memory\", \"search memory\", \"recall past decisions\", \"solved this before?\"."
 ---
 
 # Memory Toolkit

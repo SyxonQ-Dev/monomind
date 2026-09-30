@@ -1,6 +1,6 @@
 ---
 name: mastermind-liveness
-description: Mastermind liveness — enforce the non-terminal issue liveness contract for agent-owned work. Checks if every in_progress/blocked/in_review issue has a valid action path (active run, queued wake, explicit blocker, or recovery action). Can checkout an issue to an agent run, release checkout, trigger wakeup decisions, and file explicit recovery actions for stalled issues. Based on Paperclip's execution-semantics.md liveness contract.
+description: "Mastermind liveness — check that every in-progress, blocked or in-review org issue has a way forward (run, queued wake, blocker or recovery action); fix stalled ones."
 type: domain-skill
 default_mode: auto
 pick: low
