@@ -41,11 +41,16 @@ export interface RateLimitHit {
   vendorRetries?: number;
 }
 
+/** A credential that was never set: pi's "No API key found for …" and the
+ *  runners' own "missing API key: set X" (#532). §3.4 `auth` covers it. */
+const MISSING_KEY_RE = /\bmissing api key\b|\bno api key (?:found|configured)\b/i;
+
 /** §3.4 code for a runner failure's text (anything but a missing binary). */
 export function execErrorCode(
   err: unknown,
   message: string,
 ): { code: ExecErrorCode; rateLimit?: RateLimitHit } {
+  if (MISSING_KEY_RE.test(message)) return { code: 'auth' };
   const cls = classifyStderr(message);
   if (!cls.fatal) return { code: 'runner-error' };
   if (/auth/i.test(cls.label ?? '')) return { code: 'auth' };

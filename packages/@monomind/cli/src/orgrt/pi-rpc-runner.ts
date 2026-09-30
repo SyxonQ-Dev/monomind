@@ -24,7 +24,9 @@
  *   Client → server: {"type":"prompt","message":"<text>"} per round, and
  *     {"type":"abort"} for the emulated max-turns cap.
  *   Server → client: `response` acks (ignored — an abort's ack arrives after
- *     agent_settled), then session events.
+ *     agent_settled), then session events. Exception: a `prompt` response
+ *     with `success:false` (e.g. "No API key found") is the only reply pi
+ *     sends, so it fails the turn at once (pi-rpc-runner-auth.ts).
  *
  * Completion: `agent_settled`. An `agent_end` with `willRetry:true` is
  * followed by `auto_retry_*` and another agent run, so the round keeps
@@ -59,6 +61,7 @@ import {
 import { maskedCommand } from './authority-mask.js';
 import { classifyStderr } from './kimicode-runner.js';
 import { NativeToolCalls } from './kimicode-runner-tools.js';
+import { missingApiKeyError, missingPiApiKey, piAuthErrorFromText } from './pi-rpc-runner-auth.js';
 import {
   defaultSpawnPiRpc,
   encodePiRpcCommand,
@@ -112,19 +115,22 @@ export class PiRpcAgentRunner implements AgentRunner {
     // Cumulative per session, like every runner's cost_usd.
     let runCostUsd: number | undefined;
 
+    // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
+    // vendor CLI; an explicit value in args.env still wins below.
+    const env = {
+      ...omitAnthropicManagedKeys(process.env),
+      PI_TELEMETRY: '0',
+      PI_SKIP_VERSION_CHECK: '1',
+      ...args.env,
+    };
+    // Fail before spawning when the model's provider has no key at all —
+    // pi would only reject the prompt (see pi-rpc-runner-auth.ts).
+    const missingKey = missingPiApiKey(args.model, env, args.cwd);
+    if (missingKey) throw missingApiKeyError(missingKey);
+
     const child = this.spawnFn(
       ...maskedCommand(args.authorityMask, bin, piCliArgs('rpc', sessionId, args)),
-      {
-        cwd: args.cwd,
-        // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
-        // vendor CLI; an explicit value in args.env still wins below.
-        env: {
-          ...omitAnthropicManagedKeys(process.env),
-          PI_TELEMETRY: '0',
-          PI_SKIP_VERSION_CHECK: '1',
-          ...args.env,
-        },
-      },
+      { cwd: args.cwd, env },
       args,
     );
 
@@ -295,6 +301,10 @@ export class PiRpcAgentRunner implements AgentRunner {
                 // Rethrow the ORIGINAL spawn error so the ENOENT check below
                 // still sees its .code.
                 if (kind === '__error__') throw ev.error as Error;
+                // pi may print its no-credential error on stderr and exit.
+                const authErr =
+                  kind !== '__aborted__' ? piAuthErrorFromText(stderrTail, args.model) : undefined;
+                if (authErr) throw authErr;
                 throw new Error(
                   kind === '__hang__'
                     ? `PiRpcAgentRunner: pi produced no output within ${STARTUP_GRACE_MS / 1000}s and was killed. ` +
@@ -305,6 +315,12 @@ export class PiRpcAgentRunner implements AgentRunner {
                       : `PiRpcAgentRunner: pi rpc process ended unexpectedly (${kind})` +
                         (stderrTail ? `\nstderr: ${stderrTail.slice(-500)}` : ''),
                 );
+              }
+
+              // A rejected prompt is pi's only answer to it — no session
+              // events follow, so waiting would sit on the silence watchdog.
+              if (kind === 'response' && ev.command === 'prompt' && ev.success === false) {
+                throw promptRejected(String(ev.error ?? ''), stderrTail, args.model);
               }
 
               const parsed = parsePiEvent(ev as PiEvent);
@@ -414,6 +430,15 @@ export class PiRpcAgentRunner implements AgentRunner {
       }
     }
   }
+}
+
+/** The error for a `prompt` command pi answered with `success:false`: the
+ *  missing-key error when it is pi's no-credential wording. */
+function promptRejected(error: string, stderrTail: string, model: string | undefined): Error {
+  return (
+    piAuthErrorFromText(error, model) ??
+    rpcFailure(`pi rejected the prompt: ${error || '(no error text)'}`, stderrTail)
+  );
 }
 
 /** The error for a prompt pi settled on with a failure (a final assistant
