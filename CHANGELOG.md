@@ -7,12 +7,19 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 ### Deprecated
 
 - **`monoswarm` and `autopilot` are deprecated and will be removed in 2.22.0, the minor release after this one** ([#418](https://github.com/monoes/monomind/issues/418)). Both record state and start no agents. Use Claude Code's Task tool or `monomind org run` instead. Nothing is removed in this release:
+
   - Every `monoswarm` and `autopilot` subcommand prints a one-line deprecation notice on stderr. `-Q` drops it. The notice never goes to stdout, so the subcommands that emit JSON (`--format json` / `--json`) keep it clean.
+
   - `monomind start` and `monomind start stop` record and terminate a monoswarm state file, so they print the same notice. `start` no longer suggests `monoswarm status`, and its progress lines say it records state and starts no agents. When monoswarm is removed in 2.22.0, `start` stops recording monoswarm state and `start stop` stops marking it terminated.
+
   - The 13 `monoswarm_*` and 8 `autopilot_*` MCP tools start their descriptions with `DEPRECATED (removed in 2.22.0; use the Task tool or 'monomind org run'):` and carry the full notice in a `deprecated` field on every result. The autopilot tool descriptions no longer claim to re-engage agents or report learning metrics.
+
   - `monoswarm status` counts `idle` agent records as idle, not active.
+
   - `monoswarm init --format json` printed its progress lines and table on stdout ahead of the JSON. It now prints only the result document there.
+
   - Honest wording: `monoswarm scale` reports roster entries recorded or removed (it said "Spawned N agent(s)"), `monoswarm stop` says it marks the state terminated (in its prompt, its output and the bare `monoswarm` help), and `autopilot status` shows `Tasks: 0/0 (n/a)` with no tasks instead of `100%`. `autopilot_status` and `autopilot_progress` return `percent: 0` for zero tasks.
+
   - The generated CLAUDE.md (full/security/performance templates), `.monomind/CAPABILITIES.md`, the main `--help` examples, the guidance catalog and quick reference, and the shipped monoswarm skill, commands and agents that tell models to initialize a monoswarm now say it is deprecated and point to the Task tool or `org run`. Section headings are unchanged, so upgrades of existing CLAUDE.md files are unaffected.
 
 ### Removed
@@ -63,6 +70,8 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 - **`monomind start` uses the topology and maxAgents from `.monomind/config.yaml`** ([#509](https://github.com/monoes/monomind/issues/509)). `init` writes that section as `swarm:`, but `start` read `monoswarm:`, so it always fell back to `hierarchical-mesh` and 15 agents. It now reads `swarm:` and still accepts a `monoswarm:` section. The `--topology` flag still takes precedence.
 
 - **The guidance catalog named skills that do not exist.** `guidance_capabilities` and `guidance_recommend` listed `memory-advanced`, `memory-vector-search`, `memory-patterns`, `memory-learning`, `memory-optimization` and five `github-*` skills; none ship. The memory and GitHub areas now point to the shipped `memory-toolkit` and `github-toolkit`; the embeddings area links no skill, since none covers the `embeddings_*` tools. A test fails if the catalog names a skill `monomind init` does not install.
+
+- **Security: org file-tool path checks fold case and Unicode look-alikes; the Bash git check matches `git` in any case** ([#496](https://github.com/monoes/monomind/issues/496)). On a case-insensitive filesystem (macOS, Windows, vfat/exfat, a Linux casefold dir) a role could reach a denied path through another spelling of it. Deny checks now fold every path segment on every platform, whatever the filesystem: NFKC normalization, removal of default-ignorable code points (zero-width space and joiners, soft hyphen, BOM, CGJ, which Linux casefold ignores), and full case folding (so `.SSH`, `.ſsh`, `.ßh`, `.ẞh`, `.gıt`, `.gi<ZWJ>t`, `.ss<soft hyphen>h`, `.conﬁg`, `.proﬁle`, `daſhboard-token` and a Kelvin-sign `K` all match), with trailing dots and spaces and a `:stream` suffix dropped. This covers the credential and guard deny list (`~/.GITCONFIG`, `~/.BashRC`), the dashboard token, the org authority files and the `.git` write check. On a case-sensitive filesystem a deny now also refuses look-alike names, for example a `Dashboard-Token` file anywhere, or anything under `.monomind/Orgs/` of the org root, on Linux. That fail-closed trade-off is intended: the policy cannot always tell whether a directory folds case, and a missed deny is worse than a refused look-alike. Grants (roots and directory entries in `fileWrite`/`fileRead`) compare the on-disk spelling that `realpath` returns and fold only the part of a path that does not exist yet. They do that only on macOS and Windows, and only where a probe of the target directory (a case-swapped lookup of its own name and of one of its entries, by inode and never through a symlink) shows that the filesystem folds case. Globs never fold, and a grant never reaches an existing directory spelled in another case. A directory entry spelled in another case than the directory on disk is no longer refused as a symlink. The Bash git classifier matches `GIT`, `/usr/bin/GIT`, `git.EXE`, `BASH -c "git …"`, `ENV -i …`, `cmd /c`, `powershell`/`pwsh` and other interpreters in any case, so at level `read` `GIT push` is refused like `git push`.
 
 ## [2.20.0] — 2026-09-29
 
