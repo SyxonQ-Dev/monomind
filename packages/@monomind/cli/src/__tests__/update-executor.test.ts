@@ -3,14 +3,15 @@
  *
  *  - GitHub #83: update installs must target the global CLI (`-g`), never the
  *    user's project, and the startup path must be notify-only.
- *  - GitHub #84: npm must be spawned as `npm.cmd` on Windows (execFile of the
- *    bare `npm` .cmd shim throws EINVAL on Node >= 18.20.2).
+ *  - GitHub #84, #521: npm must not be spawned through the `npm.cmd` shim on
+ *    Windows (execFile of a .cmd shim without a shell throws EINVAL on
+ *    Node >= 18.20.2); npm-cli.js runs under node instead.
  *
  * child_process and fs are mocked so the suite never runs a real npm install
  * or touches ~/.monomind/update-history.json.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // The production code calls execFile(cmd, args, { timeout }, cb) — the
 // callback is the LAST argument, not the third. A mock that assumes
@@ -45,7 +46,7 @@ vi.mock('fs', () => ({
 
 import type { UpdateCheckResult } from '../update/checker.js';
 import { executeUpdate, rollbackUpdate } from '../update/executor.js';
-import { npmCommand } from '../utils/npm-command.js';
+import { npmInvocation } from '../utils/npm-command.js';
 
 function makeUpdate(overrides: Partial<UpdateCheckResult> = {}): UpdateCheckResult {
   return {
@@ -59,23 +60,36 @@ function makeUpdate(overrides: Partial<UpdateCheckResult> = {}): UpdateCheckResu
   } as UpdateCheckResult;
 }
 
-describe('npmCommand() (#84)', () => {
-  const originalPlatform = process.platform;
-
-  afterEach(() => {
-    Object.defineProperty(process, 'platform', { value: originalPlatform });
+describe('npmInvocation() (#84, #521)', () => {
+  const host = (platform: NodeJS.Platform, files: string[], env: NodeJS.ProcessEnv = {}) => ({
+    platform,
+    execPath: 'C:\\Program Files\\nodejs\\node.exe',
+    env,
+    exists: (p: string) => files.includes(p),
   });
 
-  it('returns bare "npm" on non-Windows platforms', () => {
-    Object.defineProperty(process, 'platform', { value: 'darwin' });
-    expect(npmCommand()).toBe('npm');
-    Object.defineProperty(process, 'platform', { value: 'linux' });
-    expect(npmCommand()).toBe('npm');
+  it('spawns bare "npm" on non-Windows platforms', () => {
+    expect(npmInvocation(['audit'], host('darwin', []))).toEqual(['npm', ['audit']]);
+    expect(npmInvocation(['audit'], host('linux', []))).toEqual(['npm', ['audit']]);
   });
 
-  it('returns "npm.cmd" on win32 so execFile does not throw EINVAL', () => {
-    Object.defineProperty(process, 'platform', { value: 'win32' });
-    expect(npmCommand()).toBe('npm.cmd');
+  it('on win32 runs npm-cli.js with node, never the npm.cmd shim (EINVAL without a shell)', () => {
+    const cli = 'C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js';
+    const [cmd, args] = npmInvocation(['install', 'x'], host('win32', [cli]));
+    expect(cmd).toBe('C:\\Program Files\\nodejs\\node.exe');
+    expect(args).toEqual([cli, 'install', 'x']);
+  });
+
+  it('on win32 prefers npm_execpath when it is npm-cli.js', () => {
+    const cli = 'D:\\tools\\npm\\bin\\npm-cli.js';
+    expect(npmInvocation(['ci'], host('win32', [cli], { npm_execpath: cli }))[1]).toEqual([
+      cli,
+      'ci',
+    ]);
+  });
+
+  it('on win32 without npm-cli.js fails with a message instead of spawning npm.cmd', () => {
+    expect(() => npmInvocation(['ci'], host('win32', []))).toThrow(/npm-cli\.js was not found/);
   });
 });
 
@@ -91,7 +105,7 @@ describe('executeUpdate (#83)', () => {
 
     expect(execFileMock).toHaveBeenCalledTimes(1);
     const [cmd, args] = execFileMock.mock.calls[0] as unknown as [string, string[]];
-    expect(cmd).toBe(npmCommand());
+    expect(cmd).toBe(npmInvocation([])[0]);
     expect(args[0]).toBe('install');
     expect(args).toContain('-g');
     expect(args).toContain('@monoes/monomindcli@1.11.1');
@@ -127,7 +141,7 @@ describe('rollbackUpdate (#83/#84)', () => {
 
     expect(execFileMock).toHaveBeenCalledTimes(1);
     const [cmd, args] = execFileMock.mock.calls[0] as unknown as [string, string[]];
-    expect(cmd).toBe(npmCommand());
+    expect(cmd).toBe(npmInvocation([])[0]);
     expect(args[0]).toBe('install');
     expect(args).toContain('-g');
     expect(args).toContain('@monoes/monomindcli@1.11.0');

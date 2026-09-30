@@ -188,6 +188,34 @@ jobs:
             exit 1
           fi
 
+      # #428: the Claude Agent SDK (and its ~300 MB binary) and puppeteer are
+      # not part of the install. The first Claude command installs the SDK
+      # into $MONOMIND_HOME/deps; `agent models` then runs the native binary,
+      # which needs neither credentials nor a prompt.
+      - name: Claude runtime installs on first use
+        working-directory: ${{ env.install_dir }}
+        run: |
+          set -euo pipefail
+          # Anywhere in the tree, not only top level: a nested copy pulled in
+          # by some other dependency costs the same download.
+          FOUND="$(find ./node_modules -maxdepth 12 \( -path '*/node_modules/@anthropic-ai/claude-agent-sdk*' -o -path '*/node_modules/puppeteer' -o -path '*/node_modules/puppeteer-core' \) -prune -print 2>/dev/null)"
+          if [ -n "${FOUND}" ]; then
+            echo "${FOUND}"
+            echo "::error::the Claude Agent SDK or puppeteer is part of the install again; they must install on first use (#428)"
+            exit 1
+          fi
+          export MONOMIND_HOME="$(mktemp -d)"
+          OUT="$(MONOMIND_NO_AUTO_INSTALL=1 node node_modules/.bin/monomind agent models --runtime claude --json 2>&1)" || true
+          if ! echo "${OUT}" | grep -q 'npm install --prefix'; then
+            echo "${OUT}"
+            echo "::error::with MONOMIND_NO_AUTO_INSTALL=1, 'agent models --runtime claude' did not print the install command"
+            exit 1
+          fi
+          node node_modules/.bin/monomind agent models --runtime claude --json > "${MONOMIND_HOME}/models.json"
+          node -e "const r=require(process.argv[1]); if (!r.models || !r.models.length) { console.error(JSON.stringify(r)); process.exit(1); }" "${MONOMIND_HOME}/models.json"
+          echo "OK: the SDK installed into ${MONOMIND_HOME}/deps and listed $(node -p "require('${MONOMIND_HOME}/models.json').models.length") models"
+          rm -rf "${MONOMIND_HOME}"
+
       - name: Clean up temp install dir
         if: always()
         run: rm -rf "${{ env.install_dir }}"
