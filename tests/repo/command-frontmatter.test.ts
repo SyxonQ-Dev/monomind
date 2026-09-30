@@ -60,7 +60,9 @@ describe('slash command frontmatter', () => {
   for (const tree of COMMAND_TREES) {
     it(`every command in ${tree} has a one-line description`, () => {
       const files = commandFiles(tree);
-      expect(files.length).toBeGreaterThan(100);
+      // Sanity floor: a walk that finds nothing must not pass. (#418 removed
+      // 20 monoswarm-only commands, taking the trees from ~115 to ~95.)
+      expect(files.length).toBeGreaterThan(80);
       const bad = files
         .map((rel) => [rel, descriptionProblem(readFileSync(join(REPO_ROOT, rel), 'utf8'))])
         .filter(([, problem]) => problem !== null);

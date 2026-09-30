@@ -475,7 +475,7 @@ describe('Start Command', () => {
       const result = await startCommand.action!(ctx);
 
       expect(result.success).toBe(true);
-      expect(result.data).toHaveProperty('swarmId');
+      expect(result.data).not.toHaveProperty('swarmId');
       expect(result.data).toHaveProperty('topology');
     });
 
@@ -487,13 +487,29 @@ describe('Start Command', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should start with custom topology', async () => {
-      ctx.flags = { topology: 'mesh', _: [] };
+    it('records no monoswarm state and calls no MCP tool (#418)', async () => {
+      const { callMCPTool } = await import('../src/mcp-client.js');
 
       const result = await startCommand.action!(ctx);
 
       expect(result.success).toBe(true);
-      expect(result.data).toHaveProperty('topology', 'mesh');
+      expect(callMCPTool).not.toHaveBeenCalled();
+    });
+
+    it.each([['--topology'], ['-t']])('warns that %s was removed (#418)', async (flag) => {
+      const parser = new CommandParser();
+      parser.registerCommand(startCommand);
+      const parsed = parser.parse(['start', flag, 'mesh']);
+
+      const result = await startCommand.action!({ ...ctx, flags: parsed.flags });
+
+      expect(result.success).toBe(true);
+      expect(output.printWarning).toHaveBeenCalledWith(expect.stringContaining('was removed in 2.22.0'));
+    });
+
+    it('does not warn about --topology when it is not passed', async () => {
+      await startCommand.action!(ctx);
+      expect(output.printWarning).not.toHaveBeenCalled();
     });
 
     it('should honour the swarm section init writes to config.yaml (#509)', async () => {
@@ -553,6 +569,9 @@ describe('Start Command', () => {
 
       expect(result.success).toBe(true);
       expect(result.data).toHaveProperty('stopped', null);
+      // #418: stop no longer marks a monoswarm state file terminated.
+      const { callMCPTool } = await import('../src/mcp-client.js');
+      expect(callMCPTool).not.toHaveBeenCalled();
     });
 
     it('actually verifies liveness and stops a real running daemon', async () => {
@@ -623,7 +642,8 @@ describe('Status Command', () => {
 
       expect(result.success).toBe(true);
       expect(result.data).toHaveProperty('running');
-      expect(result.data).toHaveProperty('swarm');
+      expect(result.data).not.toHaveProperty('swarm');
+      expect(result.data).toHaveProperty('agents.total', 2);
       expect(result.data).toHaveProperty('mcp');
       expect(result.data).toHaveProperty('memory');
       expect(result.data).toHaveProperty('tasks');

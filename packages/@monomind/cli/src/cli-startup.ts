@@ -77,8 +77,7 @@ export async function loadCliConfig(
 
 /**
  * Initialize optional subsystems at startup (non-blocking, all failures are silent).
- * Starts the @monoes/hooks WorkerManager, wires MonoswarmCheckpointer, and builds
- * the unified agent registry so that packages/@monomind/* actually contribute
+ * Builds the unified agent registry so that packages/@monomind/* actually contribute
  * to the live runtime.
  */
 export async function initCliSubsystems(): Promise<void> {
@@ -90,21 +89,6 @@ export async function initCliSubsystems(): Promise<void> {
   // outlived the stagger, so the consolidate worker fired mid-command,
   // loaded the onnxruntime embedding model, and its thread pool crashed the
   // process at exit ("mutex lock failed: Invalid argument" from libc++).
-
-  // GAP-007: MonoswarmCheckpointer — write checkpoint files so crashed monoswarms can resume
-  try {
-    const { MonoswarmCheckpointer } = await import('@monoes/memory' as string);
-    const _swarmCheckpointer = new MonoswarmCheckpointer({
-      dbPath: '.monomind/checkpoints/monoswarm.jsonl',
-      monoswarmId: 'default',
-      sessionId: `session-${Date.now()}`,
-    });
-    void _swarmCheckpointer;
-  } catch (e) {
-    // optional — monomind/memory may not be installed
-    if (process.env.DEBUG || process.env.MONOMIND_DEBUG)
-      console.error('[index] MonoswarmCheckpointer init failed:', e);
-  }
 
   // Task 30: Keep the project's agent registry fresh. The project root is
   // found by walking up from cwd (a CLI run from a directory without agent

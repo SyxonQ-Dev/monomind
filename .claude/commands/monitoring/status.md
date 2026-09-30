@@ -1,11 +1,11 @@
 ---
 name: monitoring:status
-description: Show system status — swarm health, agents, tasks, memory, and MCP server.
+description: Show system status — agents, tasks, memory, and MCP server.
 ---
 
 # status
 
-Show system status — swarm health, agents, tasks, memory, and MCP server. The primary monitoring command.
+Show system status — agents, tasks, memory, and MCP server. The primary monitoring command.
 
 ## Usage
 
@@ -61,8 +61,7 @@ npx monomind status memory
 
 ## Status Display Sections
 
-- **Swarm** — ID, topology, health (`healthy` / `degraded` / `stopped`), uptime
-- **Agents** — active / idle / total counts
+- **Agents** — agents recorded in the agent store (terminated ones left out)
 - **Tasks** — pending / running / completed / failed / total
 - **Memory** — backend, entries, size, search time, cache hit rate
 - **MCP Server** — running state, transport, port
@@ -74,9 +73,8 @@ npx monomind status memory
 
 | Check | Pass Condition |
 |---|---|
-| System Running | MCP/swarm reachable |
-| Swarm Health | status = `healthy` |
-| Agents Available | active > 0 |
+| System Running | daemon process alive |
+| Agents Available | recorded agents > 0 |
 | MCP Server | running |
 | Memory Backend | backend != `none` |
 | Task Success Rate | < 5% failure rate |
@@ -88,9 +86,6 @@ npx monomind status memory
 ## MCP Tools (equivalent)
 
 ```javascript
-// Swarm status
-mcp__monomind__monoswarm_status({ includeMetrics: true })
-
 // Memory stats
 mcp__monomind__memory_health({})
 
@@ -105,5 +100,4 @@ mcp__monomind__agent_list({ includeMetrics: true, status: "all" })
 
 - `agent metrics` — performance metrics per agent type
 - `agent health` — agent-specific health check
-- `swarm status` — swarm-specific status
 - `doctor` — comprehensive system diagnostics

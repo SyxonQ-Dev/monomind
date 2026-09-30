@@ -5,7 +5,6 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type WebSocket, WebSocketServer } from 'ws';
 import { z } from 'zod';
-import { getMonomindDataRoot } from '../../mcp-tools/types.js';
 import type { RunRecord, StepEvent } from '../workflow/types.js';
 
 // Matches StepEvent (workflow/types.ts) exactly. Anything that doesn't fit this
@@ -78,18 +77,12 @@ async function readMetricsDir(root: string): Promise<Record<string, unknown>> {
 }
 
 async function collectDashboardState(root: string) {
-  const [workerMetrics, swarmState, lastRoute, autoMemory] = await Promise.all([
+  const [workerMetrics, lastRoute, autoMemory] = await Promise.all([
     readMetricsDir(root),
-    // Canonical root first (getMonomindDataRoot(): `<repo>/.git/monomind` in a
-    // git repo), legacy `<root>/.monomind` second. Reading only the legacy path
-    // showed stale/absent swarm state in every real project.
-    readJsonSafe(join(getMonomindDataRoot(root), 'monoswarm', 'state.json')).then(
-      (v: unknown) => v ?? readJsonSafe(join(root, '.monomind', 'monoswarm', 'state.json')),
-    ),
     readJsonSafe(join(root, '.monomind', 'last-route.json')),
     readJsonSafe(join(root, '.monomind', 'data', 'auto-memory-store.json')),
   ]);
-  return { workerMetrics, swarmState, lastRoute, autoMemory };
+  return { workerMetrics, lastRoute, autoMemory };
 }
 
 interface DashboardServer {
@@ -128,9 +121,9 @@ export function getDashboardServer(port = DEFAULT_PORT): DashboardServer {
     }
     if (req.method === 'GET' && req.url === '/api/metrics') {
       try {
-        const { workerMetrics, swarmState, lastRoute } = await collectDashboardState(process.cwd());
+        const { workerMetrics, lastRoute } = await collectDashboardState(process.cwd());
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ workerMetrics, swarmState, lastRoute, ts: Date.now() }));
+        res.end(JSON.stringify({ workerMetrics, lastRoute, ts: Date.now() }));
       } catch {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'failed to collect metrics' }));
@@ -139,13 +132,10 @@ export function getDashboardServer(port = DEFAULT_PORT): DashboardServer {
     }
     if (req.method === 'GET' && req.url === '/api/dashboard') {
       try {
-        const { workerMetrics, swarmState, lastRoute, autoMemory } = await collectDashboardState(
-          process.cwd(),
-        );
+        const { workerMetrics, lastRoute, autoMemory } = await collectDashboardState(process.cwd());
         const worker_metrics = Object.keys(workerMetrics).filter((k) => workerMetrics[k] != null);
         const summary = {
           worker_metrics,
-          monoswarm_status: swarmState ?? null,
           last_route: lastRoute ?? null,
           pattern_count: Array.isArray(autoMemory) ? autoMemory.length : 0,
           memory_health: autoMemory ? 'ok' : 'unknown',

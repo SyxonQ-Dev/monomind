@@ -9,7 +9,7 @@ import { readJsonStoreOrNull } from '../utils/json-file.js';
 import { getMonomindDataRoot, migrateLegacyStoreFile } from './types.js';
 
 // Storage paths — relative to the git-safe data root (see getMonomindDataRoot()).
-// Canonical location matches task-tools.ts/session-tools.ts/monoswarm-tools.ts
+// Canonical location matches task-tools.ts/session-tools.ts
 // so the agent store is a single physical file across all tools.
 const AGENT_DIR = 'agents';
 const AGENT_FILE = 'store.json';

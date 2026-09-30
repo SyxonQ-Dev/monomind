@@ -27,7 +27,6 @@ const REQUIRED_GITIGNORE_PATTERNS = [
   { pattern: 'data/mastermind-*.json', reason: 'mastermind session data' },
   { pattern: 'data/mastermind-*.jsonl', reason: 'mastermind event logs' },
   { pattern: '**/.claude-flow/', reason: 'claude-flow runtime data with paths' },
-  { pattern: '.monomind/monoswarm/', reason: 'monoswarm state files' },
   // #398: provider API keys (`providers configure -k`) and session-derived memory DBs.
   { pattern: 'monomind.config.json', reason: 'provider API keys in plain text' },
   { pattern: '.swarm/', reason: 'swarm memory database' },

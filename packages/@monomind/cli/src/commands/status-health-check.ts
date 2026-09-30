@@ -19,24 +19,12 @@ export async function performHealthCheck(
     message: status.running ? 'System is running' : 'System is not running',
   });
 
-  // Check swarm health
   if (status.running) {
-    checks.push({
-      name: 'Swarm Status',
-      status:
-        status.swarm.status === 'running'
-          ? 'pass'
-          : status.swarm.status === 'no_swarm'
-            ? 'fail'
-            : 'warn',
-      message: `Swarm status: ${status.swarm.status}`,
-    });
-
     // Check agent count
     checks.push({
       name: 'Agents Available',
-      status: status.swarm.agents.total > 0 ? 'pass' : 'fail',
-      message: `${status.swarm.agents.total} agent(s)`,
+      status: status.agents.total > 0 ? 'pass' : 'fail',
+      message: `${status.agents.total} agent(s)`,
     });
 
     // Check MCP

@@ -6,8 +6,6 @@ type: flow
 
 # Research Workflow Coordination
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
-
 Coordinate multi-agent research. The CLI has no `workflow` command; run the stages with the Task tool, or as a `research-pod` org.
 
 ## How to Invoke
@@ -49,8 +47,6 @@ npx monomind memory store --key "research-web-frameworks-2026" \
   --namespace research
 ```
 
-Optional: record a mesh topology for the roster with `npx monomind monoswarm init --topology mesh --max-agents 5`.
-
 ## As an Org
 
 ```bash
@@ -71,6 +67,5 @@ The `research-pod` template has lead-analyst, researcher, and fact-checker roles
 ## Related Skills
 
 - `workflows:workflow-execute` — Running workflows
-- `monoswarm:research` — Monoswarm-based research coordination
 - `mastermind-research` — Structured research protocol
 - `memory:memory-search` — Search past findings

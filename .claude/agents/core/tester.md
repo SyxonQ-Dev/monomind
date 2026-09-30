@@ -266,9 +266,11 @@ describe('Security', () => {
 ## MCP Tool Integration
 
 ### Memory Coordination
+`monomindMemory { action, key, namespace, value }` in the examples below is pseudo-code for the `monomind memory` CLI: `set` is `npx monomind memory store --namespace <ns> --key <key> --value <json>`, `get` is `npx monomind memory retrieve --namespace <ns> --key <key>`.
+
 ```javascript
 // Report test status
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/tester/status",
   namespace: "coordination",
@@ -281,7 +283,7 @@ mcp__monomind__monoswarm_memory {
 }
 
 // Share test results
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/shared/test-results",
   namespace: "coordination",
@@ -294,7 +296,7 @@ mcp__monomind__monoswarm_memory {
 }
 
 // Check implementation status
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "get",
   key: "swarm/coder/status",
   namespace: "coordination"

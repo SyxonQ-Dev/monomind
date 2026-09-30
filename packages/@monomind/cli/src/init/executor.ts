@@ -38,7 +38,8 @@ import {
   findMonomindProjects,
   shouldRegisterMonomindProject,
 } from './project-registry.js';
-import { findSourceHelpersDir } from './shared.js';
+import { retireRemovedFiles } from './retired-files.js';
+import { findSourceDir, findSourceHelpersDir } from './shared.js';
 import {
   detectProjectProfile,
   generateMemorySeeds,
@@ -257,6 +258,11 @@ export async function executeInit(options: InitOptions): Promise<InitResult> {
     if (options.components.mcp) {
       await writeMCPConfig(targetDir, options, result);
     }
+
+    // Retire single files older releases installed and this one removed
+    // (#418), before the copies and the kimi/opencode conversions below.
+    const sourceCommands = findSourceDir('commands', options.sourceBaseDir);
+    retireRemovedFiles(targetDir, result, sourceCommands ? path.dirname(sourceCommands) : null);
 
     // Copy skills
     if (options.components.skills) {
