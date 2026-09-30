@@ -8,7 +8,7 @@
  * `outcome: 'partial'` with `blocker: 'human'`, which says exactly that — so
  * the gate still cannot trap a run whose human never answers.
  */
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -56,6 +56,13 @@ describe('checkCompletion — an open blocking ask_human (#564)', () => {
     expect(checkCompletion({ ...FACTS, outcome: 'partial', blocker: 'human' })).toBeNull();
   });
 
+  it("dag mode with runnable work still allows 'partial' with blocker 'human', so some outcome is always allowed", () => {
+    const dag = { ...FACTS, mode: 'dag' as const, hasPendingWork: true };
+    expect(checkCompletion({ ...dag, outcome: 'achieved' })).toMatch(/blocking ask_human/);
+    expect(checkCompletion({ ...dag, outcome: 'failed' })).toMatch(/blocking ask_human/);
+    expect(checkCompletion({ ...dag, outcome: 'partial', blocker: 'human' })).toBeNull();
+  });
+
   it('allows achieved once no blocking question is open', () => {
     expect(checkCompletion({ ...FACTS, openBlockingQuestions: [], pendingHumanWaits: 0 })).toBeNull();
   });
@@ -63,12 +70,15 @@ describe('checkCompletion — an open blocking ask_human (#564)', () => {
 
 describe('OrgDaemon — org_complete while a blocking ask_human is open (#564)', () => {
   const daemons: OrgDaemon[] = [];
+  const roots: string[] = [];
   afterEach(async () => {
     for (const d of daemons.splice(0)) await d.stopAll();
+    for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true });
   });
 
   async function startOrg() {
     const root = mkdtempSync(join(tmpdir(), 'org-complete-564-'));
+    roots.push(root);
     mkdirSync(join(root, '.monomind/orgs'), { recursive: true });
     writeFileSync(
       join(root, '.monomind/orgs/alpha.json'),

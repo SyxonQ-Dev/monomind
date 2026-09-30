@@ -123,7 +123,16 @@ export function checkCompletion(f: CompletionFacts): string | null {
     const refusal = checkBlocker(f);
     if (refusal) return refusal;
   }
-  if (f.mode === 'dag' && f.outcome !== 'failed' && f.hasPendingWork && !f.hasActiveBlock) {
+  // Past the check above, an open blocking question means this is `partial`
+  // with blocker `human`. Runnable work cannot refuse it too: that would
+  // refuse every outcome and trap the run (#564).
+  if (
+    f.mode === 'dag' &&
+    f.outcome !== 'failed' &&
+    f.hasPendingWork &&
+    !f.hasActiveBlock &&
+    open.length === 0
+  ) {
     return DAG_PENDING_WORK;
   }
   return null;
