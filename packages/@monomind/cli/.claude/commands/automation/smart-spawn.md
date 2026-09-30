@@ -5,8 +5,6 @@ description: Automatically spawn agents at the start of a task using the hooks p
 
 # smart-spawn
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
-
 Automatically spawn agents at the start of a task using the hooks pre-task system.
 
 ## Usage
@@ -47,14 +45,7 @@ The `pre-task` hook analyzes the task description and automatically selects and 
 ## Integration with Claude Code
 
 ```javascript
-// Initialize monoswarm with auto strategy
-mcp__monomind__monoswarm_init({
-  topology: "hierarchical",
-  maxAgents: 8,
-  strategy: "specialized"
-})
-
-// Then spawn the appropriate agent type
+// Spawn the appropriate agent type
 mcp__monomind__agent_spawn({
   type: "coder",
   name: "Task Handler",

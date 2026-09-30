@@ -6,8 +6,6 @@ type: flow
 
 # GitHub Issue Tracker
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
-
 ## Purpose
 Intelligent issue management and project coordination with monomind swarm integration for automated tracking, progress monitoring, and team coordination.
 
@@ -32,8 +30,7 @@ Intelligent issue management and project coordination with monomind swarm integr
 
 ### 1. Create Coordinated Issue with Swarm Tracking
 ```javascript
-// Initialize issue management swarm
-mcp__monomind__monoswarm_init { topology: "star", maxAgents: 3 }
+// Spawn issue management agents
 mcp__monomind__agent_spawn { type: "coordinator", name: "Issue Coordinator" }
 mcp__monomind__agent_spawn { type: "researcher", name: "Requirements Analyst" }
 mcp__monomind__agent_spawn { type: "coder", name: "Implementation Planner" }
@@ -69,9 +66,11 @@ mcp__monomind__task_create {
 ```
 
 ### 2. Automated Progress Updates
+`monomindMemory { action, key, namespace, value }` in the examples below is pseudo-code for the `monomind memory` CLI: `set` is `npx monomind memory store --namespace <ns> --key <key> --value <json>`, `get` is `npx monomind memory retrieve --namespace <ns> --key <key>`.
+
 ```javascript
 // Update issue with progress from swarm memory
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "get",
   key: "issue/54/progress"
 }
@@ -131,8 +130,7 @@ mcp__github__update_issue {
 ### Complete Issue Management Workflow:
 ```javascript
 [Single Message - Issue Lifecycle Management]:
-  // Initialize issue coordination swarm
-  mcp__monomind__monoswarm_init { topology: "mesh", maxAgents: 4 }
+  // Spawn issue coordination agents
   mcp__monomind__agent_spawn { type: "coordinator", name: "Issue Manager" }
   mcp__monomind__agent_spawn { type: "analyst", name: "Progress Tracker" }
   mcp__monomind__agent_spawn { type: "researcher", name: "Context Gatherer" }

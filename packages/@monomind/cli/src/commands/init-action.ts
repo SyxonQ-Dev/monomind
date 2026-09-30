@@ -346,8 +346,8 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
       // which fetched the published package (and Chrome, via puppeteer's
       // postinstall) into $HOME only to fail — `swarm` became `monoswarm`
       // long ago. npm defers SIGTERM, so the 30s timeout never bounded it,
-      // and a killed init left npm writing into $HOME. `monoswarm init`
-      // stays an explicit, on-demand step.
+      // and a killed init left npm writing into $HOME. monoswarm itself was
+      // removed in 2.22.0 (#418).
 
       if (startAll) {
         // Seed .monomind/metrics/ immediately instead of waiting for the

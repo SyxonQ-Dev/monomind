@@ -130,6 +130,8 @@ plan:
 ## MCP Tool Integration
 
 ### Task Orchestration
+`monomindMemory { action, key, namespace, value }` in the examples below is pseudo-code for the `monomind memory` CLI: `set` is `npx monomind memory store --namespace <ns> --key <key> --value <json>`, `get` is `npx monomind memory retrieve --namespace <ns> --key <key>`.
+
 ```javascript
 // Orchestrate complex tasks
 mcp__monomind__task_create {
@@ -140,7 +142,7 @@ mcp__monomind__task_create {
 }
 
 // Share task breakdown
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/planner/task-breakdown",
   namespace: "coordination",
@@ -165,7 +167,7 @@ mcp__monomind__task_status {
 ### Memory Coordination
 ```javascript
 // Report planning status
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/planner/status",
   namespace: "coordination",

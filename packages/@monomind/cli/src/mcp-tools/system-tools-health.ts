@@ -72,13 +72,6 @@ export const systemHealthTool: MCPTool = {
       });
     }
 
-    // Monoswarm — cannot verify real connectivity, report unknown
-    checks.push({
-      name: 'monoswarm',
-      status: 'unknown',
-      message: 'Monoswarm connectivity not monitored — check coordination store manually',
-    });
-
     // Neural — cannot verify, report unknown
     checks.push({
       name: 'neural',

@@ -14,15 +14,21 @@ const MARKER_PREFIX = 'monomind-block';
 const MIN_GENERATED_HEADINGS = 3;
 
 const CLAUDE_MD_TITLE = '# Claude Code Configuration - Monomind';
+const CAPABILITIES_MD_TITLE = '# Monomind - Complete Capabilities Reference';
 
 /**
  * Section headings older CLAUDE.md generators emitted that the current
- * lean template no longer does (GH #412). Still recognised as generated, so a
- * pre-delimiter body carrying them is replaced whole on upgrade instead of
- * leaving its stale tail behind the first retired heading.
+ * lean template no longer does (GH #412), or that were dropped with monoswarm
+ * (#418). Still recognised as generated, so a pre-delimiter body carrying them
+ * is replaced whole on upgrade instead of leaving its stale tail behind the
+ * first retired heading.
  */
 const RETIRED_GENERATED_HEADINGS = [
   '## Monoswarm Rules',
+  '## Monoswarm Orchestration',
+  '## Monoswarm Configuration & Anti-Drift',
+  '## Monoswarm Protocols & Routing',
+  '## Monoswarm Execution Rules',
   '## CLI Commands',
   '## Available Agents (Curated Subset)',
   '## Auto-Learning Protocol',
@@ -31,6 +37,18 @@ const RETIRED_GENERATED_HEADINGS = [
   '## Claude Code vs CLI Tools',
   '## Support',
 ];
+
+/** The same for `.monomind/CAPABILITIES.md`: its monoswarm sections (#418). */
+const RETIRED_CAPABILITIES_HEADINGS = [
+  '## Monoswarm Orchestration',
+  '## Monoswarm Vote Strategies',
+];
+
+/** Retired headings still recognised as generated, by the generated file's title line. */
+const RETIRED_HEADINGS_BY_TITLE: Record<string, readonly string[]> = {
+  [CLAUDE_MD_TITLE]: RETIRED_GENERATED_HEADINGS,
+  [CAPABILITIES_MD_TITLE]: RETIRED_CAPABILITIES_HEADINGS,
+};
 
 function escapeForBlockMarker(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -114,8 +132,7 @@ function findLegacyUnmarkedRange(
 
   const known = sectionHeadings(generated);
   if (known.size < MIN_GENERATED_HEADINGS) return null;
-  if (title === CLAUDE_MD_TITLE)
-    for (const heading of RETIRED_GENERATED_HEADINGS) known.add(heading);
+  for (const heading of RETIRED_HEADINGS_BY_TITLE[title] ?? []) known.add(heading);
 
   const start = lines.findIndex((line) => line.trimEnd() === title);
   if (start === -1) return null;

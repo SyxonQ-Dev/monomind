@@ -5,7 +5,6 @@
  * `guidanceTools`.
  */
 
-import { MONOSWARM_AUTOPILOT_REMOVAL_VERSION } from '../deprecations.js';
 import type { MCPTool } from './types.js';
 
 export const guidanceQuickRef: MCPTool = {
@@ -80,19 +79,15 @@ export const guidanceQuickRef: MCPTool = {
           ],
         },
         'swarm-ops': {
-          title: `Monoswarm Operations (deprecated — removed in ${MONOSWARM_AUTOPILOT_REMOVAL_VERSION})`,
+          title: 'Multi-Agent Operations',
           commands: [
             {
-              cmd: 'npx monomind@latest monoswarm init --topology hierarchical --max-agents 8',
-              desc: 'Deprecated: records a monoswarm state file; starts no agents',
+              cmd: "Claude Code's Task tool",
+              desc: 'Spawn subagents in parallel, all in one message',
             },
             {
-              cmd: 'npx monomind@latest monoswarm status',
-              desc: 'Deprecated: show the recorded monoswarm state',
-            },
-            {
-              cmd: 'npx monomind@latest agent spawn -t coder --name my-coder',
-              desc: 'Spawn a specific agent',
+              cmd: 'npx monomind@latest org run <org>',
+              desc: 'Run an agent org under the Org Runtime',
             },
           ],
         },

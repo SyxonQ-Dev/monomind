@@ -78,18 +78,6 @@ export const GOLDEN_SET: GoldenPair[] = [
     relevant: ['doc/concepts/statusline.md'],
     tags: ['ux'],
   },
-  {
-    id: 'swarm-not-distributed',
-    query: 'is the multi agent agreement mechanism spread over machines or all inside one process',
-    relevant: ['doc/concepts/monoswarm.md'],
-    tags: ['architecture'],
-  },
-  {
-    id: 'swarm-shapes',
-    query: 'choosing between a boss-and-reports arrangement versus everyone talking to everyone',
-    relevant: ['doc/concepts/monoswarm.md'],
-    tags: ['architecture'],
-  },
 
   // -- decisions / ADRs --
   {
@@ -693,13 +681,6 @@ GOLDEN_SET.push(
     tags: ['b0'],
   },
   {
-    id: 'b0-startup-shared-state',
-    query:
-      'setting up a group of helpers so every one of them is forced to post its progress into a common store before work is handed out',
-    relevant: ['.claude/agents/templates/coordinator-monoswarm-init.md'],
-    tags: ['b0'],
-  },
-  {
     id: 'b0-loop-never-stops',
     query:
       'unattended repeat keeps going forever when studying another codebase because nothing is ever actually executed',
@@ -856,20 +837,6 @@ GOLDEN_SET.push(
     tags: ['b0'],
   },
   {
-    id: 'b0-spread-the-work',
-    query:
-      'hand one job to several workers either all at once one after another or feeding each others output',
-    relevant: ['packages/@monomind/cli/.claude/commands/coordination/task-orchestrate.md'],
-    tags: ['b0'],
-  },
-  {
-    id: 'b0-voting-scheme-setup',
-    query:
-      'flags for choosing the arrangement and the agreement rule when standing up a large collective',
-    relevant: ['packages/@monomind/cli/.claude/commands/monoswarm/init.md'],
-    tags: ['b0'],
-  },
-  {
     id: 'b0-event-handler-list',
     query:
       'what gets triggered around each file change or shell run and what is written down from it',
@@ -901,13 +868,6 @@ GOLDEN_SET.push(
     query:
       'ways to split the typing between me and the assistant while working through something together',
     relevant: ['packages/@monomind/cli/.claude/commands/pair/modes.md'],
-    tags: ['b0'],
-  },
-  {
-    id: 'b0-ready-recipes',
-    query:
-      'copy and paste starting points for a research team versus a build team including which roles to create',
-    relevant: ['packages/@monomind/cli/.claude/commands/monoswarm/examples.md'],
     tags: ['b0'],
   },
   {
@@ -997,13 +957,6 @@ GOLDEN_SET.push(
     query:
       'write a new capability document for the assistant and confirm it actually fires before shipping it',
     relevant: ['.claude/commands/mastermind/skill-builder.md'],
-    tags: ['b1'],
-  },
-  {
-    id: 'b1-shape-picker',
-    query:
-      'i cant decide whether my helpers should all talk to each other or report up to one boss',
-    relevant: ['.claude/commands/mastermind/topology.md'],
     tags: ['b1'],
   },
   {
@@ -1220,13 +1173,6 @@ GOLDEN_SET.push(
     tags: ['b1'],
   },
   {
-    id: 'b1-shared-kv-flags',
-    query:
-      'command line flags for putting a value under a name in the collective store and reading it back later',
-    relevant: ['packages/@monomind/cli/.claude/commands/monoswarm/memory.md'],
-    tags: ['b1'],
-  },
-  {
     id: 'b1-log-change-outcome',
     query:
       'log whether a file change worked so the tool learns from it, fired automatically whenever something is written',
@@ -1259,13 +1205,6 @@ GOLDEN_SET.push(
     query:
       'how to run a working-side-by-side stretch from setup through wrap up and picking it back up tomorrow',
     relevant: ['packages/@monomind/cli/.claude/commands/pair/session.md'],
-    tags: ['b1'],
-  },
-  {
-    id: 'b1-monthly-upkeep',
-    query:
-      'a step by step group routine for safely bumping libraries and doing the monthly vulnerability sweep',
-    relevant: ['packages/@monomind/cli/.claude/commands/monoswarm/maintenance.md'],
     tags: ['b1'],
   },
   {
@@ -1596,13 +1535,6 @@ GOLDEN_SET.push(
     tags: ['b2'],
   },
   {
-    id: 'b2-add-drones-flags',
-    query:
-      'command line switches to add five more drones to the colony or start the leader session with a stated objective',
-    relevant: ['packages/@monomind/cli/.claude/commands/monoswarm/spawn.md'],
-    tags: ['b2'],
-  },
-  {
     id: 'b2-log-finish',
     query: 'record that a job wrapped up and how well it went so the pattern learner picks it up',
     relevant: ['packages/@monomind/cli/.claude/commands/hooks/post-task.md'],
@@ -1635,24 +1567,10 @@ GOLDEN_SET.push(
     tags: ['b2'],
   },
   {
-    id: 'b2-speed-hunting-group',
-    query:
-      'stand up a peer group of helpers whose whole purpose is profiling for slow spots and fixing them together',
-    relevant: ['packages/@monomind/cli/.claude/commands/monoswarm/optimization.md'],
-    tags: ['b2'],
-  },
-  {
     id: 'b2-gather-compare-conclude',
     query:
       'a canned team flow for gathering sources weighing them against each other and writing up conclusions',
     relevant: ['packages/@monomind/cli/.claude/commands/workflows/research.md'],
-    tags: ['b2'],
-  },
-  {
-    id: 'b2-leader-led-group-decisions',
-    query:
-      'explain the boss led arrangement how a group verdict gets reached and where the common recollection is kept',
-    relevant: ['packages/@monomind/cli/.claude/skills/monoswarm/SKILL.md'],
     tags: ['b2'],
   },
   {
@@ -1960,13 +1878,6 @@ GOLDEN_SET.push(
     tags: ['b3'],
   },
   {
-    id: 'b3-queen-and-drones',
-    query:
-      'see the leader and its subordinate pool with vote round counts refreshing on screen as things change',
-    relevant: ['packages/@monomind/cli/.claude/commands/monoswarm/status.md'],
-    tags: ['b3'],
-  },
-  {
     id: 'b3-warn-before-touching',
     query:
       'what runs just ahead of a file being changed to surface likely fallout and suggest who should handle it',
@@ -1988,24 +1899,10 @@ GOLDEN_SET.push(
     tags: ['b3'],
   },
   {
-    id: 'b3-let-it-choose-shape',
-    query:
-      'i do not want to hand pick how many helpers or how they are arranged let the difficulty of the request decide it for me',
-    relevant: ['packages/@monomind/cli/.claude/commands/optimization/auto-topology.md'],
-    tags: ['b3'],
-  },
-  {
     id: 'b3-feed-output-forward',
     query:
       'i want my own ordered sequence where later stages automatically inherit everything the earlier stages produced',
     relevant: ['packages/@monomind/cli/.claude/commands/stream-chain/run.md'],
-    tags: ['b3'],
-  },
-  {
-    id: 'b3-parallel-peer-digging',
-    query:
-      'fan out a group of peers with no leader to gather sources on a topic in parallel and merge what they find into one synthesis',
-    relevant: ['packages/@monomind/cli/.claude/commands/monoswarm/research.md'],
     tags: ['b3'],
   },
   {
@@ -2114,13 +2011,6 @@ GOLDEN_SET.push(
     query:
       'after it finds issues i want it to just repair the obvious ones itself instead of asking me each time',
     relevant: ['.claude/commands/mastermind/research.md', '.claude/commands/mastermind/review.md'],
-    tags: ['b4'],
-  },
-  {
-    id: 'b4-shape-choice-table',
-    query:
-      'when would i want the workers arranged in a circle passing work along versus all reporting to one leader',
-    relevant: ['.claude/commands/mastermind/monoswarm.md'],
     tags: ['b4'],
   },
   {
@@ -2352,13 +2242,6 @@ GOLDEN_SET.push(
     query:
       'make sure every bundle in a group stays lined up at the same number when shipping, docs included, so nothing lands mismatched',
     relevant: ['packages/@monomind/cli/.claude/commands/github/sync-coordinator.md'],
-    tags: ['b4'],
-  },
-  {
-    id: 'b4-wind-down-keep-state',
-    query:
-      'wind the whole collective down cleanly and keep what it knew so a later sitting can refer back to it',
-    relevant: ['packages/@monomind/cli/.claude/commands/monoswarm/stop.md'],
     tags: ['b4'],
   },
   {
@@ -2681,20 +2564,6 @@ GOLDEN_SET.push(
     tags: ['b5'],
   },
   {
-    id: 'b5-fan-out-inspection',
-    query:
-      'spread an inspection of the source across several peer helpers at once looking for slowness and holes',
-    relevant: ['packages/@monomind/cli/.claude/commands/monoswarm/analysis.md'],
-    tags: ['b5'],
-  },
-  {
-    id: 'b5-parallel-checks',
-    query:
-      'split verification work across several helpers so unit level and full journey checks run at the same time',
-    relevant: ['packages/@monomind/cli/.claude/commands/monoswarm/testing.md'],
-    tags: ['b5'],
-  },
-  {
     id: 'b5-prebuilt-pipelines',
     query:
       'what canned multi stage pipelines ship out of the box and how do i confirm my own yaml file is well formed',
@@ -2722,13 +2591,6 @@ GOLDEN_SET.push(
     query:
       'figure out where a group of cooperating helpers is losing time and get concrete suggestions to fix it',
     relevant: ['packages/@monomind/cli/.claude/skills/performance-analysis/SKILL.md'],
-    tags: ['b5'],
-  },
-  {
-    id: 'b5-arrangement-tradeoffs',
-    query:
-      'when should a group of helpers be arranged peer to peer versus led from the top with example wiring code',
-    relevant: ['packages/@monomind/cli/.claude/skills/monoswarm/SKILL.md'],
     tags: ['b5'],
   },
   {
@@ -2988,19 +2850,6 @@ GOLDEN_SET.push(
     tags: ['b6'],
   },
   {
-    id: 'b6-group-start-flags',
-    query:
-      'command line switches for starting a worker group including the legacy fifteen worker mode',
-    relevant: ['packages/@monomind/cli/.claude/commands/coordination/monoswarm-init.md'],
-    tags: ['b6'],
-  },
-  {
-    id: 'b6-put-to-vote',
-    query: 'let the group decide on a change by ballot and check where the count stands',
-    relevant: ['packages/@monomind/cli/.claude/commands/monoswarm/consensus.md'],
-    tags: ['b6'],
-  },
-  {
     id: 'b6-callback-catalog',
     query: 'one page listing all the before and after triggers i can run from the terminal',
     relevant: ['packages/@monomind/cli/.claude/commands/hooks/README.md'],
@@ -3030,13 +2879,6 @@ GOLDEN_SET.push(
     query:
       'sample worked sessions showing exactly what to say while hunting a leak or reviewing together',
     relevant: ['packages/@monomind/cli/.claude/commands/pair/examples.md'],
-    tags: ['b6'],
-  },
-  {
-    id: 'b6-feature-roles',
-    query:
-      'staffing plan for shipping one capability end to end from whoever plans it to whoever validates it',
-    relevant: ['packages/@monomind/cli/.claude/commands/monoswarm/development.md'],
     tags: ['b6'],
   },
   {
@@ -3073,13 +2915,6 @@ GOLDEN_SET.push(
     query:
       'spec for authoring a new reusable instruction package so it gets discovered automatically',
     relevant: ['packages/@monomind/cli/.claude/skills/skill-builder/SKILL.md'],
-    tags: ['b6'],
-  },
-  {
-    id: 'b6-programmatic-peers',
-    query:
-      'code level calls to start several equal workers and spread tasks over them automatically',
-    relevant: ['packages/@monomind/cli/.claude/skills/monoswarm/SKILL.md'],
     tags: ['b6'],
   },
   {
@@ -3281,21 +3116,9 @@ GOLDEN_SET.push(
     tags: ['b7'],
   },
   {
-    id: 'b7-fleet-shared',
-    query: 'coordinate a fleet of parallel workers on a shared objective',
-    relevant: ['packages/@monomind/cli/.claude/commands/mastermind/monoswarm.md'],
-    tags: ['b7'],
-  },
-  {
     id: 'b7-transfer-infra',
     query: 'transfer a codebase to a different hosting platform or infrastructure',
     relevant: ['packages/@monomind/cli/.claude/commands/mastermind/techport.md'],
-    tags: ['b7'],
-  },
-  {
-    id: 'b7-best-arrangement',
-    query: 'pick the best arrangement of nodes and communication pattern for the fleet',
-    relevant: ['packages/@monomind/cli/.claude/commands/mastermind/topology.md'],
     tags: ['b7'],
   },
   {
@@ -3540,12 +3363,6 @@ GOLDEN_SET.push(
     tags: ['b7'],
   },
   {
-    id: 'b7-bootstrap-template',
-    query: 'what is the bootstrap template for launching a new multi worker group',
-    relevant: ['packages/@monomind/cli/.claude/agents/templates/coordinator-monoswarm-init.md'],
-    tags: ['b7'],
-  },
-  {
     id: 'b7-mock-first-parallel',
     query: 'how to do mock first outside in testing with parallel workers',
     relevant: ['packages/@monomind/cli/.claude/agents/testing/tdd-london-monoswarm.md'],
@@ -3571,12 +3388,6 @@ GOLDEN_SET.push(
     tags: ['b7'],
   },
   {
-    id: 'b7-multi-participant',
-    query: 'what slash commands handle multi participant task distribution',
-    relevant: ['packages/@monomind/cli/.claude/commands/coordination/README.md'],
-    tags: ['b7'],
-  },
-  {
     id: 'b7-launch-worker',
     query: 'how to launch a new background worker for a specific role',
     relevant: ['packages/@monomind/cli/.claude/commands/coordination/agent-spawn.md'],
@@ -3586,30 +3397,6 @@ GOLDEN_SET.push(
     id: 'b7-auto-pick-worker',
     query: 'how to let the system autonomously pick and run the right worker',
     relevant: ['packages/@monomind/cli/.claude/commands/automation/auto-agent.md'],
-    tags: ['b7'],
-  },
-  {
-    id: 'b7-collective-cmds',
-    query: 'what commands exist for the collective intelligence network mode',
-    relevant: ['packages/@monomind/cli/.claude/commands/monoswarm/README.md'],
-    tags: ['b7'],
-  },
-  {
-    id: 'b7-shared-brain-config',
-    query: 'how to configure and operate the shared brain collaboration system',
-    relevant: ['packages/@monomind/cli/.claude/commands/monoswarm/monoswarm.md'],
-    tags: ['b7'],
-  },
-  {
-    id: 'b7-group-skills-list',
-    query: 'what are the available group coordination skill definitions',
-    relevant: ['packages/@monomind/cli/.claude/commands/monoswarm/README.md'],
-    tags: ['b7'],
-  },
-  {
-    id: 'b7-fleet-large-problem',
-    query: 'how to manage a fleet of parallel workers tackling one large problem',
-    relevant: ['packages/@monomind/cli/.claude/commands/monoswarm/monoswarm.md'],
     tags: ['b7'],
   },
   {
@@ -3952,18 +3739,6 @@ GOLDEN_SET.push(
     id: 'c3-org-runtime-human-loop',
     query: 'what happens when a running agent team needs to ask me something before continuing',
     relevant: ['doc/concepts/org-runtime.md'],
-    tags: ['c3'],
-  },
-  {
-    id: 'c3-swarm-topologies',
-    query: 'what arrangements can I use when splitting work across multiple helpers',
-    relevant: ['doc/concepts/monoswarm.md'],
-    tags: ['c3'],
-  },
-  {
-    id: 'c3-swarm-consensus-voting',
-    query: 'how do workers agree on a result when they produce conflicting answers',
-    relevant: ['doc/concepts/monoswarm.md'],
     tags: ['c3'],
   },
   {
@@ -4320,12 +4095,6 @@ GOLDEN_SET.push(
     tags: ['c3-lo'],
   },
   {
-    id: 'c3lo-multiple-helpers-at-once',
-    query: 'running several AI assistants side by side on one problem',
-    relevant: ['doc/concepts/monoswarm.md'],
-    tags: ['c3-lo'],
-  },
-  {
     id: 'c3lo-dangerous-command-blocker',
     query: 'what stops an AI from accidentally wiping files or force-pushing',
     relevant: ['doc/adrs/ADR-G004-four-enforcement-gates.md'],
@@ -4413,13 +4182,6 @@ GOLDEN_SET.push(
     query:
       'managing the full journey of a code contribution from creation through review to merging',
     relevant: ['.claude/agents/github/pr-manager.md'],
-    tags: ['c3-lo'],
-  },
-  {
-    id: 'c3lo-choose-arrangement',
-    query:
-      'picking whether my AI workers should be in a flat group or have someone directing traffic',
-    relevant: ['.claude/commands/mastermind/topology.md'],
     tags: ['c3-lo'],
   },
   {
@@ -5148,12 +4910,6 @@ GOLDEN_SET.push(
     relevant: ['.claude/agents/github/monoswarm-code-review.md'],
     tags: ['c3-lo2'],
   },
-  {
-    id: 'c3lo2-starter-template',
-    query: 'where is the boilerplate definition for setting up a new group of coordinated workers',
-    relevant: ['.claude/agents/templates/coordinator-monoswarm-init.md'],
-    tags: ['c3-lo2'],
-  },
 
   // -- touched: doc --
   {
@@ -5187,13 +4943,6 @@ GOLDEN_SET.push(
     query:
       'how does the daemon-based system actually orchestrate multiple AI workers in the background',
     relevant: ['doc/concepts/org-runtime.md'],
-    tags: ['c3-lo2'],
-  },
-  {
-    id: 'c3lo2-ant-colony',
-    query:
-      'how do many autonomous workers coordinate on a shared goal using different network shapes',
-    relevant: ['doc/concepts/monoswarm.md'],
     tags: ['c3-lo2'],
   },
   {
@@ -5316,12 +5065,6 @@ GOLDEN_SET.push(
 
   // -- touched: commands --
   {
-    id: 'c3lo2-network-shape-picker',
-    query: 'how do I choose the best arrangement of workers for my particular kind of project',
-    relevant: ['.claude/commands/mastermind/topology.md'],
-    tags: ['c3-lo2'],
-  },
-  {
     id: 'c3lo2-detective-work',
     query: 'how do I systematically track down why something broke using structured investigation',
     relevant: ['.claude/commands/mastermind/debug.md'],
@@ -5368,18 +5111,6 @@ GOLDEN_SET.push(
     query:
       'how do I work side by side with the AI in a collaborative back-and-forth coding session',
     relevant: ['packages/@monomind/cli/.claude/skills/pair-programming/SKILL.md'],
-    tags: ['c3-lo2'],
-  },
-  {
-    id: 'c3lo2-conductor-baton',
-    query: 'how do I coordinate a group of parallel AI workers with shared state and checkpoints',
-    relevant: ['packages/@monomind/cli/.claude/skills/monoswarm/SKILL.md'],
-    tags: ['c3-lo2'],
-  },
-  {
-    id: 'c3lo2-collective-brain',
-    query: 'how do multiple autonomous helpers pool their findings into a shared understanding',
-    relevant: ['packages/@monomind/cli/.claude/skills/monoswarm/SKILL.md'],
     tags: ['c3-lo2'],
   },
   {

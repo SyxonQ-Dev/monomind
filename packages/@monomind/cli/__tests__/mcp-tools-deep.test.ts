@@ -161,8 +161,6 @@ vi.mock('../src/mcp-tools/auto-install.js', () => ({
 // Import all tool modules (after mocks are set up)
 // ============================================================================
 
-import * as fs from 'node:fs';
-import * as path from 'node:path';
 import { agentTools } from '../src/mcp-tools/agent-tools.js';
 import { analyzeTools } from '../src/mcp-tools/analyze-tools.js';
 import { claimsTools } from '../src/mcp-tools/claims-tools.js';
@@ -173,7 +171,6 @@ import { memoryTools } from '../src/mcp-tools/memory-tools.js';
 import { performanceTools } from '../src/mcp-tools/performance-tools.js';
 import { securityTools } from '../src/mcp-tools/security-tools.js';
 import { sessionTools } from '../src/mcp-tools/session-tools.js';
-import { monoswarmTools } from '../src/mcp-tools/monoswarm-tools.js';
 import { systemTools } from '../src/mcp-tools/system-tools.js';
 import { taskTools } from '../src/mcp-tools/task-tools.js';
 import { allTransferTools as transferTools } from '../src/mcp-tools/transfer-tools.js';
@@ -202,7 +199,6 @@ const ALL_MODULES: ToolModule[] = [
   { name: 'performance-tools', tools: performanceTools },
   { name: 'security-tools', tools: securityTools },
   { name: 'session-tools', tools: sessionTools },
-  { name: 'monoswarm-tools', tools: monoswarmTools },
   { name: 'system-tools', tools: systemTools },
   { name: 'task-tools', tools: taskTools },
   { name: 'transfer-tools', tools: transferTools },
@@ -220,8 +216,8 @@ describe('MCP Tools Deep Test Suite', () => {
   // 1. Module Loading & Registration
   // --------------------------------------------------------------------------
   describe('Module Loading & Registration', () => {
-    it('should load all 15 tool modules', () => {
-      expect(ALL_MODULES).toHaveLength(15);
+    it('should load all 14 tool modules', () => {
+      expect(ALL_MODULES).toHaveLength(14);
     });
 
     it('should have at least 100 total tools across all modules', () => {
@@ -255,7 +251,6 @@ describe('MCP Tools Deep Test Suite', () => {
         'performance-tools': 6,
         'security-tools': 6,
         'session-tools': 5,
-        'monoswarm-tools': 13,
         'system-tools': 7,
         'task-tools': 7,
         // Was 7 — 6 pattern-store tools were deleted in 2026-07 along with
@@ -542,155 +537,6 @@ describe('MCP Tools Deep Test Suite', () => {
   });
 
   // --------------------------------------------------------------------------
-  // 8. Handler Invocation - Monoswarm Tools
-  // --------------------------------------------------------------------------
-  describe('Monoswarm Tools - Handler Invocation', () => {
-    it('monoswarm_init returns monoswarmId and topology', async () => {
-      const tool = monoswarmTools.find(t => t.name === 'monoswarm_init')!;
-      const result: any = await tool.handler({ topology: 'hierarchical' });
-      expect(result.success).toBe(true);
-      expect(result.monoswarmId).toBeDefined();
-    });
-
-    it('monoswarm_status returns initialized (not running) status after init', async () => {
-      // Init first so status has something to report. monoswarm_init always
-      // replaces the single global state record, so this is a fresh start
-      // regardless of what earlier tests in this file left behind.
-      const initTool = monoswarmTools.find(t => t.name === 'monoswarm_init')!;
-      await initTool.handler({ topology: 'mesh' });
-      const tool = monoswarmTools.find(t => t.name === 'monoswarm_status')!;
-      const result: any = await tool.handler({});
-      expect(result.status).toBe('initialized');
-    });
-
-    it('monoswarm_shutdown returns success after init', async () => {
-      const initTool = monoswarmTools.find(t => t.name === 'monoswarm_init')!;
-      await initTool.handler({ topology: 'hierarchical' });
-      const tool = monoswarmTools.find(t => t.name === 'monoswarm_shutdown')!;
-      const result: any = await tool.handler({});
-      expect(result.success).toBe(true);
-      expect(result.terminated).toBe(true);
-    });
-
-    it('monoswarm_health returns healthy checks after init', async () => {
-      const initTool = monoswarmTools.find(t => t.name === 'monoswarm_init')!;
-      await initTool.handler({ topology: 'hierarchical' });
-      const tool = monoswarmTools.find(t => t.name === 'monoswarm_health')!;
-      const result: any = await tool.handler({});
-      expect(result.status).toBe('healthy');
-      expect(result.checks).toBeDefined();
-      expect(result.healthy).toBe(true);
-    });
-
-    it('monoswarm_health returns not_initialized when nothing has been initialized', async () => {
-      // Drive the state to "shut down" explicitly rather than relying on
-      // execution order — monoswarm_shutdown sets initialized:false.
-      const initTool = monoswarmTools.find(t => t.name === 'monoswarm_init')!;
-      await initTool.handler({ topology: 'hierarchical' });
-      const shutdownTool = monoswarmTools.find(t => t.name === 'monoswarm_shutdown')!;
-      await shutdownTool.handler({});
-
-      const tool = monoswarmTools.find(t => t.name === 'monoswarm_health')!;
-      const result: any = await tool.handler({});
-      expect(result.status).toBe('not_initialized');
-      expect(result.healthy).toBe(false);
-      expect(result.checks).toBeDefined();
-    });
-
-    it('monoswarm_init rejects invalid topology', async () => {
-      const tool = monoswarmTools.find(t => t.name === 'monoswarm_init')!;
-      const result: any = await tool.handler({ topology: 'invalid-topo' });
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('Invalid topology');
-    });
-
-    it('monoswarm_scale spawns agents to reach a higher target', async () => {
-      const initTool = monoswarmTools.find(t => t.name === 'monoswarm_init')!;
-      await initTool.handler({ topology: 'mesh' });
-      const scaleTool = monoswarmTools.find(t => t.name === 'monoswarm_scale')!;
-      const result: any = await scaleTool.handler({ targetAgents: 3 });
-
-      expect(result.success).toBe(true);
-      expect(result.previousCount).toBe(0);
-      expect(result.currentCount).toBe(3);
-      expect(result.spawned).toHaveLength(3);
-      expect(result.terminated).toHaveLength(0);
-    });
-
-    it('monoswarm_scale terminates agents to reach a lower target', async () => {
-      const initTool = monoswarmTools.find(t => t.name === 'monoswarm_init')!;
-      await initTool.handler({ topology: 'mesh' });
-      const scaleTool = monoswarmTools.find(t => t.name === 'monoswarm_scale')!;
-      await scaleTool.handler({ targetAgents: 5 });
-      const result: any = await scaleTool.handler({ targetAgents: 2 });
-
-      expect(result.success).toBe(true);
-      expect(result.previousCount).toBe(5);
-      expect(result.currentCount).toBe(2);
-      expect(result.terminated).toHaveLength(3);
-    });
-
-    it('monoswarm_scale is a no-op success when already at target', async () => {
-      const initTool = monoswarmTools.find(t => t.name === 'monoswarm_init')!;
-      await initTool.handler({ topology: 'mesh' });
-      const scaleTool = monoswarmTools.find(t => t.name === 'monoswarm_scale')!;
-      await scaleTool.handler({ targetAgents: 2 });
-      const result: any = await scaleTool.handler({ targetAgents: 2 });
-
-      expect(result.success).toBe(true);
-      expect(result.spawned).toHaveLength(0);
-      expect(result.terminated).toHaveLength(0);
-    });
-
-    it('monoswarm_scale reports failure (not silent success) when it cannot reach the target', async () => {
-      // Regression test: swarm_scale used to hardcode success:true even when
-      // every agent_terminate call failed (e.g. a stale agent ID already
-      // evicted from the agent store), silently reporting the swarm as
-      // "already at target size" when it never actually changed.
-      const initTool = monoswarmTools.find(t => t.name === 'monoswarm_init')!;
-      await initTool.handler({ topology: 'mesh' });
-      const scaleTool = monoswarmTools.find(t => t.name === 'monoswarm_scale')!;
-
-      // Directly corrupt the persisted state with an agent ID that was
-      // never actually spawned, simulating desync with the agent store.
-      const monoswarmPath = path.join(process.cwd(), '.monomind', 'monoswarm', 'state.json');
-      const raw = JSON.parse((fs.readFileSync as any)(monoswarmPath, 'utf-8'));
-      raw.agents.push('agent-stale-never-existed');
-      (fs.writeFileSync as any)(monoswarmPath, JSON.stringify(raw));
-
-      const result: any = await scaleTool.handler({ targetAgents: 0 });
-
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('Reached');
-      expect(result.currentCount).toBe(1);
-    });
-
-    it('monoswarm_scale rejects a negative or non-integer target', async () => {
-      const initTool = monoswarmTools.find(t => t.name === 'monoswarm_init')!;
-      await initTool.handler({ topology: 'mesh' });
-      const scaleTool = monoswarmTools.find(t => t.name === 'monoswarm_scale')!;
-
-      const negative: any = await scaleTool.handler({ targetAgents: -1 });
-      expect(negative.success).toBe(false);
-
-      const fractional: any = await scaleTool.handler({ targetAgents: 1.5 });
-      expect(fractional.success).toBe(false);
-    });
-
-    it('monoswarm_scale returns error when monoswarm is not initialized', async () => {
-      const initTool = monoswarmTools.find(t => t.name === 'monoswarm_init')!;
-      await initTool.handler({ topology: 'mesh' });
-      const shutdownTool = monoswarmTools.find(t => t.name === 'monoswarm_shutdown')!;
-      await shutdownTool.handler({});
-
-      const scaleTool = monoswarmTools.find(t => t.name === 'monoswarm_scale')!;
-      const result: any = await scaleTool.handler({ targetAgents: 3 });
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('not initialized');
-    });
-  });
-
-  // --------------------------------------------------------------------------
   // 9. Handler Invocation - Task Tools
   // --------------------------------------------------------------------------
   describe('Task Tools - Handler Invocation', () => {
@@ -731,30 +577,6 @@ describe('MCP Tools Deep Test Suite', () => {
       const result: any = await tool.handler({ name: 'Test Session' });
       expect(result.sessionId).toBeDefined();
       expect(result.name).toBe('Test Session');
-    });
-  });
-
-  // --------------------------------------------------------------------------
-  // 11. Handler Invocation - Monoswarm Vote Tool
-  // --------------------------------------------------------------------------
-  describe('Monoswarm Vote Tool - Handler Invocation', () => {
-    it('monoswarm_init initializes with the requested topology', async () => {
-      const tool = monoswarmTools.find(t => t.name === 'monoswarm_init')!;
-      const result: any = await tool.handler({ topology: 'mesh' });
-      expect(result.success).toBe(true);
-      expect(result.topology).toBe('mesh');
-    });
-
-    it('monoswarm_status returns status info', async () => {
-      const tool = monoswarmTools.find(t => t.name === 'monoswarm_status')!;
-      const result: any = await tool.handler({});
-      expect(result).toBeDefined();
-    });
-
-    it('monoswarm_vote with list action returns pending proposals', async () => {
-      const tool = monoswarmTools.find(t => t.name === 'monoswarm_vote')!;
-      const result: any = await tool.handler({ action: 'list' });
-      expect(result.action).toBe('list');
     });
   });
 
@@ -901,7 +723,6 @@ describe('MCP Tools Deep Test Suite', () => {
       const toolsToTest = [
         agentTools.find(t => t.name === 'agent_list')!,
         configTools.find(t => t.name === 'config_list')!,
-        monoswarmTools.find(t => t.name === 'monoswarm_status')!,
         taskTools.find(t => t.name === 'task_list')!,
         performanceTools.find(t => t.name === 'performance_report')!,
       ];
@@ -996,13 +817,6 @@ describe('MCP Tools Deep Test Suite', () => {
       expect(result.taskId).toBeDefined();
       expect(typeof result.taskId).toBe('string');
       expect(result.status).toBe('pending');
-    });
-
-    it('monoswarm_init returns success and monoswarmId', async () => {
-      const tool = monoswarmTools.find(t => t.name === 'monoswarm_init')!;
-      const result: any = await tool.handler({});
-      expect(result.success).toBe(true);
-      expect(result.monoswarmId).toBeDefined();
     });
   });
 
