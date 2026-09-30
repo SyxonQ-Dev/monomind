@@ -7,7 +7,6 @@
  * `guidanceTools`.
  */
 
-import { MONOSWARM_AUTOPILOT_REMOVAL_VERSION } from '../deprecations.js';
 import { HOOKS_SUBCOMMAND_COUNT, WORKER_COUNT } from '../init/generated-counts.js';
 
 // ── Capability Catalog ──────────────────────────────────────
@@ -46,29 +45,6 @@ export const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
     agents: ['coder', 'tester', 'reviewer', 'researcher', 'planner'],
     skills: [],
     whenToUse: 'When you need to create or manage individual agents for specific tasks.',
-  },
-  monoswarm: {
-    name: 'Monoswarm Coordination',
-    description: `Deprecated (removed in ${MONOSWARM_AUTOPILOT_REMOVAL_VERSION}; use Claude Code's Task tool or \`monomind org run\`). Topology/roster bookkeeping in a JSON state file and threshold-based voting (majority/supermajority/unanimous/threshold); starts no agents.`,
-    tools: [
-      'monoswarm_init',
-      'monoswarm_status',
-      'monoswarm_scale',
-      'monoswarm_health',
-      'monoswarm_shutdown',
-      'monoswarm_agent_add',
-      'monoswarm_vote',
-    ],
-    commands: ['monoswarm init', 'monoswarm status', 'monoswarm scale', 'monoswarm stop'],
-    agents: [
-      'coordinator',
-      'mesh-coordinator',
-      'collective-intelligence-coordinator',
-      'quorum-manager',
-    ],
-    skills: ['monoswarm'],
-    whenToUse:
-      "Don't start new work with it — it is deprecated. For multiple agents working together, spawn them with Claude Code's Task tool or run an org with `monomind org run`.",
   },
   'memory-knowledge': {
     name: 'Memory & Knowledge',

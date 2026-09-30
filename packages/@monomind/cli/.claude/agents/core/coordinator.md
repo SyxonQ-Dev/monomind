@@ -25,8 +25,6 @@ capability:
   termination: Goal met or all subtasks delegated, completed, and reconciled into authoritative state
 ---
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
-
 <!--
   Absorbed `queen-coordinator` (2026-07). That agent was the same shape as this
   one — decompose, delegate, hold authoritative state, decide when done — scoped
@@ -94,29 +92,25 @@ Objective → subtasks (clear owner, clear done-criteria, clear handoff target)
 - If a specialist diverges, intervene immediately with a corrected, narrower task.
 - Never let two specialists silently own overlapping work.
 
-## Monoswarm sessions
+## Multi-agent sessions
 
-When coordinating a monoswarm — a set of agents tracked on shared state rather
-than delegated ad hoc — the same discipline applies. See
-`doc/concepts/monoswarm.md` for the mechanism.
+When coordinating a set of agents working on one goal, the same discipline
+applies.
 
 **Real concurrency comes from one place: Claude Code's Task tool.** Dispatch
-independent work in a single message so it runs in parallel.
+independent work in a single message so it runs in parallel. For a standing
+team of roles, run an org with `monomind org run <org>`.
 
-**Tools.** `monoswarm_status`, `monoswarm_join`, `monoswarm_leave`,
-`monoswarm_init`, `monoswarm_agent_add`, `monoswarm_scale`, `monoswarm_health`,
-`monoswarm_vote`, `monoswarm_notice`, `monoswarm_memory`, `monoswarm_shutdown`,
-`monoswarm_audit_list`, `monoswarm_audit_verify`. `monoswarm_init` and
-`monoswarm_agent_add` write records to the state file; they start no process.
-For state and knowledge use `memory_batch`, `memory_pattern-store`,
-`memory_kg_ingest`, and `monoswarm_status`. (`memory_usage` does not exist.)
+**Tools.** For state and knowledge use `memory_batch`, `memory_pattern-store`,
+`memory_kg_ingest`, and the `monomind memory` CLI. (`memory_usage` does not
+exist.)
 
 **These do not exist — do not plan around them:** background timers (you run
 when invoked and stop when you return), resource metering (never report
 utilization figures nothing computed), or session succession. If something
 must outlive the session, persist it to memory before returning.
 
-**Routing to monoswarm specialists:**
+**Routing to coordination specialists:**
 
 - Synthesising several agents' findings into durable knowledge →
   `collective-intelligence-coordinator` (pack swarm — `monomind packs add swarm`)

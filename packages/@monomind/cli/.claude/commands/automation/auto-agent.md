@@ -5,8 +5,6 @@ description: Automatically spawn agents based on task requirements.
 
 # auto-agent
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
-
 Automatically spawn agents based on task requirements.
 
 ## Usage
@@ -71,13 +69,6 @@ mcp__monomind__agent_spawn({
   name: "API Builder",
   task: "Build authentication system",
   capabilities: ["typescript", "rest-api"]
-})
-
-// For multi-agent coordination, initialize a swarm first
-mcp__monomind__monoswarm_init({
-  topology: "hierarchical",
-  maxAgents: 6,
-  strategy: "specialized"
 })
 ```
 

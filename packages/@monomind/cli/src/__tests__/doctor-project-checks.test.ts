@@ -921,7 +921,6 @@ describe('doctor-project-checks', () => {
         'data/mastermind-*.json',
         'data/mastermind-*.jsonl',
         '**/.claude-flow/',
-        '.monomind/monoswarm/',
         'monomind.config.json',
         '.swarm/',
         '.claude/memory.db',
@@ -943,7 +942,7 @@ describe('doctor-project-checks', () => {
       writeFileSync(join(dir, '.gitignore'), '.monomind/sessions/\n');
       const result = await checkGitignoreCoverage();
       expect(result.status).toBe('warn');
-      expect(result.message).toContain('.monomind/monoswarm/');
+      expect(result.message).toContain('.monomind/data/');
     });
 
     // i-052 AC-4: the doctor check written specifically to catch gitignore

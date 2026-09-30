@@ -398,6 +398,17 @@ export function signOrgDef(
   return { hash: base.hash, at: base.at, path };
 }
 
+/** When `org` was last signed (the sidecar's `at`), if a trusted sidecar is
+ *  there. Meaningful only once `verifyOrgDef` has checked its HMAC. */
+export function orgSignedAt(
+  root: string,
+  org: string,
+  dir = defaultOperatorDir(),
+): string | undefined {
+  const at = readRecord(orgSignaturePath(root, org, dir))?.rec?.at;
+  return typeof at === 'string' ? at : undefined;
+}
+
 /** The projection that was last signed for `org`, if its copy is there. */
 export function lastSignedProjection(
   root: string,

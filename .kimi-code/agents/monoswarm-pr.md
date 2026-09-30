@@ -11,13 +11,11 @@ deprecatedBy: pr-manager
 
 # Swarm PR - Managing Swarms through Pull Requests
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
-
 ## Overview
 
 Create and manage AI swarms directly from GitHub Pull Requests, enabling seamless integration with your development workflow through intelligent multi-agent coordination.
 
-GitHub work goes through the `gh` CLI. Agent picking uses `monomind pick`, the swarm's topology and roster are recorded with the `monoswarm` MCP tools, and the work is done by subagents spawned with the Task tool. There is no monomind command that creates a swarm from a PR; this agent reads the PR and drives the subagents.
+GitHub work goes through the `gh` CLI. Agent picking uses `monomind pick`, and the work is done by subagents spawned with the Task tool. There is no monomind command that creates a swarm from a PR; this agent reads the PR and drives the subagents.
 
 ## Core Features
 
@@ -32,7 +30,7 @@ QUERY=$(jq -r '.title + " " + ([.labels[].name] | join(" "))' /tmp/pr-123.json)
 npx monomind pick -t "$QUERY" --agents --json
 ```
 
-Then record the swarm with `mcp__monomind__monoswarm_init` and spawn the picked agents in one message with the Task tool.
+Then spawn the picked agents in one message with the Task tool.
 
 ### 2. PR Comment Commands
 

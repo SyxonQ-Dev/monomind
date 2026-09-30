@@ -287,7 +287,6 @@ export function getWatchPaths(projectDir) {
 
   return [
     // Swarm
-    path.join(m, 'monoswarm', 'state.json'),
     path.join(m, 'swarm', 'history.jsonl'),
     path.join(m, 'swarm-config.json'),
     // Metrics

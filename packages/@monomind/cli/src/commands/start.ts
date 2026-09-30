@@ -5,8 +5,6 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { MONOSWARM_DEPRECATION, printDeprecationNotice } from '../deprecations.js';
-import { callMCPTool, MCPClientError } from '../mcp-client.js';
 import { output } from '../output.js';
 import { confirm } from '../prompt.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
@@ -107,8 +105,14 @@ function loadConfig(cwd: string): Record<string, unknown> | null {
 // Main start action
 const startAction = async (ctx: CommandContext): Promise<CommandResult> => {
   const daemon = ctx.flags.daemon as boolean;
-  const topology = ctx.flags.topology as string | undefined;
   const cwd = ctx.cwd;
+
+  // #418: --topology only set the recorded monoswarm state, removed in 2.22.0.
+  if (ctx.flags.topology !== undefined || ctx.flags.t !== undefined) {
+    output.printWarning(
+      '--topology/-t was removed in 2.22.0 with monoswarm; it is ignored. The topology shown comes from .monomind/config.yaml.',
+    );
+  }
 
   // Check initialization
   if (!isInitialized(cwd)) {
@@ -134,7 +138,7 @@ const startAction = async (ctx: CommandContext): Promise<CommandResult> => {
   const swarmConfig =
     ((config?.swarm ?? config?.monoswarm) as Record<string, unknown> | undefined) || {};
   const VALID_TOPOLOGIES = new Set(['hierarchical-mesh', 'mesh', 'hierarchical', 'ring', 'star']);
-  const rawTopology = topology || (swarmConfig.topology as string) || DEFAULT_TOPOLOGY;
+  const rawTopology = (swarmConfig.topology as string) || DEFAULT_TOPOLOGY;
   const finalTopology = VALID_TOPOLOGIES.has(rawTopology) ? rawTopology : DEFAULT_TOPOLOGY;
   const rawMaxAgents = Number((swarmConfig.maxAgents as number) || DEFAULT_MAX_AGENTS);
   const maxAgents = Number.isFinite(rawMaxAgents)
@@ -144,93 +148,36 @@ const startAction = async (ctx: CommandContext): Promise<CommandResult> => {
   output.writeln();
   output.writeln(output.bold('Starting Monomind'));
   output.writeln();
+  output.printSuccess(
+    'Config initialized (no long-running process — use "monomind org run" for real execution).',
+  );
+  output.writeln();
 
-  const spinner = output.createSpinner({ text: 'Initializing system...' });
+  // Status display
+  output.printBox(
+    [`Topology:  ${finalTopology}`, `Max Agents: ${maxAgents}`].join('\n'),
+    'Configuration',
+  );
 
-  // `start` records a monoswarm state file, and monoswarm is deprecated
-  // (#418). At its removal `start` stops recording that state.
-  printDeprecationNotice(ctx, MONOSWARM_DEPRECATION);
+  output.writeln();
+  output.writeln(output.bold('Quick Commands:'));
+  output.printList([
+    `${output.highlight('monomind status')} - View system status`,
+    `${output.highlight('monomind org run <org>')} - Run an agent org`,
+    `${output.highlight('monomind doctor')} - Check the installation`,
+  ]);
 
-  try {
-    // Step 1: Record monoswarm state (starts no agents)
-    spinner.start();
-    spinner.setText('Recording monoswarm state (deprecated; starts no agents)...');
+  const result = {
+    topology: finalTopology,
+    maxAgents,
+    startedAt: new Date().toISOString(),
+  };
 
-    const swarmResult = await callMCPTool<{
-      monoswarmId: string;
-      topology: string;
-      initializedAt: string;
-      config: Record<string, unknown>;
-    }>('monoswarm_init', {
-      topology: finalTopology,
-      maxAgents,
-    });
-
-    spinner.succeed(`Monoswarm state recorded (${finalTopology}; no agents started)`);
-
-    // Step 2: Run health check
-    spinner.setText('Running health checks...');
-    spinner.start();
-
-    const healthResult = await callMCPTool<{
-      status: 'healthy' | 'degraded' | 'unhealthy';
-      checks: Array<{ name: string; status: string; message?: string }>;
-    }>('monoswarm_health', {});
-
-    if (healthResult.status === 'healthy') {
-      spinner.succeed('Health checks passed');
-    } else {
-      spinner.fail(`Health check: ${healthResult.status}`);
-    }
-
-    // Success output
-    output.writeln();
-    output.printSuccess(
-      'Config initialized (no long-running process — use "monomind org run" for real execution).',
-    );
-    output.writeln();
-
-    // Status display
-    output.printBox(
-      [
-        `Swarm ID:  ${swarmResult.monoswarmId}`,
-        `Topology:  ${finalTopology}`,
-        `Max Agents: ${maxAgents}`,
-        `Health:    ${healthResult.status}`,
-      ].join('\n'),
-      'System Status',
-    );
-
-    output.writeln();
-    output.writeln(output.bold('Quick Commands:'));
-    output.printList([
-      `${output.highlight('monomind status')} - View system status`,
-      `${output.highlight('monomind agent spawn -t coder')} - Spawn an agent`,
-      `${output.highlight('monomind stop')} - Stop the system`,
-    ]);
-
-    const result = {
-      swarmId: swarmResult.monoswarmId,
-      topology: finalTopology,
-      maxAgents,
-      health: healthResult.status,
-      startedAt: new Date().toISOString(),
-    };
-
-    if (ctx.flags.format === 'json') {
-      output.printJson(result);
-    }
-
-    return { success: true, data: result };
-  } catch (error) {
-    spinner.fail('Startup failed');
-    if (error instanceof MCPClientError) {
-      output.printError(`Failed to start: ${error.message}`);
-    } else {
-      output.printError(`Unexpected error: ${String(error)}`);
-    }
-    return { success: false, exitCode: 1 };
+  if (ctx.flags.format === 'json') {
+    output.printJson(result);
   }
+
+  return { success: true, data: result };
 };
 
 // Stop subcommand
@@ -274,25 +221,8 @@ const stopCommand: Command = {
     }
 
     const spinner = output.createSpinner({ text: 'Stopping system...' });
-    spinner.start();
-
-    // `stop` marks the deprecated monoswarm state terminated (#418).
-    printDeprecationNotice(ctx, MONOSWARM_DEPRECATION);
 
     try {
-      // Mark the recorded monoswarm state terminated (no process to stop)
-      spinner.setText('Marking monoswarm state terminated...');
-      spinner.start();
-      try {
-        await callMCPTool('monoswarm_shutdown', {
-          graceful: !force,
-          force,
-        });
-        spinner.succeed('Monoswarm state marked terminated');
-      } catch {
-        spinner.fail('No monoswarm state recorded');
-      }
-
       // Stop the daemon process itself: read its real pid, verify liveness,
       // send a real termination signal, then wait and confirm it's actually
       // dead before reporting success — rather than unconditionally deleting
@@ -444,10 +374,7 @@ const quickCommand: Command = {
     }
 
     // Start with defaults
-    return startAction({
-      ...ctx,
-      flags: { ...ctx.flags, topology: 'mesh' },
-    });
+    return startAction(ctx);
   },
 };
 
@@ -465,17 +392,9 @@ export const startCommand: Command = {
       type: 'boolean',
       default: false,
     },
-    {
-      name: 'topology',
-      short: 't',
-      description: 'Swarm topology (hierarchical-mesh, mesh, hierarchical, ring, star)',
-      type: 'string',
-      choices: ['hierarchical-mesh', 'mesh', 'hierarchical', 'ring', 'star'],
-    },
   ],
   examples: [
     { command: 'monomind start', description: 'Initialize config with configuration defaults' },
-    { command: 'monomind start --topology mesh', description: 'Start with mesh topology' },
     { command: 'monomind start quick', description: 'Quick start with defaults' },
     { command: 'monomind start stop', description: 'Stop the running system' },
   ],

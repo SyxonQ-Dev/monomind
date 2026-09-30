@@ -5,8 +5,6 @@ description: "Set up and use monomind hooks: pre/post edit, command and task hoo
 
 # Hooks Automation
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
-
 Coordinate, validate, and learn from Claude Code operations through the `monomind hooks` command group and the hook handlers that `monomind init` installs into `.claude/settings.json`.
 
 ## What This Skill Does
@@ -489,7 +487,6 @@ npx monomind doctor
 - `npx monomind memory store|search|retrieve` - Shared memory
 - `npx monomind session save|list|restore` - Session checkpoints
 - `npx monomind agent spawn -t <type>` - Spawn agents
-- `npx monomind monoswarm init` - Initialize a monoswarm
 
 ### Integration with Other Skills
 

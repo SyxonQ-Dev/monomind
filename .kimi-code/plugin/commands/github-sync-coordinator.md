@@ -5,8 +5,6 @@ description: Multi-package synchronization and version alignment with monomind s
 
 # GitHub Sync Coordinator
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
-
 ## Purpose
 Multi-package synchronization and version alignment with monomind swarm coordination for seamless integration across packages.
 
@@ -30,8 +28,7 @@ Multi-package synchronization and version alignment with monomind swarm coordina
 
 ### 1. Synchronize Package Dependencies
 ```javascript
-// Initialize sync coordination swarm
-mcp__monomind__monoswarm_init { topology: "hierarchical", maxAgents: 5 }
+// Spawn sync coordination agents
 mcp__monomind__agent_spawn { type: "coordinator", name: "Sync Coordinator" }
 mcp__monomind__agent_spawn { type: "analyst", name: "Dependency Analyzer" }
 mcp__monomind__agent_spawn { type: "coder", name: "Integration Developer" }
@@ -151,8 +148,7 @@ Generated with Claude Code using Monomind swarm coordination`
 ### Complete Package Sync Workflow:
 ```javascript
 [Single Message - Complete Synchronization]:
-  // Initialize comprehensive sync swarm
-  mcp__monomind__monoswarm_init { topology: "mesh", maxAgents: 6 }
+  // Spawn comprehensive sync agents
   mcp__monomind__agent_spawn { type: "coordinator", name: "Master Sync Coordinator" }
   mcp__monomind__agent_spawn { type: "analyst", name: "Package Analyzer" }
   mcp__monomind__agent_spawn { type: "coder", name: "Integration Coder" }

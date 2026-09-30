@@ -28,7 +28,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { agentTools } from '../mcp-tools/agent-tools.js';
 import { allEmbeddingsTools } from '../mcp-tools/embeddings-tools.js';
-import { monoswarmTools } from '../mcp-tools/monoswarm-tools.js';
 import type { MCPTool } from '../mcp-tools/types.js';
 
 /**
@@ -131,7 +130,7 @@ function loadedTermsInName(name: string): string[] {
  * explicit floor: even if registry discovery below were to break or silently
  * return nothing, these are always audited.
  */
-const HISTORIC_FAMILIES: MCPTool[] = [...monoswarmTools, ...allEmbeddingsTools, ...agentTools];
+const HISTORIC_FAMILIES: MCPTool[] = [...allEmbeddingsTools, ...agentTools];
 
 /**
  * Every registered tool, gated families included.

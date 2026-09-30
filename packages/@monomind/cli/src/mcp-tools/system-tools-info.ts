@@ -38,7 +38,6 @@ export const systemInfoTool: MCPTool = {
         flashAttention: false,
       },
       limits: {
-        // Real clamp applied in monoswarm-tools.ts: Math.min(Math.max(x || 8, 1), 50)
         maxAgents: 50,
         maxTasks: 1000,
         maxMemory: `${Math.round(os.totalmem() / 1024 / 1024 / 1024)}GB`,

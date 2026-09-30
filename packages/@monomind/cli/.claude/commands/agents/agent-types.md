@@ -14,7 +14,7 @@ description: Guide to the core agent types in Monomind and how to list the rest.
 - `planner` - Strategic planning
 - `researcher` - Information gathering
 
-## Monoswarm Coordination Agents
+## Coordination Agents
 - `coordinator` - Lead coordination
 - `mesh-coordinator` - Peer-to-peer networks
 - `collective-intelligence-coordinator` - Shared knowledge synthesis
