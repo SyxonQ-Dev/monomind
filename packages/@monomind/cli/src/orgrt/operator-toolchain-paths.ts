@@ -3,39 +3,50 @@
  * #527: the toolchains the operator's own processes run, when a role could
  * write them. node, npm and monomind installed under $HOME (mise, nvm,
  * volta, fnm, asdf, bun, pnpm, …) sit inside the SDK sandbox's allowWrite
- * and the bubblewrap mask's writable $HOME: a role that replaced one would
- * run as the operator, outside every sandbox, the next time the daemon or an
- * operator shell starts it. operator-protected-paths.ts adds these paths to
- * its list, which feeds the file-tool deny, the SDK sandbox's denyWrite, the
- * mask's read-only binds and the planted-path watch.
+ * and the bubblewrap mask's writable $HOME: a role that replaced one, or
+ * planted a file in a directory on PATH, would run as the operator, outside
+ * every sandbox, the next time the daemon or an operator shell starts it.
+ * operator-protected-paths.ts adds these paths to its list, which feeds the
+ * file-tool deny, the SDK sandbox's denyWrite, the mask's read-only binds
+ * and the planted-path watch.
  *
  * Covered, as real paths:
  *   - `process.execPath` and its install root (`…/installs/node/<ver>`);
  *   - the running CLI's package root, and the npm prefix or `node_modules`
  *     it was installed into;
- *   - `node`, `npm`, `npx` and `claude` as found on the daemon's PATH, each
- *     with its install root (a PATH hit that is a symlink: its directory);
- *   - the version-manager roots (VERSION_MANAGERS) that exist, that an
- *     environment variable names, or that a PATH entry lies in.
+ *   - every absolute directory on the daemon's PATH, and the directory
+ *     holding a symlink on the way to one (fnm's `fnm_multishells`);
+ *   - `node`, `npm`, `npx` and `claude` as found on PATH, each with its
+ *     install root (a PATH hit that is a symlink: its directory);
+ *   - the version-manager roots (versionManagerPaths) that exist, that an
+ *     environment variable names, or that a PATH entry lies in; mise's trust
+ *     store and direnv's allow list, which decide what an operator shell
+ *     runs on `cd`.
  * Only what a role could write matters: a path whose nearest existing
- * ancestor is not writable (`/usr/bin/node`) is left out. A directory that
- * holds $HOME, the temp dir or a role's work tree is never protected.
+ * ancestor is not writable (`/usr/bin/node`) is left out, and so is one
+ * that does not exist outside $HOME. A directory that holds $HOME, an XDG
+ * base directory, the temp dir or a role's work tree is never protected.
  *
  * Roles still read and run all of it. A role that installs a global tool
  * gets EROFS; `npm_config_prefix=$TMPDIR/npm-global` installs it in the
- * role's own temp dir instead.
+ * role's own temp dir instead. toolchainRoleEnv moves a role's pnpm store
+ * out of the protected pnpm home.
  */
-import { accessSync, constants, existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
+import { accessSync, constants, existsSync, lstatSync, mkdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { realPath } from './policy-paths.js';
 
-/** The environment variables toolchainPaths reads. */
+/** The environment variables toolchainPaths reads (its memo key). */
 export const TOOLCHAIN_ENV = [
   'PATH',
+  'XDG_DATA_HOME',
+  'XDG_STATE_HOME',
+  'XDG_CONFIG_HOME',
   'MISE_DATA_DIR',
   'MISE_CONFIG_DIR',
+  'MISE_STATE_DIR',
   'NVM_DIR',
   'VOLTA_HOME',
   'FNM_DIR',
@@ -43,6 +54,7 @@ export const TOOLCHAIN_ENV = [
   'BUN_INSTALL',
   'PNPM_HOME',
   'CARGO_HOME',
+  'RUSTUP_HOME',
   'PYENV_ROOT',
   'RBENV_ROOT',
   'GOPATH',
@@ -52,70 +64,95 @@ export const TOOLCHAIN_ENV = [
 /** Binaries looked up on PATH. */
 export const TOOLCHAIN_BINARIES = ['node', 'npm', 'npx', 'claude'];
 
-/** A manager path: `path` (under $HOME unless an env var overrides it), and
- *  the root whose use makes it relevant even before it exists. */
-interface ManagerPath {
-  path: string;
-  /** Set when an environment variable chose this location. */
-  named: boolean;
-  /** In use when this exists, is env-named, or holds a PATH entry. */
-  anchor: string;
+const envDir = (env: NodeJS.ProcessEnv, k: string): string | undefined => {
+  const v = env[k];
+  return v && isAbsolute(v) ? resolve(v) : undefined;
+};
+
+/** The XDG base directories, with their $HOME defaults. */
+export function xdgDirs(home: string, env: NodeJS.ProcessEnv) {
+  return {
+    data: envDir(env, 'XDG_DATA_HOME') ?? join(home, '.local', 'share'),
+    state: envDir(env, 'XDG_STATE_HOME') ?? join(home, '.local', 'state'),
+    config: envDir(env, 'XDG_CONFIG_HOME') ?? join(home, '.config'),
+  };
 }
 
-/** The known version-manager and global-install locations. pnpm and bun
- *  keep a package cache beside their global installs (`store`,
- *  `install/cache`), which a role's own `pnpm install`/`bun install`
- *  writes: only the global parts are protected there. */
+const absPathDirs = (env: NodeJS.ProcessEnv): string[] =>
+  (env.PATH ?? '')
+    .split(delimiter)
+    .filter((d) => isAbsolute(d))
+    .map((d) => resolve(d));
+
+/** A manager path, and the root whose use makes it relevant before it
+ *  exists. `precreate`: created empty at org start when in use and absent,
+ *  so it is bound read-only and never "appears" to the planted-path watch
+ *  when the operator later installs into it. */
+export interface ManagerPath {
+  path: string;
+  /** An environment variable chose it, or its tool is in use. */
+  named: boolean;
+  anchor: string;
+  precreate?: boolean;
+}
+
+/** The known version-manager and global-install locations. bun keeps its
+ *  package cache beside its global installs: only those are protected.
+ *  pnpm's home is protected whole (it is on PATH, where one new file
+ *  shadows `git`); toolchainRoleEnv moves a role's store out of it. */
 export function versionManagerPaths(home: string, env: NodeJS.ProcessEnv): ManagerPath[] {
+  const x = xdgDirs(home, env);
+  const pathDirs = absPathDirs(env);
   const out: ManagerPath[] = [];
-  const envDir = (k: string): string | undefined => {
-    const v = env[k];
-    return v && isAbsolute(v) ? resolve(v) : undefined;
-  };
-  const add = (paths: string[], root: string, named: boolean) => {
-    for (const path of paths) out.push({ path, named, anchor: root });
+  const add = (paths: string[], anchor: string, named: boolean, precreate = false) => {
+    for (const path of paths) out.push({ path, named, anchor, precreate });
   };
   const one = (k: string, fallback: string[]) => {
-    const named = envDir(k);
+    const named = envDir(env, k);
     if (named) add([named], named, true);
-    else for (const f of fallback) add([join(home, f)], join(home, f), false);
+    else for (const f of fallback) add([f], f, false);
   };
-  one('MISE_DATA_DIR', ['.local/share/mise']);
-  one('MISE_CONFIG_DIR', ['.config/mise']);
-  one('NVM_DIR', ['.nvm']);
-  one('VOLTA_HOME', ['.volta']);
-  one('FNM_DIR', ['.fnm', '.local/share/fnm']);
-  one('ASDF_DATA_DIR', ['.asdf']);
-  one('PYENV_ROOT', ['.pyenv']);
-  one('RBENV_ROOT', ['.rbenv']);
-  const cargo = envDir('CARGO_HOME');
+  const miseData = envDir(env, 'MISE_DATA_DIR') ?? join(x.data, 'mise');
+  one('MISE_DATA_DIR', [miseData]);
+  one('MISE_CONFIG_DIR', [join(x.config, 'mise')]);
+  one('NVM_DIR', [join(home, '.nvm')]);
+  one('VOLTA_HOME', [join(home, '.volta')]);
+  one('FNM_DIR', [join(home, '.fnm'), join(x.data, 'fnm')]);
+  one('ASDF_DATA_DIR', [join(home, '.asdf')]);
+  one('RUSTUP_HOME', [join(home, '.rustup')]);
+  one('PYENV_ROOT', [join(home, '.pyenv')]);
+  one('RBENV_ROOT', [join(home, '.rbenv')]);
+  const cargo = envDir(env, 'CARGO_HOME');
   const cargoBin = join(cargo ?? join(home, '.cargo'), 'bin');
-  add([cargoBin], cargoBin, !!cargo);
-  const gobin = envDir('GOBIN') ?? (env.GOPATH ? envDirFirst(env.GOPATH, 'bin') : undefined);
-  add([gobin ?? join(home, 'go', 'bin')], gobin ?? join(home, 'go', 'bin'), !!gobin);
-  const bun = envDir('BUN_INSTALL');
-  const bunRoot = bun ?? join(home, '.bun');
-  add([join(bunRoot, 'bin'), join(bunRoot, 'install', 'global')], bunRoot, !!bun);
-  const pnpm = envDir('PNPM_HOME');
-  const pnpmRoot = pnpm ?? join(home, '.local', 'share', 'pnpm');
-  let entries: string[] = [];
-  try {
-    entries = readdirSync(pnpmRoot).filter((e) => e !== 'store');
-  } catch {
-    /* no pnpm home */
-  }
-  add(
-    [...new Set([...entries, 'global', '.tools'])].map((e) => join(pnpmRoot, e)),
-    pnpmRoot,
-    !!pnpm,
-  );
+  add([cargoBin], cargoBin, !!cargo, true);
+  const gopath = env.GOPATH?.split(delimiter).find((d) => isAbsolute(d));
+  const gobin =
+    envDir(env, 'GOBIN') ?? (gopath ? join(resolve(gopath), 'bin') : join(home, 'go', 'bin'));
+  add([gobin], gobin, !!(env.GOBIN || gopath), true);
+  const bunRoot = envDir(env, 'BUN_INSTALL') ?? join(home, '.bun');
+  add([join(bunRoot, 'bin'), join(bunRoot, 'install', 'global')], bunRoot, !!env.BUN_INSTALL, true);
+  const pnpm = pnpmHome(home, env);
+  add([pnpm], pnpm, !!env.PNPM_HOME, true);
+  // #527 review B2: mise's trust store and direnv's allow list decide what an
+  // operator shell runs when it enters a directory (`[env] _.source`,
+  // `.envrc`): a role that trusted its own planted config would run there.
+  const onPath = (bin: string) => pathDirs.some((d) => existsSync(join(d, bin)));
+  const miseUsed =
+    exists(miseData) ||
+    onPath('mise') ||
+    TOOLCHAIN_ENV.some((k) => k.startsWith('MISE_') && env[k]);
+  const miseState = envDir(env, 'MISE_STATE_DIR') ?? join(x.state, 'mise');
+  for (const d of ['trusted-configs', 'ignored-configs'])
+    add([join(miseState, d)], join(miseState, d), miseUsed, true);
+  add([join(home, '.mise.toml')], join(home, '.mise.toml'), miseUsed);
+  add([join(home, '.tool-versions')], join(home, '.tool-versions'), false);
+  const direnvAllow = join(x.data, 'direnv', 'allow');
+  add([direnvAllow], direnvAllow, onPath('direnv') || exists(join(x.data, 'direnv')), true);
   return out;
 }
 
-const envDirFirst = (list: string, sub: string): string | undefined => {
-  const first = list.split(delimiter).find((d) => isAbsolute(d));
-  return first ? join(resolve(first), sub) : undefined;
-};
+const pnpmHome = (home: string, env: NodeJS.ProcessEnv): string =>
+  envDir(env, 'PNPM_HOME') ?? join(xdgDirs(home, env).data, 'pnpm');
 
 const within = (container: string, p: string): boolean =>
   p === container || p.startsWith(container.endsWith(sep) ? container : container + sep);
@@ -167,16 +204,25 @@ export function onPath(name: string, pathVar: string | undefined): string | unde
 
 const NPM_PREFIX_MARK = `${sep}lib${sep}node_modules${sep}`;
 
-/** Directories under $HOME too general to make read-only as an "install
- *  root": an npm prefix of `~/.local` protects its bin and lib/node_modules
- *  instead. */
-const GENERIC_HOME_DIRS = ['.local', '.local/share', '.local/state', '.config', '.cache'];
-
-function isGeneric(dir: string, home: string): boolean {
+/** Directories too general to make read-only: $HOME, what holds it, and
+ *  the (XDG) base directories under it. An npm prefix of `~/.local`
+ *  protects its bin and lib/node_modules instead. */
+function isGeneric(dir: string, home: string, env: NodeJS.ProcessEnv = {}): boolean {
+  const x = xdgDirs(home, env);
+  const generic = [
+    join(home, '.local'),
+    join(home, '.local', 'share'),
+    join(home, '.local', 'state'),
+    join(home, '.config'),
+    join(home, '.cache'),
+    x.data,
+    x.state,
+    x.config,
+  ];
   return (
     within(dir, home) ||
     within(dir, realPath(home)) ||
-    GENERIC_HOME_DIRS.some((g) => dir === join(home, g) || dir === join(realPath(home), g))
+    generic.some((g) => dir === g || dir === realPath(g))
   );
 }
 
@@ -225,6 +271,36 @@ function binaryPaths(hit: string, home: string): string[] {
   return [link ? realPath(dirname(hit)) : r, r, ...installRoots(r, home)];
 }
 
+const warned = new Set<string>();
+
+/** A PATH directory, and the directory holding each symlink on the way to
+ *  it: a role that could replace the link would redirect the whole entry.
+ *  A symlink whose directory is too general to protect is only reported. */
+function pathEntryPaths(dir: string, home: string, env: NodeJS.ProcessEnv, tmp: string): string[] {
+  const out = [realPath(dir)];
+  for (let p = dir; dirname(p) !== p; p = dirname(p)) {
+    let link = false;
+    try {
+      link = lstatSync(p).isSymbolicLink();
+    } catch {
+      continue;
+    }
+    const parent = dirname(p);
+    if (!link || !roleWritable(parent)) continue;
+    if (isGeneric(parent, home, env) || within(parent, tmp)) {
+      if (!warned.has(p)) {
+        warned.add(p);
+        console.warn(
+          `monomind: PATH entry ${dir} goes through the symlink ${p}, in ${parent}, which org roles can write and which is too general to make read-only; move it to a dedicated directory.`,
+        );
+      }
+      continue;
+    }
+    out.push(realPath(parent));
+  }
+  return out;
+}
+
 export interface ToolchainProbe {
   home: string;
   env: NodeJS.ProcessEnv;
@@ -234,61 +310,109 @@ export interface ToolchainProbe {
   packageRoot?: string | null;
   /** Defaults to os.tmpdir(). */
   tmp?: string;
+  /** Work trees: a PATH entry inside one (its node_modules/.bin) stays
+   *  writable to the role that works there. */
+  exclude?: string[];
 }
+
+const inUse = (m: ManagerPath, pathDirs: string[]): boolean => {
+  const anchor = realPath(m.anchor);
+  return m.named || exists(m.path) || exists(m.anchor) || pathDirs.some((d) => within(anchor, d));
+};
 
 /** Every toolchain path a role must not write; see the module doc. */
 export function toolchainPaths(probe: ToolchainProbe): string[] {
   const { home, env } = probe;
   const tmp = probe.tmp ?? tmpdir();
-  const pathDirs = (env.PATH ?? '')
-    .split(delimiter)
-    .filter((d) => isAbsolute(d))
-    .map((d) => realPath(resolve(d)));
+  const pathDirs = absPathDirs(env);
+  const realPathDirs = pathDirs.map(realPath);
+  const exclude = (probe.exclude ?? []).flatMap((r) => [resolve(r), realPath(r)]);
   const found: string[] = [...binaryPaths(probe.execPath ?? process.execPath, home)];
+  for (const d of pathDirs)
+    if (!exclude.some((r) => within(r, d) || within(r, realPath(d))))
+      found.push(...pathEntryPaths(d, home, env, tmp));
   for (const b of TOOLCHAIN_BINARIES) {
     const hit = onPath(b, env.PATH);
     if (hit) found.push(...binaryPaths(hit, home));
   }
   const pkg = probe.packageRoot === undefined ? defaultPackageRoot() : probe.packageRoot;
   if (pkg) found.push(...packagePaths(pkg, home));
-  for (const m of versionManagerPaths(home, env)) {
-    const anchor = realPath(m.anchor);
-    const inUse =
-      m.named || exists(m.path) || exists(m.anchor) || pathDirs.some((d) => within(anchor, d));
-    if (inUse) found.push(realPath(m.path));
-  }
+  for (const m of versionManagerPaths(home, env))
+    if (inUse(m, realPathDirs)) found.push(realPath(m.path));
+  const underHome = (p: string) => within(home, p) || within(realPath(home), p);
   const keep = (p: string) =>
-    !isGeneric(p, home) && !within(p, tmp) && !within(p, realPath(tmp)) && roleWritable(p);
+    !isGeneric(p, home, env) &&
+    !within(p, tmp) &&
+    !within(p, realPath(tmp)) &&
+    roleWritable(p) &&
+    // Watching an absent path outside $HOME would reach another user's
+    // tree (a test's fake HOME with the real XDG dirs).
+    (exists(p) || underHome(p));
   const kept = [...new Set(found)].filter(keep);
   // One entry for a tree: the mise root, not also each install inside it.
   return kept.filter((p) => !kept.some((q) => q !== p && within(q, p)));
 }
 
+/** #527 review M2: create what toolchainPaths expects but is absent (pnpm's
+ *  home, bun's global dirs, a cargo or Go bin dir in use, mise's trust
+ *  store, direnv's allow list), so it is bound read-only from the start and
+ *  the operator's own `pnpm add -g` never looks like a plant. Only under
+ *  $HOME. */
+export function ensureToolchainDirs(home: string, env: NodeJS.ProcessEnv): void {
+  const pathDirs = absPathDirs(env).map(realPath);
+  const underHome = (p: string) => within(home, p) || within(realPath(home), p);
+  for (const m of versionManagerPaths(home, env)) {
+    if (!m.precreate || exists(m.path) || !underHome(m.path) || !inUse(m, pathDirs)) continue;
+    try {
+      mkdirSync(m.path, { recursive: true });
+    } catch {
+      /* unwritable: nothing can plant it either */
+    }
+  }
+}
+
+/** Environment for a role's processes: its pnpm store outside the
+ *  protected pnpm home (pnpm keeps the store inside it by default), and no
+ *  pnpm self-install into `<pnpm home>/.tools`. An operator-set store is
+ *  kept. */
+export function toolchainRoleEnv(home: string, env: NodeJS.ProcessEnv): Record<string, string> {
+  const out: Record<string, string> = { npm_config_manage_package_manager_versions: 'false' };
+  if (!env.npm_config_store_dir && exists(pnpmHome(home, env)))
+    out.npm_config_store_dir = join(xdgDirs(home, env).data, 'pnpm-store');
+  return out;
+}
+
 const memo = new Map<string, string[]>();
 
-/** toolchainPaths for this process, computed once per home and toolchain
- *  environment (the org start's): the file tools consult it on every write. */
-export function operatorToolchainPaths(home: string, env: NodeJS.ProcessEnv): string[] {
-  const key = JSON.stringify([home, ...TOOLCHAIN_ENV.map((k) => env[k] ?? null)]);
+/** toolchainPaths for this home, toolchain environment and set of work
+ *  trees, cached until the next org or session start
+ *  (ensureOperatorProtectedPaths resets it): the file tools consult it on
+ *  every write. */
+export function operatorToolchainPaths(
+  home: string,
+  env: NodeJS.ProcessEnv,
+  exclude: string[] = [],
+): string[] {
+  const key = JSON.stringify([home, exclude, ...TOOLCHAIN_ENV.map((k) => env[k] ?? null)]);
   let paths = memo.get(key);
   if (!paths) {
-    paths = toolchainPaths({ home, env });
+    paths = toolchainPaths({ home, env, exclude });
     memo.set(key, paths);
   }
   return paths;
 }
 
-/** For tests: forget the computed lists. */
+/** Forget the computed lists (every org and session start). */
 export function resetToolchainMemo(): void {
   memo.clear();
 }
 
 /** The directories on the way to each protected path that a role could
- *  rename (their parent is writable), stopping at $HOME and the temp dir:
- *  bound onto themselves (a mount point cannot be renamed), so no role can
- *  move `~/.local/share` aside and plant a new `mise/…` in its place. Paths
- *  inside `roots` (the org root and cwd, whose binds already hold them) are
- *  skipped, and so are directories inside another protected path. */
+ *  rename (their parent is writable), stopping at $HOME, the temp dir and
+ *  the work tree holding the path: bound onto themselves (a mount point
+ *  cannot be renamed), so no role can move `~/.local/share` aside and plant
+ *  a new `mise/…` in its place. Directories inside another protected path
+ *  are skipped: nothing there can be renamed. */
 export function mountPointAncestors(
   paths: string[],
   ctx: { home: string; roots: string[]; tmp?: string },
@@ -298,9 +422,11 @@ export function mountPointAncestors(
   const out = new Set<string>();
   const covered = paths.map(realPath);
   for (const p of covered) {
-    if (roots.some((r) => within(r, p))) continue;
+    // #527 review M1: inside a work tree, up to that tree (its own binds
+    // hold it), not skipped: a checkout the daemon runs can live there.
+    const holders = roots.filter((r) => within(r, p) && r !== p);
     for (let d = dirname(p); dirname(d) !== d && !stops.has(d); d = dirname(d)) {
-      // Inside a protected (read-only) path: nothing there can be renamed.
+      if (holders.some((r) => within(d, r))) break;
       if (!exists(d) || covered.some((q) => within(q, d))) continue;
       if (!canWrite(dirname(d))) break;
       out.add(d);

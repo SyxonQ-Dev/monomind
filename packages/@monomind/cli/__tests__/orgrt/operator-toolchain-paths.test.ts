@@ -77,7 +77,9 @@ describe('the toolchain list', () => {
     const home = scratch('tc-h-');
     const node = join(home, '.local/share/mise/installs/node/22.12.0/bin/node');
     exe(node);
-    expect(probe(home, {}, node)).toEqual([join(home, '.local/share/mise')]);
+    const paths = probe(home, {}, node);
+    expect(paths).toContain(join(home, '.local/share/mise'));
+    expect(paths.filter((p) => p.includes('installs'))).toEqual([]);
     const other = scratch('tc-o-');
     exe(join(other, 'node-v22/bin/node'));
     expect(probe(home, {}, join(other, 'node-v22/bin/node'))).toContain(join(other, 'node-v22'));
@@ -109,29 +111,27 @@ describe('the toolchain list', () => {
       CARGO_HOME: join(alt, 'cargo'),
       GOBIN: join(alt, 'gobin'),
     };
+    // Outside $HOME only what exists is covered.
+    for (const d of ['mise', 'nvm', 'volta', 'pnpm', 'bun/bin', 'bun/install/global', 'cargo/bin', 'gobin']) mkdirSync(join(alt, d), { recursive: true });
     mkdirSync(join(home, '.nvm'));
     const paths = probe(home, env);
-    for (const p of ['mise', 'nvm', 'volta', 'pnpm/global', 'pnpm/.tools', 'bun/bin', 'bun/install/global', 'cargo/bin', 'gobin'])
+    for (const p of ['mise', 'nvm', 'volta', 'pnpm', 'bun/bin', 'bun/install/global', 'cargo/bin', 'gobin'])
       expect(paths).toContain(join(alt, p));
     // The override replaces the default location.
     expect(paths).not.toContain(join(home, '.nvm'));
   });
 
-  it('pnpm and bun: the global installs, never the package store a role’s own install writes', () => {
+  it('pnpm’s home as a whole; bun’s global installs but not its package cache', () => {
     const home = scratch('tc-pn-');
     const pnpm = join(home, '.local/share/pnpm');
     mkdirSync(join(pnpm, 'store/v10'), { recursive: true });
-    exe(join(pnpm, 'pnpm'));
     mkdirSync(join(home, '.bun/install/cache'), { recursive: true });
     const paths = probe(home);
-    expect(paths).toEqual(
-      expect.arrayContaining([join(pnpm, 'pnpm'), join(pnpm, 'global'), join(pnpm, '.tools')]),
-    );
+    expect(paths).toContain(pnpm);
     expect(paths).toEqual(
       expect.arrayContaining([join(home, '.bun/bin'), join(home, '.bun/install/global')]),
     );
-    for (const p of [pnpm, join(pnpm, 'store'), join(home, '.bun'), join(home, '.bun/install/cache')])
-      expect(paths).not.toContain(p);
+    for (const p of [join(home, '.bun'), join(home, '.bun/install/cache')]) expect(paths).not.toContain(p);
   });
 
   it('npm and npx on PATH: a symlinked shim covers its directory and the real npm prefix', () => {
@@ -188,7 +188,7 @@ describe('the toolchain list', () => {
     expect(paths.some((p) => home.startsWith(p))).toBe(false);
     expect(installRoots(join(home, 'bin/node'), home)).toEqual([join(home, 'bin'), join(home, 'lib/node_modules')]);
     if (process.getuid?.() !== 0 && existsSync('/usr/bin/env'))
-      expect(probe(home, { PATH: '/usr/bin' }, '/usr/bin/env')).toEqual([]);
+      expect(probe(home, { PATH: '/usr/bin' }, '/usr/bin/env').filter((p) => !p.startsWith(home))).toEqual([]);
   });
 
   it('a toolchain dir holding the role’s work tree is left writable', () => {
@@ -235,6 +235,7 @@ describe('one list, every layer', () => {
     const r = buildClaudeRestrictions(guard as NonNullable<typeof guard>, undefined, { cwd: root, orgRoot: root, home, tmp: scratch('tc-t-'), env }, true);
     const fs = (r.sandbox as { filesystem: { allowWrite: string[]; denyWrite: string[] } }).filesystem;
     expect(fs.denyWrite).toContain(nvm);
+    expect(fs.denyWrite).toContain(join(home, '.local/share/pnpm'));
     expect(fs.allowWrite).toContain(join(home, '.local/share'));
     expect(r.disallowedTools).toContain(`Edit(/${nvm}/**)`);
 
@@ -246,8 +247,9 @@ describe('one list, every layer', () => {
     expect(anchor).toBeGreaterThan(0);
 
     // The planted watch: an entry that does not exist yet is a candidate.
-    expect(plantCandidates({ home, env, orgRoot: root, cwd: root })).toContain(
-      join(home, '.local/share/pnpm/global'),
+    const cargoBin = join(home, '.cargo/bin');
+    expect(plantCandidates({ home, env: { ...env, PATH: cargoBin }, orgRoot: root, cwd: root })).toContain(
+      cargoBin,
     );
   });
 });

@@ -13,8 +13,9 @@
  *   - `~/.npm/_npx` (what `npx -y monomind …` runs), `~/.npmrc`,
  *     `~/.local/bin`, and shell startup files beyond HOME_DENY_WRITE;
  *   - #527: the node, npm, claude and monomind installs the operator's
- *     processes run, and the version-manager roots they live in
- *     (operator-toolchain-paths.ts).
+ *     processes run, the version-manager roots they live in, the directories
+ *     on PATH, mise's trust store and direnv's allow list
+ *     (operator-toolchain-paths.ts), and toolchain config files.
  *
  * Enforced three ways: the SDK sandbox's `denyWrite`, read-only binds in the
  * bubblewrap authority mask, and the file tools' deny pass (policy.ts). The
@@ -26,7 +27,13 @@
 
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
-import { mountPointAncestors, operatorToolchainPaths } from './operator-toolchain-paths.js';
+import {
+  ensureToolchainDirs,
+  mountPointAncestors,
+  operatorToolchainPaths,
+  resetToolchainMemo,
+  xdgDirs,
+} from './operator-toolchain-paths.js';
 
 /** `~/.monomind` entries a role's own `monomind` commands write: browser
  *  automation state, the embedding-model cache, per-project memory, update
@@ -105,7 +112,18 @@ export const HOME_OPERATOR_EXEC = [
   '.config/fish',
   '.bashrc.d',
   '.zshrc.d',
+  // #527 review M3: config the operator's toolchain commands load and act
+  // on (install hooks, env files, default global packages). The XDG ones
+  // are added in protectedCandidates.
+  '.bunfig.toml',
+  '.cargo/env',
+  '.cargo/config.toml',
+  '.yarnrc.yml',
+  '.default-npm-packages',
 ];
+
+/** Under $XDG_CONFIG_HOME (default ~/.config), like HOME_OPERATOR_EXEC. */
+export const XDG_CONFIG_OPERATOR_EXEC = ['pnpm/rc', 'go/env'];
 
 /** Inside ~/.claude, the entries Claude Code executes or obeys. Used by the
  *  bubblewrap mask, which also wraps Claude Code itself and so cannot make
@@ -203,8 +221,11 @@ function protectedCandidates(ctx: ProtectedCtx): string[] {
     join(mmHome, 'enable-terminal.json'),
     ...monomindEntries,
     ...HOME_OPERATOR_EXEC.map((p) => join(ctx.home, p)),
+    ...XDG_CONFIG_OPERATOR_EXEC.map((p) => join(xdgDirs(ctx.home, ctx.env).config, p)),
     // #527: never one that holds the role's own work tree.
-    ...operatorToolchainPaths(ctx.home, ctx.env).filter((t) => !roots.some((r) => within(t, r))),
+    ...operatorToolchainPaths(ctx.home, ctx.env, roots).filter(
+      (t) => !roots.some((r) => within(t, r)),
+    ),
   ];
   return [...new Set(paths)];
 }
@@ -266,4 +287,8 @@ export function ensureOperatorProtectedPaths(ctx: {
   } catch {
     /* exists (the operator's own choice) or unwritable */
   }
+  // #527: the toolchain list is recomputed for every org and session start,
+  // after the directories it expects are created.
+  ensureToolchainDirs(ctx.home, ctx.env);
+  resetToolchainMemo();
 }

@@ -119,6 +119,16 @@ export function authorityMaskArgs(ctx: {
   if (ctx.orgRoot)
     for (const d of [ctx.orgRoot, join(ctx.orgRoot, '.monomind')].map(realPath))
       if (existsSync(d)) args.push('--bind', d, d);
+  // A writable bind above whose source holds one of those mount points hid
+  // it again (bwrap binds the host's tree): repeat it — before the orgs
+  // layout, whose read-only binds a later host bind would uncover, and never
+  // inside a read-only bind above.
+  const inside = (t: string, d: string) => d !== t && d.startsWith(t.endsWith(sep) ? t : t + sep);
+  const covering = bindTargets(args.slice(afterAnchors), '--bind');
+  const readOnly = bindTargets(args.slice(afterAnchors), '--ro-bind');
+  for (const d of anchors)
+    if (covering.some((t) => inside(t, d)) && !readOnly.some((t) => t === d || inside(t, d)))
+      args.push('--bind', d, d);
   // The orgs dir read-only (no new org definition, runfile or decision file,
   // no rename), the dirs roles work in read-write again, then the authority
   // files those still hold read-only (org-authority-files.ts).
@@ -127,12 +137,6 @@ export function authorityMaskArgs(ctx: {
   for (const d of orgs.readOnly) args.push('--ro-bind', d, d);
   for (const d of orgs.writable) args.push('--bind', d, d);
   for (const f of orgs.files) args.push('--ro-bind', f, f);
-  // A writable bind above whose source holds one of those mount points hid
-  // it again (bwrap binds the host's tree): repeat it.
-  const covering = bindTargets(args.slice(afterAnchors), '--bind');
-  for (const d of anchors)
-    if (covering.some((t) => d !== t && d.startsWith(t.endsWith(sep) ? t : t + sep)))
-      args.push('--bind', d, d);
   // #502 review: what the operator's own processes run or trust, and the
   // shell/git config that would undo the guard.
   for (const p of new Set(

@@ -367,7 +367,8 @@ uses them must read `sandbox_applied` (and `native_sandbox`) rather than assume 
   like any role that can read the operator-credential directory, it can sign.
   The same layers keep a sandboxed role from replacing what the operator's own processes run:
   the node, npm, claude and monomind installs under `$HOME` (mise, nvm, volta, fnm, asdf, bun,
-  pnpm, …) are read-only to it, and the directories above them cannot be renamed aside (#527;
+  pnpm, …), the writable directories on `PATH`, mise's trust store and direnv's allow list are
+  read-only to it, and the directories above them cannot be renamed aside (#527;
   [`org-runtime.md`](org-runtime.md), "What the operator's own sessions run").
 
 ## 4. Residual risks (accepted, not mitigated further by this issue)

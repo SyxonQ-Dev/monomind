@@ -314,6 +314,12 @@ describe.skipIf(
       ANTHROPIC_BASE_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
       ANTHROPIC_API_KEY: ['test', 'toolchain'].join('-'),
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+      // The real XDG dirs would point Claude Code and the tools at the
+      // operator's home.
+      XDG_DATA_HOME: undefined,
+      XDG_STATE_HOME: undefined,
+      XDG_CONFIG_HOME: undefined,
+      XDG_CACHE_HOME: undefined,
       CLAUDECODE: undefined,
       CLAUDE_CONFIG_DIR: undefined,
       MONOMIND_ORGRT_OPERATOR_DIR: undefined,
