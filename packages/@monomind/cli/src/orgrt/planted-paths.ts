@@ -164,12 +164,14 @@ export function strayClaudeConfigs(
   home: string,
   env: NodeJS.ProcessEnv,
   operatorDir = defaultOperatorDir(),
+  opts: { readOnly?: boolean } = {},
 ): string[] {
   if (exists(join(operatorDir, ALLOW_LEGACY_CONFIG))) return [];
   const found = claudeConfigCandidates(home, env);
   const rec = readConfigRecord(operatorDir) ?? {};
   if (!rec[home]) {
-    writeConfigRecord(operatorDir, { ...rec, [home]: found });
+    // Read-only (doctor --read-only/--json): no first look to compare with.
+    if (!opts.readOnly) writeConfigRecord(operatorDir, { ...rec, [home]: found });
     return [];
   }
   const trusted = new Set(rec[home]);
