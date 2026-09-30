@@ -52,18 +52,23 @@ function readBlueprintBytes(root: string, name: string): Buffer | undefined {
 const bytesDigest = (bytes: Buffer): string =>
   `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 
+/** The one value recorded for a blueprint that can't be read. Fixed, so the
+ *  hash doesn't depend on which check failed first (a cached snapshot can
+ *  report a changed package differently from a fresh one) or on local paths. */
+export const BLUEPRINT_UNAVAILABLE = 'unavailable: not active for org on this machine';
+
 /**
  * #571: what the signed hash records for blueprint `name` — `sha256:<hex>` of
- * its `blueprint.json` bytes, or `unavailable: <reason>` when no active `org`
+ * its `blueprint.json` bytes, or BLUEPRINT_UNAVAILABLE when no active `org`
  * blueprint of that name can be read. Start and reload resolve a blueprint
  * only while its bytes still have the digest that was verified.
  */
 export function blueprintDigest(root: string, name: string): string {
   try {
     const bytes = readBlueprintBytes(root, name);
-    return bytes ? bytesDigest(bytes) : 'unavailable: not active for org on this machine';
-  } catch (e) {
-    return `unavailable: ${(e as Error).message}`;
+    return bytes ? bytesDigest(bytes) : BLUEPRINT_UNAVAILABLE;
+  } catch {
+    return BLUEPRINT_UNAVAILABLE;
   }
 }
 

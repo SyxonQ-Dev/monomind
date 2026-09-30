@@ -48,6 +48,8 @@ const ORG = {
 const BP_CANONICAL =
   '{"blueprints":{"sec":"sha256:bef85f02692707ae3179d10366050315d13b4ecd6383eba0a90bc1212725dc53"},' +
   '"definition":{"name":"fx","roles":[{"blueprint":"sec","id":"boss","reports_to":null,"type":"boss"}]}}';
+/** Documented value for a blueprint that can't be loaded. */
+const UNAVAILABLE = 'unavailable: not active for org on this machine';
 const BP_HASH = '2db4cf8c4596e17c97bd20a66d30c56cdaccf6bf9fc71a4e57adbadf2d7e7508';
 /** The #568 bare fixture: an org without blueprints hashes as before. */
 const BARE =
@@ -103,6 +105,13 @@ describe('the signable hash binds blueprint content', () => {
     expect(signOrgDef(root, 'fx', readDef(root)).hash).toBe(BP_HASH);
   });
 
+  it('records the documented fixed value for a blueprint that is not active', () => {
+    expect(instructionsDigests(ORG, scratch('osbp-empty-'))).toEqual({ 'blueprint:sec': UNAVAILABLE });
+    const root = project();
+    writeDef(root, { ...ORG, roles: [{ ...ORG.roles[0], blueprint: 'nope' }] });
+    expect(instructionsDigests(readDef(root), root)).toEqual({ 'blueprint:nope': UNAVAILABLE });
+  });
+
   it('leaves orgs without blueprints unchanged, catalog or not', () => {
     const root = project();
     expect(computeOrgDefHash(JSON.parse(BARE), root)).toBe(BARE_HASH);
@@ -123,7 +132,8 @@ describe('the signable hash binds blueprint content', () => {
     const pkg = stage(root, BP_JSON); // same bytes, same digest: still signed
     expect(verifyOrgDef(root, 'fx', readDef(root))).toEqual({ ok: true });
     writeFileSync(join(pkg.dir, 'blueprint.json'), BP_JSON.replace('audit', 'evil'));
-    expect(instructionsDigests(readDef(root), root)['blueprint:sec']).toMatch(/^unavailable: /);
+    // One fixed value, whichever check failed (a cached snapshot or a fresh one).
+    expect(instructionsDigests(readDef(root), root)['blueprint:sec']).toBe(UNAVAILABLE);
     expect(verifyOrgDef(root, 'fx', readDef(root))).toMatchObject({ ok: false, reason: 'changed' });
   });
 });

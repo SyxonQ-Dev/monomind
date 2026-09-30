@@ -932,15 +932,27 @@ The hash `--expect-hash` compares, `--check` reports and the signature records i
 4. **Digest the blueprints.** For each role in `roles` whose `blueprint` is a string, add the
    entry `<blueprint>` (the name itself, once per name however many roles use it). The value is
    `sha256:` followed by the lowercase hex SHA-256 of the bytes of that blueprint's
-   `blueprint.json`, the one a role would get its `skills` and `skill_pool` from at start: in the
-   project's `.monomind/catalog/state.json`, the entry with `id` `blueprint:<name>`, `status`
-   `active` and `org` in `targets`, whose package directory
-   `.monomind/catalog/packages/<name>/<first 12 hex characters of the entry's sha256>/` still
-   has that `sha256` (SHA-256 over every file in the directory, paths sorted by UTF-16 code units,
-   each fed as a big-endian u32 byte length of the UTF-8 path, the path, a big-endian u64 byte
-   length of the content, and the content). A blueprint monomind can't load that way (none
-   active for `org`, or its package no longer matches) is recorded as `unavailable: <reason>`;
-   take the `hash` from `--check` for such an org.
+   `blueprint.json`, the one a role would get its `skills` and `skill_pool` from at start. That
+   file is found like this:
+   - In the project's `.monomind/catalog/state.json` (it must parse and match its schema, where a
+     name is `[a-z0-9][a-z0-9-]{0,63}`), take the entry in `entries` with `id`
+     `blueprint:<name>`, `status` `"active"` and `"org"` in its `targets` array.
+   - Its package directory is `.monomind/catalog/packages/<name>/<sha12>/`, where `<sha12>` is the
+     first 12 characters of the entry's `sha256`. After resolving symlinks it must still lie inside
+     `.monomind/catalog/packages/`, and must not itself be a symlink.
+   - The package must still have the entry's `sha256`, the lowercase hex SHA-256 of this byte
+     stream: list every regular file under the directory, recursing into subdirectories (other
+     entry types add nothing; any symlink anywhere fails the package), as its path relative to the
+     package directory with `/` between components. Sort the paths by UTF-16 code units. For each
+     path, feed the UTF-8 path's byte length as a big-endian u32, the path's UTF-8 bytes, the
+     file's byte length as a big-endian u64, then the file's bytes.
+   - Its `blueprint.json` must parse as JSON (it need not be a valid blueprint; the digest is of
+     the bytes either way).
+
+   If any of this fails (no such entry, the package is missing, escapes the store, holds a symlink,
+   has another digest, or its `blueprint.json` is missing or not JSON), the value is exactly the
+   string `unavailable: not active for org on this machine`. Such an org can be signed, but `org
+   run` refuses it until the blueprint is active again, and then its hash changes.
 5. **Combine.** With no digests of either kind, the value to hash is the projection itself.
    Otherwise it is an object with `definition` (the projection), plus `instructions` (the
    instructions-file digests) if there is at least one, plus `blueprints` (the blueprint digests)
