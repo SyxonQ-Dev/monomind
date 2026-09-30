@@ -2,6 +2,7 @@
 // Extracted from daemon.ts — org_respawn_role: mid-run replacement of one role.
 import { holdReplacedRoleForBudget, orgCeilingDetail } from './budget-closure.js';
 import type { OrgDaemon } from './daemon.js';
+import type { AgentRuntime } from './daemon-types.js';
 import { resolveRoleProvider } from './provider.js';
 import {
   buildRespawnReceipt,
@@ -186,12 +187,27 @@ export async function respawnRole(
   };
   // The budget closed during the replacement: keep the (closed) old
   // incarnation, hold its tasks and report the replacement as not done.
-  const cancelForBudget = (detail: string): RespawnReceipt => {
-    // Mail swept out of the old mailbox rides in queuedDuringSwap; what is
-    // still in the old mailbox needn't. A reopen delivers the rest
-    // (budget-closure.ts respawnFromCheckpoint).
-    const inBox = new Set(slot.runtime!.mailbox.serialize().queue);
-    slot.queuedDuringSwap = slot.queuedDuringSwap.filter((m) => !inBox.has(m));
+  // The spend retired at step 9 and where step 8's reclaimed mail starts in
+  // queuedDuringSwap — both undone if the replacement is cancelled.
+  let retiredBefore = { ...slot.retiredUsage };
+  let reclaimed = { start: 0, count: 0 };
+  const cancelForBudget = (detail: string, stopped?: AgentRuntime): RespawnReceipt => {
+    // The old incarnation stays in `agents`, where orgBudgetedUsage counts
+    // its spend: un-retire it (step 9), or it is counted twice — and a
+    // reopen (respawnFromCheckpoint) carries it over again. A replacement
+    // stopped after it started retires what it spent in its start window,
+    // which nothing else counts.
+    slot.retiredUsage = {
+      tokens: retiredBefore.tokens + (stopped?.policy.budgetedUsage ?? 0),
+      costUsd: retiredBefore.costUsd + (stopped?.metrics.costUsd ?? 0),
+    };
+    // Mail swept out of the old mailbox rides in queuedDuringSwap; the
+    // entries step 8 reclaimed are still in the old mailbox, so drop exactly
+    // those (by position — mailbox entries carry no id). A reopen delivers
+    // the rest (budget-closure.ts respawnFromCheckpoint).
+    slot.queuedDuringSwap.splice(reclaimed.start, reclaimed.count);
+    // Not a replacement: give back the max_role_respawns attempt.
+    slot.respawnCount = Math.max(0, slot.respawnCount - 1);
     slot.phase = 'running';
     running.respawning.delete(input.roleId);
     holdReplacedRoleForBudget(running, input.roleId, detail);
@@ -248,8 +264,10 @@ export async function respawnRole(
   // abandoned mid-yield by a forced stop for at-least-once redelivery.
   oldRuntime.mailbox.reclaimInFlight();
   const reclaimedQueue = oldRuntime.mailbox.serialize().queue;
+  reclaimed = { start: slot.queuedDuringSwap.length, count: reclaimedQueue.length };
   slot.queuedDuringSwap.push(...reclaimedQueue);
   // Step 9: retire accounting BEFORE replacing the runtime.
+  retiredBefore = { ...slot.retiredUsage };
   slot.retiredUsage = {
     // Budgeted basis: this total is summed with live policy.budgetedUsage
     // against the org-wide budget_tokens ceiling (ADR-O001 D1), so the two
@@ -313,7 +331,7 @@ export async function respawnRole(
   if (running.orgBudgetClosed) {
     newAbort.abort();
     newRuntime.mailbox.close('token-budget');
-    return cancelForBudget(orgCeilingDetail(running));
+    return cancelForBudget(orgCeilingDetail(running), newRuntime);
   }
   if (!ready) {
     // Step 12: rollback — one attempt with the prior effective config.

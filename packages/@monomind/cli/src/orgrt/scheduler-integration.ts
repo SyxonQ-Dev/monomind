@@ -2,7 +2,7 @@
 // Extracted from daemon.ts — auto-wake, boss restart, deferred role spawns.
 
 import { waitForCapacity } from '../utils/resource-governor.js';
-import { spawnClosedDetail } from './budget-closure.js';
+import { holdTasksForBudget, spawnClosedDetail } from './budget-closure.js';
 import { pushMessage } from './cross-org.js';
 import { activeRoleCount, OrgDaemon, type RunningOrg } from './daemon.js';
 import { dispatchReadyTasks, queueDispatch } from './decisions.js';
@@ -18,8 +18,10 @@ import type { OrgRole } from './types.js';
 function cancelIfBudgetClosed(running: RunningOrg, role: OrgRole): boolean {
   const detail = spawnClosedDetail(running, role.id);
   if (!detail) return false;
-  if (running.orgBudgetClosed && !running.agents.has(role.id))
+  if (running.orgBudgetClosed && !running.agents.has(role.id)) {
     (running.orgBudgetPendingRoles ??= new Map()).set(role.id, role);
+    holdTasksForBudget(running, role.id, detail);
+  }
   running.bus.emit({
     type: 'audit',
     from: role.id,
@@ -201,6 +203,10 @@ function runDeferredSpawn(
   maxAttempts: number,
   waitTurn: () => Promise<{ ok: boolean; reason?: string }>,
 ): void {
+  // #557 review: the ceiling may have closed while the caller waited (deliver()
+  // waits up to 60s for host capacity) — set the role aside and hold its
+  // tasks now rather than after the first retry turn (up to 5 minutes).
+  if (running.orgBudgetClosed && cancelIfBudgetClosed(running, role)) return;
   const deferred = (running.deferredSpawns ??= new Map());
   if (deferred.has(role.id)) return;
   const entry = { role, gate, noted: new Set<string>() };

@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { activeRoleCount, OrgDaemon, type RunningOrg } from '../../src/orgrt/daemon.js';
+import { orgBudgetedUsage } from '../../src/orgrt/budget-closure.js';
 import { dagCreateTask } from '../../src/orgrt/decisions.js';
 
 function writeOrg(
@@ -44,6 +45,9 @@ function writeOrg(
 // A message's input tokens are read from its text: the largest `tok=<n>` in
 // it (a coalesced turn-end nudge can repeat an earlier task's title).
 const received = new Map<string, string[]>();
+// Tokens every session has reported and had consumed (input + output: the
+// budgeted basis) — the org's true spend, counted outside the runtime.
+let reported = 0;
 const got = (role: string, text: string) => (received.get(role) ?? []).some((m) => m.includes(text));
 const tokQuery = ({ prompt, options }: any) =>
   (async function* () {
@@ -60,6 +64,8 @@ const tokQuery = ({ prompt, options }: any) =>
         usage: { input_tokens: tok, output_tokens: 1 },
         total_cost_usd: 0,
       };
+      // Runs once the session pulled past the result, i.e. recorded it.
+      reported += tok + 1;
     }
   })();
 
@@ -210,6 +216,7 @@ describe('#557 review — budget closure during a role replacement', () => {
   it('the ceiling closing while the replacement starts stops it instead of publishing it', async () => {
     const root = mkdtempSync(join(tmpdir(), 'budget-respawn-'));
     received.clear();
+    reported = 0;
     writeOrg(root, 1000, {
       maxConcurrent: 4,
       runConfig: { max_role_respawns: 1, respawn_start_timeout_ms: 2000 },
@@ -223,6 +230,8 @@ describe('#557 review — budget closure during a role replacement', () => {
     const starts = () =>
       running.busEvents().filter((e) => e.from === 'workerA' && e.msg === 'session starting').length;
     const startsBefore = starts();
+    // Before: the org's spend is exactly what the sessions reported.
+    expect(await waitUntil(() => orgBudgetedUsage(running) === reported)).toBe(true);
 
     const pending = d.respawnRole('o', 'boss', {
       roleId: 'workerA',
@@ -247,5 +256,45 @@ describe('#557 review — budget closure during a role replacement', () => {
     expect(running.orgBudgetClosed?.has('workerA')).toBe(true);
     expect(running.taskDag!.get(a1.id)?.status).toBe('blocked');
     expect(running.taskDag!.get(a1.id)?.blockedReason).toMatch(/org-wide budget_tokens exhausted/);
+
+    // Spend stays exact: the old incarnation counted once (it is still in
+    // `agents`), the stopped replacement's start-window spend counted too.
+    const slot = running.roleSlots.get('workerA')!;
+    expect(slot.retiredUsage.tokens).toBeGreaterThan(0); // the replacement spent something
+    expect(await waitUntil(() => orgBudgetedUsage(running) === reported)).toBe(true);
+    // The cancelled replacement did not use up the one allowed respawn.
+    expect(slot.respawnCount).toBe(0);
+
+    // And after the reopen, nothing is carried over twice.
+    writeOrg(root, 100_000, {
+      maxConcurrent: 4,
+      runConfig: { max_role_respawns: 1, respawn_start_timeout_ms: 2000 },
+    });
+    d.reloadOrgDef('o');
+    expect(running.agents.get('workerA')).not.toBe(oldRuntime);
+    expect(running.agents.get('workerA')!.mailbox.isClosed).toBe(false);
+    expect(await waitUntil(() => orgBudgetedUsage(running) === reported)).toBe(true);
+  }, 20_000);
+
+  it("a resource deferral registered after the ceiling closed sets the role aside and holds its tasks at once", async () => {
+    const { d, running } = await startWithDeferredWorkerB();
+    dagCreateTask(d, 'o', 'boss', 'spend tok=1200', 'workerA', []);
+    expect(await waitUntil(() => events(running, 'org-budget-exhausted').length === 1)).toBe(true);
+    // As if deliver() had taken workerC out of pendingRoles, then waited out
+    // its 60s host-capacity check while the ceiling closed.
+    running.orgBudgetPendingRoles!.delete('workerC');
+    const t = JSON.parse(dagCreateTask(d, 'o', 'boss', 'c work', 'workerC', []));
+    expect(running.taskDag!.get(t.id)?.status).toBe('ready');
+    const workerC = running.def.roles.find((r) => r.id === 'workerC')!;
+    const spawned: string[] = [];
+    d.scheduleDeferredSpawn('o', running, workerC, (r) => spawned.push(r.id));
+
+    expect(running.deferredSpawns?.has('workerC')).toBe(false);
+    expect(running.orgBudgetPendingRoles?.has('workerC')).toBe(true);
+    expect(running.taskDag!.get(t.id)?.status).toBe('blocked');
+    expect(running.taskDag!.get(t.id)?.blockedReason).toMatch(
+      /assignee "workerC" closed: org-wide budget_tokens exhausted/,
+    );
+    expect(spawned).toEqual([]);
   }, 20_000);
 });

@@ -100,6 +100,12 @@ export function spawnClosedDetail(running: RunningOrg, roleId: string): string |
   return running.orgBudgetClosed ? orgDetail(running) : budgetClosureDetail(running, roleId);
 }
 
+/** Hold `roleId`'s open tasks with a budget-closure reason (#557 review: a
+ *  deferral registered while the org-wide ceiling is spent). */
+export function holdTasksForBudget(running: RunningOrg, roleId: string, detail: string): void {
+  holdOpenTasks(running, roleId, detail);
+}
+
 /** #557 review: a replacement incarnation found the budget closed before it
  *  was published (role-respawn.ts). The old incarnation stays in `agents`;
  *  under the org-wide ceiling it is closed and recorded like the roles the
