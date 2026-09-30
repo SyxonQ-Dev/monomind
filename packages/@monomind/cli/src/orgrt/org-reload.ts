@@ -6,6 +6,12 @@ import { resolveOrgDefBlueprints } from '../catalog/blueprints.js';
 import { reopenBudgetClosedRoles, rolesOnDefTokenCaps } from './budget-closure.js';
 import type { OrgDaemon } from './daemon.js';
 import { isEndpointRole } from './endpoint-roles.js';
+import {
+  assertOrgDefSigned,
+  instructionsDigests,
+  OrgSignatureError,
+  pinInstructionDigests,
+} from './org-signature.js';
 import { expandOrgPolicyPathVars, promptVarsFor } from './prompt-vars.js';
 import { computeReplacementBudget } from './role-slot.js';
 import { ORG_DIR, OrgDefSchema } from './types.js';
@@ -17,10 +23,31 @@ export function reloadOrgDef(
   const running = daemon.orgs.get(name);
   if (!running) throw new Error(`org ${name} is not running`);
   const defPath = join(daemon.root, ORG_DIR, `${name}.json`);
-  const parsedDef = OrgDefSchema.parse(JSON.parse(readFileSync(defPath, 'utf8')));
+  const rawDef: unknown = JSON.parse(readFileSync(defPath, 'utf8'));
+  // #502: an unsigned or tampered definition changes nothing — the running
+  // org keeps the last definition that verified (the one it started or last
+  // reloaded with).
+  const digests = instructionsDigests(rawDef, daemon.root);
+  try {
+    assertOrgDefSigned(daemon.root, name, rawDef, { digests });
+  } catch (err) {
+    if (!(err instanceof OrgSignatureError)) throw err;
+    running.bus.emit({
+      type: 'audit',
+      reason: 'hot-reload-refused',
+      msg: `org def reload refused: ${err.message}`,
+      data: { reason: err.reason },
+    });
+    throw new OrgSignatureError(
+      `reload refused, the running org keeps its last verified definition: ${err.message}`,
+      err.reason,
+    );
+  }
+  const parsedDef = OrgDefSchema.parse(rawDef);
   const bp = resolveOrgDefBlueprints(parsedDef, daemon.root);
   if (bp.errors.length) throw new Error(`org ${name}: ${bp.errors.join('; ')}`);
   const newDef = expandOrgPolicyPathVars(bp.def, promptVarsFor(daemon.root));
+  pinInstructionDigests(newDef, digests); // for roles this reload adds
   const changed: string[] = [];
   const newRoles: string[] = [];
   const removedRoles: string[] = [];

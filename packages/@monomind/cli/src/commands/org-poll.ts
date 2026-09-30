@@ -6,6 +6,8 @@
 import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import type { OrgDaemon } from '../orgrt/daemon.js';
+import { orgSignatureEnforced, verifyOrgDef } from '../orgrt/org-signature.js';
+import { sweepPlantWatches } from '../orgrt/planted-paths.js';
 import { ORG_DIR } from '../orgrt/types.js';
 import { output } from '../output.js';
 import type { CommandResult } from '../types.js';
@@ -46,6 +48,10 @@ export async function waitForRunEnd(
       } else {
         pollReloadfiles(cwd, daemon as OrgDaemon).catch((err) => {
           console.error('[org run] reloadfile poll failed:', err);
+        });
+        // #502 review round 4: the same planted-path sweep as `org serve`.
+        sweepPlantWatches().catch((err) => {
+          console.error('[org run] planted-path sweep failed:', err);
         });
       }
     }, intervalMs);
@@ -164,6 +170,22 @@ export const pollReloadfiles = async (cwd: string, daemon: OrgDaemon): Promise<s
  * is satisfied, not an error.
  *
  * Returns the names it started, so callers/tests don't have to guess. */
+function runfileOrgSigned(
+  cwd: string,
+  orgDir: string,
+  name: string,
+): { ok: true } | { ok: false; message: string } {
+  if (!orgSignatureEnforced()) return { ok: true };
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(join(orgDir, `${name}.json`), 'utf8'));
+  } catch (err) {
+    return { ok: false, message: `definition unreadable (${(err as Error).message})` };
+  }
+  const check = verifyOrgDef(cwd, name, raw);
+  return check.ok ? check : { ok: false, message: check.message };
+}
+
 export const pollRunfiles = async (cwd: string, daemon: OrgDaemon): Promise<string[]> => {
   const started: string[] = [];
   const orgDir = join(cwd, ORG_DIR);
@@ -188,6 +210,14 @@ export const pollRunfiles = async (cwd: string, daemon: OrgDaemon): Promise<stri
       /* already gone */
     }
     if (daemon.listRunning().includes(name)) continue; // already running — request satisfied
+    // #502: a role that can write .monomind/orgs/ could drop in a new org
+    // plus its runfile. Never start one the operator has not signed.
+    // (prepareOrgStart checks again on the bytes it actually parses.)
+    const signed = runfileOrgSigned(cwd, orgDir, name);
+    if (!signed.ok) {
+      log(output.warning(`org ${name}: run request refused — ${signed.message}`));
+      continue;
+    }
     log(output.info(`org ${name}: run requested — starting now${task ? ' (with task)' : ''}`));
     try {
       await daemon.startOrg(name, task);

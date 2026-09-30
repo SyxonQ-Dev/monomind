@@ -50,14 +50,18 @@ describe('deps dir and npm config are write-denied to roles', () => {
     expect(sb.filesystem.allowWrite).toContain(join(home, '.monomind'));
   });
 
-  it('the mask binds the deps dir read-only and its parent in place', () => {
+  it('the mask binds the deps dir and its parent read-only', () => {
     const home = scratch('dp-home-');
     const root = scratch('dp-root-');
     const args = authorityMaskArgs({ home, env: {}, roots: [root], orgRoot: root });
-    const deps = join(home, '.monomind', 'deps');
-    const at = args.indexOf('--ro-bind', args.indexOf(join(home, '.monomind')));
-    expect(args.slice(at, at + 3)).toEqual(['--ro-bind', deps, deps]);
-    expect(args).toEqual(expect.arrayContaining(['--bind', join(home, '.monomind')]));
+    const bound = (flag: string, p: string) =>
+      args.some((a, i) => a === flag && args[i + 1] === p && args[i + 2] === p);
+    const mm = join(home, '.monomind');
+    // The monomind home is a read-only mount point (#502 review), so the
+    // deps dir in it can neither be renamed aside nor re-created.
+    expect(bound('--ro-bind', mm)).toBe(true);
+    expect(bound('--bind', mm)).toBe(false);
+    expect(bound('--ro-bind', join(mm, 'deps'))).toBe(true);
   });
 });
 

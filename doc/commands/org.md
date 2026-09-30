@@ -1,6 +1,6 @@
 # `monomind org` — Command Reference
 
-> **<!-- doc-count:org-subcommands -->37<!-- /doc-count:org-subcommands --> subcommands** for starting, stopping, monitoring, and managing autonomous agent
+> **<!-- doc-count:org-subcommands -->39<!-- /doc-count:org-subcommands --> subcommands** for starting, stopping, monitoring, and managing autonomous agent
 > organizations. All commands target a named org config in `.monomind/orgs/<name>.json`.
 
 ---
@@ -46,6 +46,8 @@
 | [`delete`](#delete) | Delete org and all artifacts |
 | [`mark-complete`](#mark-complete) | Clear stale running/crashed runtime record |
 | [`role set-access`](#role-set-access) | Human-only grant/revoke of `policy.access: "full"` for one role |
+| [`sign`](#sign) | Review an org definition's authority and sign it as the operator |
+| [`approve-paths`](#approve-paths) | List, or approve, protected paths the runtime would quarantine as possible plants |
 
 ---
 
@@ -67,6 +69,10 @@ monomind org run <name> [--task "..."] [--resume] [--no-cross-process] [--dry-ru
 | `--budget-usd <n>` | Abort before any session starts if the upfront cost estimate exceeds `n` USD |
 | `--yes`, `-y` | Skip the interactive cost-estimate confirmation (only asked on a TTY). It does not approve tool calls |
 | `--auto-approve <tools>` | Comma-separated tools every role may call without human approval for this run only, e.g. `org_complete` for an unattended one-shot `--task` run. Adds to each role's `policy.autoApproveTools`; other gated tools still wait. A name no role gates (not `Bash`, `WebFetch`, `WebSearch`, `org_complete` or a role's `approvalTools`) is refused, so a typo can't leave the run waiting. Also refused when an `org serve` daemon owns the project |
+
+The org's definition must carry a valid operator signature (see [`sign`](#sign)). An org that has
+never been signed gets a one-time review-and-sign prompt on a TTY; otherwise `run` exits 1 with the
+`monomind org sign <name>` hint, before handing anything to a serve daemon.
 
 While the run is up, each tool call that is waiting on approval is printed with the
 `monomind org approve <org> <role> <tool>` and `monomind org deny …` commands that resolve it.
@@ -133,6 +139,11 @@ run's total spend reopens the roles the org-wide ceiling closed, and the ceiling
 the new value. A changed `run_config.budget_tokens` or role `budget_tokens` also recomputes the even
 split for live roles without their own `budget_tokens`. See
 [Budget-closed assignees](../concepts/org-runtime.md#budget-closed-assignees).
+
+A definition whose operator signature does not verify (see [`sign`](#sign)) is not applied at all:
+the running org keeps its last verified definition, `reload` prints the `org sign` hint, and the
+daemon logs `reload refused` and emits a `hot-reload-refused` audit event. Goal and prompt edits are
+not signed and reload as before.
 
 ```bash
 monomind org reload <name>
@@ -612,7 +623,9 @@ monomind org create <name> --template <template> [--goal "..."] [--schedule 30m]
 | `--force` | Overwrite an existing org config (otherwise: `Org "<name>" already exists — pass --force to overwrite.`) |
 | `--yes`, `-y` | Skip the per-role model confirmation prompt (asked only in an interactive terminal) |
 
-Prints the roles, their models, the token budget and the config path.
+Prints the roles, their models, the token budget and the config path, and signs the new org as the
+operator (see [`sign`](#sign)). Inside an org role's process tree it writes the org unsigned and
+says so.
 
 ---
 
@@ -724,8 +737,98 @@ agent-context check (a downgrade is always safe). Neither writes a live running 
 directly — run `monomind org validate <org>` to check for taint/scoped-field warnings, then
 `monomind org reload <org>` (or restart it) to apply.
 
+On an org whose definition verified before the edit, both modes re-sign it with that one change
+(see [`sign`](#sign)); otherwise they say to run `monomind org sign <org>`.
+
 **Source:** [`commands/org-subcommands-role.ts`](packages/@monomind/cli/src/commands/org-subcommands-role.ts)
 
+---
+
+## `sign`
+
+Review an org definition's authority and sign it as the operator (#502). `org run`, `org serve`
+(its runfile poll and its schedule, including a scheduled org's `prechecks`), `org reload` and
+resume all refuse a definition whose signature does not verify:
+
+```text
+org growth: the definition has no operator signature — run `monomind org sign growth` as the operator after reviewing the change
+```
+
+```bash
+monomind org sign <org> [--yes]
+monomind org sign --all [--yes]
+```
+
+| Flag | Purpose |
+|---|---|
+| `--all` | Sign every org definition in the project (the one-time migration) |
+| `--yes`, `-y` | Skip the per-org confirmation. Without a TTY and without it, `sign` prints the review and signs nothing |
+
+For each org it prints everything that decides what a role may run, reach or be granted: each
+role's runtime, git level and access, `adapter_config`, `provider`, `endpoint`,
+`instructions_file`, `skills`/`skill_pool`, budgets, every `policy` scope (`fileWrite`,
+`fileRead`, tools, `webAllow`, `sandbox` with `allowWrite` and `allowedDomains`), and each tool
+provider's command, arguments and env variable names (never values); then the org's runtime,
+schedule, workspace, each precheck command, the full-access knobs, `federation`, `fence` and
+`loadouts`. It names every role that would run with neither the SDK sandbox nor the bubblewrap
+mask on this machine ("can read the operator key and sign anything"), and shows what changed
+since the last signature (a copy of the signed projection is kept beside it). Then it asks
+before signing.
+
+**What is signed:** every field of `.monomind/orgs/<org>.json` as written, except the org's `goal`
+and `status` and each role's `title`, `responsibilities` and `ui`. So each role's whole `policy`,
+the role list, runtimes, `adapter_config`, `provider`, `tool_providers`, budgets, `endpoint`,
+`instructions_file`, `skills` and `skill_pool`, the org's `run_config`, `schedule`, `runtime`,
+`fence`, `federation` and `loadouts` are covered, and so is any field added later. A goal or
+responsibilities edit needs no new signature. A definition with a `__proto__`, `constructor` or
+`prototype` key is refused.
+
+**The key and the signature:** an HMAC-SHA256 under the same machine-local key as
+[`role set-access`](#role-set-access)'s full-access grants, created on first use in the
+operator-credential directory (`~/.monomind/orgrt-operator/`, or `MONOMIND_ORGRT_OPERATOR_DIR`).
+The signature is kept there too, in `org-signatures/<project id>/<org>.json`, not in the org file:
+roles can neither read nor write that directory, a tracked org file is not changed, and a
+signature does not carry over to another checkout or machine. The key and signature files must be
+the operator's own, mode 0600 and not symlinks; a key replaced after a daemon loaded it is refused
+until that daemon restarts. Each checkout (and each worktree
+you run an org from) is signed separately.
+
+**Who may sign:** `sign` refuses inside an org role's or `agent exec`'s process tree
+(`MONOMIND_ORG_ROLE`, `MONOMIND_SDK_AGENT`, `MONOMIND_AGENT_EXEC`, `MONOMIND_CLINE_TURN`,
+`MONOMIND_AIDER`). Unlike `role set-access … full`, it runs from your own Claude Code session.
+`/mastermind:createorg` runs `org sign` without `--yes`, shows you the review and asks you to sign
+in your own terminal. `org create` signs the org it writes.
+
+**Migration.** Orgs made before this release have no signature. `org run` on a TTY shows the
+full review and offers a one-time sign for such an org. A changed or unverifiable signature, or any run without
+a TTY (`org serve`, a detached `org run`, the mastermind skills), is refused with the message
+above. Run `monomind org sign --all` once per checkout, including for the shipped
+`.monomind/orgs/*.json` and `config/orgs/release.json`, whose signatures are per machine and never
+committed.
+
+**Source:** [`commands/org-sign.ts → signAction`](packages/@monomind/cli/src/commands/org-sign.ts#signAction), [`orgrt/org-signature.ts → verifyOrgDef`](packages/@monomind/cli/src/orgrt/org-signature.ts#verifyOrgDef)
+
+
+---
+
+## `approve-paths`
+
+List, or approve, paths that the org runtime would quarantine as possible plants (#502). A role
+can create a protected path that did not exist yet — a `.mcp.json` or `.claude/` in the project,
+`~/.claude/.config.json`, a shell or npm config — so the runtime quarantines one that appears
+(see `doc/concepts/org-runtime.md`, "Planted paths"). A file you created yourself, or restored from
+quarantine, is trusted only once you approve it here. Signing an org approves nothing.
+
+```bash
+monomind org approve-paths                  # list what is waiting; approves nothing
+monomind org approve-paths .mcp.json ...    # approve exactly these paths
+```
+
+With paths, it asks on a TTY and refuses without one, and it refuses inside an org role's or
+`agent exec`'s process tree (the same check as `sign`). A named path that is not waiting is left
+unchanged and reported. `org sign`'s review warns when paths are waiting.
+
+**Source:** [`commands/org-approve-paths.ts → approvePathsAction`](packages/@monomind/cli/src/commands/org-approve-paths.ts#approvePathsAction)
 ---
 
 ## Name Validation

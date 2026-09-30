@@ -5,9 +5,9 @@
  * tool, an agent with file access to `.monomind/orgs`, a hand-crafted
  * import) could recompute the same SHA-256 and forge a "human" grant.
  * This module adds the missing authentication: a machine-local secret key,
- * created ONLY by `monomind org role set-access <org> <role> full`
- * (org-subcommands-role.ts — no other code path calls
- * `ensureFullAccessGrantKey`), stored in the operator-credential directory
+ * created only by the operator's own commands (`org role set-access <org>
+ * <role> full`, and since #502 `org sign` / `org create`, which sign org
+ * definitions with it — org-signature.ts), stored in the operator-credential directory
  * (`broker.ts`'s `defaultOperatorDir()`, the same directory
  * `authority-mask.ts`'s `authorityDirs()` denies Read/Edit on for every
  * scoped/sandboxed role — see `role-sandbox-restrictions.ts`'s
@@ -25,7 +25,15 @@
  */
 
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  type Stats,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { defaultOperatorDir } from './broker.js';
 
@@ -36,38 +44,142 @@ export function fullAccessGrantKeyPath(dir: string = defaultOperatorDir()): stri
   return join(dir, KEY_FILE);
 }
 
-/** Read the signing key, or `undefined` when it doesn't exist / can't be
- *  read (wrong host, wrong HOME, deleted, permissions) — never throws and
- *  NEVER creates it. A role whose grant hinges on a missing key is exactly
- *  the 'invalid-signature' suspended case (access-grant.ts). */
-export function readFullAccessGrantKey(dir: string = defaultOperatorDir()): Buffer | undefined {
+const currentUid = (getuid?: () => number): number | undefined =>
+  (getuid ?? process.getuid?.bind(process))?.();
+
+/** #502 review: why a file holding operator authority (the key, a signature)
+ *  must not be trusted, or undefined when it may be: a symlink, not a plain
+ *  file (or dir), another user's, or with group/other permission bits. */
+export function untrustedFileReason(
+  st: Stats,
+  what: string,
+  opts: { dir?: boolean; getuid?: () => number } = {},
+): string | undefined {
+  const uid = currentUid(opts.getuid);
+  if (st.isSymbolicLink()) return `${what} is a symlink`;
+  if (opts.dir ? !st.isDirectory() : !st.isFile())
+    return `${what} is not a ${opts.dir ? 'directory' : 'regular file'}`;
+  if (uid !== undefined && st.uid !== uid) return `${what} is owned by uid ${st.uid}, not ${uid}`;
+  if (process.platform !== 'win32' && st.mode & 0o077)
+    return `${what} has mode ${(st.mode & 0o777).toString(8)} (must be ${opts.dir ? '700' : '600'})`;
+  return undefined;
+}
+
+/** The operator dir's problem, if any. A dir of ours with looser bits is
+ *  tightened to 0700 first: broker.ts creates it with the default umask. */
+export function checkOperatorDir(dir: string, getuid?: () => number): string | undefined {
+  let st: Stats;
   try {
-    const raw = readFileSync(fullAccessGrantKeyPath(dir));
-    return raw.length > 0 ? raw : undefined;
+    st = lstatSync(dir);
   } catch {
-    return undefined;
+    return undefined; // nothing there yet
   }
+  const uid = currentUid(getuid);
+  const ours = st.isDirectory() && !st.isSymbolicLink() && (uid === undefined || st.uid === uid);
+  if (ours && st.mode & 0o077) {
+    try {
+      chmodSync(dir, 0o700);
+      st = lstatSync(dir);
+    } catch {
+      /* reported below */
+    }
+  }
+  return untrustedFileReason(st, `operator dir ${dir}`, { dir: true, getuid });
+}
+
+interface LoadedKey {
+  key: Buffer;
+  dev: number;
+  ino: number;
+  mtimeMs: number;
+  size: number;
+}
+/** #502 review: the key each operator dir held when this process first
+ *  loaded (or created) it. A key file replaced or rewritten afterwards is
+ *  refused, not picked up: a role that swaps the key under a running daemon
+ *  gains nothing, and the operator is told. */
+const loadedKeys = new Map<string, LoadedKey>();
+
+const sameFile = (a: LoadedKey, st: Stats): boolean =>
+  a.dev === st.dev && a.ino === st.ino && a.mtimeMs === st.mtimeMs && a.size === st.size;
+
+export type OperatorKey =
+  | { key: Buffer; problem?: undefined }
+  | { key?: undefined; problem: string };
+
+/** The operator key or why it can't be used. Never throws, never creates it. */
+export function loadOperatorKey(
+  dir: string = defaultOperatorDir(),
+  opts: { getuid?: () => number } = {},
+): OperatorKey {
+  const path = fullAccessGrantKeyPath(dir);
+  let st: Stats;
+  try {
+    st = lstatSync(path);
+  } catch {
+    return { problem: `no operator key at ${path}` };
+  }
+  const bad =
+    checkOperatorDir(dir, opts.getuid) ?? untrustedFileReason(st, `operator key ${path}`, opts);
+  if (bad) return { problem: bad };
+  const cached = loadedKeys.get(dir);
+  if (cached) {
+    if (sameFile(cached, st)) return { key: cached.key };
+    return {
+      problem: `operator key ${path} changed since this process loaded it; refusing it (if you replaced it yourself, restart the daemon)`,
+    };
+  }
+  let key: Buffer;
+  try {
+    key = readFileSync(path);
+  } catch (err) {
+    return { problem: `operator key ${path} is unreadable (${(err as Error).message})` };
+  }
+  if (key.length === 0) return { problem: `operator key ${path} is empty` };
+  loadedKeys.set(dir, { key, dev: st.dev, ino: st.ino, mtimeMs: st.mtimeMs, size: st.size });
+  return { key };
+}
+
+/** Read the signing key, or `undefined` when it doesn't exist or can't be
+ *  trusted (loadOperatorKey) — never throws and NEVER creates it. A role
+ *  whose grant hinges on a missing key is exactly the 'invalid-signature'
+ *  suspended case (access-grant.ts). */
+export function readFullAccessGrantKey(dir: string = defaultOperatorDir()): Buffer | undefined {
+  return loadOperatorKey(dir).key;
 }
 
 /** Create the key on first use (idempotent — returns the existing one if
- *  present). ONLY called from `org role set-access ... full`. 32 random
- *  bytes, mode 0600, written atomically (tmp file + same-directory rename)
- *  so a concurrent grant never observes a half-written key. */
+ *  present). Called only from the operator's own commands (`org role
+ *  set-access … full`, `org sign`, `org create`). 32 random bytes, mode 0600
+ *  in a 0700 dir, written atomically (tmp file + same-directory rename) so a
+ *  concurrent grant never observes a half-written key. Throws when a key
+ *  exists but can't be trusted: overwriting it would hide that. */
 export function ensureFullAccessGrantKey(dir: string = defaultOperatorDir()): Buffer {
-  const existing = readFullAccessGrantKey(dir);
-  if (existing) return existing;
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const key = randomBytes(KEY_BYTES);
+  const loaded = loadOperatorKey(dir);
+  if (loaded.key) return loaded.key;
   const path = fullAccessGrantKeyPath(dir);
+  let exists = true;
+  try {
+    lstatSync(path);
+  } catch {
+    exists = false;
+  }
+  if (exists) throw new Error(`refusing the operator key: ${loaded.problem}`);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const dirProblem = checkOperatorDir(dir);
+  if (dirProblem) throw new Error(`refusing the operator dir: ${dirProblem}`);
   const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, key, { mode: 0o600 });
+  writeFileSync(tmp, randomBytes(KEY_BYTES), { mode: 0o600 });
   try {
     chmodSync(tmp, 0o600);
   } catch {
     /* best effort on platforms without POSIX file modes */
   }
   renameSync(tmp, path);
-  return key;
+  loadedKeys.delete(dir);
+  const created = loadOperatorKey(dir);
+  if (!created.key) throw new Error(`the new operator key is not usable: ${created.problem}`);
+  return created.key;
 }
 
 /** The bytes signed/verified — org, role, the drift hash, and the ack's own

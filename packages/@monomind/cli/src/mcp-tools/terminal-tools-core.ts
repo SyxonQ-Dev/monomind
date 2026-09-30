@@ -6,6 +6,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { monomindHome } from '../orgrt/operator-protected-paths.js';
 import { readJsonStoreOrNull, writeJsonFileAtomic } from '../utils/json-file.js';
 import { getProjectCwd } from './types.js';
 
@@ -127,7 +128,9 @@ function readEnabledFlag(flagPath: string): boolean {
 }
 
 function homeFlagPath(): string {
-  return join(homedir(), STORAGE_DIR, 'enable-terminal.json');
+  // #502 review: the same place the org runtime keeps unwritable to roles
+  // (operator-protected-paths.ts), $MONOMIND_HOME included.
+  return join(monomindHome(homedir(), process.env), 'enable-terminal.json');
 }
 
 function projectFlagPath(): string {

@@ -2,7 +2,9 @@
 
 import { output } from '../output.js';
 import type { Command, CommandResult } from '../types.js';
+import { approvePathsSubcommand } from './org-approve-paths.js';
 import { memorySubcommand } from './org-memory-command.js';
+import { signSubcommand } from './org-sign.js';
 import {
   createSubcommand,
   deleteSubcommand,
@@ -114,6 +116,8 @@ export const orgCommand: Command = {
     deleteSubcommand,
     markCompleteSubcommand,
     roleSubcommand,
+    signSubcommand,
+    approvePathsSubcommand,
   ],
   examples: [
     { command: 'monomind org run my-org', description: 'Run an org under full daemon control' },
@@ -123,7 +127,7 @@ export const orgCommand: Command = {
     // it only exits with result.exitCode — so this must log itself or bare
     // `monomind org` exits silently with code 1 and zero output.
     const message =
-      'usage: monomind org <run|stop|status|serve|test-loop|logs|report|costs|inbox|questions|answer|approve|deny|replay|resume-from|branch|decisions|create|validate|migrate|list|delete|mark-complete|role>';
+      'usage: monomind org <run|stop|status|serve|test-loop|logs|report|costs|inbox|questions|answer|approve|deny|replay|resume-from|branch|decisions|create|validate|migrate|list|delete|mark-complete|role|sign|approve-paths>';
     log(output.error(message));
     return { success: false, message };
   },

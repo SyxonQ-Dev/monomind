@@ -147,6 +147,8 @@ fi
 
 npx -y monomind@latest org validate "$org_name" \
   || echo "WARNING: '${org_name}' no longer passes validation — fix it before 'monomind org run ${org_name}'"
+# Budgets are signed (#502): run/reload/serve use this change only once the operator signs it.
+echo "Review, then sign the change yourself: monomind org sign ${org_name}"
 npx -y monomind@latest org reload "$org_name"
 ```
 
@@ -164,6 +166,8 @@ jq --arg id "$agent_id" '(.roles[] | select(.id == $id)) |= del(.budget_usd, .bu
 echo "  Cleared budget_usd / budget_tokens for '$agent_id'"
 npx -y monomind@latest org validate "$org_name" \
   || echo "WARNING: '${org_name}' no longer passes validation — fix it before 'monomind org run ${org_name}'"
+# Budgets are signed (#502): run/reload/serve use this change only once the operator signs it.
+echo "Review, then sign the change yourself: monomind org sign ${org_name}"
 npx -y monomind@latest org reload "$org_name"
 ```
 
