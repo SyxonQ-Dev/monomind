@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { catalogAction } from '../../src/commands/catalog.js';
 import { newRoot, writeEntry } from './fixtures.js';
 
@@ -62,7 +62,16 @@ describe('monomind catalog (read-only verbs)', () => {
 });
 
 describe('monomind catalog (lifecycle verbs)', () => {
-  afterEach(() => vi.restoreAllMocks());
+  // #576: these verbs refuse inside a role; run as the operator even when the
+  // suite itself runs under one.
+  beforeEach(() => {
+    for (const m of ['MONOMIND_ORG_ROLE', 'MONOMIND_SDK_AGENT', 'MONOMIND_AGENT_EXEC', 'MONOMIND_CLINE_TURN', 'MONOMIND_AIDER'])
+      vi.stubEnv(m, '');
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
 
   function localSkill(): string {
     const src = mkdtempSync(join(tmpdir(), 'cat-cmd-src-'));

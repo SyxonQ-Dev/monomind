@@ -112,7 +112,26 @@ acted, not who did.
 ## 3. Commands
 
 All verbs take `--format json` for machine-readable output. Read-only verbs
-never create files; only a mutating verb creates `.monomind/catalog/`.
+never create files; only a mutating verb creates `.monomind/catalog/` (an org
+start also creates it empty, see below, which still means "not configured").
+
+**Only the operator changes the catalog (#576).** The catalog decides what org
+roles get when an org starts: the content of each active `org` skill, its
+`grantedTools` (the MCP tools the daemon grants for it) and each blueprint's
+`skills` and `skill_pool`. The org signature covers only the names a role lists
+(and, since #571, a digest of each blueprint), so no role may write
+`.monomind/catalog/`:
+- it is an operator-protected path ([org runtime](./org-runtime.md)): denied
+  to the file tools, in the SDK sandbox's `denyWrite` and read-only under the
+  bubblewrap mask, for the org root and a role's cwd. Roles still read it. An
+  org start creates it empty when it is missing, so a role cannot plant one. A
+  signed `policy.sandbox.allowWrite` entry naming it is the opt-in;
+- `stage`, `approve`, `activate`, `disable`, `quarantine`, `release`, `revoke`,
+  and `project`/`unproject` with `--apply`, refuse inside an org role or
+  `agent exec` process tree (any of `MONOMIND_ORG_ROLE`, `MONOMIND_SDK_AGENT`,
+  `MONOMIND_AGENT_EXEC`, `MONOMIND_CLINE_TURN`, `MONOMIND_AIDER` set), like
+  `org sign`. The read-only verbs and projection dry runs still work there.
+  Run the mutating verbs yourself in a terminal.
 
 | Command | Effect |
 |---|---|
