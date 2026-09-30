@@ -383,11 +383,18 @@ export function queryWithExecutable(
 /** The Claude Agent SDK, installed into ~/.monomind/deps on first use
  *  (#428; not a dependency of the published package), running the installed
  *  Claude Code if there is a usable one (#522). Loaded once per process; a
- *  failure is not cached, so a later session retries. `probe` is for tests. */
-export const loadClaudeSdk = (probe?: ClaudeProbe): Promise<ClaudeSdk> =>
+ *  failure is not cached, so a later session retries. `probe` is for tests;
+ *  `requested` marks the operator's own `monomind deps install` (#559). */
+export const loadClaudeSdk = (
+  probe?: ClaudeProbe,
+  { requested = false }: { requested?: boolean } = {},
+): Promise<ClaudeSdk> =>
   (claudeSdk ??= (async () => {
     const found = await findInstalledClaude(probe ?? defaultClaudeProbe());
-    const sdk = await ensureOptionalDependency<ClaudeSdk>(SDK, sdkLoadOptions(found));
+    const sdk = await ensureOptionalDependency<ClaudeSdk>(SDK, {
+      ...sdkLoadOptions(found),
+      ...(requested ? { requested } : {}),
+    });
     const { createSdkMcpServer, query, tool } = sdk;
     // #526: the SDK's own binary, pinned by hash, is passed to and rechecked
     // at every query (claude-sdk-pin.ts). An installed Claude Code below is

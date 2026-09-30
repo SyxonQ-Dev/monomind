@@ -8,7 +8,13 @@ import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, sep } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { pathWithoutHome, UNSET_KEYS, useTestHome, XDG_DIRS } from './isolated-home.global.js';
+import {
+  ORG_ROLE_ENV_KEYS,
+  pathWithoutHome,
+  UNSET_KEYS,
+  useTestHome,
+  XDG_DIRS,
+} from './isolated-home.global.js';
 import { checkHome, diffHome, snapshotHome } from './real-home-guard.js';
 
 const base = mkdtempSync(join(tmpdir(), 'mm-env-isolation-'));
@@ -36,6 +42,13 @@ describe('the running test process is isolated (#544)', () => {
     for (const key of UNSET_KEYS) expect(process.env[key], key).toBeUndefined();
   });
 
+  it('drops the markers an org role session sets (#560)', () => {
+    expect(ORG_ROLE_ENV_KEYS).toEqual(
+      expect.arrayContaining(['MONOMIND_ORG_ROLE', 'MONOMIND_AGENT_EXEC']),
+    );
+    for (const key of ORG_ROLE_ENV_KEYS) expect(process.env[key], key).toBeUndefined();
+  });
+
   it.skipIf(process.platform === 'win32')(
     'keeps no PATH entry under the real home but node',
     () => {
@@ -50,11 +63,18 @@ describe('the running test process is isolated (#544)', () => {
 
 describe('useTestHome', () => {
   it('moves XDG dirs into the home, creates them, and drops the overrides', () => {
-    const keys = [...Object.keys(XDG_DIRS), ...UNSET_KEYS, 'HOME', 'MONOMIND_GLOBAL_BRAIN_DIR'];
+    const keys = [
+      ...Object.keys(XDG_DIRS),
+      ...UNSET_KEYS,
+      ...ORG_ROLE_ENV_KEYS,
+      'HOME',
+      'MONOMIND_GLOBAL_BRAIN_DIR',
+    ];
     const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
     const home = join(base, 'use-home');
     try {
       for (const k of UNSET_KEYS) process.env[k] = '/real/home/elsewhere';
+      for (const k of ORG_ROLE_ENV_KEYS) process.env[k] = 'builder';
       process.env.XDG_DATA_HOME = '/real/elsewhere/.local/share';
       useTestHome(home);
       expect(process.env.HOME).toBe(home);
@@ -62,6 +82,7 @@ describe('useTestHome', () => {
         expect(process.env[key], key).toBe(join(home, rel));
       }
       for (const k of UNSET_KEYS) expect(process.env[k], k).toBeUndefined();
+      for (const k of ORG_ROLE_ENV_KEYS) expect(process.env[k], k).toBeUndefined();
     } finally {
       for (const k of keys) {
         if (saved[k] === undefined) delete process.env[k];

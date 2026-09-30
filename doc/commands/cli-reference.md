@@ -1,10 +1,10 @@
 # CLI Command Reference
 
-> All <!-- doc-count:cli-commands -->37<!-- /doc-count:cli-commands --> top-level `monomind` commands, verified against `packages/@monomind/cli/src/commands/index.ts:15-55` (the `COMMAND_LOADERS` map) plus a live `node bin/cli.js --help` run on the built dist (reported `v2.9.3`). The category grouping is defined statically in `CATEGORY_NAMES` (`src/commands/index.ts:75-104`); real `Command` objects are attached on demand by `getCommandsByCategory()` (`src/commands/index.ts:171-182`) and `loadAllCommands()` (`src/commands/index.ts:156-160`), with `getCommand`/`getCommandAsync` as the single-command entry points (`src/commands/index.ts:136-142`). Subcommand counts for `doc`, `analyze`, and `org` are read directly from each command's own `subcommands:` array, not estimated.
+> All <!-- doc-count:cli-commands -->38<!-- /doc-count:cli-commands --> top-level `monomind` commands, verified against `packages/@monomind/cli/src/commands/index.ts:15-55` (the `COMMAND_LOADERS` map) plus a live `node bin/cli.js --help` run on the built dist (reported `v2.9.3`). The category grouping is defined statically in `CATEGORY_NAMES` (`src/commands/index.ts:75-104`); real `Command` objects are attached on demand by `getCommandsByCategory()` (`src/commands/index.ts:171-182`) and `loadAllCommands()` (`src/commands/index.ts:156-160`), with `getCommand`/`getCommandAsync` as the single-command entry points (`src/commands/index.ts:136-142`). Subcommand counts for `doc`, `analyze`, and `org` are read directly from each command's own `subcommands:` array, not estimated.
 
 **Note on `--help` coverage:** a live run of `monomind --help` (2.16.0, `node packages/@monomind/cli/bin/cli.js --help` against the built dist) shows all 39 commands except `report-crash` — including `pick` and `catalog`, added for the Jev decision model and the unified skill catalog. `report-crash` alone is absent, and that's intentional: it's the only command with `hidden: true` (`report-crash.ts:16`), an internal command shelled out to by monotask/mono-clip crash handlers, not meant for interactive use. This doc lists all 39 regardless of what `--help` shows.
 
-## Full command list (<!-- doc-count:cli-commands -->37<!-- /doc-count:cli-commands -->)
+## Full command list (<!-- doc-count:cli-commands -->38<!-- /doc-count:cli-commands -->)
 
 | Command | Purpose | Subcommands |
 |---|---|---|
@@ -43,6 +43,7 @@
 | `ui` | Start the Monomind Neural Control Room (web UI dashboard). Alias: `dashboard`. | 1 — open. `monomind dashboard open` logs a browser in to the running dashboard with a **one-time login link**; since 2.15.0 the dashboard's pages and human-decision routes require that login, so a bare `http://localhost:4242` visit is no longer enough. `--print` emits the link instead of opening a browser, for use over SSH. |
 | `events` | Stream events from the running dashboard to stdout as JSONL (pipe into `jq` to filter) | 0 — flat command, flags only |
 | `download-embeddings` | Download the semantic-routing embedding model (opt-in, ~88 MB) | 0 — flat command, flags only |
+| `deps` | Install the pinned Claude Agent SDK into `~/.monomind/deps`, for the operator to run outside any org role, where that directory is read-only (#559). Runs even with `MONOMIND_NO_AUTO_INSTALL` set, which only turns off automatic installs | 1 — install |
 | `report-crash` | File a GitHub issue for a crash (internal; used by panic handlers) | – |
 | `crash-reporting` | Configure crash reporting | 3 — enable, disable, status |
 

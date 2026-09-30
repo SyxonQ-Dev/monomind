@@ -9,6 +9,7 @@ import type { RoleFence } from './fence.js';
 import type { LoadoutSummary, ResolvedLoadout } from './loadouts.js';
 import type { Mailbox } from './mailbox.js';
 import type { PolicyEngine } from './policy.js';
+import type { RoleDepsResult } from './role-deps.js';
 import type { SessionLedger } from './session-ledger.js';
 import type { TaskProcesses } from './task-cancel.js';
 import type { RolePick, TaskPick } from './task-match.js';
@@ -117,6 +118,9 @@ export interface SessionOpts {
    *  session.ts builds a ClaudeAgentRunner from queryFn (or the default),
    *  preserving the previous Claude-only behaviour exactly. */
   runner?: AgentRunner;
+  /** #559: installs, host side, the pinned deps the role may need before
+   *  its runner starts (role-deps.ts). Tests replace it. */
+  ensureRoleDeps?: (runtime: string) => RoleDepsResult | Promise<RoleDepsResult>;
   /** Caller-owned cancellation handle for THIS incarnation. Every session
    *  attempt runs on its own AbortController linked to this one: aborting it
    *  aborts the in-flight attempt, which lets the daemon force-stop a specific
