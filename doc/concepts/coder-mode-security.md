@@ -132,6 +132,20 @@ documented case)'`. No new seam was found that needed a new test for this issue:
 does not touch env construction at all (`args.access` and `args.envAuthoritative` are independent
 fields), so the existing coverage already exercises the exact code path a full-access turn runs.
 
+**codex shell snapshots** (#535). Interactive codex writes a snapshot of the user's shell — every
+exported variable, so every API key and token in its environment — to
+`$CODEX_HOME/shell_snapshots/<id>.sh`, created with the process umask (0644 under the usual
+022; codex 0.156.1 restricts `auth.json` and `history.jsonl` to 0600 but not these). monomind
+does not cause this with current codex: the runner uses `codex exec`, and a live check of
+`codex exec` 0.156.1 wrote no snapshot, with or without the flags below. As defence in depth
+for codex versions or modes that do snapshot, the codex runner, in every access mode, passes
+`-c features.shell_snapshot=false -c features.shell_snapshot_v2=false` (codex's own feature
+flags) and spawns the child under umask 077 (`withChildUmask` in
+[`orgrt/codex-runner-stream.ts`](../../packages/@monomind/cli/src/orgrt/codex-runner-stream.ts)),
+so anything codex writes under `$CODEX_HOME` — or in the workspace — is owner-only. It sets no
+`CODEX_HOME` and never copies codex's auth. Snapshots already on disk come from interactive
+codex sessions: delete `~/.codex/shell_snapshots/*.sh` and rotate the keys they contain.
+
 ### 2.4 Audit trail
 
 Every `tool_activity` event (§3.2 of the protocol doc) is the caller's own live audit log — the

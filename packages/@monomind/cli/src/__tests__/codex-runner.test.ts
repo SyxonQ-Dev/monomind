@@ -29,6 +29,7 @@ import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { CodexAgentRunner } from '../orgrt/codex-runner.js';
+import { withChildUmask } from '../orgrt/codex-runner-stream.js';
 
 vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
@@ -159,7 +160,7 @@ describe('CodexAgentRunner', () => {
     }
   });
 
-  it('no --effort: no -c flag', async () => {
+  it('no --effort: no model_reasoning_effort flag', async () => {
     vi.mocked(cp.spawn).mockReturnValue(
       makeMockChild([
         JSON.stringify({ type: 'session_configured', session_id: 't1', thread_id: 't1' }),
@@ -177,7 +178,78 @@ describe('CodexAgentRunner', () => {
     })) {
       /* consume */
     }
-    expect(vi.mocked(cp.spawn).mock.calls[0][1]).not.toContain('-c');
+    const argv = vi.mocked(cp.spawn).mock.calls[0][1] as string[];
+    expect(argv.some((x) => x.startsWith('model_reasoning_effort'))).toBe(false);
+  });
+
+  // Security: codex's shell snapshot dumps the whole environment (API keys
+  // included) to $CODEX_HOME/shell_snapshots, 0644 under umask 022.
+  it('security: disables codex shell snapshots on every spawn', async () => {
+    vi.mocked(cp.spawn).mockReturnValue(
+      makeMockChild([
+        JSON.stringify({ type: 'session_configured', session_id: 't1', thread_id: 't1' }),
+      ]),
+    );
+    for await (const _m of runner.run({
+      tools: [],
+      prompt: (async function* () {
+        yield 'hello';
+      })(),
+      systemPrompt: '',
+      cwd: '/tmp',
+      env: {},
+      maxTurns: 5,
+      resume: 'thread-9',
+    })) {
+      /* consume */
+    }
+    const argv = vi.mocked(cp.spawn).mock.calls[0][1] as string[];
+    const flags = argv.slice(0, argv.indexOf('resume'));
+    expect(flags).toEqual(
+      expect.arrayContaining([
+        '-c',
+        'features.shell_snapshot=false',
+        'features.shell_snapshot_v2=false',
+      ]),
+    );
+    expect(argv.indexOf('features.shell_snapshot=false')).toBeLessThan(argv.indexOf('resume'));
+  });
+
+  it('security: spawns codex under umask 077 and restores the old umask after', async () => {
+    const order: string[] = [];
+    let current = 0o022;
+    const umask = vi.spyOn(process, 'umask').mockImplementation(((mask?: number) => {
+      const prev = current;
+      if (mask !== undefined) {
+        current = mask;
+        order.push(`umask ${mask.toString(8)}`);
+      }
+      return prev;
+    }) as typeof process.umask);
+    vi.mocked(cp.spawn).mockImplementation((() => {
+      order.push(`spawn under ${current.toString(8)}`);
+      return makeMockChild([
+        JSON.stringify({ type: 'session_configured', session_id: 't1', thread_id: 't1' }),
+      ]);
+    }) as unknown as typeof cp.spawn);
+    try {
+      for await (const _m of runner.run({
+        tools: [],
+        prompt: (async function* () {
+          yield 'hello';
+        })(),
+        systemPrompt: '',
+        cwd: '/tmp',
+        env: {},
+        maxTurns: 5,
+      })) {
+        /* consume */
+      }
+    } finally {
+      umask.mockRestore();
+    }
+    if (process.platform === 'win32') return;
+    expect(order).toEqual(['umask 77', 'spawn under 77', 'umask 22']);
   });
 
   it('captures session id from session_configured event', async () => {
@@ -1185,5 +1257,36 @@ describe('CodexAgentRunner sandbox mapping (#263)', () => {
     const argv = await argvFor({});
     expect(sandboxOf(argv)).toBe('danger-full-access');
     expect(argv).not.toContain('sandbox_workspace_write.network_access=true');
+  });
+});
+
+describe('withChildUmask', () => {
+  it('still spawns when the umask cannot be set (worker thread)', () => {
+    const umask = vi.spyOn(process, 'umask').mockImplementation((() => {
+      throw new Error('ERR_WORKER_UNSUPPORTED_OPERATION');
+    }) as typeof process.umask);
+    try {
+      expect(withChildUmask(0o077, () => 'spawned')).toBe('spawned');
+    } finally {
+      umask.mockRestore();
+    }
+  });
+
+  it('restores the umask even when the spawn throws', () => {
+    const calls: Array<number | undefined> = [];
+    const umask = vi.spyOn(process, 'umask').mockImplementation(((mask?: number) => {
+      calls.push(mask);
+      return 0o022;
+    }) as typeof process.umask);
+    try {
+      expect(() =>
+        withChildUmask(0o077, () => {
+          throw new Error('ENOENT');
+        }),
+      ).toThrow('ENOENT');
+    } finally {
+      umask.mockRestore();
+    }
+    if (process.platform !== 'win32') expect(calls).toEqual([0o077, 0o022]);
   });
 });

@@ -13,9 +13,57 @@ import { TOOL_CALL_RE } from './tool-fence.js';
 export const TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours, matching kimi/antigravity runners
 
 /**
+ * Security (#535), defence in depth: interactive codex writes a "shell
+ * snapshot" of the user's shell — every exported environment variable, API
+ * keys and tokens included — to `$CODEX_HOME/shell_snapshots/<id>.sh`,
+ * created with the process umask, so 0644 under the usual 022. `codex exec`
+ * 0.156.1 (what this runner runs) was checked live and writes none, with or
+ * without the measures below; they guard codex versions or modes that do:
+ *  - `-c features.shell_snapshot=false` (and `_v2`): codex's own feature
+ *    flags (`codex features list`); no snapshot is written. A codex that
+ *    lacks a key only logs "unknown feature key in config".
+ *  - umask 077 for the child (`withChildUmask`), so anything codex writes —
+ *    snapshots, session rollouts, logs — is owner-only. Files the agent
+ *    creates in the workspace are 0600 too (git records only the exec bit).
+ * CODEX_HOME is left alone: codex's auth lives in the user's own
+ * `~/.codex/auth.json`, which this runner has never copied or redirected.
+ */
+export const CODEX_SNAPSHOT_OFF_ARGS = [
+  '-c',
+  'features.shell_snapshot=false',
+  '-c',
+  'features.shell_snapshot_v2=false',
+] as const;
+export const CODEX_CHILD_UMASK = 0o077;
+
+/**
+ * Run `spawnFn` (a synchronous spawn) with the process umask set to `mask`,
+ * restoring it straight after: a child inherits the umask at fork, and
+ * nothing async runs in between, so no other file this process creates is
+ * affected. No-op on win32 and where `process.umask` cannot be set (worker
+ * threads), where it just spawns.
+ */
+export function withChildUmask<T>(mask: number, spawnFn: () => T): T {
+  let previous: number | undefined;
+  if (process.platform !== 'win32') {
+    try {
+      previous = process.umask(mask);
+    } catch {
+      previous = undefined; // worker thread: umask is process-wide and read-only here
+    }
+  }
+  try {
+    return spawnFn();
+  } finally {
+    if (previous !== undefined) process.umask(previous);
+  }
+}
+
+/**
  * `codex exec` argv for one turn. ARG ORDER — see file header for the
  * live-verified citation:
- *   codex exec --json [--model X] [-c model_reasoning_effort=L] [--cd Y]
+ *   codex exec --json [--model X] [-c model_reasoning_effort=L]
+ *              -c features.shell_snapshot=false -c features.shell_snapshot_v2=false [--cd Y]
  *              [--skip-git-repo-check] [--sandbox <mode> | --dangerously-…]
  *              [resume <threadId>] -- -
  * The prompt goes over STDIN, not argv: a single argv element is capped
@@ -42,6 +90,7 @@ export function codexExecArgs(args: AgentRunArgs, threadId: string | undefined):
   const cliArgs: string[] = ['exec', '--json'];
   if (args.model) cliArgs.push('--model', args.model);
   cliArgs.push(...codexEffortArgs(args.effort));
+  cliArgs.push(...CODEX_SNAPSHOT_OFF_ARGS); // security: no env dump on disk (see above)
   cliArgs.push('--cd', args.cwd);
   cliArgs.push('--skip-git-repo-check');
   if (args.access === 'read') {
@@ -88,16 +137,19 @@ export async function* streamTurn(
   // Full access: own process group + tree tracking (process-group-spawn.ts),
   // so cancel reaches every descendant and agent-exec can report
   // background_pids. Any other access: a plain spawn, as before.
-  const proc = spawnRunnerProcess(
-    ...maskedCommand(args.authorityMask, bin, cliArgs),
-    {
-      cwd: args.cwd,
-      // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
-      // vendor CLI; an explicit value in args.env still wins below.
-      env: { ...omitAnthropicManagedKeys(process.env), ...args.env },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    },
-    args,
+  // umask 077: whatever codex writes under $CODEX_HOME is owner-only.
+  const proc = withChildUmask(CODEX_CHILD_UMASK, () =>
+    spawnRunnerProcess(
+      ...maskedCommand(args.authorityMask, bin, cliArgs),
+      {
+        cwd: args.cwd,
+        // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
+        // vendor CLI; an explicit value in args.env still wins below.
+        env: { ...omitAnthropicManagedKeys(process.env), ...args.env },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+      args,
+    ),
   );
   const child = proc.child;
   const toolItems = new CodexToolItems(idPrefix);

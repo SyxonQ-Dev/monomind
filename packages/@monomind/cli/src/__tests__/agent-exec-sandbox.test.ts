@@ -43,6 +43,10 @@ describe('#396 codex argv', () => {
       expect(argv).toEqual([
         'exec',
         '--json',
+        '-c',
+        'features.shell_snapshot=false',
+        '-c',
+        'features.shell_snapshot_v2=false',
         '--cd',
         '/w',
         '--skip-git-repo-check',
