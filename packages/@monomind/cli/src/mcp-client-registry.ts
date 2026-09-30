@@ -30,7 +30,6 @@ type CategoryLoader = () => Promise<MCPTool[]>;
 
 export const CATEGORY_LOADERS: Record<string, CategoryLoader> = {
   agent: async () => (await import('./mcp-tools/agent-tools.js')).agentTools,
-  monoswarm: async () => (await import('./mcp-tools/monoswarm-tools.js')).monoswarmTools,
   memory: async () => (await import('./mcp-tools/memory-tools.js')).memoryTools,
   config: async () => (await import('./mcp-tools/config-tools.js')).configTools,
   hooks: async () => (await import('./mcp-tools/hooks-tools.js')).hooksTools,
@@ -48,7 +47,6 @@ export const CATEGORY_LOADERS: Record<string, CategoryLoader> = {
   github: async () => (await import('./mcp-tools/github-tools.js')).githubTools,
   browser: async () => (await import('./mcp-tools/browser-tools.js')).browserTools,
   guidance: async () => (await import('./mcp-tools/guidance-tools.js')).guidanceTools,
-  autopilot: async () => (await import('./mcp-tools/autopilot-tools.js')).autopilotTools,
   monograph: async () => (await import('./mcp-tools/monograph-tools.js')).monographTools,
   coverage: async () => (await import('./monovector/coverage-tools.js')).coverageRouterTools,
   quality: async () => (await import('./mcp-tools/quality-tools.js')).qualityTools,

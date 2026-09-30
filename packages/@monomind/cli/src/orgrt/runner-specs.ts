@@ -141,7 +141,9 @@ export const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures | keyof Run
     installHint: 'npm install ai (plus the vendor model package)',
     // Real per-token streaming: vercel-runner.ts consumes the `ai` SDK's
     // `result.fullStream` and yields each real `text-delta` part as it
-    // arrives (verified against the installed `ai` package's own types).
+    // arrives (verified against the installed `ai` package's own types)
+    // when extras.includePartialMessages is set; otherwise one message per
+    // model step (#563).
     streamsIncrementally: true,
     supportsFullAccess: false,
     // #357: vercel-runner.ts never yields a 'tool_use' AgentMessage at all

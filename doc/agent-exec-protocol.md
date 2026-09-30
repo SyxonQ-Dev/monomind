@@ -1297,7 +1297,7 @@ Errors keep the same shape with `models: []` and an `error: {code, message}`: `u
 
 `monomind agent test <id> [--model M] [--timeout 60s] [--sandbox MODE] [--sandbox-fallback F] [--env KEY=V]... --json` checks that one runtime and model
 actually answer (issue #390). It runs one turn through the `agent exec` engine with the prompt
-`Reply with the single word: ok`, max turns 1, no caller tools, `scoped` access and a fresh
+`Reply with the single word: ok`, max turns 3 (a model may run one of its CLI's own tools before it answers, #564), no caller tools, `scoped` access and a fresh
 temporary cwd that is removed afterwards, then prints a single JSON object on stdout:
 
 ```json

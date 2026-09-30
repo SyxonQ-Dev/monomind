@@ -8,8 +8,6 @@ category: github
 
 # GitHub Release Manager
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
-
 ## Purpose
 
 Automated release coordination and deployment with Monomind swarm orchestration for seamless version management, testing, and deployment across multiple packages.
@@ -27,8 +25,7 @@ Automated release coordination and deployment with Monomind swarm orchestration 
 ### 1. Coordinated Release Preparation
 
 ```javascript
-// Initialize release management swarm
-mcp__monomind__monoswarm_init { topology: "hierarchical", maxAgents: 6 }
+// Spawn release management agents
 mcp__monomind__agent_spawn { type: "coordinator", name: "Release Coordinator" }
 mcp__monomind__agent_spawn { type: "tester", name: "QA Engineer" }
 mcp__monomind__agent_spawn { type: "reviewer", name: "Release Reviewer" }
@@ -143,8 +140,7 @@ mcp__github__create_pull_request {
 
 ```javascript
 [Single Message - Complete Release Management]:
-  // Initialize comprehensive release swarm
-  mcp__monomind__monoswarm_init { topology: "star", maxAgents: 8 }
+  // Spawn comprehensive release agents
   mcp__monomind__agent_spawn { type: "coordinator", name: "Release Director" }
   mcp__monomind__agent_spawn { type: "tester", name: "QA Lead" }
   mcp__monomind__agent_spawn { type: "reviewer", name: "Senior Reviewer" }

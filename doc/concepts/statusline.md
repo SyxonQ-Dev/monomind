@@ -17,8 +17,8 @@ It has two modes you can toggle with `/ts`:
 
 | Element              | Meaning                                                          | Source                                                                        |
 | -------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `▊ Monomind`        | Brand mark + monoswarm status dot                                    | Always present                                                                |
-| `●` green / `○` grey | Monoswarm **LIVE** (active within 5 min) or **IDLE**                 | `.monomind/monoswarm/state.json` mtime                                     |
+| `▊ Monomind`        | Brand mark + agent-activity status dot                               | Always present                                                                |
+| `●` green / `○` grey | Agent activity **LIVE** (active within 5 min) or **IDLE**            | `.monomind/agents/registrations/`, else `.monomind/metrics/monoswarm-activity.json` |
 | `⎇ main`             | Current git branch                                               | `git branch --show-current`                                                   |
 | `+1`                 | Staged files                                                     | `git status --porcelain` index column                                         |
 | `~9921`              | Modified but unstaged files                                      | `git status --porcelain` worktree column                                      |
@@ -63,7 +63,7 @@ Source: `generateDashboard()`, `.claude/helpers/statusline.cjs:1208-1226`.
 | Element              | Meaning                                        | Source                                                                                                                                                                          |
 | --------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `▊Monomind v2.8.3`   | Brand mark and package version                 | `getVersion()`: walk up from the script for a `monomind`/`@monomind/cli`/`@monoes/monomindcli` `package.json`; else the npm global prefix's `node_modules` (and, on macOS/Linux, `lib/node_modules`), checking `monomind`, `@monoes/monomindcli` and `monomind/node_modules/@monoes/monomindcli`; else `monomind --version` on PATH. Shows no version (bare `▊Monomind`) instead of a guessed one when none resolve (#368) |
-| `● LIVE` / `○ IDLE`  | Whether monoswarm coordination looks active        | `getMonoswarmStatus()` — first of 3 tiers that finds live state wins: agent-registration files in `.monomind/agents/registrations/` (<30 min old), else `state.json` (<5 min old), else `monoswarm-activity.json` (<5 min old) |
+| `● LIVE` / `○ IDLE`  | Whether subagents look active                  | `getMonoswarmStatus()` — first of 2 tiers that finds live state wins: agent-registration files in `.monomind/agents/registrations/` (<30 min old), else `monoswarm-activity.json` (<5 min old) |
 | `monoes/monomind`    | Project identifier                             | `getProjectName()` — `owner/repo` parsed from `git remote get-url origin`; falls back to the working-directory folder name when there's no remote                              |
 | `◎monomind`          | Working directory name                         | `path.basename(CWD)`                                                                                                                                                             |
 | `⬡nokhodian`         | Your git identity                              | `git config user.name` (`getGitInfo()`)                                                                                                                                          |
@@ -172,7 +172,6 @@ Scans `.monomind/orgs/<name>/runs/*.jsonl` — or the equivalent path under the 
 | `.monomind/data/auto-memory-store.json` | Intelligence consolidation at session-end  | MEMORY              |
 | `.monomind/data/ranked-context.json`    | PageRank consolidation at session-end      | MEMORY              |
 | `.monomind/security/audit-status.json`  | `monomind security scan`                  | ARCH                |
-| `.monomind/monoswarm/state.json`        | Monoswarm init / coordinator               | Header, SWARM       |
 | `.agents/shared_instructions.md`         | Hand-edited — size checked at session start | CONTEXT             |
 | `~/.claude/projects/…/*.jsonl`           | Claude Code session writer                 | `--json` output only (not Full/Compact Mode text) |
 | `.claude/settings.json`                  | Project configuration                      | SWARM (hooks, MCP)  |

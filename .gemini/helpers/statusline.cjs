@@ -132,21 +132,6 @@ function readJSON(filePath) {
   } catch { /* ignore */ }
   return null;
 }
-/** Canonical data root — mirrors getMonomindDataRoot() in mcp-tools/types.ts. */
-function monomindDataRoot(cwd) {
-  if (process.env.MONOMIND_DATA_DIR) return process.env.MONOMIND_DATA_DIR;
-  try {
-    const gitEntry = path.join(cwd, '.git');
-    const st = fs.statSync(gitEntry);
-    if (st.isDirectory()) return path.join(gitEntry, 'monomind');
-    const m = fs.readFileSync(gitEntry, 'utf8').match(/^gitdir:\s*(.+)/m);
-    if (m) {
-      const wt = path.resolve(cwd, m[1].trim());
-      return path.join(path.dirname(path.dirname(wt)), 'monomind');
-    }
-  } catch { /* not a git repo */ }
-  return path.join(cwd, '.monomind');
-}
 
 
 // Safe file stat (returns null on failure)
@@ -453,30 +438,7 @@ function getMonoswarmStatus() {
     } catch { /* fall through */ }
   }
 
-  // SECONDARY: state.json written by MCP monoswarm_init — trust if fresh.
-  // The MCP tools resolve their data root via getMonomindDataRoot(), which
-  // inside a git repo is `<repo>/.git/monomind` — so reading only
-  // `<cwd>/.monomind` showed a stale or missing swarm in every real project.
-  // Canonical first, legacy second for projects written by an older CLI.
-  const swarmStateCandidates = [
-    path.join(monomindDataRoot(CWD), 'monoswarm', 'state.json'),
-    path.join(CWD, '.monomind', 'monoswarm', 'state.json'),
-  ];
-  let swarmState = null;
-  for (const p of swarmStateCandidates) { swarmState = readJSON(p); if (swarmState) break; }
-  if (swarmState) {
-    const updatedAt = swarmState.updatedAt || swarmState.startedAt;
-    const age = updatedAt ? now - new Date(updatedAt).getTime() : Infinity;
-    if (age < staleThresholdMs) {
-      return {
-        activeAgents: swarmState.agents?.length || swarmState.agentCount || 0,
-        maxAgents: swarmState.maxAgents || CONFIG.maxAgents,
-        coordinationActive: true,
-      };
-    }
-  }
-
-  // TERTIARY: monoswarm-activity.json refreshed by post-task hook
+  // SECONDARY: monoswarm-activity.json refreshed by post-task hook
   const activityData = readJSON(path.join(CWD, '.monomind', 'metrics', 'monoswarm-activity.json'));
   if (activityData?.monoswarm) {
     const updatedAt = activityData.timestamp || activityData.monoswarm.timestamp;

@@ -15,7 +15,7 @@ import type { Command, CommandContext, CommandResult } from '../types.js';
 // any tool's `category` field always return zero results from the real
 // registry (previously masked by a fabricated static fallback list).
 const TOOL_CATEGORIES = [
-  { value: 'monoswarm', label: 'Coordination', hint: 'Monoswarm coordination tools' },
+  { value: 'agent', label: 'Agents', hint: 'Agent store tools' },
   { value: 'performance', label: 'Monitoring', hint: 'Status and metrics monitoring' },
   { value: 'knowledge', label: 'Memory', hint: 'Memory and neural features' },
   { value: 'github', label: 'GitHub', hint: 'GitHub integration tools' },
@@ -196,7 +196,7 @@ export const execCommand: Command = {
   ],
   examples: [
     {
-      command: 'monomind mcp exec -t monoswarm_init -p \'{"topology":"mesh"}\'',
+      command: 'monomind mcp exec -t agent_list -p \'{"includeTerminated":true}\'',
       description: 'Execute tool',
     },
   ],

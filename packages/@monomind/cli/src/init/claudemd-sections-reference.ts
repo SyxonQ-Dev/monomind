@@ -8,10 +8,8 @@ import { agentCommand } from '../commands/agent.js';
 import { hooksCommand } from '../commands/hooks.js';
 import { initCommand } from '../commands/init.js';
 import { memoryCommand } from '../commands/memory.js';
-import { monoswarmCommand } from '../commands/monoswarm.js';
 import { sessionCommand } from '../commands/session.js';
 import { taskCommand } from '../commands/task.js';
-import { MONOSWARM_AUTOPILOT_REMOVAL_VERSION } from '../deprecations.js';
 import { mcpAddHint } from '../platform-adapters/renderers/mcp.js';
 import {
   detectOptionalPackages,
@@ -34,22 +32,20 @@ export function cliCommandsTable(): string {
 |---------|-------------|-------------|
 | \`init\` | ${subcommandCount(initCommand)} | Project initialization |
 | \`agent\` | ${subcommandCount(agentCommand)} | Agent lifecycle management |
-| \`monoswarm\` | ${subcommandCount(monoswarmCommand)} | Deprecated — records state, starts no agents; removed in ${MONOSWARM_AUTOPILOT_REMOVAL_VERSION} |
 | \`memory\` | ${subcommandCount(memoryCommand)} | SQLite memory with ANN search |
 | \`task\` | ${subcommandCount(taskCommand)} | Task creation and lifecycle |
 | \`session\` | ${subcommandCount(sessionCommand)} | Session state management |
 | \`hooks\` | ${subcommandCount(hooksCommand)} | Edit/outcome logging, agent routing + ${workerCountLabel(avail.hooks)}background workers${unavailNote(avail.hooks)} |
 
 > Note: there is no \`neural\` CLI command. Its pattern commands live under
-> \`hooks intelligence\` — a local JSON pattern store; no model is trained. See \`doc/concepts/monoswarm.md\` for monoswarm
-> coordination and vote strategies.
+> \`hooks intelligence\` — a local JSON pattern store; no model is trained.
 
 ### Quick CLI Examples
 
 \`\`\`bash
 npx monomind init wizard
 npx monomind agent spawn -t coder --name my-coder
-npx monomind org run <org>   # run an agent org (monoswarm is deprecated)
+npx monomind org run <org>   # run an agent org
 npx monomind memory search --query "authentication patterns"
 npx monomind doctor --fix
 \`\`\``;
@@ -77,7 +73,7 @@ complete set.
 ### Specialized
 \`Security Engineer\`
 
-### Monoswarm Coordination
+### Coordination
 \`mesh-coordinator\`
 
 ### GitHub & Repository
@@ -251,7 +247,7 @@ export function setupAndBoundary(): string {
   return `## Quick Setup
 
 \`\`\`bash
-# Add MCP server — includes monograph, monoswarm, memory, hooks, all 66+ tools
+# Add MCP server — includes monograph, memory, hooks and more
 ${mcpAddHint()}
 
 # Verify everything works
@@ -263,7 +259,7 @@ npx monomind doctor --fix
 ## Claude Code vs CLI Tools
 
 - Claude Code's Task tool handles ALL execution: agents, file ops, code generation, git
-- CLI tools handle coordination via Bash: memory, hooks, routing (\`monoswarm\` is deprecated and removed in ${MONOSWARM_AUTOPILOT_REMOVAL_VERSION})
+- CLI tools handle coordination via Bash: memory, hooks, routing
 - NEVER use CLI tools as a substitute for Task tool agents
 
 ## Support

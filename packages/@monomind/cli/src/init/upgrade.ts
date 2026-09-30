@@ -12,6 +12,7 @@ import { atomicWriteFile, copyDirRecursive } from './fs-helpers.js';
 import { FORCE_SYNC_GENERATORS, helperFileMode } from './helpers-generator.js';
 import { installedPacks } from './pack-install.js';
 import { CORE_PACK, OPTIONAL_PACKS, packEntries } from './packs.js';
+import { retireRemovedFiles } from './retired-files.js';
 import { generateSettings } from './settings-generator.js';
 import { findSourceDir, findSourceHelpersDir, MAX_EXEC_FILE_BYTES } from './shared.js';
 import { generateStatuslineScript } from './statusline-generator.js';
@@ -94,6 +95,17 @@ export async function executeUpgrade(
       summary: { skillsCount: 0, commandsCount: 0, agentsCount: 0, hooksEnabled: 0 },
     };
     const guard = guardFor(targetDir, upgradeOptions, docsResult);
+
+    // Retire single files older releases installed and this one removed
+    // (#418); refresh the stale READMEs that named them.
+    const sourceCommandsForRetire = findSourceDir('commands');
+    retireRemovedFiles(
+      targetDir,
+      docsResult,
+      sourceCommandsForRetire ? path.dirname(sourceCommandsForRetire) : null,
+    );
+    result.updated.push(...docsResult.removed, ...docsResult.updated);
+    result.errors.push(...docsResult.errors);
 
     // 0. ALWAYS update critical helpers + subdirectories (force overwrite)
     const sourceHelpersForUpgrade = findSourceHelpersDir();

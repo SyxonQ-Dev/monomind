@@ -32,7 +32,8 @@ describe('lint-tool-refs', () => {
 
   it('resolves against the full MCP registry, not just the advertised core roster', async () => {
     const tools = await loadMcpToolNames(REPO_ROOT);
-    expect(toolResolves('monoswarm_init', tools)).toBe(true); // non-core category
+    expect(toolResolves('browser_open', tools)).toBe(true); // non-core category
+    expect(toolResolves('monoswarm_init', tools)).toBe(false); // removed in 2.22.0 (#418)
     expect(toolResolves('memory_hierarchical-store', tools)).toBe(true);
     expect(toolResolves('monograph_*', tools)).toBe(true);
     expect(toolResolves('swarm_init', tools)).toBe(false);

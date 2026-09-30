@@ -55,10 +55,11 @@ export interface CLIOptions {
  */
 /**
  * Invocations that only read state and must not write any: `agent scan`
- * (runtime detection). Exported for tests.
+ * (runtime detection) and `org sign --check` (#558). Exported for tests.
  */
-export function isReadOnlyProbe(words: string[]): boolean {
+export function isReadOnlyProbe(words: string[], flags: Record<string, unknown> = {}): boolean {
   const w = words.filter((x) => !x.startsWith('-'));
+  if (w[0] === 'org' && w[1] === 'sign') return flags.check === true;
   return w[0] === 'agent' && w[1] === 'scan';
 }
 
@@ -155,7 +156,7 @@ export class CLI {
       // (it writes ~/.monomind/update-state.json after a network call) and,
       // below, no subsystem init (it writes .monomind/registry.json). Callers
       // such as mono-agent run it on a timer to show installed runtimes.
-      const probe = isReadOnlyProbe([...commandPath, ...positional]);
+      const probe = isReadOnlyProbe([...commandPath, ...positional], flags);
       if (flags.update !== false && commandPath[0] !== 'update' && !quietDoctor && !probe) {
         checkForUpdatesOnStartup(this.name, this.output).catch(() => {
           /* silent */
