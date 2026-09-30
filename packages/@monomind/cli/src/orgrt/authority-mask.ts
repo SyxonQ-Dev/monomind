@@ -37,10 +37,11 @@
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
-import { dirname, join, sep } from 'node:path';
+import { join, sep } from 'node:path';
 import { protectableDepsRoot } from '../utils/optional-deps.js';
 import { protectedClaudeBinary } from './claude-sdk.js';
-import { dashboardCredentialPaths, operatorDirOverride } from './file-roots.js';
+import { dashboardCredentialPaths, HOME_DENY_WRITE, operatorDirOverride } from './file-roots.js';
+import { maskReadOnlyPaths, monomindMaskLayout } from './operator-protected-paths.js';
 import { ensureOrgWorkDirs, orgsMaskLayout } from './org-authority-files.js';
 import { realPath } from './policy-paths.js';
 
@@ -92,15 +93,30 @@ export function authorityMaskArgs(ctx: {
   /** The role's cwd and `policy.fileWrite`, for the work dirs to create. */
   cwd?: string;
   fileWrite?: string[];
+  /** The role's signed `policy.sandbox.allowWrite` (operator-protected-paths.ts). */
+  allowWrite?: string[];
 }): string[] {
   const args = ['--dev-bind', '/', '/'];
-  // #522: an operator-chosen Claude Code (MONOMIND_CLAUDE_PATH), which the
-  // daemons run unsandboxed: read-only, and every directory on the way to it
-  // a mount point, so none can be renamed aside and replaced. First, so the
-  // binds below nest inside these mount points instead of covering them.
-  const claude = protectedClaudeBinary(ctx.env, ctx.home);
-  const afterClaude = args.length;
-  if (claude) args.push(...claude.dirs.flatMap((d) => ['--bind', d, d]));
+  // #502 review: ~/.monomind read-only, only its role-writable entries bound
+  // back — first, so a work tree below it (binds further down) still opens.
+  // #518's deps dir first, so ~/.monomind exists for the layout below.
+  const deps = protectableDepsRoot(ctx.env, ctx.home);
+  const mm = monomindMaskLayout(ctx.home, ctx.env);
+  const mmRoots = mm.readOnly.map(realPath);
+  // #522: anchors for an operator-chosen Claude Code (MONOMIND_CLAUDE_PATH),
+  // which the daemons run unsandboxed: every directory between $HOME (or /)
+  // and it becomes a mount point, so none can be renamed aside and replaced;
+  // the file itself is bound read-only with the other protected paths below.
+  // First, so the binds below nest inside them instead of covering them. None
+  // inside ~/.monomind: it is a read-only mount point already, where nothing
+  // can be renamed, and a writable bind there would reopen it.
+  const claudeAnchors = (protectedClaudeBinary(ctx.env, ctx.home)?.dirs ?? []).filter(
+    (d) => !mmRoots.some((r) => d === r || d.startsWith(r + sep)),
+  );
+  for (const d of claudeAnchors) args.push('--bind', d, d);
+  const afterAnchors = args.length;
+  for (const d of mmRoots) args.push('--ro-bind', d, d);
+  for (const d of mm.writable.map(realPath)) args.push('--bind', d, d);
   // #498: the mask binds only existing work dirs read-write, so create them
   // first (a `git worktree add … work/src` in a masked role needs `work/`).
   ensureOrgWorkDirs(ctx.orgRoot, ctx.fileWrite, ctx.cwd ?? ctx.orgRoot);
@@ -117,23 +133,23 @@ export function authorityMaskArgs(ctx: {
   for (const d of orgs.readOnly) args.push('--ro-bind', d, d);
   for (const d of orgs.writable) args.push('--bind', d, d);
   for (const f of orgs.files) args.push('--ro-bind', f, f);
-  // #518 review (B1): the first-use deps dir (utils/optional-deps.ts) holds
-  // code the unsandboxed daemons load, so it is read-only, and its parent a
-  // mount point so it cannot be renamed aside and replaced. After the org
-  // binds, in case one of those is an ancestor.
-  const made = protectableDepsRoot(ctx.env, ctx.home);
-  if (made) {
-    const deps = realPath(made);
-    args.push('--bind', dirname(deps), dirname(deps), '--ro-bind', deps, deps);
-  }
-  if (claude) {
-    // A writable bind above that covers one of those mount points hid it
-    // again: repeat it. Under a read-only bind nothing can be renamed.
-    const covering = bindTargets(args.slice(afterClaude), '--bind');
-    for (const d of claude.dirs)
-      if (covering.some((t) => d === t || d.startsWith(t + sep))) args.push('--bind', d, d);
-    args.push('--ro-bind', claude.file, claude.file);
-  }
+  // #522: a writable bind above that covers a Claude Code anchor hid it
+  // again: repeat it. Under a read-only bind nothing can be renamed.
+  const covering = bindTargets(args.slice(afterAnchors), '--bind');
+  for (const d of claudeAnchors)
+    if (covering.some((t) => d === t || d.startsWith(t + sep))) args.push('--bind', d, d);
+  // #502 review: what the operator's own processes run or trust, and the
+  // shell/git config that would undo the guard. #518's first-use deps dir
+  // (utils/optional-deps.ts: code the unsandboxed daemons load) is one of
+  // them — ~/.monomind is already a read-only mount point above, with only
+  // the role-writable entries bound back, so deps is never writable; it is
+  // bound read-only again here, after the org binds, in case one of those is
+  // an ancestor. No read-write bind of ~/.monomind itself: that would let a
+  // role plant new top-level entries again. The MONOMIND_CLAUDE_PATH binary
+  // (#522) is one of the protected paths too (operator-protected-paths.ts).
+  const readOnly = maskReadOnlyPaths({ ...ctx, homeDenyWrite: HOME_DENY_WRITE });
+  for (const p of [...new Set([...readOnly, ...(deps ? [deps] : [])])].map(realPath))
+    args.push('--ro-bind', p, p);
   // Last, so that no bind above can uncover them.
   for (const d of hidden) if (existsSync(d)) args.push('--tmpfs', d);
   for (const f of dashboardCredentialPaths(ctx.roots)) args.push('--ro-bind', '/dev/null', f);

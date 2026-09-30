@@ -27,6 +27,8 @@ import {
 } from '../../src/orgrt/authority-mask.js';
 import { fileToolDenied, HOME_DENY_WRITE } from '../../src/orgrt/file-roots.js';
 import { gitCommonDir, prepareGitGuard } from '../../src/orgrt/git-guard.js';
+import { isOperatorProtected } from '../../src/orgrt/operator-protected-paths.js';
+import { realPath } from '../../src/orgrt/policy-paths.js';
 import { buildClaudeRestrictions } from '../../src/orgrt/role-sandbox.js';
 
 const scratch = (p: string) => realpathSync(mkdtempSync(join(tmpdir(), p)));
@@ -119,9 +121,9 @@ function claudeHome() {
 }
 
 describe('the MONOMIND_CLAUDE_PATH binary is write-denied to roles', () => {
-  it('the file tools deny its real path', () => {
+  it('it is an operator-protected path, which the file tools refuse to write', () => {
     const { home, file, env } = claudeHome();
-    expect(fileToolDenied(home, env)).toContain(file);
+    expect(isOperatorProtected(file, { home, env }, realPath)).toBe(file);
   });
 
   it('the SDK sandbox denies it and pins every directory under $HOME on the way', () => {
@@ -144,14 +146,20 @@ describe('the MONOMIND_CLAUDE_PATH binary is write-denied to roles', () => {
     expect(sb.filesystem.allowWrite).toEqual(expect.arrayContaining(dirs));
   });
 
-  it('the mask pins those directories first and binds the file read-only last', () => {
+  it('the mask pins those directories first, binds the file read-only, and never ~/.monomind read-write', () => {
     const { home, file, env, dirs } = claudeHome();
     const root = scratch('dp-root-');
     const args = authorityMaskArgs({ home, env, roots: [root], orgRoot: root });
     expect(args.slice(3, 3 + 3 * dirs.length)).toEqual(dirs.flatMap((d) => ['--bind', d, d]));
     const at = args.indexOf(file);
     expect(args.slice(at - 1, at + 2)).toEqual(['--ro-bind', file, file]);
-    expect(at).toBeGreaterThan(args.lastIndexOf(join(home, '.monomind', 'deps')));
+    // With the other read-only binds: after the org binds, before the tmpfs.
+    expect(at).toBeGreaterThan(args.lastIndexOf(join(home, '.monomind')));
+    const tmpfs = args.indexOf('--tmpfs');
+    if (tmpfs >= 0) expect(at).toBeLessThan(tmpfs);
+    const mm = join(home, '.monomind');
+    for (let i = 0; i < args.length; i++)
+      if (args[i] === '--bind') expect(args[i + 2]).not.toBe(mm);
   });
 
   it.runIf(authorityMaskAvailability().available)(
@@ -168,11 +176,13 @@ describe('the MONOMIND_CLAUDE_PATH binary is write-denied to roles', () => {
           `echo evil > ${file} 2>/dev/null && echo WROTE; ` +
             `mv ${v} ${v}-aside 2>/dev/null && echo MOVED1; ` +
             `mv ${dirname(v)} ${dirname(v)}-aside 2>/dev/null && echo MOVED2; ` +
-            `mv ${home}/.local ${home}/.local-aside 2>/dev/null && echo MOVED3; true`,
+            `mv ${home}/.local ${home}/.local-aside 2>/dev/null && echo MOVED3; ` +
+            `touch ${home}/.monomind/newfile 2>/dev/null && echo PLANTED; true`,
         ],
       );
-      expect(spawnSync(cmd, argv, { encoding: 'utf8' }).stdout).not.toMatch(/WROTE|MOVED/);
+      expect(spawnSync(cmd, argv, { encoding: 'utf8' }).stdout).not.toMatch(/WROTE|MOVED|PLANTED/);
       expect(readFileSync(file, 'utf8')).toBe('\x7fELF');
+      expect(existsSync(join(home, '.monomind', 'newfile'))).toBe(false);
     },
   );
 });

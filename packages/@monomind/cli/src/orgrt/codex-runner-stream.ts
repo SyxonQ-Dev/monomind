@@ -1,4 +1,7 @@
 // packages/@monomind/cli/src/orgrt/codex-runner-stream.ts
+import { chmodSync, lstatSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { AgentRunArgs } from './agent-runner.js';
 import { killOnAbort } from './agent-runner.js';
 import { maskedCommand } from './authority-mask.js';
@@ -13,9 +16,62 @@ import { TOOL_CALL_RE } from './tool-fence.js';
 export const TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours, matching kimi/antigravity runners
 
 /**
+ * Security (#535): codex's `shell_snapshot` feature is enabled by default
+ * (stable) in codex 0.156.1, and `codex exec` — what this runner runs —
+ * creates `$CODEX_HOME/shell_snapshots/`. A snapshot holds the user's shell
+ * environment, every exported API key and token included, and codex creates
+ * it with the process umask, so 0644 under the usual 022.
+ *  - `-c features.shell_snapshot=false` (and `_v2`): codex's own feature
+ *    flags (`codex features list`) — the fix; no snapshot is written. A codex
+ *    that lacks a key only logs "unknown feature key in config".
+ *  - `restrictCodexHome` makes `$CODEX_HOME` and its `sessions/` and
+ *    `shell_snapshots/` 0700 before each spawn, when the current user owns
+ *    them: a 0700 dir hides its files whatever their own modes, so rollouts
+ *    and any snapshot an older codex wrote are not readable by other users.
+ *    The process umask is left alone, so workspace files keep their modes.
+ * CODEX_HOME is never redirected: codex's auth lives in the user's own
+ * `~/.codex/auth.json`, which this runner has never copied.
+ */
+export const CODEX_SNAPSHOT_OFF_ARGS = [
+  '-c',
+  'features.shell_snapshot=false',
+  '-c',
+  'features.shell_snapshot_v2=false',
+] as const;
+
+/** `$CODEX_HOME` for a child env: codex's own default is `~/.codex`. */
+export function codexHomeDir(env: NodeJS.ProcessEnv): string {
+  return env.CODEX_HOME || join(env.HOME || homedir(), '.codex');
+}
+
+/**
+ * chmod 0700 `codexHome` and its `sessions/` and `shell_snapshots/`, each
+ * only when it is a real directory (not a symlink) owned by the current user.
+ * Missing dirs are left for codex to create; errors are ignored (best effort,
+ * never blocks a turn). Returns the paths it tightened. No-op on win32.
+ */
+export function restrictCodexHome(codexHome: string): string[] {
+  if (process.platform === 'win32' || typeof process.getuid !== 'function') return [];
+  const uid = process.getuid();
+  const changed: string[] = [];
+  for (const dir of [codexHome, join(codexHome, 'sessions'), join(codexHome, 'shell_snapshots')]) {
+    try {
+      const st = lstatSync(dir);
+      if (!st.isDirectory() || st.uid !== uid || (st.mode & 0o777) === 0o700) continue;
+      chmodSync(dir, 0o700);
+      changed.push(dir);
+    } catch {
+      /* missing or not ours to change */
+    }
+  }
+  return changed;
+}
+
+/**
  * `codex exec` argv for one turn. ARG ORDER — see file header for the
  * live-verified citation:
- *   codex exec --json [--model X] [-c model_reasoning_effort=L] [--cd Y]
+ *   codex exec --json [--model X] [-c model_reasoning_effort=L]
+ *              -c features.shell_snapshot=false -c features.shell_snapshot_v2=false [--cd Y]
  *              [--skip-git-repo-check] [--sandbox <mode> | --dangerously-…]
  *              [resume <threadId>] -- -
  * The prompt goes over STDIN, not argv: a single argv element is capped
@@ -42,6 +98,7 @@ export function codexExecArgs(args: AgentRunArgs, threadId: string | undefined):
   const cliArgs: string[] = ['exec', '--json'];
   if (args.model) cliArgs.push('--model', args.model);
   cliArgs.push(...codexEffortArgs(args.effort));
+  cliArgs.push(...CODEX_SNAPSHOT_OFF_ARGS); // security: no env dump on disk (see above)
   cliArgs.push('--cd', args.cwd);
   cliArgs.push('--skip-git-repo-check');
   if (args.access === 'read') {
@@ -88,15 +145,13 @@ export async function* streamTurn(
   // Full access: own process group + tree tracking (process-group-spawn.ts),
   // so cancel reaches every descendant and agent-exec can report
   // background_pids. Any other access: a plain spawn, as before.
+  // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic vendor
+  // CLI; an explicit value in args.env still wins below.
+  const env = { ...omitAnthropicManagedKeys(process.env), ...args.env };
+  restrictCodexHome(codexHomeDir(env)); // #535: rollouts/snapshots owner-only
   const proc = spawnRunnerProcess(
     ...maskedCommand(args.authorityMask, bin, cliArgs),
-    {
-      cwd: args.cwd,
-      // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
-      // vendor CLI; an explicit value in args.env still wins below.
-      env: { ...omitAnthropicManagedKeys(process.env), ...args.env },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    },
+    { cwd: args.cwd, env, stdio: ['pipe', 'pipe', 'pipe'] },
     args,
   );
   const child = proc.child;

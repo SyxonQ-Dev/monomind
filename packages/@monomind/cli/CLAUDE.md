@@ -8,7 +8,7 @@
 
 ## Automatic Monoswarm Orchestration
 
-> **Deprecated:** `monoswarm` (the CLI command and the `monoswarm_*` MCP tools) is deprecated and removed in 2.21.0 (#418): it records state and starts no agents. Don't initialize a monoswarm; spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
+> **Deprecated:** `monoswarm` (the CLI command and the `monoswarm_*` MCP tools) is deprecated and removed in 2.22.0 (#418): it records state and starts no agents. Don't initialize a monoswarm; spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
 
 For complex work, spawn agents via the Task tool in the same message so they run concurrently — Task tool agents do the actual work.
 
@@ -24,7 +24,7 @@ table (`majority`/`supermajority`/`unanimous`/`threshold`).
 - Never poll TaskOutput or check monoswarm status; don't ask "should I check?" — wait for results
 - When agent results arrive, review ALL results before proceeding
 
-### Anti-Drift Config (deprecated — removed in 2.21.0)
+### Anti-Drift Config (deprecated — removed in 2.22.0)
 
 These commands only record a state file; they start no agents and change no behaviour:
 
@@ -178,7 +178,7 @@ emitted for new projects by `src/init/claudemd-generator.ts` stops at code 9.
 | `init`      | 5           | Project initialization with wizard, presets, skills, hooks               | Working         |
 | `ui`        | 0           | Start the Neural Control Room dashboard (`--no-open`, `--port`; alias `dashboard`) | Working         |
 | `agent`     | 7           | Agent lifecycle (spawn, list, status, stop, metrics, pool, health)       | Working — runs in-process, no MCP server needed |
-| `monoswarm` | 6           | Deprecated — records state, starts no agents; removed in 2.21.0          | Deprecated (#418) |
+| `monoswarm` | 6           | Deprecated — records state, starts no agents; removed in 2.22.0          | Deprecated (#418) |
 | `memory`    | 12          | Memory store (SQLite/JSON; optional vector search)                        | Working         |
 | `mcp`       | 9           | MCP server management and tool execution                                 | Working         |
 | `task`      | 5           | Task creation, assignment, and lifecycle                                 | Working         |
@@ -186,7 +186,7 @@ emitted for new projects by `src/init/claudemd-generator.ts` stops at code 9.
 | `config`    | 7           | Configuration management and provider setup                              | Working         |
 | `status`    | 3           | System status monitoring with watch mode                                 | Working         |
 | `hooks`     | 28          | Lifecycle hooks (pattern/outcome logging, agent picking) + <!-- doc-count:workers -->9<!-- /doc-count:workers --> background workers                               | Working         |
-| `org`       | <!-- doc-count:org-subcommands -->37<!-- /doc-count:org-subcommands -->          | SDK org runtime (skills, run [--dry-run], stop, pause, resume, reload, status, serve, supervisor, test-loop, logs, events, watch, report, memory [stats\|search\|rules\|rollback], costs, inbox, flow, questions, approvals, answer, approve, deny, gates, gate-approve, gate-reject, replay, resume-from [resumes live execution from a checkpoint — distinct from replay's debug-only event replay], branch, decisions, create, validate, migrate, list, delete, mark-complete, role) | Working |
+| `org`       | <!-- doc-count:org-subcommands -->39<!-- /doc-count:org-subcommands -->          | SDK org runtime (skills, run [--dry-run], stop, pause, resume, reload, status, serve, supervisor, test-loop, logs, events, watch, report, memory [stats\|search\|rules\|rollback], costs, inbox, flow, questions, approvals, answer, approve, deny, gates, gate-approve, gate-reject, replay, resume-from [resumes live execution from a checkpoint — distinct from replay's debug-only event replay], branch, decisions, create, validate, migrate, list, delete, mark-complete, role, sign, approve-paths) | Working |
 
 ### Advanced Commands
 
@@ -212,7 +212,7 @@ npx monomind@latest init --wizard
 # Spawn an agent
 npx monomind@latest agent spawn -t coder --name my-coder
 
-# Run an agent org (monoswarm is deprecated and removed in 2.21.0)
+# Run an agent org (monoswarm is deprecated and removed in 2.22.0)
 npx monomind@latest org run <org> --task "..."
 
 # Search memory (local SQLite + local HF-embeddings; keyword fallback. HNSW ANN
@@ -463,7 +463,7 @@ npx monomind@latest doctor --fix
 
 ### CLI Tools Handle Coordination (via Bash):
 
-- **Monoswarm init/status** (deprecated, removed in 2.21.0 — records state, starts no agents): `npx monomind@latest monoswarm init --topology <type>`, `npx monomind@latest monoswarm status`
+- **Monoswarm init/status** (deprecated, removed in 2.22.0 — records state, starts no agents): `npx monomind@latest monoswarm init --topology <type>`, `npx monomind@latest monoswarm status`
 - **Agent spawn**: `npx monomind@latest agent spawn -t <type> --name <name>`
 - **Memory store**: `npx monomind@latest memory store --key "mykey" --value "myvalue" --namespace patterns`
 - **Memory search**: `npx monomind@latest memory search --query "search terms"`

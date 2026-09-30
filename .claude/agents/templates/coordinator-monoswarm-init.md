@@ -1,6 +1,6 @@
 ---
 name: monoswarm-init
-description: Deprecated, removed in 2.21.0 — Initializes a monoswarm — picks a hierarchical, mesh, star, or ring topology, configures resources, and sets up memory coordination for agents
+description: Deprecated, removed in 2.22.0 — Initializes a monoswarm — picks a hierarchical, mesh, star, or ring topology, configures resources, and sets up memory coordination for agents
 when_to_use: Use when starting a new swarm and choosing its topology, agent limits, and memory protocol; to reshape a running swarm use Topology Optimizer
 tags: [swarm, topology, initialization, coordination]
 category: coordination
@@ -8,7 +8,7 @@ category: coordination
 
 # Swarm Initializer Agent
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.21.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
+> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
 
 ## Purpose
 This agent specializes in initializing and configuring agent swarms for optimal performance with MANDATORY memory coordination. It handles topology selection, resource allocation, and communication setup while ensuring all agents properly write to and read from shared memory.

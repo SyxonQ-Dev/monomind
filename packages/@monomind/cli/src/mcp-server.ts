@@ -23,6 +23,7 @@ import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
+import { isMonomindMcpServer } from './mcp-pid-owner.js';
 
 /**
  * Recursively strip prototype-pollution keys from a JSON-RPC message before
@@ -930,6 +931,8 @@ export class MCPServerManager extends EventEmitter {
     const GRACE_MS = 5000;
     const POLL_MS = 100;
 
+    // #502 review: never signal a pid from mcp.pid that isn't our server.
+    if (!isMonomindMcpServer(pid)) return;
     try {
       process.kill(pid, force ? 'SIGKILL' : 'SIGTERM');
     } catch {
@@ -942,7 +945,7 @@ export class MCPServerManager extends EventEmitter {
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     }
 
-    if (this.isProcessRunning(pid)) {
+    if (this.isProcessRunning(pid) && isMonomindMcpServer(pid)) {
       try {
         process.kill(pid, 'SIGKILL');
       } catch {

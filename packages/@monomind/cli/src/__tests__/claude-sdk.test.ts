@@ -328,7 +328,9 @@ describe('sdkLoadOptions', () => {
   });
 
   it('tells the operator how to use a refused binary', () => {
-    const { note } = sdkLoadOptions({ skipped: ['/home/user/.local/bin/claude: owned by uid 1000'] });
+    const { note } = sdkLoadOptions({
+      skipped: ['/home/user/.local/bin/claude: owned by uid 1000'],
+    });
     expect(note).toContain('/home/user/.local/bin/claude: owned by uid 1000');
     expect(note).toContain(CLAUDE_PATH_ENV);
   });

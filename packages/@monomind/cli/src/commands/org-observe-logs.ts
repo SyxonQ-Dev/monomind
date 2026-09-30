@@ -113,7 +113,8 @@ export const watchAction = async (ctx: CommandContext, name: string): Promise<Co
   const stats = ctx.flags.stats === true;
 
   let totalTokens = 0;
-  let totalCostUsd = 0;
+  // null until a usage event reports a cost (unknown is not $0).
+  let totalCostUsd: number | null = null;
 
   const show = (e: BusEvent): void => {
     if (e.from !== role) return;
@@ -127,12 +128,13 @@ export const watchAction = async (ctx: CommandContext, name: string): Promise<Co
     }
     if (stats && e.type === 'usage') {
       const tokens = typeof e.data?.tokens === 'number' ? e.data.tokens : 0;
-      const costDelta = typeof e.data?.cost_usd === 'number' ? e.data.cost_usd : 0;
+      const costDelta = typeof e.data?.cost_usd === 'number' ? e.data.cost_usd : null;
       totalTokens += tokens;
-      totalCostUsd += costDelta;
+      if (costDelta !== null) totalCostUsd = (totalCostUsd ?? 0) + costDelta;
+      const fmt = (usd: number | null): string => (usd === null ? '?' : `$${usd.toFixed(4)}`);
       log(
         output.info(
-          `[stats] +${tokens} tokens (total ${totalTokens}) · +$${costDelta.toFixed(4)} (total $${totalCostUsd.toFixed(4)})`,
+          `[stats] +${tokens} tokens (total ${totalTokens}) · +${fmt(costDelta)} (total ${fmt(totalCostUsd)})`,
         ),
       );
     }

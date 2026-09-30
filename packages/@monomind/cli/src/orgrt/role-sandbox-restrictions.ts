@@ -1,7 +1,7 @@
 // packages/@monomind/cli/src/orgrt/role-sandbox-restrictions.ts
 import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { protectableDepsRoot } from '../utils/optional-deps.js';
 import {
   authorityDirs,
@@ -20,6 +20,7 @@ import {
   runtimeDir,
 } from './file-roots.js';
 import { type GitGuard, gitLocalRemotePaths } from './git-guard.js';
+import { operatorProtectedPaths } from './operator-protected-paths.js';
 import { gitGuardDirs, orgsMountPoints } from './org-authority-files.js';
 import { ORG_DISALLOWED_HARNESS_TOOLS } from './org-harness-tools.js';
 import { expandDenyWrite, underAnyRoot } from './sandbox-deny-write.js';
@@ -161,6 +162,15 @@ export function buildClaudeRestrictions(
   // Operator-declared read-only paths (e.g. a QA role must never write into
   // the checkout it tests from). Relative paths resolve against the org root.
   const roleDenyWrite = (cfg?.denyWrite ?? []).map((p) => resolve(ctx.orgRoot ?? ctx.cwd, p));
+  // #502 review: what the operator's own processes run or trust
+  // (operator-protected-paths.ts), unless a signed allowWrite opts in.
+  const operatorPaths = operatorProtectedPaths({
+    home,
+    env,
+    orgRoot: ctx.orgRoot,
+    cwd: ctx.cwd,
+    allowWrite: cfg?.allowWrite,
+  });
 
   const disallowedTools = [
     ...ORG_DISALLOWED_HARNESS_TOOLS,
@@ -179,6 +189,7 @@ export function buildClaudeRestrictions(
     ]),
     ...authorityDirs(home, env).flatMap((d) => [rule('Read', `${d}/**`), rule('Edit', `${d}/**`)]),
     ...roleDenyWrite.flatMap((d) => [rule('Edit', d), rule('Edit', `${d}/**`)]),
+    ...operatorPaths.flatMap((d) => [rule('Edit', d), rule('Edit', `${d}/**`)]),
     // Authority files: the org definitions, the decision files and the
     // daemon's state (authority-mask.ts, #498). policy.ts's isAuthorityFile
     // is the complete check; these name the known files for the SDK too.
@@ -197,11 +208,16 @@ export function buildClaudeRestrictions(
   // paths are passed below), and its parent becomes a mount point so the
   // role cannot rename ~/.monomind aside and plant a new deps dir.
   const deps = protectableDepsRoot(env, home);
-  // #522: the same for an operator-chosen Claude Code the daemons run.
-  const claude = protectedClaudeBinary(env, home);
+  // #522: an operator-chosen Claude Code the daemons run: its file is in
+  // operatorPaths; the directories above it become mount points (below).
+  const claudeAnchors = protectedClaudeBinary(env, home)?.dirs ?? [];
   // Stubs first: with all of the cwd's in place, bwrap creates nothing there.
   const missingStubs =
     (ctx.platform ?? process.platform) === 'linux' ? ctx.holdStubs?.(allowWrite) : undefined;
+  const cwdClaude = join(ctx.cwd, '.claude');
+  const cwdClaudeStubsHeld =
+    !!missingStubs &&
+    !missingStubs.some((s) => s === cwdClaude || s.startsWith(`${cwdClaude}${sep}`));
   // #323: a read-only directory holding the cwd or ~/.claude breaks the SDK's
   // own stub mounts — pass its children instead, unless it is the cwd and the
   // runtime holds every stub in it (sandbox-deny-write.ts).
@@ -212,13 +228,19 @@ export function buildClaudeRestrictions(
       ...gitDirs.flatMap(gitLocalRemotePaths),
       ...HOME_DENY_WRITE.map((p) => join(home, p)),
       ...(deps ? [deps] : []),
-      ...(claude ? [claude.file] : []),
       ...authorityFilePaths(ctx.orgRoot, ctx.current),
       // Every role's guard dir, not only this one's (#498).
       ...gitGuardDirs(ctx.orgRoot),
       ...roleDenyWrite,
+      // #502 review: the operator key and signatures must not be replaceable
+      // either — where the SDK's read deny does not stop writes (macOS), a
+      // role could otherwise plant a key it knows.
+      ...authorityDirs(home, env),
+      ...operatorPaths,
     ]),
-    [ctx.cwd, join(home, '.claude')],
+    // The cwd's .claude holds some of the SDK's own stubs: unless the
+    // runtime holds every one of them, it is expanded, not a plain deny.
+    [ctx.cwd, join(home, '.claude'), ...(cwdClaudeStubsHeld ? [] : [cwdClaude])],
     ctx.platform,
     missingStubs && { cwd: ctx.cwd, writableRoots: allowWrite, missingStubs },
   );
@@ -244,7 +266,7 @@ export function buildClaudeRestrictions(
         // denied here, and new files in it stay possible (authority-mask.ts).
         ...orgsMountPoints(ctx.orgRoot).filter((d) => underAnyRoot(d, allowWrite)),
         ...(deps ? [dirname(deps)] : []).filter((d) => underAnyRoot(d, allowWrite)),
-        ...(claude?.dirs ?? []).filter((d) => underAnyRoot(d, allowWrite)),
+        ...claudeAnchors.filter((d) => underAnyRoot(d, allowWrite)),
       ]),
       denyWrite: existing(expanded.denyWrite),
       denyRead: existing([

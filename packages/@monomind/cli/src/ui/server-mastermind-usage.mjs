@@ -44,10 +44,12 @@ function _accumulateAgentUsage(event, root, _orn) {
         // re-added from the split fields, which are that same total broken
         // down rather than an extra amount.
         const _tokensTotal = event.type === 'org:usage' ? Number(event.data?.tokens) || 0 : 0;
+        // null/missing = the runtime reported no cost (unknown, rev 28).
+        const _rawCost = event.type === 'agent:usage' ? event.cost_usd : event.data?.cost_usd;
         const _costUsd =
-          event.type === 'agent:usage'
-            ? Number(event.cost_usd) || 0
-            : Number(event.data?.cost_usd) || 0;
+          _rawCost === null || _rawCost === undefined || !Number.isFinite(Number(_rawCost))
+            ? null
+            : Number(_rawCost);
         _st.agents[_arole] = {
           ..._ex,
           tokens_in: (_ex.tokens_in || 0) + _tokensIn,
@@ -57,7 +59,8 @@ function _accumulateAgentUsage(event, root, _orn) {
           tokens_used:
             (_ex.tokens_used || 0) +
             (event.type === 'org:usage' ? _tokensTotal : _tokensIn + _tokensOut),
-          total_cost_usd: (_ex.total_cost_usd || 0) + _costUsd,
+          total_cost_usd:
+            _costUsd === null ? (_ex.total_cost_usd ?? null) : (_ex.total_cost_usd ?? 0) + _costUsd,
           lastUpdated: event.ts,
         };
         fs.writeFileSync(_stateFile, JSON.stringify(_st, null, 2));

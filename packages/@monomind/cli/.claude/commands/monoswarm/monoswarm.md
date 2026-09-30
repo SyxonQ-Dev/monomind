@@ -1,11 +1,11 @@
 ---
 name: monoswarm-monoswarm
-description: Deprecated, removed in 2.21.0 — initializes and starts multi-agent swarms for research, development, analysis, testing, optimization and maintenance, with optional vote-based consensus
+description: Deprecated, removed in 2.22.0 — initializes and starts multi-agent swarms for research, development, analysis, testing, optimization and maintenance, with optional vote-based consensus
 ---
 
 # Monoswarm Orchestration
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.21.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
+> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
 
 Start and coordinate multi-agent swarms for complex tasks. Queen-led,
 vote-based coordination for decisions that need a recorded outcome.

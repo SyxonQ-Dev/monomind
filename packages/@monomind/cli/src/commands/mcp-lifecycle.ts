@@ -6,6 +6,7 @@
  */
 
 import { listMCPTools } from '../mcp-client.js';
+import { isMonomindMcpServer } from '../mcp-pid-owner.js';
 import { getMCPServerStatus, getServerManager, type MCPServerOptions } from '../mcp-server.js';
 import { output } from '../output.js';
 import { confirm } from '../prompt.js';
@@ -135,7 +136,8 @@ export const startCommand: Command = {
       output.printWarning(`MCP Server (PID: ${existingStatus.pid}) - restarting...`);
       try {
         // Force kill the existing process
-        if (existingStatus.pid) {
+        // #502 review: only a pid whose command line is our MCP server.
+        if (existingStatus.pid && isMonomindMcpServer(existingStatus.pid)) {
           try {
             process.kill(existingStatus.pid, 'SIGKILL');
           } catch {

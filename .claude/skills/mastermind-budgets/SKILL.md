@@ -21,6 +21,11 @@ The Org Runtime enforces exactly three caps, all in the org definition `.monomin
 | `run_config.budget_tokens` | whole org, tokens | every role's session closes (default `1000000`) |
 
 A role's `policy.maxUsd` / `policy.maxTokens`, when set, win over `budget_usd` / `budget_tokens`.
+
+A `budget_usd` cap only counts costs the runtime reports. On a runtime with `reports_cost: false` in
+`monomind agent scan --json` (codex, kimicode, hermes, vercel, …) the role's cost is unknown —
+`cost_usd: null` in `org costs --json` — so its `budget_usd` never fires. Cap those roles with
+`budget_tokens` instead.
 Caps are per run: a new `monomind org run` starts at zero spend, `--resume` keeps it. The coordinator
 is warned once when a role or the org passes 80% of a cap.
 
@@ -76,7 +81,7 @@ echo "BUDGETS — $org_name  (run: $(echo "$spendJson" | jq -r '.run // "none ye
 echo "════════════════════════════════════════════════════════"
 
 jq -r --argjson spend "$spendJson" --arg only "${agent_id:-}" '
-  def usd: . * 10000 | round / 10000;
+  def usd: if . == null then "unknown" else . * 10000 | round / 10000 | "$\(.)" end;
   ($spend.items | map({key: .role, value: .}) | from_entries) as $s
   | [.roles[] | select(.kind != "endpoint")] as $roles
   | (.run_config.budget_tokens // 1000000) as $orgTok
@@ -85,18 +90,18 @@ jq -r --argjson spend "$spendJson" --arg only "${agent_id:-}" '
   | [$roles[] | select(.budget_tokens == null)] as $even
   | (($orgTok - ([$roles[].budget_tokens // 0] | add // 0)) / ([$even | length, 1] | max)
      | floor | [., 0] | max) as $split
-  | "ORG   run_config.budget_tokens \($orgTok)   spent \($spend.totals.tokens) tokens / $\($spend.totals.cost_usd | usd)",
+  | "ORG   run_config.budget_tokens \($orgTok)   spent \($spend.totals.tokens) tokens / \($spend.totals.cost_usd | usd)",
     "      (no org-wide USD cap — set budget_usd per role)",
     "",
     ( $roles[] | select($only == "" or .id == $only)
       | ($s[.id] // {cost_usd: 0, tokens: 0}) as $r
       | (.policy.maxUsd // .budget_usd) as $usd
       | (.policy.maxTokens // .budget_tokens // $split) as $tok
-      | (if ($usd and $r.cost_usd >= $usd) or $r.tokens >= $tok then "  OVER"
-         elif ($usd and $r.cost_usd >= $usd * 0.8) or $r.tokens >= $tok * 0.8 then "  >80%"
+      | (if ($usd and ($r.cost_usd // 0) >= $usd) or $r.tokens >= $tok then "  OVER"
+         elif ($usd and ($r.cost_usd // 0) >= $usd * 0.8) or $r.tokens >= $tok * 0.8 then "  >80%"
          else "" end) as $flag
       | "\(.id)\($flag)",
-        "    USD:    $\($r.cost_usd | usd) / \(if $usd then "$\($usd)" else "no cap (budget_usd unset)" end)",
+        "    USD:    \($r.cost_usd | usd) / \(if $usd then "$\($usd)" else "no cap (budget_usd unset)" end)\(if $usd and $r.cost_usd == null then " (cost not reported: this cap cannot fire)" else "" end)",
         "    tokens: \($r.tokens) / \($tok)\(if .policy.maxTokens or .budget_tokens then "" else " (even split of run_config.budget_tokens)" end)" )
 ' "$orgFile"
 
@@ -126,6 +131,10 @@ if [ -n "${agent_id:-}" ]; then
     jq --arg id "$agent_id" --argjson v "$limit_usd" \
       '(.roles[] | select(.id == $id)).budget_usd = $v' "$orgFile" > "$tmp" && mv "$tmp" "$orgFile"
     echo "  roles[$agent_id].budget_usd → \$$limit_usd"
+    role_rt=$(jq -r --arg id "$agent_id" '(.roles[] | select(.id == $id) | .runtime) // .runtime // "claude"' "$orgFile")
+    npx -y monomind@latest agent scan --json 2>/dev/null \
+      | jq -e --arg rt "$role_rt" '.agents[] | select(.id == $rt) | .reports_cost == false' >/dev/null \
+      && echo "  WARNING: runtime '$role_rt' reports no cost (reports_cost: false) — this budget_usd never fires. Cap the role with --limit-tokens."
     jq -e --arg id "$agent_id" '.roles[] | select(.id == $id) | .policy.maxUsd != null' "$orgFile" >/dev/null \
       && echo "  NOTE: this role's policy.maxUsd is set and takes precedence over budget_usd."
   fi
@@ -147,6 +156,8 @@ fi
 
 npx -y monomind@latest org validate "$org_name" \
   || echo "WARNING: '${org_name}' no longer passes validation — fix it before 'monomind org run ${org_name}'"
+# Budgets are signed (#502): run/reload/serve use this change only once the operator signs it.
+echo "Review, then sign the change yourself: monomind org sign ${org_name}"
 npx -y monomind@latest org reload "$org_name"
 ```
 
@@ -164,6 +175,8 @@ jq --arg id "$agent_id" '(.roles[] | select(.id == $id)) |= del(.budget_usd, .bu
 echo "  Cleared budget_usd / budget_tokens for '$agent_id'"
 npx -y monomind@latest org validate "$org_name" \
   || echo "WARNING: '${org_name}' no longer passes validation — fix it before 'monomind org run ${org_name}'"
+# Budgets are signed (#502): run/reload/serve use this change only once the operator signs it.
+echo "Review, then sign the change yourself: monomind org sign ${org_name}"
 npx -y monomind@latest org reload "$org_name"
 ```
 
@@ -177,6 +190,7 @@ echo "BUDGET ALERTS — $org_name"
 echo "────────────────────────────────────────────────────────"
 
 jq -r --argjson spend "$spendJson" '
+  def usd: if . == null then "unknown" else . * 10000 | round / 10000 | "$\(.)" end;
   ($spend.items | map({key: .role, value: .}) | from_entries) as $s
   | [.roles[] | select(.kind != "endpoint")] as $roles
   | [$roles[] | select(.budget_tokens == null)] as $even
@@ -186,8 +200,8 @@ jq -r --argjson spend "$spendJson" '
       | ($s[.id] // {cost_usd: 0, tokens: 0}) as $r
       | (.policy.maxUsd // .budget_usd) as $usd
       | (.policy.maxTokens // .budget_tokens // $split) as $tok
-      | select(($usd and $r.cost_usd >= $usd * 0.8) or $r.tokens >= $tok * 0.8)
-      | "  \(.id): $\($r.cost_usd * 10000 | round / 10000)\(if $usd then " / $\($usd)" else "" end), \($r.tokens) / \($tok) tokens" ]
+      | select(($usd and ($r.cost_usd // 0) >= $usd * 0.8) or $r.tokens >= $tok * 0.8)
+      | "  \(.id): \($r.cost_usd | usd)\(if $usd then " / $\($usd)" else "" end), \($r.tokens) / \($tok) tokens" ]
   | if length == 0 then "  All roles under 80% of their caps." else .[] end
 ' "$orgFile"
 

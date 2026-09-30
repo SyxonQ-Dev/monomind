@@ -1,11 +1,11 @@
 ---
 name: monoswarm-README
-description: Deprecated, removed in 2.21.0 — Monoswarm skill index — lists all available multi-agent coordination and vote-consensus skills for Monomind
+description: Deprecated, removed in 2.22.0 — Monoswarm skill index — lists all available multi-agent coordination and vote-consensus skills for Monomind
 ---
 
 # Monoswarm Skills
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.21.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
+> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
 
 Multi-agent swarm coordination, with optional vote-based consensus, for Monomind.
 
