@@ -250,7 +250,7 @@ describe('resolveInitOptions platform selection (#420)', () => {
     [{ 'only-claude': true, codex: true }, '--codex'],
     [{ 'only-claude': true, opencode: true, kimicode: true }, '--opencode, --kimicode'],
     [{ 'only-claude': true, platforms: 'codex' }, '--platforms'],
-    [{ 'only-claude': true, platform: 'claude' }, '--platform'],
+    [{ 'only-claude': true, platform: 'claude,codex' }, '--platform'],
     [{ 'only-claude': true, target: 'codex' }, '--target'],
     [{ 'only-claude': true, 'skip-claude': true }, '--skip-claude'],
   ])('rejects --only-claude with %j (#525)', (flags, named) => {
@@ -258,19 +258,24 @@ describe('resolveInitOptions platform selection (#420)', () => {
     expect(r).toEqual({ ok: false, message: `--only-claude cannot be combined with ${named}` });
   });
 
-  it('accepts --only-claude with --target claude', () => {
-    expect(resolve({ 'only-claude': true, target: 'claude' }).options.selectedPlatforms).toEqual([
-      'claude',
-    ]);
-  });
+  it.each([{ target: 'claude' }, { platforms: 'claude' }, { platform: 'claude' }])(
+    'accepts --only-claude with %j',
+    (flags) => {
+      expect(resolve({ 'only-claude': true, ...flags }).options.selectedPlatforms).toEqual([
+        'claude',
+      ]);
+    },
+  );
 
   it('--skip-claude hints no Claude Code back in (#525)', () => {
     const r = resolve({ 'skip-claude': true, platforms: 'codex,claude' });
     expect(r.options.selectedPlatforms).toEqual(['codex']);
     const lines = describePlatformChoice(r.platforms).join('\n');
     expect(lines).toContain('Not written: Antigravity / Gemini, OpenCode, Kimi Code.');
-    expect(lines).toContain('--platforms codex,antigravity,opencode,kimi --yes');
-    expect(lines).not.toContain('claude');
+    // The suggested command keeps --skip-claude, or it would copy .claude/skills.
+    expect(lines).toContain('--platforms codex,antigravity,opencode,kimi --skip-claude --yes');
+    expect(lines).not.toContain('claude,');
+    expect(lines).not.toContain('Claude Code');
     expect(lines).not.toContain('--all-platforms');
     const all = describePlatformChoice(resolve({ 'skip-claude': true }).platforms);
     expect(all).toHaveLength(1);

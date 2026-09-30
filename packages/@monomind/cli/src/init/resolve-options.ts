@@ -125,10 +125,15 @@ export function resolveInitOptions(
   }
 
   // `--only-claude` already names the platform; another platform flag would
-  // be silently dropped (#525). `--target claude` just repeats it.
+  // be silently dropped (#525). `--target claude` and `--platforms claude`
+  // just repeat it.
   if (onlyClaude) {
+    const onlyClaudeListed = requestedPlatforms
+      ?.split(',')
+      .every((value) => resolvePlatformId(value) === 'claude');
     const narrowing = [
       requestedPlatforms !== undefined &&
+        !onlyClaudeListed &&
         (ctx.flags.platforms !== undefined ? '--platforms' : '--platform'),
       requestedTarget !== undefined && requestedTarget !== 'claude' && '--target',
       skipClaude && '--skip-claude',

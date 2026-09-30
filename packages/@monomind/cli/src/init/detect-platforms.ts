@@ -198,7 +198,7 @@ export function describePlatformChoice(choice: PlatformChoice): string[] {
       `  Not written: ${names(others)}. Add them with \`monomind init --platforms ${[
         ...choice.platforms,
         ...others,
-      ].join(',')} --yes\`${allPlatforms}.`,
+      ].join(',')}${choice.skipClaude ? ' --skip-claude' : ''} --yes\`${allPlatforms}.`,
     );
   }
   return lines;
