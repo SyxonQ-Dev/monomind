@@ -14,6 +14,11 @@
  *     packages, whose active `org` skills (their content and grantedTools,
  *     which decide the MCP tools the daemon grants) and blueprints roles get
  *     at start. Only the operator's `monomind catalog` writes it;
+ *   - #580: `<project>/.agents/skills` — the catalog's other projection
+ *     surface, which the operator's Codex, Gemini, Kimi, OpenCode… sessions
+ *     load skills from, as Claude Code loads `.claude/`. Like `.claude/` it
+ *     is not pre-created (that would leave a stray `.agents/` in every repo);
+ *     while missing it is on the planted-path watch (planted-paths.ts);
  *   - `~/.npm/_npx` (what `npx -y monomind …` runs), `~/.npmrc`,
  *     `~/.local/bin`, and shell startup files beyond HOME_DENY_WRITE;
  *   - #527: the node, npm, claude and monomind installs the operator's
@@ -230,6 +235,7 @@ function protectedCandidates(ctx: ProtectedCtx): string[] {
     ...roots.map((r) => join(r, '.mcp.json')),
     ...roots.map((r) => join(r, '.monomind', 'org-skills')),
     ...roots.map((r) => join(r, '.monomind', 'catalog')),
+    ...roots.map((r) => join(r, '.agents', 'skills')),
     join(mmHome, 'org-skills'),
     join(mmHome, 'enable-terminal.json'),
     ...monomindEntries,

@@ -23,7 +23,7 @@ Source: [`packages/@monomind/cli/src/catalog/`](packages/@monomind/cli/src/catal
 | Layer | Owns | Notes |
 |---|---|---|
 | Package bytes — `.monomind/catalog/packages/<name>/<sha12>/` | name, description, tags, instructions, requested tools | Immutable: the directory name is the first 12 hex digits of the content digest |
-| `.monomind/catalog/state.json` | kind, lifecycle status, source provenance, `sha256`, inspection, targets, `grantedTools`, `replacesLegacy`, history | The only file the lifecycle verbs write; written atomically under `.monomind/locks/catalog.lock` |
+| `.monomind/catalog/state.json` | kind, lifecycle status, source provenance, `sha256`, inspection, targets, `grantedTools`, `replacesLegacy`, history | The only file the lifecycle verbs write; written atomically under `.monomind/catalog/.lock` (inside the protected catalog dir, so a role cannot take it and block the operator, #581; a leftover `.monomind/locks/catalog.lock` from an older version is ignored) |
 | Snapshot, `catalog audit`, `doctor -c catalog` | nothing | Rebuilt from the two layers above |
 | `.claude/skills`, `.agents/skills` | nothing the catalog reads | Projections only |
 
@@ -132,6 +132,15 @@ roles get when an org starts: the content of each active `org` skill, its
   `MONOMIND_AGENT_EXEC`, `MONOMIND_CLINE_TURN`, `MONOMIND_AIDER` set), like
   `org sign`. The read-only verbs and projection dry runs still work there.
   Run the mutating verbs yourself in a terminal.
+
+The projection targets are protected the same way (#580): `.claude/` as a
+whole, and `.agents/skills`, which the operator's Codex, Gemini, Kimi,
+OpenCode and other sessions load skills from. Neither is created at org start
+(that would leave a stray `.agents/` in every repo); a missing one is on the
+planted-path watch instead, so one a role creates is quarantined.
+
+`monomind cleanup --force` treats `.monomind/catalog/` as data: it keeps the
+staged packages, approvals and grants unless `--purge-data` is given (#579).
 
 | Command | Effect |
 |---|---|
