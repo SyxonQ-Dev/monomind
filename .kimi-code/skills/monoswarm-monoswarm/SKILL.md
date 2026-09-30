@@ -1,6 +1,6 @@
 ---
 name: monoswarm-monoswarm
-description: "Deprecated, removed in 2.21.0 — main monoswarm skill: initializes swarms for research, development, analysis, testing, optimization and maintenance, with optional vote-based consensus"
+description: Deprecated, removed in 2.21.0 — initializes and starts multi-agent swarms for research, development, analysis, testing, optimization and maintenance, with optional vote-based consensus
 type: flow
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: optimization-auto-topology
-description: "Deprecated, removed in 2.21.0 — select a monoswarm topology by task complexity, using pre-task hook recommendations, monoswarm init flags and the performance_optimize MCP tool"
+description: Deprecated, removed in 2.21.0 — select a monoswarm topology from task complexity with pre-task hook recommendations, monoswarm init flags and the performance_optimize MCP tool
 type: flow
 ---
 
