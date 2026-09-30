@@ -117,6 +117,38 @@ describe('org questions dismiss (CLI, org not running)', () => {
   });
 });
 
+describe('org questions dismiss (CLI, org running)', () => {
+  it('records nothing offline when the hosting daemon refuses the dismissal', async () => {
+    const http = await import('node:http');
+    const { normalizeRoot } = await import('../orgrt/broker.js');
+    const srv = http.createServer((_req, res) => {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'forbidden: operator credential required' }));
+    });
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+    try {
+      const port = (srv.address() as { port: number }).port;
+      mkdirSync(join(cwd, 'broker'), { recursive: true });
+      writeFileSync(
+        join(cwd, 'broker', `${ORG}.json`),
+        JSON.stringify({
+          url: `http://127.0.0.1:${port}`,
+          pid: process.pid,
+          updatedAt: Date.now(),
+          root: normalizeRoot(cwd),
+        }),
+      );
+      const res = await dismissAction(ctx([ORG, 'q1']), ORG);
+      expect(res.success).toBe(false);
+      expect(res.message).toMatch(/rejected/);
+      expect(questions().find((q) => q.questionId === 'q1')?.state).toBeUndefined();
+      expect(existsSync(inboxPath())).toBe(false);
+    } finally {
+      srv.close();
+    }
+  });
+});
+
 describe('org answer — removed role (CLI, org not running)', () => {
   it('records the answer and skips queueing instead of failing', async () => {
     const res = await answerAction(ctx([ORG, 'q2', 'yes']), ORG);

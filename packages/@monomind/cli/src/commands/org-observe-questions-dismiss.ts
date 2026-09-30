@@ -86,8 +86,10 @@ export const dismissAction = async (ctx: CommandContext, name: string): Promise<
   };
 
   // Live path: the hosting daemon records it, tells the role and emits the audit event.
-  const { lookupOrg, readOperatorCredential } = await import('../orgrt/broker.js');
-  const remote = lookupOrg(name);
+  const { lookupOrg, normalizeRoot, readOperatorCredential } = await import('../orgrt/broker.js');
+  const found = lookupOrg(name);
+  // Only a daemon hosting THIS project's org (same rule as the dashboard's hostingDaemon).
+  const remote = found && (!found.root || found.root === normalizeRoot(ctx.cwd)) ? found : null;
   if (remote) {
     const cred = readOperatorCredential(name);
     try {
@@ -106,11 +108,14 @@ export const dismissAction = async (ctx: CommandContext, name: string): Promise<
         delivery?: Delivery;
       };
       if (res.ok && data.ok) return done(data.delivery ?? 'live');
+      // The daemon that runs this org refused (403 without the operator
+      // credential, or the question is closed): writing questions.json behind
+      // its back would close a blocking question — and release org_complete —
+      // without the operator check, the role's note or the audit event.
       log(
-        output.warning(
-          `Live dismissal rejected (${data.error ?? res.status}) — recording it offline.`,
-        ),
+        output.error(`Live dismissal rejected (${data.error ?? res.status}) — nothing dismissed.`),
       );
+      return { success: false, message: `dismissal rejected: ${data.error ?? res.status}` };
     } catch (err) {
       log(
         output.warning(

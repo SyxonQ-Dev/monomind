@@ -32,18 +32,24 @@ export function closedQuestionReason(
   return null;
 }
 
-/** True only when the org's saved definition is readable and no longer has a
- *  role `role`. A missing or unreadable definition says nothing about the
- *  role, so it is never taken as "removed". */
-export function roleRemovedFromOrgDef(root: string, org: string, role: string): boolean {
+/** Whether the org's saved definition has a role `role`; undefined when that
+ *  definition is missing or unreadable (it then says nothing about the role). */
+export function savedOrgDefHasRole(root: string, org: string, role: string): boolean | undefined {
   let def: { roles?: unknown };
   try {
     def = JSON.parse(readFileSync(join(root, ORG_DIR, `${org}.json`), 'utf8'));
   } catch {
-    return false;
+    return undefined;
   }
-  if (!Array.isArray(def?.roles)) return false;
-  return !def.roles.some((r) => (r as { id?: unknown } | null)?.id === role);
+  if (!Array.isArray(def?.roles)) return undefined;
+  return def.roles.some((r) => (r as { id?: unknown } | null)?.id === role);
+}
+
+/** True only when the org's saved definition is readable and no longer has a
+ *  role `role`. A missing or unreadable definition says nothing about the
+ *  role, so it is never taken as "removed". */
+export function roleRemovedFromOrgDef(root: string, org: string, role: string): boolean {
+  return savedOrgDefHasRole(root, org, role) === false;
 }
 
 /** The note the asking role receives when its question is dismissed, so it

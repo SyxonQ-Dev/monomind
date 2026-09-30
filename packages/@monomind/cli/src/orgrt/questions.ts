@@ -10,6 +10,7 @@ import {
   isOpenQuestion,
   type QuestionDismissal,
   roleRemovedFromOrgDef,
+  savedOrgDefHasRole,
 } from './question-state.js';
 import { ORG_DIR } from './types.js';
 
@@ -288,13 +289,17 @@ export function answerQuestion(
 type Running = NonNullable<ReturnType<OrgDaemon['orgs']['get']>>;
 
 /** A role with no live agent is "removed" when it is not waiting to spawn and
- *  either the running definition or the saved one lacks it (a reload keeps a
- *  removed role in the running definition until the next start). */
+ *  the saved definition lacks it (a reload keeps a removed role in the running
+ *  definition until the next start). A role the saved definition still has
+ *  runs again on the next start, so it is never "removed" even when the
+ *  running definition lacks it; only without a readable saved definition does
+ *  the running one decide. */
 function roleRemoved(daemon: OrgDaemon, org: string, role: string): boolean {
   const running = daemon.orgs.get(org);
   if (running?.pendingRoles?.has(role) || running?.deferredSpawns?.has(role)) return false;
-  const inRunningDef = running?.def.roles.some((r) => r.id === role) ?? false;
-  return !inRunningDef || roleRemovedFromOrgDef(daemon.root, org, role);
+  const saved = savedOrgDefHasRole(daemon.root, org, role);
+  if (saved !== undefined) return !saved;
+  return !(running?.def.roles.some((r) => r.id === role) ?? false);
 }
 
 function removedNote(role: string, what: 'answer' | 'dismissal'): string {

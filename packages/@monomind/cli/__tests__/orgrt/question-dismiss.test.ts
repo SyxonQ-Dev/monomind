@@ -143,6 +143,24 @@ describe('dismissQuestion — running org', () => {
     expect(audits().at(-1)?.data).toMatchObject({ verdict: 'answered', delivery: 'skipped' });
   });
 
+  it('a role the saved definition still has is not "removed" when the running one lacks it', async () => {
+    const { root, d } = await startOrg();
+    // The saved definition gains `writer` (no reload): it runs on the next
+    // start, so its answer must not be recorded as delivered-to-nobody.
+    writeFileSync(
+      join(root, '.monomind/orgs/alpha.json'),
+      JSON.stringify({ ...DEF, roles: [...DEF.roles, { id: 'writer', title: 'W', type: 'specialist', reports_to: 'boss' }] }),
+    );
+    const data = readQuestions(root, 'alpha');
+    data.questions.push({ questionId: 'q-w', role: 'writer', question: 'tone?', ts: 1, answer: null, answeredAt: null, blocking: true });
+    writeQuestions(root, 'alpha', data);
+    expect(await d.answerQuestion('alpha', 'writer', 'q-w', 'dry')).toEqual({
+      ok: false,
+      error: 'role "writer" not found in org "alpha"',
+    });
+    expect(readQuestions(root, 'alpha').questions[0].answer).toBeNull();
+  });
+
   it('refuses an unknown id and an already answered question', async () => {
     const { root, d } = await startOrg();
     await d.askHuman('alpha', 'boss', 'x?', true);

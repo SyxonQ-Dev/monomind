@@ -452,6 +452,9 @@ monomind org questions dismiss <name> <question-id> [--reason "<text>"] [--by <r
 - `--format json` prints `{v, org, question_id, role, delivery, dismissed, resolvedBy}`.
 - An unknown id, or a question that is already answered or dismissed, fails with a
   message and exit code 1.
+- While a daemon runs the org, the dismissal goes only through it (with the operator
+  credential): if that daemon refuses it, nothing is recorded. Only an unreachable
+  daemon falls back to recording it in `questions.json`.
 - The dashboard's Human Input view has a **Dismiss** button next to **Answer**
   (`POST /api/questions/dismiss`, same human-session auth as answering).
 
