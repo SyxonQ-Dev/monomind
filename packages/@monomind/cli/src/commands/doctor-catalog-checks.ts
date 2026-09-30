@@ -4,17 +4,28 @@
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { PROJECTION_SURFACES, planProjection } from '../catalog/projection.js';
 import { catalogAudit } from '../catalog/snapshot.js';
 import { nonBundledSkillLines } from '../orgrt/org-sign-review.js';
+import {
+  quarantine,
+  quarantineMessage,
+  strayClaudeConfigs,
+  untrackedWorktreeMcp,
+} from '../orgrt/planted-paths.js';
 import type { HealthCheck } from './doctor-env-checks.js';
 
 /** `doctor -c org-skills` (#502 review): org skills from the project or user
  *  library, which decide MCP tools the org daemon grants. Informational. */
-export async function checkOrgSkills(root: string = process.cwd()): Promise<HealthCheck[]> {
+export async function checkOrgSkills(
+  root: string = process.cwd(),
+  readOnly = false,
+): Promise<HealthCheck[]> {
   const lines = nonBundledSkillLines(root).map((l) => l.trim());
   return [
+    checkStrayClaudeConfig(root, readOnly),
     {
       name: 'Org Skills',
       status: 'pass',
@@ -24,6 +35,29 @@ export async function checkOrgSkills(root: string = process.cwd()): Promise<Heal
     },
     checkMcpjsonApprovals(root),
   ];
+}
+
+/** #502 review round 4: a Claude Code global config other than the current
+ *  one (above all `~/.claude/.config.json`, which Claude Code prefers when it
+ *  exists) or an untracked `.mcp.json` in an org work tree is quarantined on
+ *  every doctor run — reported only under --read-only. */
+export function checkStrayClaudeConfig(root: string, readOnly: boolean): HealthCheck {
+  const NAME = 'Planted Claude Config';
+  const found = [...strayClaudeConfigs(homedir(), process.env), ...untrackedWorktreeMcp(root)];
+  if (!found.length) return { name: NAME, status: 'pass', message: 'None' };
+  if (readOnly)
+    return {
+      name: NAME,
+      status: 'warn',
+      message: `Found ${found.join(', ')}: Claude Code would load it (a role may have planted it)`,
+      fix: 'Run monomind doctor without --read-only to quarantine it',
+    };
+  const findings = quarantine(found, root);
+  return {
+    name: NAME,
+    status: 'warn',
+    message: quarantineMessage(undefined, findings).replace(/\n/g, ' '),
+  };
 }
 
 /** #502 review round 3: settings that approve `.mcp.json` servers by name

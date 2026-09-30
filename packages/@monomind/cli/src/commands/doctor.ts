@@ -243,7 +243,7 @@ async function runDoctor(ctx: CommandContext, json: boolean): Promise<CommandRes
     // and needs to know its crash-reporting state) — alwaysOnChecks, not
     // codeOnlyChecks.
     ['crash-reporting', checkCrashReporting],
-    ['org-skills', () => checkOrgSkills(ctx.cwd || process.cwd())],
+    ['org-skills', () => checkOrgSkills(ctx.cwd || process.cwd(), mode.readOnly)],
   ];
   const codeOnlyChecks: [string, CheckFn][] = [
     ['git-repo', checkGitRepo],
@@ -317,7 +317,7 @@ async function runDoctor(ctx: CommandContext, json: boolean): Promise<CommandRes
     platforms: checkPlatforms,
     'crash-reporting': checkCrashReporting,
     catalog: () => checkCatalog(ctx.cwd || process.cwd()),
-    'org-skills': () => checkOrgSkills(ctx.cwd || process.cwd()),
+    'org-skills': () => checkOrgSkills(ctx.cwd || process.cwd(), mode.readOnly),
     // Opt-in: rebuilds stale indexes and scores the eval set, so it stays out
     // of the default run.
     pick: () => checkPick(ctx.cwd || process.cwd()),

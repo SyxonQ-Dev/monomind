@@ -7,6 +7,7 @@ import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import type { OrgDaemon } from '../orgrt/daemon.js';
 import { orgSignatureEnforced, verifyOrgDef } from '../orgrt/org-signature.js';
+import { sweepPlantWatches } from '../orgrt/planted-paths.js';
 import { ORG_DIR } from '../orgrt/types.js';
 import { output } from '../output.js';
 import type { CommandResult } from '../types.js';
@@ -47,6 +48,10 @@ export async function waitForRunEnd(
       } else {
         pollReloadfiles(cwd, daemon as OrgDaemon).catch((err) => {
           console.error('[org run] reloadfile poll failed:', err);
+        });
+        // #502 review round 4: the same planted-path sweep as `org serve`.
+        sweepPlantWatches().catch((err) => {
+          console.error('[org run] planted-path sweep failed:', err);
         });
       }
     }, intervalMs);

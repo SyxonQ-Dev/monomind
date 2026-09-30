@@ -232,11 +232,15 @@ function assertSafeOrgName(org: string): void {
   if (!/^[a-z0-9][a-z0-9_-]*$/i.test(org)) throw new Error(`invalid org name: ${org}`);
 }
 
+/** A project's id under the operator dir: a hash of its real path. */
+export function orgProjectId(root: string): string {
+  return createHash('sha256').update(projectRoot(root)).digest('hex').slice(0, 24);
+}
+
 /** Where the signature for `org` in project `root` is kept. */
 export function orgSignaturePath(root: string, org: string, dir = defaultOperatorDir()): string {
   assertSafeOrgName(org);
-  const projectId = createHash('sha256').update(projectRoot(root)).digest('hex').slice(0, 24);
-  return join(dir, 'org-signatures', projectId, `${org}.json`);
+  return join(dir, 'org-signatures', orgProjectId(root), `${org}.json`);
 }
 
 /** The signed projection kept beside the signature, for `org sign`'s diff. */

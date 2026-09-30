@@ -20,6 +20,7 @@ import {
   signOrgDef,
   verifyOrgDef,
 } from '../orgrt/org-signature.js';
+import { approveExistingPlantPaths } from '../orgrt/planted-paths.js';
 import { ORG_DIR, OrgDefSchema } from '../orgrt/types.js';
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
@@ -83,6 +84,8 @@ async function signOne(
     if (!ok) return `org ${name}: not signed (declined)`;
   }
   const { at } = signOrgDef(ctx.cwd, name, raw);
+  // #502: the operator approves the protected paths that exist now.
+  approveExistingPlantPaths(ctx.cwd);
   log(output.success(`org ${name}: signed (${at})`));
   return undefined;
 }
