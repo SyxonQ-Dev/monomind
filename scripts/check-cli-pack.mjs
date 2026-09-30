@@ -40,6 +40,15 @@ export function missingFromPack(files, required) {
   return required.filter((rel) => !present.has(rel));
 }
 
+/**
+ * Per-package entries of `npm pack --json` output: npm ≤11 prints an array,
+ * npm 12 an object keyed by package name.
+ */
+export function packEntries(json) {
+  const parsed = JSON.parse(json);
+  return Array.isArray(parsed) ? parsed : Object.values(parsed);
+}
+
 /** File list of a package directory (as npm would pack it) or of a tarball. */
 function packFileList(target) {
   if (target.endsWith('.tgz')) {
@@ -53,7 +62,7 @@ function packFileList(target) {
     maxBuffer: 64 << 20,
     stdio: ['ignore', 'pipe', 'ignore'],
   });
-  return JSON.parse(out)[0].files.map((f) => f.path);
+  return packEntries(out)[0].files.map((f) => f.path);
 }
 
 async function main(argv) {
