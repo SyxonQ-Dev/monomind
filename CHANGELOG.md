@@ -98,6 +98,16 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
   - **Residual:** a role that can read the operator-credential directory can sign, as it can already forge a full-access grant: an active full-access role, or a role that runs with neither the SDK sandbox nor the bubblewrap mask. **Such roles are allowed, by decision:** refusing them would stop orgs that need one (a push-level releaser, codex on macOS, any role on a host without bubblewrap), so signing protects every other role and these run with a warning instead. `org sign` and every org start name each unconfined role and why it runs without an OS sandbox (for example `policy.git push, and no bubblewrap mask`). To confine one, run it on the claude runtime below `policy.git: push` with the sandbox on, or install bubblewrap (Linux).
 
+- **First-use code is pinned by hash, and roles can no longer plant missing config or move a custom `MONOMIND_HOME` aside** ([#526](https://github.com/monoes/monomind/issues/526), follow-ups to the [#518](https://github.com/monoes/monomind/pull/518) review).
+
+  - **Pinned hashes.** The Claude Agent SDK's `sdk.mjs` and each platform's Claude binary have SHA-256 hashes shipped next to the install lockfiles, taken from the registry tarballs (the procedure is documented beside them). They are checked once per process before the SDK is imported, and so before it can spawn the binary, whether the copy is in `~/.monomind/deps` or found up monomind's own module path. A same-user plant passed the ownership and mode checks; now a mismatch refuses to load, names the file and says what to delete. A test keeps the pins in step with the pinned version and lockfile, and checks them against the copy the checkout installed.
+
+  - **Missing config is created empty before a role starts.** The SDK sandbox drops a `denyWrite` path that does not exist, so a role could create `~/.npmrc`, `~/.config/npm` or a shell rc file. `~/.npmrc`, `~/.bashrc`, `~/.profile`, `~/.gitconfig` (unless git has an XDG config), the zsh files (only next to an existing one) and the directories `~/.ssh`, `~/.config/git`, `~/.config/gh` and `~/.config/npm` are now created empty, so the SDK sandbox denies them and the mask binds them read-only. `~/.bash_profile` and `~/.bash_login` are left to the planted-path watch, since an empty one would make bash skip `~/.profile`.
+
+  - **No rename aside through an ancestor.** Every directory above `$MONOMIND_HOME` and `~/.monomind` whose parent a role can write is a mount point in the SDK sandbox and the bubblewrap mask. monomind refuses to load from a deps root reached through a symlink in a directory the user can write.
+
+  - **macOS.** The SDK's seatbelt profile already denies unlinking and creating every ancestor of a denied path, so the rename-aside defence holds there without mount points. Seatbelt rules match paths, so on macOS a `denyWrite` entry that does not exist yet (with an existing parent) is now passed too, and creating it is denied.
+
 ## [2.20.0] — 2026-09-29
 
 ### Added

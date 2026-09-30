@@ -1,7 +1,7 @@
 // packages/@monomind/cli/src/orgrt/role-sandbox-restrictions.ts
-import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
+import { accessSync, constants, existsSync, readdirSync, realpathSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { protectableDepsRoot } from '../utils/optional-deps.js';
 import {
   authorityDirs,
@@ -22,7 +22,7 @@ import { type GitGuard, gitLocalRemotePaths } from './git-guard.js';
 import { operatorProtectedPaths } from './operator-protected-paths.js';
 import { gitGuardDirs, orgsMountPoints } from './org-authority-files.js';
 import { ORG_DISALLOWED_HARNESS_TOOLS } from './org-harness-tools.js';
-import { expandDenyWrite, underAnyRoot } from './sandbox-deny-write.js';
+import { expandDenyWrite, renameGuardDirs, underAnyRoot } from './sandbox-deny-write.js';
 
 export interface RoleSandboxPolicy {
   mode?: 'auto' | 'required' | 'off';
@@ -118,6 +118,23 @@ const existing = (xs: Array<string | undefined>): string[] =>
       .filter((p) => existsSync(p))
       .map(maskTarget),
   );
+/** #526, macOS: seatbelt (sandbox-exec) denies by path rule, so a deny for
+ *  a path that does not exist yet also denies creating it; nothing has to
+ *  exist, unlike bwrap's binds. Kept only when the parent exists: the SDK
+ *  also denies creating or unlinking every ancestor of a denied path, and a
+ *  missing ancestor (~/.config for ~/.config/npm) would become uncreatable.
+ *  The parent is resolved, as seatbelt matches resolved paths. */
+const seatbeltDenyWrite = (xs: string[]): string[] =>
+  uniq(
+    uniq(xs).map((p) => {
+      if (existsSync(p)) return p;
+      try {
+        return join(realpathSync(dirname(p)), basename(p));
+      } catch {
+        return undefined;
+      }
+    }),
+  );
 /** bwrap cannot bind over a path inside a directory it cannot list ("Can't
  *  mkdir parents … Permission denied" — /run/containerd is drwx--x--x on a
  *  stock docker host), and that failure kills every sandboxed Bash call. Mask
@@ -204,12 +221,20 @@ export function buildClaudeRestrictions(
 
   const allowWrite = uniq([ctx.cwd, ctx.orgRoot, home, tmp, ...(cfg?.allowWrite ?? [])]);
   // #518 review (B1): the deps dir must exist to be denied (only existing
-  // paths are passed below), and its parent becomes a mount point so the
-  // role cannot rename ~/.monomind aside and plant a new deps dir.
+  // paths are passed below on Linux). #526: the monomind homes, and every
+  // directory above them in a writable directory, become mount points, so
+  // none can be renamed aside to plant a new deps dir — a custom
+  // MONOMIND_HOME deep in the cwd included. On macOS the SDK's seatbelt
+  // already denies unlinking every ancestor of a denied path.
   const deps = protectableDepsRoot(env, home);
+  const renameGuards = uniq(
+    [deps && dirname(deps), join(home, '.monomind')]
+      .filter((d): d is string => !!d && existsSync(d))
+      .flatMap((d) => renameGuardDirs(d, (parent) => underAnyRoot(parent, allowWrite))),
+  );
+  const platform = ctx.platform ?? process.platform;
   // Stubs first: with all of the cwd's in place, bwrap creates nothing there.
-  const missingStubs =
-    (ctx.platform ?? process.platform) === 'linux' ? ctx.holdStubs?.(allowWrite) : undefined;
+  const missingStubs = platform === 'linux' ? ctx.holdStubs?.(allowWrite) : undefined;
   const cwdClaude = join(ctx.cwd, '.claude');
   const cwdClaudeStubsHeld =
     !!missingStubs &&
@@ -255,15 +280,18 @@ export function buildClaudeRestrictions(
     filesystem: {
       allowWrite: uniq([
         ...allowWrite,
+        ...renameGuards,
         ...expanded.mountPoints.filter((d) => underAnyRoot(d, allowWrite)),
         // #498: mount points, so the orgs tree cannot be renamed aside.
         // The SDK binds denyWrite after allowWrite, so a writable dir below a
         // denied one would stay read-only: the orgs dir itself cannot be
         // denied here, and new files in it stay possible (authority-mask.ts).
         ...orgsMountPoints(ctx.orgRoot).filter((d) => underAnyRoot(d, allowWrite)),
-        ...(deps ? [dirname(deps)] : []).filter((d) => underAnyRoot(d, allowWrite)),
       ]),
-      denyWrite: existing(expanded.denyWrite),
+      denyWrite:
+        platform === 'darwin'
+          ? seatbeltDenyWrite(expanded.denyWrite)
+          : existing(expanded.denyWrite),
       denyRead: existing([
         ...(guard.level === 'none' ? gitDirs : []),
         runtimeDir(env),

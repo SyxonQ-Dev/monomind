@@ -1,0 +1,269 @@
+/**
+ * #526 (1): assertTrustedTree cannot tell a tree planted by this same user
+ * from monomind's own install, so the file it imports and the Claude binary
+ * the SDK spawns must match SHA-256 pins shipped beside the lockfiles.
+ * (3): no directory above the deps root may be a symlink this user could
+ * replace.
+ */
+
+import type * as fs from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+/** Opens of a file named sdk.mjs: each one is a hash computed. */
+const opened = vi.hoisted(() => ({ entry: 0 }));
+vi.mock('node:fs', async (orig) => {
+  const real = await orig<typeof import('node:fs')>();
+  return {
+    ...real,
+    openSync: ((p: fs.PathLike, ...rest: unknown[]) => {
+      if (String(p).endsWith('sdk.mjs')) opened.entry++;
+      return (real.openSync as (...a: unknown[]) => number)(p, ...rest);
+    }) as typeof real.openSync,
+  };
+});
+
+import {
+  dependencyDir,
+  ensureOptionalDependency,
+  OPTIONAL_DEPENDENCIES,
+} from '../utils/optional-deps.js';
+import {
+  OPTIONAL_DEPENDENCY_CODE_PINS,
+  OPTIONAL_DEPENDENCY_LOCKS,
+} from '../utils/optional-deps-locks.js';
+import {
+  claudeBinaryCandidates,
+  resetPinnedCodeCache,
+  sha256File,
+  verifyPinnedCode,
+} from '../utils/optional-deps-verify.js';
+import {
+  FAKE_PINS,
+  fakeNpm,
+  HOST,
+  notFound,
+  SDK,
+  VERSION,
+  writeFakeSdk,
+} from './fixtures/optional-deps-fixture.js';
+
+let home: string;
+let env: NodeJS.ProcessEnv;
+const opts = (extra: Record<string, unknown> = {}) => ({
+  env,
+  resolveOwn: notFound,
+  log: () => {},
+  host: HOST,
+  runNpm: fakeNpm('npm').run,
+  ...extra,
+});
+const plant = (marker = 'PLANTED CODE RAN') => writeFakeSdk(dependencyDir(SDK, env), marker);
+const fail = (m: string): never => {
+  throw new Error(m);
+};
+
+beforeEach(() => {
+  home = realpathSync(mkdtempSync(join(tmpdir(), 'mm-pins-')));
+  env = { MONOMIND_HOME: home };
+  mkdirSync(join(home, 'deps'), { recursive: true, mode: 0o700 });
+  resetPinnedCodeCache();
+});
+afterEach(() => {
+  rmSync(home, { recursive: true, force: true });
+});
+
+describe('the pins stay in step with the pinned versions and lockfiles', () => {
+  const pins = OPTIONAL_DEPENDENCY_CODE_PINS[SDK];
+  const lock = OPTIONAL_DEPENDENCY_LOCKS[SDK].packages as Record<string, { version?: string }>;
+
+  it('pins the SDK at the version it installs, with one binary per platform package', () => {
+    expect(pins?.version).toBe(OPTIONAL_DEPENDENCIES[SDK].version);
+    const platformPackages = Object.keys(lock)
+      .filter((p) => p.startsWith(`node_modules/${SDK}-`))
+      .map((p) => p.slice('node_modules/'.length));
+    expect(Object.keys(pins?.binaries ?? {}).sort()).toEqual(platformPackages.sort());
+    for (const [pkg, pin] of Object.entries(pins?.binaries ?? {})) {
+      expect(lock[`node_modules/${pkg}`].version).toBe(pins?.version);
+      expect(pin.file).toBe(pkg.includes('-win32-') ? 'claude.exe' : 'claude');
+      expect(pin.sha256).toMatch(/^[0-9a-f]{64}$/);
+    }
+    expect(pins?.entry).toMatchObject({
+      file: 'sdk.mjs',
+      sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+  });
+
+  it('matches the registry copy this checkout installed (sdk.mjs and this host’s binary)', () => {
+    // The CLI's devDependency is the same pinned version, installed by pnpm
+    // from the registry with the tarball's integrity checked.
+    const entry = createRequire(import.meta.url).resolve(SDK);
+    expect(sha256File(entry)).toBe(pins?.entry.sha256);
+    const req = createRequire(entry);
+    const found = claudeBinaryCandidates({ platform: process.platform, arch: process.arch })
+      .map((spec) => {
+        try {
+          return { pkg: spec.slice(0, spec.lastIndexOf('/')), bin: req.resolve(spec) };
+        } catch {
+          return undefined;
+        }
+      })
+      .find((x) => x);
+    expect(found, 'pnpm installs this host’s platform package').toBeDefined();
+    if (found) expect(sha256File(found.bin)).toBe(pins?.binaries?.[found.pkg]?.sha256);
+  });
+
+  it('tries the Claude binaries in the SDK’s order', () => {
+    const base = '@anthropic-ai/claude-agent-sdk';
+    expect(claudeBinaryCandidates({ platform: 'linux', arch: 'x64', musl: false })).toEqual([
+      `${base}-linux-x64/claude`,
+      `${base}-linux-x64-musl/claude`,
+    ]);
+    expect(claudeBinaryCandidates({ platform: 'linux', arch: 'arm64', musl: true })).toEqual([
+      `${base}-linux-arm64-musl/claude`,
+      `${base}-linux-arm64/claude`,
+    ]);
+    expect(claudeBinaryCandidates({ platform: 'win32', arch: 'x64' })).toEqual([
+      `${base}-win32-x64/claude.exe`,
+    ]);
+    expect(claudeBinaryCandidates({ platform: 'darwin', arch: 'arm64' })).toEqual([
+      `${base}-darwin-arm64/claude`,
+    ]);
+  });
+});
+
+describe('a same-user plant fails the pins', () => {
+  it('refuses a planted SDK in the deps dir before importing it, with a clear message', async () => {
+    plant();
+    const err = await ensureOptionalDependency(SDK, opts()).catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    const msg = (err as Error).message;
+    expect(msg).toMatch(/^Refusing to load @anthropic-ai\/claude-agent-sdk@\d/);
+    expect(msg).toMatch(/sdk\.mjs has SHA-256 [0-9a-f]{64}, but monomind pins [0-9a-f]{64}/);
+    expect(msg).toContain(`Delete ${dependencyDir(SDK, env)}`);
+    expect(msg).not.toContain('PLANTED CODE RAN');
+  });
+
+  it('refuses a genuine entry with a planted Claude binary', async () => {
+    plant();
+    const bin = join(
+      dependencyDir(SDK, env),
+      'node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude',
+    );
+    writeFileSync(bin, '#!/bin/sh\necho planted\n');
+    await expect(ensureOptionalDependency(SDK, opts({ pins: FAKE_PINS }))).rejects.toThrow(
+      /claude-agent-sdk-linux-x64\/claude has SHA-256 .*but monomind pins/,
+    );
+  });
+
+  it('refuses a package.json that points the import at another file', async () => {
+    plant();
+    const pkg = join(dependencyDir(SDK, env), 'node_modules', SDK);
+    writeFileSync(join(pkg, 'evil.mjs'), 'export const marker = "PLANTED";\n');
+    writeFileSync(
+      join(pkg, 'package.json'),
+      JSON.stringify({ name: SDK, version: VERSION, type: 'module', exports: './evil.mjs' }),
+    );
+    await expect(ensureOptionalDependency(SDK, opts({ pins: FAKE_PINS }))).rejects.toThrow(
+      /package\.json points to .*evil\.mjs/,
+    );
+  });
+
+  it('refuses a platform binary the pins do not list', async () => {
+    plant();
+    const unpinned = { [SDK]: { ...FAKE_PINS[SDK], binaries: {} } };
+    await expect(ensureOptionalDependency(SDK, opts({ pins: unpinned }))).rejects.toThrow(
+      /comes from @anthropic-ai\/claude-agent-sdk-linux-x64, which has no pin/,
+    );
+  });
+
+  it('holds a copy found up monomind’s own module path (~/node_modules) to the same pins', async () => {
+    const planted = writeFakeSdk(join(home, 'node_modules-root'), 'OWN PLANT');
+    const err = await ensureOptionalDependency(SDK, opts({ resolveOwn: () => planted })).catch(
+      (e: Error) => e,
+    );
+    expect((err as Error).message).toMatch(/Refusing to load .*sdk\.mjs has SHA-256/);
+    // With matching pins the same copy loads.
+    const mod = await ensureOptionalDependency<{ marker: string }>(
+      SDK,
+      opts({ resolveOwn: () => planted, pins: FAKE_PINS }),
+    );
+    expect(mod.marker).toBe('OWN PLANT');
+  });
+
+  it('loads the genuine SDK this checkout installed, with the shipped pins', async () => {
+    const mod = await ensureOptionalDependency<{ query: unknown }>(SDK, {
+      env,
+      log: () => {},
+    });
+    expect(typeof mod.query).toBe('function');
+  });
+});
+
+describe('verified once per process, again when the file changes', () => {
+  it('does not rehash an unchanged file, and rehashes one that changed', () => {
+    const pkgDir = dirname(writeFakeSdk(join(home, 'p'), 'x'));
+    const entry = join(pkgDir, 'sdk.mjs');
+    const pins = FAKE_PINS[SDK];
+    const where = { entry, pkgDir, remove: pkgDir };
+    opened.entry = 0;
+    verifyPinnedCode(SDK, pins, where, HOST, fail);
+    verifyPinnedCode(SDK, pins, where, HOST, fail);
+    expect(opened.entry).toBe(1);
+    const later = new Date(Date.now() + 5000);
+    utimesSync(entry, later, later);
+    verifyPinnedCode(SDK, pins, where, HOST, fail);
+    expect(opened.entry).toBe(2);
+    writeFileSync(entry, 'export const marker = "CHANGED";\n');
+    expect(() => verifyPinnedCode(SDK, pins, where, HOST, fail)).toThrow(/has SHA-256/);
+  });
+});
+
+describe('no replaceable symlink above the deps root', () => {
+  it('refuses a MONOMIND_HOME reached through a symlink in a writable directory', async () => {
+    const real = join(home, 'real-mm');
+    mkdirSync(join(real, 'deps'), { recursive: true, mode: 0o700 });
+    const link = join(home, 'link');
+    symlinkSync(real, link);
+    env = { MONOMIND_HOME: link };
+    writeFakeSdk(dependencyDir(SDK, env), 'x');
+    await expect(ensureOptionalDependency(SDK, opts({ pins: FAKE_PINS }))).rejects.toThrow(
+      new RegExp(`${link}, above it, is a symlink in a directory this user can write`),
+    );
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    'accepts one in a directory this user cannot write',
+    async () => {
+      const real = join(home, 'real-mm');
+      mkdirSync(join(real, 'deps'), { recursive: true, mode: 0o700 });
+      const locked = join(home, 'locked');
+      mkdirSync(locked);
+      symlinkSync(real, join(locked, 'link'));
+      chmodSync(locked, 0o555);
+      try {
+        env = { MONOMIND_HOME: join(locked, 'link') };
+        writeFakeSdk(dependencyDir(SDK, env), 'LOCKED OK');
+        const mod = await ensureOptionalDependency<{ marker: string }>(
+          SDK,
+          opts({ pins: FAKE_PINS }),
+        );
+        expect(mod.marker).toBe('LOCKED OK');
+      } finally {
+        chmodSync(locked, 0o755);
+      }
+    },
+  );
+});

@@ -36,13 +36,24 @@
  * (decisions.ts's gatesFor) and signed inbox entries (inbox.ts).
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { protectableDepsRoot } from '../utils/optional-deps.js';
 import { dashboardCredentialPaths, HOME_DENY_WRITE, operatorDirOverride } from './file-roots.js';
 import { maskReadOnlyPaths, monomindMaskLayout } from './operator-protected-paths.js';
 import { ensureOrgWorkDirs, orgsMaskLayout } from './org-authority-files.js';
 import { realPath } from './policy-paths.js';
+import { renameGuardDirs } from './sandbox-deny-write.js';
+
+const writableDir = (d: string): boolean => {
+  try {
+    accessSync(d, constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+const uniqPaths = (xs: string[]): string[] => [...new Set(xs)];
 
 /** Under $HOME: the dashboard's human-auth secret (ui/server.mjs). */
 export const DASHBOARD_AUTH_DIR = join('.monomind', 'dashboard-auth');
@@ -104,7 +115,15 @@ export function authorityMaskArgs(ctx: {
   // #502 review: ~/.monomind read-only, only its role-writable entries bound
   // back — first, so a work tree below it (binds further down) still opens.
   const mm = monomindMaskLayout(ctx.home, ctx.env);
-  for (const d of mm.readOnly.map(realPath)) args.push('--ro-bind', d, d);
+  // #526: every directory above a monomind home that this user could rename
+  // (its parent is writable) becomes a mount point, so a custom
+  // MONOMIND_HOME cannot be moved aside through an ancestor and a new deps
+  // dir planted in its place. Before the binds below them, which a later
+  // bind of an ancestor would cover.
+  const homes = mm.readOnly.map(realPath);
+  for (const d of uniqPaths(homes.flatMap((h) => renameGuardDirs(h, writableDir))))
+    if (!homes.includes(d)) args.push('--bind', d, d);
+  for (const d of homes) args.push('--ro-bind', d, d);
   for (const d of mm.writable.map(realPath)) args.push('--bind', d, d);
   // #498: the mask binds only existing work dirs read-write, so create them
   // first (a `git worktree add … work/src` in a masked role needs `work/`).

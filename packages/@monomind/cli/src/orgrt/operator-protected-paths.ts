@@ -20,7 +20,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 
 /** `~/.monomind` entries a role's own `monomind` commands write: browser
  *  automation state, the embedding-model cache, per-project memory, update
@@ -225,7 +225,8 @@ export function maskReadOnlyPaths(ctx: {
  *  OS sandbox can only protect a path that exists, and a role creating one
  *  of these first would plant it. The skill libraries and the npx cache are
  *  empty directories; the terminal gate is written as disabled, which is
- *  what its absence already meant (terminal-tools-core.ts). */
+ *  what its absence already meant (terminal-tools-core.ts); and the
+ *  HOME_DENY_WRITE stubs below (#526). */
 export function ensureOperatorProtectedPaths(ctx: {
   home: string;
   env: NodeJS.ProcessEnv;
@@ -246,5 +247,57 @@ export function ensureOperatorProtectedPaths(ctx: {
     writeFileSync(gate, '{ "enabled": false }\n', { flag: 'wx' });
   } catch {
     /* exists (the operator's own choice) or unwritable */
+  }
+  ensureHomeDenyWriteStubs(ctx.home, ctx.env);
+}
+
+/** #526: HOME_DENY_WRITE entries that are created empty when missing, so
+ *  the SDK sandbox's denyWrite (which drops missing paths) and the mask's
+ *  read-only binds cover them too. Each empty one means what its absence
+ *  meant. Directories are created 0700. */
+export const HOME_DENY_WRITE_STUB_DIRS = ['.ssh', '.config/git', '.config/gh', '.config/npm'];
+export const HOME_DENY_WRITE_STUB_FILES = ['.npmrc', '.bashrc', '.profile'];
+/** Created only when git has no XDG config: with one, an empty ~/.gitconfig
+ *  would take `git config --global` writes away from it. */
+export const GITCONFIG_STUB = '.gitconfig';
+/** Created only when one of them exists already: with none, an empty one
+ *  would stop zsh's new-user setup from running. */
+export const ZSH_STUBS = ['.zshrc', '.zprofile', '.zshenv', '.zlogin'];
+/** Never created, each for its reason. `.bash_profile` / `.bash_login`: an
+ *  empty one makes a bash login shell skip ~/.profile. `.claude`,
+ *  `.claude.json`: Claude Code's own state (an empty .claude.json is a
+ *  corrupt config). `.monomind/deps`: optional-deps.ts creates it. A role
+ *  that creates one of these is caught by the planted-path watch
+ *  (planted-paths.ts), and on macOS the SDK's seatbelt denies it by path
+ *  (role-sandbox-restrictions.ts). */
+export const HOME_DENY_WRITE_NOT_STUBBED = [
+  '.bash_profile',
+  '.bash_login',
+  '.claude',
+  '.claude.json',
+  '.monomind/deps',
+];
+
+function ensureHomeDenyWriteStubs(home: string, env: NodeJS.ProcessEnv): void {
+  const xdg = env.XDG_CONFIG_HOME ? resolve(env.XDG_CONFIG_HOME) : join(home, '.config');
+  const files = [
+    ...HOME_DENY_WRITE_STUB_FILES,
+    ...(existsSync(join(xdg, 'git', 'config')) ? [] : [GITCONFIG_STUB]),
+    ...(ZSH_STUBS.some((f) => existsSync(join(home, f))) ? ZSH_STUBS : []),
+  ];
+  for (const d of HOME_DENY_WRITE_STUB_DIRS) {
+    try {
+      mkdirSync(dirname(join(home, d)), { recursive: true });
+      mkdirSync(join(home, d), { mode: 0o700 });
+    } catch {
+      /* unwritable: nothing can plant it either */
+    }
+  }
+  for (const f of files) {
+    try {
+      writeFileSync(join(home, f), '', { flag: 'wx', mode: 0o600 });
+    } catch {
+      /* exists, or unwritable */
+    }
   }
 }

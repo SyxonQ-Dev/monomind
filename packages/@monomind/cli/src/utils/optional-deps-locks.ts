@@ -402,3 +402,84 @@ export const OPTIONAL_DEPENDENCY_LOCKS = {
     },
   },
 } as const;
+
+/** SHA-256 of one file inside an installed package. */
+export interface PinnedFile {
+  /** Relative to the package's directory. */
+  file: string;
+  sha256: string;
+}
+
+/** What monomind loads or runs from one optional dependency. */
+export interface CodePins {
+  /** The version these hashes belong to. */
+  version: string;
+  /** The file ensureOptionalDependency() imports. */
+  entry: PinnedFile;
+  /** Native binaries the package spawns, by the platform package that
+   *  carries each one. */
+  binaries?: Record<string, PinnedFile>;
+}
+
+/**
+ * #526: SHA-256 of the code monomind loads from the trees above, checked
+ * once per process before the entry is imported and before the SDK can
+ * spawn its Claude binary (optional-deps-pins.ts). assertTrustedTree tells
+ * a foreign or group-writable tree from monomind's own, but not a tree
+ * planted by this same user; a planted file fails here. sdk.mjs is one
+ * bundle that imports only Node built-ins, so it and the platform binary
+ * are all the SDK runs. @puppeteer/browsers is not pinned: it loads a whole
+ * dependency tree.
+ *
+ * Regenerate together with the lockfile, from the registry tarballs it
+ * names. For the SDK and each of its platform packages:
+ *   curl -sSLO <its "resolved" URL above>
+ *   echo "sha512-$(openssl dgst -sha512 -binary <tgz> | base64 -w0)"  # must equal its "integrity"
+ *   tar -xOzf <tgz> package/sdk.mjs | sha256sum   # the SDK's entry
+ *   tar -xOzf <tgz> package/claude | sha256sum    # package/claude.exe for win32-*
+ * optional-deps-pins.test.ts checks these stay in step with the pins in
+ * optional-deps.ts and with the lockfile above.
+ */
+export const OPTIONAL_DEPENDENCY_CODE_PINS: Partial<Record<string, CodePins>> = {
+  '@anthropic-ai/claude-agent-sdk': {
+    version: '0.3.226',
+    entry: {
+      file: 'sdk.mjs',
+      sha256: '70c16db85d75e8aa46f558d35ab34138ec6f18d6e260f78e62e2cae4d24967a8',
+    },
+    binaries: {
+      '@anthropic-ai/claude-agent-sdk-darwin-arm64': {
+        file: 'claude',
+        sha256: '013a1cf17df5ff1dcc189d5d6fd3fdd5f097ddc3cd41aa9992e99805574febbe',
+      },
+      '@anthropic-ai/claude-agent-sdk-darwin-x64': {
+        file: 'claude',
+        sha256: '773b095876f13ddb8336bfae202a57c62e358b1882746f1d55e3680601a32c59',
+      },
+      '@anthropic-ai/claude-agent-sdk-linux-arm64': {
+        file: 'claude',
+        sha256: 'feb715ee066d02a400c9d83941592f11c8e8fa6628c1e3c14262bc529f950498',
+      },
+      '@anthropic-ai/claude-agent-sdk-linux-arm64-musl': {
+        file: 'claude',
+        sha256: '8c58e37c14e09f0be1b5b42e1fc4f409f1124ccc584a8633b99b7e8e63d79bd0',
+      },
+      '@anthropic-ai/claude-agent-sdk-linux-x64': {
+        file: 'claude',
+        sha256: '4e9bec1177ce9690e8bd988b710ac24105e70da428dd094c5adcbbe786a55555',
+      },
+      '@anthropic-ai/claude-agent-sdk-linux-x64-musl': {
+        file: 'claude',
+        sha256: 'd199d62f2ce2fca6138256f788ecd6157cacc40edb3b50ce22b8f974f816111a',
+      },
+      '@anthropic-ai/claude-agent-sdk-win32-arm64': {
+        file: 'claude.exe',
+        sha256: '6512422580a1f705301f7a1f6cebe436b207ed4f8a3fc23caf23295b7e8745bd',
+      },
+      '@anthropic-ai/claude-agent-sdk-win32-x64': {
+        file: 'claude.exe',
+        sha256: 'cec4e772e8237357554a8a5a86f821db9081e9fb05499bc4e5fd14b73f48708c',
+      },
+    },
+  },
+};

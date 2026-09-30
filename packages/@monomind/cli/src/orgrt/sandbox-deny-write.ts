@@ -64,7 +64,7 @@
  */
 
 import { lstatSync, readdirSync, realpathSync } from 'node:fs';
-import { join, sep } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 
 const real = (p: string): string => {
   try {
@@ -161,4 +161,14 @@ export function expandDenyWrite(
 export function underAnyRoot(p: string, roots: string[]): boolean {
   const rp = real(p);
   return roots.some((r) => within(real(r), rp));
+}
+
+/** #526: `dir` and the directories above it, top down, that sit in a
+ *  directory `canWrite` accepts: each one a role could rename aside, taking
+ *  `dir` with it, and replace. Bound onto themselves they become mount
+ *  points, which cannot be renamed (EBUSY). Real paths. */
+export function renameGuardDirs(dir: string, canWrite: (parent: string) => boolean): string[] {
+  const chain: string[] = [];
+  for (let d = real(dir); dirname(d) !== d; d = dirname(d)) chain.unshift(d);
+  return chain.filter((d) => canWrite(dirname(d)));
 }
