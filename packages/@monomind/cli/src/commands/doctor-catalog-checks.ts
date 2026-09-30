@@ -43,7 +43,10 @@ export async function checkOrgSkills(
  *  every doctor run — reported only under --read-only. */
 export function checkStrayClaudeConfig(root: string, readOnly: boolean): HealthCheck {
   const NAME = 'Planted Claude Config';
-  const found = [...strayClaudeConfigs(homedir(), process.env, undefined, { readOnly }), ...untrackedWorktreeMcp(root)];
+  const found = [
+    ...strayClaudeConfigs(homedir(), process.env, undefined, { readOnly }),
+    ...untrackedWorktreeMcp(root),
+  ];
   if (!found.length) return { name: NAME, status: 'pass', message: 'None' };
   if (readOnly)
     return {
