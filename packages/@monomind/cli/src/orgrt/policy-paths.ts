@@ -91,7 +91,12 @@ export function grantWithin(
   const t = pathSegments(target, platform, 'exact');
   if (t.length < c.length) return false;
   const existing = pathSegments(existingAncestor(target), platform, 'exact').length;
-  return c.every((s, i) => (i < existing ? s === t[i] : s.toLowerCase() === t[i].toLowerCase()));
+  // A Windows drive letter (`C:` / `c:`) is the same drive in either case.
+  const drive = (a: string, b: string) =>
+    /^[a-z]:$/i.test(a) && a.toLowerCase() === b.toLowerCase();
+  return c.every((s, i) =>
+    i < existing ? s === t[i] || drive(s, t[i]) : s.toLowerCase() === t[i].toLowerCase(),
+  );
 }
 
 /** The nearest ancestor of `p` (or `p` itself) that exists. */
@@ -176,8 +181,16 @@ export function pathFolds(
   };
 }
 
+/** Linux casefold (like HFS+) also ignores default-ignorable code points
+ *  (ZWSP, ZWNJ/ZWJ, soft hyphen, BOM, CGJ…), so `.gi<ZWJ>t` is `.git`. */
 const foldForDeny = (s: string): string =>
-  s.normalize('NFKC').toLowerCase().toUpperCase().toLowerCase().normalize('NFKC');
+  s
+    .normalize('NFKC')
+    .replace(/\p{Default_Ignorable_Code_Point}/gu, '')
+    .toLowerCase()
+    .toUpperCase()
+    .toLowerCase()
+    .normalize('NFKC');
 
 /**
  * #498: the spelling of one path segment as the filesystem compares it,

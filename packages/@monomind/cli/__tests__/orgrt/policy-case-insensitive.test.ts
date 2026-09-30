@@ -79,6 +79,14 @@ const ROOT_VARIANTS = [
   ['Read', '.monomind/Dashboard-Token', 'dashboard credential'],
   ['Read', '.monomind/da\u017fhboard-token', 'dashboard credential'],
   ['Read', '.monomind/dashboard-to\u212Aen', 'dashboard credential'], // Kelvin sign K
+  // Default-ignorable code points, which Linux casefold (and HFS+) drop:
+  ['Write', '.gi\u200dt/config', 'policy.git'], // ZWJ
+  ['Write', '.gi\u200ct/config', 'policy.git'], // ZWNJ
+  ['Write', '.git\u200b/config', 'policy.git'], // ZWSP
+  ['Write', '.g\u034fit/config', 'policy.git'], // CGJ
+  ['Write', '.monomind/or\u200bgs/acme/gates.json', 'org authority state'],
+  ['Write', '.monomind/orgs/\ufeffacme.json', 'org authority state'], // BOM
+  ['Read', '.monomind/dashboard\u00ad-token', 'dashboard credential'], // soft hyphen
 ] as const;
 
 const HOME_VARIANTS = [
@@ -92,6 +100,9 @@ const HOME_VARIANTS = [
   '.con\ufb01g/gh/hosts.yml', // ﬁ ligature
   '.pro\ufb01le',
   '.ssh./id_rsa',
+  '.ss\u00adh/id_rsa', // soft hyphen
+  '.s\u200bsh/id_rsa', // ZWSP
+  '\ufeff.ssh/id_rsa', // BOM
 ];
 
 describe('#496 — deny checks fold on every filesystem, whatever the probe says', () => {
@@ -202,6 +213,11 @@ describe('#496 — grants fold only the not-yet-existing tail, only on darwin/wi
     expect(grantWithin('/nope/site', '/nope/Site/x', 'case', 'darwin')).toBe(true);
     expect(grantWithin('/nope/site', '/nope/Site/x', 'exact', 'darwin')).toBe(false);
   });
+
+  it('a Windows drive letter matches in either case', () => {
+    expect(grantWithin('C:\\work', 'c:\\work\\x', 'case', 'win32')).toBe(true);
+    expect(grantWithin('C:\\work', 'D:\\work\\x', 'case', 'win32')).toBe(false);
+  });
 });
 
 describe('#496 — a directory entry spelled in another case is not refused as a symlink', () => {
@@ -211,6 +227,8 @@ describe('#496 — a directory entry spelled in another case is not refused as a
     expect(onDiskSpelling(join(base, 'site'), join(base, 'Site'), 'darwin')).toBe(true);
     expect(onDiskSpelling(join(base, 'site'), join(base, 'Site'), 'linux')).toBe(false);
     expect(onDiskSpelling(join(base, 'site'), join(base, 'other'), 'darwin')).toBe(false);
+    // HFS+ returns NFD; the entry is written NFC.
+    expect(onDiskSpelling(join(base, 'caf\u00e9'), join(base, 'Cafe\u0301'), 'darwin')).toBe(true);
     symlinkSync(join(base, 'Site'), join(base, 'link'));
     expect(onDiskSpelling(join(base, 'link'), join(base, 'LINK'), 'darwin')).toBe(false);
   });
@@ -291,6 +309,10 @@ describe('#496 — the Bash git classifier matches git and interpreters in any c
     'bash -c "GIT push"',
     'Python3 -c "import os; os.system(\'git push\')"',
     'ENV -i git push',
+    'cmd /c "git push"',
+    'CMD.EXE /c "git push"',
+    'pwsh -c "git push"',
+    'PowerShell.exe -Command "git push"',
   ])('%s is denied at level read', (cmd) => {
     expect(checkGitPolicy(cmd, 'read')).not.toBeNull();
   });

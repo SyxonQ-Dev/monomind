@@ -57,8 +57,9 @@ export function onDiskSpelling(
   platform: NodeJS.Platform = process.platform,
 ): boolean {
   if (platform !== 'darwin' && platform !== 'win32') return false;
-  const a = pathSegments(lexical, platform, 'case');
-  const b = pathSegments(real, platform, 'case');
+  // NFC first: HFS+ hands back NFD spellings.
+  const a = pathSegments(lexical.normalize('NFC'), platform, 'case');
+  const b = pathSegments(real.normalize('NFC'), platform, 'case');
   if (a.length !== b.length || a.some((s, i) => s !== b[i])) return false;
   for (let cur = lexical; dirname(cur) !== cur; cur = dirname(cur)) {
     try {

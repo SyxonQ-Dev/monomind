@@ -189,7 +189,7 @@ const GIT_SUBCOMMAND_SHAPE = /^[a-z][a-z0-9-]*$/;
 /** Command words that run whatever their arguments say — a `git` inside
  *  their argument string is invisible to token classification. */
 const INTERPRETERS =
-  /^(sh|bash|zsh|dash|ksh|fish|eval|exec|python[0-9.]*|node|perl|ruby|php|xargs)(\.exe)?$/i;
+  /^(sh|bash|zsh|dash|ksh|fish|eval|exec|python[0-9.]*|node|perl|ruby|php|xargs|cmd|powershell|pwsh)(\.exe)?$/i;
 
 /**
  * Subcommands of every `git` invocation in a shell command — or, when the
