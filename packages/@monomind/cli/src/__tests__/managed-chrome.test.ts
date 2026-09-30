@@ -72,7 +72,7 @@ describe('ensureManagedChrome', () => {
     }).catch((e: unknown) => e)) as Error;
     expect(err).toBeInstanceOf(OptionalDependencyError);
     expect(err.message).toContain(
-      `install chrome@${CHROME_BUILD_ID} --path "${managedChromeDir(env)}"`,
+      `install chrome@${CHROME_BUILD_ID} --path '${managedChromeDir(env)}'`,
     );
     expect(install).not.toHaveBeenCalled();
   });
@@ -83,6 +83,16 @@ describe('ensureManagedChrome', () => {
       /no build for this platform/,
     );
     expect(install).not.toHaveBeenCalled();
+  });
+
+  it('inside an org role (read-only deps dir) fails with a message for the operator', async () => {
+    const { mod } = fakeBrowsers();
+    mod.install = async () => {
+      throw Object.assign(new Error('EROFS: read-only file system'), { code: 'EROFS' });
+    };
+    await expect(ensureManagedChrome({ env, loadBrowsers: async () => mod, log })).rejects.toThrow(
+      /Org roles cannot download one; ask the operator/,
+    );
   });
 
   it('leaves nothing behind when the download fails', async () => {

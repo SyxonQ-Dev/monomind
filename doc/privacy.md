@@ -124,11 +124,23 @@ Where and how:
   `~/.monomind/deps/@anthropic-ai+claude-agent-sdk@0.3.226/`. Nothing is
   installed into your project, and your `package.json` and lockfile are
   never read or written.
-- npm runs in a staging directory there, with `--ignore-scripts`, and
-  checks each package against the registry's integrity hash as usual. The
+- npm runs `npm ci` in a staging directory there, against a lockfile that
+  ships with monomind (`packages/@monomind/cli/src/utils/optional-deps-locks.ts`),
+  with `--ignore-scripts`. Every package, including the dependencies of
+  `@puppeteer/browsers`, is pinned by that lockfile and must match its
+  integrity hash, whatever registry `~/.npmrc` points at. One fetch attempt
+  with a 15-second timeout, so an offline machine fails quickly. The
   directory is moved into place only once complete, and a lock keeps two
-  processes from installing the same thing at once. Chrome comes from
-  `storage.googleapis.com/chrome-for-testing-public` over HTTPS.
+  processes from installing the same thing at once.
+- Chrome comes from `storage.googleapis.com/chrome-for-testing-public` and
+  is checked by HTTPS only: Chrome for Testing publishes no checksums.
+- Org roles cannot write `~/.monomind/deps`, `~/.npmrc` or `~/.config/npm`:
+  they are denied to the file tools and the Claude sandbox, and the deps
+  directory is read-only inside the bubblewrap mask other roles run in. A
+  role that needs a missing package gets an error asking the operator to
+  install it. Before loading anything from the deps directory, monomind also
+  refuses a tree that contains a symlink on the way in (or one leading out),
+  a file owned by another user, or a group- or other-writable file.
 - A notice on stderr says what is being installed, where, and how large it
   is. stdout is left alone, so an MCP stdio session or `agent exec`'s NDJSON
   stays clean.
@@ -139,10 +151,11 @@ To pre-install the Claude runtime, run `monomind agent models --runtime claude`
 (it installs the SDK and lists models without sending a prompt), or run the
 command monomind prints when auto-install is off. To opt out, set
 `MONOMIND_NO_AUTO_INSTALL=1`: nothing is installed, and the feature fails
-with the exact command to run by hand, such as
+with the exact command to run by hand (a plain `npm install` of the pinned
+version, without the lockfile), such as
 
 ```sh
-npm install --prefix "$HOME/.monomind/deps/@anthropic-ai+claude-agent-sdk@0.3.226" --global=false --ignore-scripts --legacy-peer-deps --no-audit --no-fund --save-exact @anthropic-ai/claude-agent-sdk@0.3.226
+npm install --prefix '/home/you/.monomind/deps/@anthropic-ai+claude-agent-sdk@0.3.226' --global=false --ignore-scripts --legacy-peer-deps --no-audit --no-fund --save-exact @anthropic-ai/claude-agent-sdk@0.3.226
 ```
 
 To remove them, delete `~/.monomind/deps`.

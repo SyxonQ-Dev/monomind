@@ -95,7 +95,7 @@ function runMonodesign(cliPath: string, args: string[], env?: NodeJS.ProcessEnv)
  * environment) when a browser is installed or the download is not possible;
  * the detector then reports what is missing itself.
  */
-async function urlScanEnv(): Promise<NodeJS.ProcessEnv | undefined> {
+export async function urlScanEnv(): Promise<NodeJS.ProcessEnv | undefined> {
   const { findChrome } = await import('@monoes/monobrowse');
   try {
     findChrome();
@@ -106,7 +106,8 @@ async function urlScanEnv(): Promise<NodeJS.ProcessEnv | undefined> {
   try {
     return { ...process.env, MONOBROWSE_CHROME_PATH: await ensureManagedChrome() };
   } catch (err) {
-    output.writeln(output.warning((err as Error).message));
+    // stderr: with --json, stdout carries only the detector's document.
+    output.writeErrorln(output.warning((err as Error).message));
     return undefined;
   }
 }

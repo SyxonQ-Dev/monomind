@@ -196,12 +196,14 @@ jobs:
         working-directory: ${{ env.install_dir }}
         run: |
           set -euo pipefail
-          for dep in @anthropic-ai/claude-agent-sdk puppeteer; do
-            if [ -d "node_modules/${dep}" ]; then
-              echo "::error::${dep} is part of the install again; it must install on first use (#428)"
-              exit 1
-            fi
-          done
+          # Anywhere in the tree, not only top level: a nested copy pulled in
+          # by some other dependency costs the same download.
+          FOUND="$(find ./node_modules -maxdepth 12 \( -path '*/node_modules/@anthropic-ai/claude-agent-sdk*' -o -path '*/node_modules/puppeteer' -o -path '*/node_modules/puppeteer-core' \) -prune -print 2>/dev/null)"
+          if [ -n "${FOUND}" ]; then
+            echo "${FOUND}"
+            echo "::error::the Claude Agent SDK or puppeteer is part of the install again; they must install on first use (#428)"
+            exit 1
+          fi
           export MONOMIND_HOME="$(mktemp -d)"
           OUT="$(MONOMIND_NO_AUTO_INSTALL=1 node node_modules/.bin/monomind agent models --runtime claude --json 2>&1)" || true
           if ! echo "${OUT}" | grep -q 'npm install --prefix'; then
