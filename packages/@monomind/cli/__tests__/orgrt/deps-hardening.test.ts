@@ -230,27 +230,6 @@ describe.runIf(authorityMaskAvailability().available)('inside the real mask', ()
     expect(readdirSync(join(mm, 'deps'))).toEqual([]);
   });
 
-  it('(3) an org root at $HOME does not make ~/.monomind writable again', () => {
-    const home = scratch('dh-home-');
-    const mm = join(home, '.monomind');
-    const [cmd, argv] = maskedCommand(
-      authorityMaskArgs({ home, env: {}, roots: [home], orgRoot: home, cwd: home }),
-      'bash',
-      [
-        '-c',
-        `touch ${mm}/planted 2>/dev/null && echo PLANTED; ` +
-          `mkdir ${mm}/deps/x 2>/dev/null && echo DEPS; ` +
-          `mv ${mm}/org-skills ${mm}/org-skills-aside 2>/dev/null && echo MOVED; ` +
-          `touch ${mm}/cache/ok && echo CACHE; ` +
-          `touch ${home}/ok && echo HOMEW; true`,
-      ],
-    );
-    const out = spawnSync(cmd, argv, { encoding: 'utf8' }).stdout;
-    expect(out).not.toMatch(/PLANTED|DEPS|MOVED/);
-    expect(out).toMatch(/CACHE[\s\S]*HOMEW/);
-    expect(existsSync(join(mm, 'planted'))).toBe(false);
-  });
-
   it('(2) a role can write none of the stubbed npm and shell config', () => {
     const home = scratch('dh-home-');
     const base = scratch('dh-base-');

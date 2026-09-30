@@ -37,7 +37,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { accessSync, constants, existsSync, mkdirSync } from 'node:fs';
-import { join, sep } from 'node:path';
+import { join } from 'node:path';
 import { protectableDepsRoot } from '../utils/optional-deps.js';
 import { dashboardCredentialPaths, HOME_DENY_WRITE, operatorDirOverride } from './file-roots.js';
 import { maskReadOnlyPaths, monomindMaskLayout } from './operator-protected-paths.js';
@@ -127,17 +127,9 @@ export function authorityMaskArgs(ctx: {
   ensureOrgWorkDirs(ctx.orgRoot, ctx.fileWrite, ctx.cwd ?? ctx.orgRoot);
   // #498: the org root and its .monomind become mount points, so neither can
   // be renamed away and replaced by a tree with a forged org definition.
-  const orgBinds = ctx.orgRoot
-    ? [ctx.orgRoot, join(ctx.orgRoot, '.monomind')].map(realPath).filter((d) => existsSync(d))
-    : [];
-  for (const d of orgBinds) args.push('--bind', d, d);
-  // #526: a later bind of an ancestor covers the read-only binds below it,
-  // so an org root at or above a monomind home ($HOME, say) would leave that
-  // home writable. Its layout goes on top again, before the orgs dir's own
-  // layout (which may lie inside it).
-  const covered = (d: string) => orgBinds.some((b) => d === b || d.startsWith(`${b}${sep}`));
-  for (const d of homes.filter(covered)) args.push('--ro-bind', d, d);
-  for (const d of mm.writable.map(realPath).filter(covered)) args.push('--bind', d, d);
+  if (ctx.orgRoot)
+    for (const d of [ctx.orgRoot, join(ctx.orgRoot, '.monomind')].map(realPath))
+      if (existsSync(d)) args.push('--bind', d, d);
   // The orgs dir read-only (no new org definition, runfile or decision file,
   // no rename), the dirs roles work in read-write again, then the authority
   // files those still hold read-only (org-authority-files.ts).

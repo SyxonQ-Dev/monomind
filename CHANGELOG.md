@@ -108,7 +108,7 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
     The SDK sandbox then denies them and the mask binds them read-only. Left to the planted-path watch, because an empty one could change behaviour: `~/.bash_profile` and `~/.bash_login` (bash would skip `~/.profile`), `~/.gitconfig` (`git config --global` would stop writing a later `~/.config/git/config`) and the zsh startup files (zsh's new-user setup would not run).
 
-  - **No rename aside through an ancestor.** Every directory above `$MONOMIND_HOME` and `~/.monomind` whose parent a role can write is a mount point in the SDK sandbox and the bubblewrap mask. monomind refuses to load from a deps root reached through a symlink in a directory the user can write. In the mask, an org root at or above a monomind home (an org run from `$HOME`) no longer makes that home writable again: its read-only layout is applied again after the org root's binds.
+  - **No rename aside through an ancestor.** Every directory above `$MONOMIND_HOME` and `~/.monomind` whose parent a role can write is a mount point in the SDK sandbox and the bubblewrap mask. monomind refuses to load from a deps root reached through a symlink in a directory the user can write.
 
   - **macOS.** The SDK's seatbelt profile already denies unlinking and creating every ancestor of a denied path, so the rename-aside defence holds there without mount points. Seatbelt rules match paths, so on macOS a `denyWrite` entry that does not exist yet (with an existing parent) is now passed too, and creating it is denied.
 
