@@ -1,6 +1,6 @@
 # `monomind org` — Command Reference
 
-> **<!-- doc-count:org-subcommands -->38<!-- /doc-count:org-subcommands --> subcommands** for starting, stopping, monitoring, and managing autonomous agent
+> **<!-- doc-count:org-subcommands -->39<!-- /doc-count:org-subcommands --> subcommands** for starting, stopping, monitoring, and managing autonomous agent
 > organizations. All commands target a named org config in `.monomind/orgs/<name>.json`.
 
 ---
@@ -47,6 +47,7 @@
 | [`mark-complete`](#mark-complete) | Clear stale running/crashed runtime record |
 | [`role set-access`](#role-set-access) | Human-only grant/revoke of `policy.access: "full"` for one role |
 | [`sign`](#sign) | Review an org definition's authority and sign it as the operator |
+| [`approve-paths`](#approve-paths) | List, or approve, protected paths the runtime would quarantine as possible plants |
 
 ---
 
@@ -807,6 +808,27 @@ committed.
 
 **Source:** [`commands/org-sign.ts → signAction`](packages/@monomind/cli/src/commands/org-sign.ts#signAction), [`orgrt/org-signature.ts → verifyOrgDef`](packages/@monomind/cli/src/orgrt/org-signature.ts#verifyOrgDef)
 
+
+---
+
+## `approve-paths`
+
+List, or approve, paths that the org runtime would quarantine as possible plants (#502). A role
+can create a protected path that did not exist yet — a `.mcp.json` or `.claude/` in the project,
+`~/.claude/.config.json`, a shell or npm config — so the runtime quarantines one that appears
+(see `doc/concepts/org-runtime.md`, "Planted paths"). A file you created yourself, or restored from
+quarantine, is trusted only once you approve it here. Signing an org approves nothing.
+
+```bash
+monomind org approve-paths                  # list what is waiting; approves nothing
+monomind org approve-paths .mcp.json ...    # approve exactly these paths
+```
+
+With paths, it asks on a TTY and refuses without one, and it refuses inside an org role's or
+`agent exec`'s process tree (the same check as `sign`). A named path that is not waiting is left
+unchanged and reported. `org sign`'s review warns when paths are waiting.
+
+**Source:** [`commands/org-approve-paths.ts → approvePathsAction`](packages/@monomind/cli/src/commands/org-approve-paths.ts#approvePathsAction)
 ---
 
 ## Name Validation

@@ -35,7 +35,7 @@ import {
 import { drainInbox, newMessageId, queueMessage } from './inbox.js';
 import { enforceConfinement } from './org-sign-review.js';
 import { assertOrgDefSigned, instructionsDigests, pinInstructionDigests } from './org-signature.js';
-import { plantNotifier, plantWatchFor } from './planted-paths.js';
+import { firstLookAudit, plantNotifier, plantWatchFor } from './planted-paths.js';
 import { expandOrgPolicyPathVars, promptVarsFor } from './prompt-vars.js';
 import * as questionOps from './questions.js';
 import { resolveRoleRunner } from './runner-resolve.js';
@@ -92,15 +92,14 @@ export async function prepareOrgStart(
   enforceConfinement(def, name);
   // #502 review round 4: quarantine whatever a role planted, including
   // during a run that crashed or was killed, before anything starts.
-  await plantWatchFor(
-    daemon.root,
-    name,
-    plantNotifier(name, () => ({
-      bus: daemon.orgs.get(name)?.bus,
-      askHuman: (r: string, q: string, b?: boolean) => daemon.askHuman(name, r, q, b),
-      def,
-    })),
-  )
+  const notifier = () => ({
+    bus: daemon.orgs.get(name)?.bus,
+    askHuman: (r: string, q: string, b?: boolean) => daemon.askHuman(name, r, q, b),
+    def,
+  });
+  const plantWatch = plantWatchFor(daemon.root, name, plantNotifier(name, notifier));
+  plantWatch.onFirstLook = firstLookAudit(notifier);
+  await plantWatch
     .check()
     .catch((err) => console.warn(`[orgrt] org ${name}: planted-path check failed: ${err}`));
   const autoApproveError = approvalOps.unknownAutoApproveError(

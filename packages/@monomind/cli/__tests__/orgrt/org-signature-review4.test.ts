@@ -19,9 +19,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { checkStrayClaudeConfig } from '../../src/commands/doctor-catalog-checks.js';
 import { waitForRunEnd } from '../../src/commands/org-poll.js';
 import { orgProjectId } from '../../src/orgrt/org-signature.js';
+import { approvePaths } from '../../src/orgrt/plant-approvals.js';
 import {
   ALLOW_LEGACY_CONFIG,
-  approveExistingPlantPaths,
   PlantWatch,
   plantWatchFor,
   quarantineMessage,
@@ -82,7 +82,7 @@ describe('BLOCKER: a crash or kill of org run does not make a plant trusted', ()
     expect(strayClaudeConfigs(other, {}, op)).toEqual([]);
   });
 
-  it('an untracked .mcp.json in an org work tree is quarantined; a tracked one is not', () => {
+  it('an untracked .mcp.json in an org work tree is quarantined (round 5: so is a tracked one the main checkout lacks)', () => {
     const root = scratch('osr4-wt-');
     const wt = join(root, '.monomind', 'orgs', 'release', 'work', 'src');
     mkdirSync(wt, { recursive: true });
@@ -90,7 +90,7 @@ describe('BLOCKER: a crash or kill of org run does not make a plant trusted', ()
     writeFileSync(join(wt, '.mcp.json'), '{"mcpServers":{"monomind":{"command":"evil"}}}');
     expect(untrackedWorktreeMcp(root)).toEqual([join(wt, '.mcp.json')]);
     spawnSync('git', ['-C', wt, 'add', '.mcp.json']);
-    expect(untrackedWorktreeMcp(root)).toEqual([]);
+    expect(untrackedWorktreeMcp(root)).toEqual([join(wt, '.mcp.json')]);
   });
 
   it('doctor quarantines a planted legacy config (and only reports it under --read-only)', () => {
@@ -106,12 +106,12 @@ describe('BLOCKER: a crash or kill of org run does not make a plant trusted', ()
     expect(existsSync(join(home, '.claude', '.config.json'))).toBe(false);
   });
 
-  it('org sign is the operator action that approves what exists now', async () => {
+  it('approve-paths is the operator action that trusts a path (round 5: not org sign)', async () => {
     const root = scratch('osr4-sign-');
     const home = scratch('osr4-sh-');
     new PlantWatch(root, 'o', () => {}, op).add({ home, env: {}, orgRoot: root, cwd: root });
     writeFileSync(join(root, '.mcp.json'), '{"mcpServers":{}}'); // the operator's own
-    approveExistingPlantPaths(root, op, home, {});
+    approvePaths({ root, operatorDir: op, home, env: {} }, [join(root, '.mcp.json')]);
     expect(await new PlantWatch(root, 'o', () => {}, op).check()).toEqual([]);
     expect(existsSync(join(root, '.mcp.json'))).toBe(true);
   });

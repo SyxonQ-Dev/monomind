@@ -69,7 +69,7 @@ export interface WatchCtx {
 }
 
 /** A 0-byte file, or a directory holding only such files: a sandbox stub. */
-function isStubOnly(p: string): boolean {
+export function isStubOnly(p: string): boolean {
   let st: ReturnType<typeof lstatSync>;
   try {
     st = lstatSync(p);
@@ -85,7 +85,7 @@ function isStubOnly(p: string): boolean {
   }
 }
 
-const exists = (p: string): boolean => {
+export const exists = (p: string): boolean => {
   try {
     lstatSync(p);
     return true;
@@ -121,7 +121,7 @@ export function plantCandidates(ctx: WatchCtx): string[] {
 }
 
 /** Existing, non-stub global-config candidates other than the current one. */
-function claudeConfigCandidates(home: string, env: NodeJS.ProcessEnv): string[] {
+export function claudeConfigCandidates(home: string, env: NodeJS.ProcessEnv): string[] {
   const current = env.CLAUDE_CONFIG_DIR
     ? join(resolve(env.CLAUDE_CONFIG_DIR), '.claude.json')
     : join(home, '.claude.json');
@@ -136,7 +136,7 @@ function claudeConfigCandidates(home: string, env: NodeJS.ProcessEnv): string[] 
 
 const configRecordPath = (operatorDir: string) => join(operatorDir, 'claude-config-baseline.json');
 
-function readConfigRecord(operatorDir: string): Record<string, string[]> | undefined {
+export function readConfigRecord(operatorDir: string): Record<string, string[]> | undefined {
   try {
     return JSON.parse(readFileSync(configRecordPath(operatorDir), 'utf8')) as Record<
       string,
@@ -147,7 +147,7 @@ function readConfigRecord(operatorDir: string): Record<string, string[]> | undef
   }
 }
 
-function writeConfigRecord(operatorDir: string, rec: Record<string, string[]>): void {
+export function writeConfigRecord(operatorDir: string, rec: Record<string, string[]>): void {
   mkdirSync(operatorDir, { recursive: true, mode: 0o700 });
   const path = configRecordPath(operatorDir);
   writeFileSync(`${path}.${process.pid}.tmp`, `${JSON.stringify(rec, null, 2)}\n`, { mode: 0o600 });
@@ -164,32 +164,31 @@ export function strayClaudeConfigs(
   home: string,
   env: NodeJS.ProcessEnv,
   operatorDir = defaultOperatorDir(),
-  opts: { readOnly?: boolean } = {},
+  opts: { readOnly?: boolean; onFirstLook?: (msg: string, trusted: string[]) => void } = {},
 ): string[] {
   if (exists(join(operatorDir, ALLOW_LEGACY_CONFIG))) return [];
   const found = claudeConfigCandidates(home, env);
   const rec = readConfigRecord(operatorDir) ?? {};
   if (!rec[home]) {
     // Read-only (doctor --read-only/--json): no first look to compare with.
-    if (!opts.readOnly) writeConfigRecord(operatorDir, { ...rec, [home]: found });
+    if (!opts.readOnly) {
+      writeConfigRecord(operatorDir, { ...rec, [home]: found });
+      const msg = `monomind: first look at the Claude Code global configs in ${home} — trusting ${found.length ? found.join(', ') : 'none (only the current ~/.claude.json)'}. Any other one that appears later is quarantined.`;
+      console.warn(msg);
+      opts.onFirstLook?.(msg, found);
+    }
     return [];
   }
   const trusted = new Set(rec[home]);
   return found.filter((p) => !trusted.has(p));
 }
 
-/** `org sign`: the operator trusts the global-config files that exist now. */
-function approveClaudeConfigs(home: string, env: NodeJS.ProcessEnv, operatorDir: string): void {
-  const rec = readConfigRecord(operatorDir) ?? {};
-  writeConfigRecord(operatorDir, {
-    ...rec,
-    [home]: [...new Set([...(rec[home] ?? []), ...claudeConfigCandidates(home, env)])],
-  });
-}
-
-/** 1b. An untracked `.mcp.json` in an org work tree or a role cwd that is a
- *  git work tree (the operator's session there would load it). */
-export function untrackedWorktreeMcp(orgRoot: string | undefined, cwds: string[] = []): string[] {
+/** 1b. A `.mcp.json` in an org work tree or a role cwd that is a git work
+ *  tree, which the operator's session there would load: untracked, or —
+ *  a role can commit one on its branch — different from the main
+ *  checkout's `HEAD:.mcp.json` (or present where the main checkout has
+ *  none). The main checkout itself is only checked for untracked. */
+export function worktreeMcpPlants(orgRoot: string | undefined, cwds: string[] = []): string[] {
   const dirs = new Set(cwds);
   if (orgRoot) {
     const orgs = join(orgRoot, '.monomind', 'orgs');
@@ -201,18 +200,38 @@ export function untrackedWorktreeMcp(orgRoot: string | undefined, cwds: string[]
       }
     }
   }
+  const git = (cwd: string, args: string[]) =>
+    spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf8', timeout: 5000 });
+  let main: string | null | undefined;
+  const mainMcp = () => {
+    if (main === undefined) {
+      const r = orgRoot ? git(orgRoot, ['show', 'HEAD:.mcp.json']) : undefined;
+      main = r && r.status === 0 ? r.stdout : null;
+    }
+    return main;
+  };
   const out: string[] = [];
   for (const d of dirs) {
     const mcp = join(d, '.mcp.json');
     if (!exists(join(d, '.git')) || !exists(mcp) || isStubOnly(mcp)) continue;
-    const tracked = spawnSync('git', ['-C', d, 'ls-files', '--error-unmatch', '.mcp.json'], {
-      stdio: 'ignore',
-      timeout: 5000,
-    });
-    if (tracked.status !== 0) out.push(mcp);
+    if (git(d, ['ls-files', '--error-unmatch', '.mcp.json']).status !== 0) {
+      out.push(mcp);
+      continue;
+    }
+    if (orgRoot && resolve(d) === resolve(orgRoot)) continue;
+    let text: string;
+    try {
+      text = readFileSync(mcp, 'utf8');
+    } catch {
+      continue;
+    }
+    if (text !== mainMcp()) out.push(mcp);
   }
   return out;
 }
+
+/** @deprecated name kept for callers of round 4: see worktreeMcpPlants. */
+export const untrackedWorktreeMcp = worktreeMcpPlants;
 
 export interface PlantFinding {
   path: string;
@@ -267,10 +286,10 @@ export function quarantineMessage(org: string | undefined, findings: PlantFindin
         `  ${f.path}: could NOT be moved (${f.error}) — inspect it before opening a Claude Code session here`,
     ),
     moved.length ? 'If you created one yourself, restore it and approve it:' : '',
-    ...moved.map((f) => `  mv ${sq(f.quarantined as string)} ${sq(f.path)}`),
-    moved.length
-      ? `  then run \`monomind org sign ${org ?? '<org>'}\` (a legacy Claude config also needs \`touch ~/.monomind/orgrt-operator/${ALLOW_LEGACY_CONFIG}\`).`
-      : '',
+    ...moved.map(
+      (f) =>
+        `  mv ${sq(f.quarantined as string)} ${sq(f.path)} && monomind org approve-paths ${sq(f.path)}`,
+    ),
   ]
     .filter(Boolean)
     .join('\n');
@@ -280,7 +299,7 @@ function baselinePath(root: string, operatorDir: string): string {
   return join(operatorDir, 'plant-baseline', `${orgProjectId(root)}.json`);
 }
 
-function readBaseline(root: string, operatorDir: string): Set<string> {
+export function readBaseline(root: string, operatorDir: string): Set<string> {
   try {
     const data = JSON.parse(readFileSync(baselinePath(root, operatorDir), 'utf8')) as {
       missing?: unknown;
@@ -291,7 +310,7 @@ function readBaseline(root: string, operatorDir: string): Set<string> {
   }
 }
 
-function writeBaseline(root: string, operatorDir: string, missing: Set<string>): void {
+export function writeBaseline(root: string, operatorDir: string, missing: Set<string>): void {
   const path = baselinePath(root, operatorDir);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const tmp = `${path}.${process.pid}.tmp`;
@@ -301,25 +320,14 @@ function writeBaseline(root: string, operatorDir: string, missing: Set<string>):
   renameSync(tmp, path);
 }
 
-/** `org sign`: the operator approves whatever protected path exists now. */
-export function approveExistingPlantPaths(
-  root: string,
-  operatorDir = defaultOperatorDir(),
-  home = homedir(),
-  env: NodeJS.ProcessEnv = process.env,
-): void {
-  approveClaudeConfigs(home, env, operatorDir);
-  const missing = readBaseline(root, operatorDir);
-  const kept = new Set([...missing].filter((p) => !exists(p)));
-  if (kept.size !== missing.size) writeBaseline(root, operatorDir, kept);
-}
-
 /** One project's watch. The baseline lives in the operator dir; the watch
  *  also remembers the home and cwds its sessions used, for check 1. */
 export class PlantWatch {
   private home = homedir();
   private env: NodeJS.ProcessEnv = process.env;
   private cwds = new Set<string>();
+  /** Told what the one-time first look at the Claude configs trusted. */
+  onFirstLook?: (msg: string, trusted: string[]) => void;
 
   constructor(
     private orgRoot: string,
@@ -334,7 +342,8 @@ export class PlantWatch {
     this.home = ctx.home;
     this.env = ctx.env;
     this.cwds.add(ctx.cwd);
-    strayClaudeConfigs(ctx.home, ctx.env, this.operatorDir); // records the first look, once
+    // Records the first look, once.
+    strayClaudeConfigs(ctx.home, ctx.env, this.operatorDir, { onFirstLook: this.onFirstLook });
     const missing = readBaseline(this.orgRoot, this.operatorDir);
     const before = missing.size;
     for (const p of plantCandidates(ctx)) if (!exists(p)) missing.add(p);
@@ -348,8 +357,10 @@ export class PlantWatch {
     );
     return [
       ...new Set([
-        ...strayClaudeConfigs(this.home, this.env, this.operatorDir),
-        ...untrackedWorktreeMcp(this.orgRoot, [...this.cwds]),
+        ...strayClaudeConfigs(this.home, this.env, this.operatorDir, {
+          onFirstLook: this.onFirstLook,
+        }),
+        ...worktreeMcpPlants(this.orgRoot, [...this.cwds]),
         ...fromBaseline,
       ]),
     ];
@@ -403,6 +414,13 @@ type Notifier = {
   def?: { roles: Array<{ id: string; reports_to?: string | null }> };
 };
 
+/** The first-look notice as an audit event on the run's bus. */
+export function firstLookAudit(n: () => Notifier) {
+  return (msg: string, trusted: string[]): void => {
+    n().bus?.emit({ type: 'audit', reason: 'claude-config-first-look', msg, data: { trusted } });
+  };
+}
+
 /** An audit event, a warning and a (non-blocking) question in the inbox. */
 export function plantNotifier(org: string, n: () => Notifier) {
   return async (findings: PlantFinding[]): Promise<void> => {
@@ -441,6 +459,7 @@ export async function beginPlantWatch(opts: {
     opts.org,
     plantNotifier(opts.org, () => opts),
   );
+  watch.onFirstLook = firstLookAudit(() => opts);
   const safeCheck = async () => {
     try {
       await watch.check();

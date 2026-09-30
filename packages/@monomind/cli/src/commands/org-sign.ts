@@ -20,7 +20,7 @@ import {
   signOrgDef,
   verifyOrgDef,
 } from '../orgrt/org-signature.js';
-import { approveExistingPlantPaths } from '../orgrt/planted-paths.js';
+import { approvalCandidates } from '../orgrt/plant-approvals.js';
 import { ORG_DIR, OrgDefSchema } from '../orgrt/types.js';
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
@@ -46,6 +46,14 @@ function printReview(cwd: string, name: string, raw: unknown): void {
     log(output.bold('  Org skills from the project or user library (not bundled):'));
     for (const line of extra) log(`  ${line}`);
   }
+  // #502 review round 5: signing approves no path; say which are waiting.
+  const pending = approvalCandidates({ root: cwd });
+  if (pending.length)
+    log(
+      output.warning(
+        `  ${pending.length} protected path(s) would be quarantined as possible plants: ${pending.join(', ')} — if they are yours, approve them with \`monomind org approve-paths <path>\``,
+      ),
+    );
   const before = lastSignedProjection(cwd, name);
   if (before === undefined) {
     log(output.dim('  (no earlier signature on this machine to compare with)'));
@@ -84,8 +92,6 @@ async function signOne(
     if (!ok) return `org ${name}: not signed (declined)`;
   }
   const { at } = signOrgDef(ctx.cwd, name, raw);
-  // #502: the operator approves the protected paths that exist now.
-  approveExistingPlantPaths(ctx.cwd);
   log(output.success(`org ${name}: signed (${at})`));
   return undefined;
 }
