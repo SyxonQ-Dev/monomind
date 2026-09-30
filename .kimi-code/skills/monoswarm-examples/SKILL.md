@@ -1,10 +1,12 @@
 ---
 name: monoswarm-examples
-description: Swarm pattern examples — concrete recipes for research, development, analysis, and testing swarms with real MCP tool invocations
+description: Deprecated, removed in 2.21.0 — Swarm pattern examples — concrete recipes for research, development, analysis, and testing swarms with real MCP tool invocations
 type: flow
 ---
 
 # Common Swarm Patterns
+
+> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.21.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
 
 Ready-to-use recipes for the most common swarm scenarios.
 

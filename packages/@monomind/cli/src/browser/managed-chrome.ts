@@ -11,13 +11,16 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  assertTrustedTree,
   autoInstallDisabled,
   depsRoot,
+  ensureDepsRoot,
   ensureOptionalDependency,
   installOnce,
   NO_AUTO_INSTALL_ENV,
   OPTIONAL_DEPENDENCIES,
   OptionalDependencyError,
+  shellQuote,
 } from '../utils/optional-deps.js';
 
 /** The Chrome build puppeteer 25.3.0 pins (puppeteer-core's revisions.ts). */
@@ -48,6 +51,13 @@ export interface ManagedChromeOptions {
   log?: (line: string) => void;
 }
 
+/** The command that downloads the same Chrome by hand. The download is
+ *  checked by TLS only: Chrome for Testing publishes no checksums. */
+export function manualChromeCommand(env: NodeJS.ProcessEnv = process.env): string {
+  const version = OPTIONAL_DEPENDENCIES['@puppeteer/browsers'].version;
+  return `npx @puppeteer/browsers@${version} install chrome@${CHROME_BUILD_ID} --path ${shellQuote(managedChromeDir(env))}`;
+}
+
 export function managedChromeDir(env: NodeJS.ProcessEnv = process.env): string {
   return join(depsRoot(env), `chrome@${CHROME_BUILD_ID}`);
 }
@@ -70,14 +80,17 @@ export async function ensureManagedChrome(opts: ManagedChromeOptions = {}): Prom
   }
   const where = { browser: browsers.Browser.CHROME, buildId: CHROME_BUILD_ID, platform };
   const executable = browsers.computeExecutablePath({ ...where, cacheDir: dir });
-  if (existsSync(executable)) return executable;
+  if (existsSync(executable)) {
+    // An org role must not be able to plant the browser the daemon runs.
+    assertTrustedTree(depsRoot(env), dir);
+    return executable;
+  }
 
   if (autoInstallDisabled(env)) {
-    const version = OPTIONAL_DEPENDENCIES['@puppeteer/browsers'].version;
     throw new OptionalDependencyError(
       `No Chrome, Chromium or Edge is installed, and ${NO_AUTO_INSTALL_ENV} is set, so monomind ` +
         'will not download one. Install a browser, or fetch the Chrome monomind uses with:\n' +
-        `  npx @puppeteer/browsers@${version} install chrome@${CHROME_BUILD_ID} --path "${dir}"`,
+        `  ${manualChromeCommand(env)}`,
     );
   }
 
@@ -85,25 +98,44 @@ export async function ensureManagedChrome(opts: ManagedChromeOptions = {}): Prom
     `No Chrome, Chromium or Edge is installed. Downloading Chrome ${CHROME_BUILD_ID} ` +
       `(about 400 MB on disk) once into ${dir} (set ${NO_AUTO_INSTALL_ENV}=1 to prevent this)...`,
   );
-  await installOnce(
-    dir,
-    (d) => existsSync(browsers.computeExecutablePath({ ...where, cacheDir: d })),
-    async (staging) => {
-      let lastTenth = -1;
-      await browsers.install({
-        ...where,
-        cacheDir: staging,
-        downloadProgressCallback: (done, total) => {
-          const tenth = total > 0 ? Math.floor((done / total) * 10) : -1;
-          if (tenth > lastTenth) {
-            lastTenth = tenth;
-            log(`Chrome download ${tenth * 10}%`);
-          }
-        },
-      });
-    },
-    log,
-  );
+  try {
+    ensureDepsRoot(env);
+    assertTrustedTree(depsRoot(env), depsRoot(env));
+    await installOnce(
+      dir,
+      (d) => existsSync(browsers.computeExecutablePath({ ...where, cacheDir: d })),
+      async (staging) => {
+        let lastTenth = -1;
+        await browsers.install({
+          ...where,
+          cacheDir: staging,
+          downloadProgressCallback: (done, total) => {
+            const tenth = total > 0 ? Math.floor((done / total) * 10) : -1;
+            if (tenth > lastTenth) {
+              lastTenth = tenth;
+              log(`Chrome download ${tenth * 10}%`);
+            }
+          },
+        });
+      },
+      log,
+    );
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (
+      !(err instanceof OptionalDependencyError) &&
+      code &&
+      ['EROFS', 'EACCES', 'EPERM'].includes(code)
+    ) {
+      throw new OptionalDependencyError(
+        `No Chrome, Chromium or Edge is installed, and ${depsRoot(env)} is not writable here ` +
+          `(${code}). Org roles cannot download one; ask the operator to install a browser or ` +
+          `run this outside the org:\n  ${manualChromeCommand(env)}`,
+      );
+    }
+    throw err;
+  }
+  assertTrustedTree(depsRoot(env), dir);
   log(`Chrome is ready at ${executable}.`);
   return executable;
 }

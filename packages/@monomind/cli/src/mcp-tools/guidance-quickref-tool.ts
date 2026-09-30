@@ -79,13 +79,16 @@ export const guidanceQuickRef: MCPTool = {
           ],
         },
         'swarm-ops': {
-          title: 'Monoswarm Operations',
+          title: 'Monoswarm Operations (deprecated — removed in the next minor release)',
           commands: [
             {
               cmd: 'npx monomind@latest monoswarm init --topology hierarchical --max-agents 8',
-              desc: 'Initialize anti-drift monoswarm',
+              desc: 'Deprecated: records a monoswarm state file; starts no agents',
             },
-            { cmd: 'npx monomind@latest monoswarm status', desc: 'Check monoswarm status' },
+            {
+              cmd: 'npx monomind@latest monoswarm status',
+              desc: 'Deprecated: show the recorded monoswarm state',
+            },
             {
               cmd: 'npx monomind@latest agent spawn -t coder --name my-coder',
               desc: 'Spawn a specific agent',

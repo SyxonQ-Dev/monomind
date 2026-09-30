@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -18,48 +19,25 @@ import {
   dependencyDir,
   depsRoot,
   ensureOptionalDependency,
+  lockIsStale,
   manualInstallCommand,
-  type NpmRunner,
   OPTIONAL_DEPENDENCIES,
   OptionalDependencyError,
 } from '../utils/optional-deps.js';
-
-const SDK = '@anthropic-ai/claude-agent-sdk';
-const VERSION = OPTIONAL_DEPENDENCIES[SDK].version;
+import { OPTIONAL_DEPENDENCY_LOCKS } from '../utils/optional-deps-locks.js';
+import {
+  fakeNpm,
+  HOST,
+  notFound,
+  SDK,
+  VERSION,
+  writeFakeSdk,
+} from './fixtures/optional-deps-fixture.js';
 
 let home: string;
 let env: NodeJS.ProcessEnv;
 const log = vi.fn();
-
-const notFound = async (name: string) => {
-  throw Object.assign(new Error(`Cannot find package '${name}' imported from /x`), {
-    code: 'ERR_MODULE_NOT_FOUND',
-  });
-};
-
-/** Writes a minimal ESM package that exports `marker`. */
-function writeFakePackage(prefix: string, marker: string, version: string = VERSION): void {
-  const dir = join(prefix, 'node_modules', SDK);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(
-    join(dir, 'package.json'),
-    JSON.stringify({ name: SDK, version, type: 'module', exports: './index.js' }),
-  );
-  writeFileSync(join(dir, 'index.js'), `export const marker = ${JSON.stringify(marker)};\n`);
-}
-
-/** A stand-in for npm: records its calls and "installs" the fake package
- *  into the prefix it was given. */
-function fakeNpm(marker: string, delayMs = 0) {
-  const calls: Array<{ args: string[]; cwd: string }> = [];
-  const run: NpmRunner = async (args, cwd) => {
-    calls.push({ args, cwd });
-    if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
-    const prefix = args.find((a) => a.startsWith('--prefix='))?.slice('--prefix='.length) as string;
-    writeFakePackage(prefix, marker);
-  };
-  return { run, calls };
-}
+const base = () => ({ env, resolveOwn: notFound, log, host: HOST });
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'mm-deps-'));
@@ -71,92 +49,122 @@ afterEach(() => {
 });
 
 describe('ensureOptionalDependency', () => {
-  it('returns the copy monomind itself resolves, without installing', async () => {
+  it('imports the pinned copy monomind itself resolves, without installing', async () => {
+    const own = mkdtempSync(join(tmpdir(), 'mm-own-'));
+    const entry = writeFakeSdk(own, 'own');
     const npm = fakeNpm('unused');
-    const own = { marker: 'own' };
     const mod = await ensureOptionalDependency<{ marker: string }>(SDK, {
-      env,
-      importOwn: async () => own,
+      ...base(),
+      resolveOwn: () => entry,
       runNpm: npm.run,
-      log,
     });
-    expect(mod).toBe(own);
+    expect(mod.marker).toBe('own');
     expect(npm.calls).toHaveLength(0);
     expect(existsSync(depsRoot(env))).toBe(false);
+    rmSync(own, { recursive: true, force: true });
+  });
+
+  it('(M1) ignores a copy monomind resolves at another version and uses the pin', async () => {
+    const own = mkdtempSync(join(tmpdir(), 'mm-own-'));
+    const entry = writeFakeSdk(own, 'projects-own-sdk', { version: '0.2.0' });
+    const npm = fakeNpm('pinned');
+    const mod = await ensureOptionalDependency<{ marker: string }>(SDK, {
+      ...base(),
+      resolveOwn: () => entry,
+      runNpm: npm.run,
+    });
+    expect(mod.marker).toBe('pinned');
+    expect(npm.calls).toHaveLength(1);
+    rmSync(own, { recursive: true, force: true });
   });
 
   it('imports an existing install from the deps directory', async () => {
-    writeFakePackage(dependencyDir(SDK, env), 'from-deps');
+    mkdirSync(depsRoot(env), { recursive: true, mode: 0o700 });
+    writeFakeSdk(dependencyDir(SDK, env), 'from-deps');
     const npm = fakeNpm('unused');
     const mod = await ensureOptionalDependency<{ marker: string }>(SDK, {
-      env,
-      importOwn: notFound,
+      ...base(),
       runNpm: npm.run,
-      log,
     });
     expect(mod.marker).toBe('from-deps');
     expect(npm.calls).toHaveLength(0);
   });
 
-  it('installs a missing package into the deps directory, pinned and without scripts', async () => {
+  it('installs with `npm ci` against the shipped lockfile, without scripts, one fetch attempt', async () => {
     const npm = fakeNpm('installed');
     const mod = await ensureOptionalDependency<{ marker: string }>(SDK, {
-      env,
-      importOwn: notFound,
-      runNpm: npm.run,
-      log,
+      ...base(),
+      runNpm: async (args, cwd, e) => {
+        // The staging dir holds the shipped manifest and lockfile when npm runs.
+        expect(JSON.parse(readFileSync(join(cwd, 'package-lock.json'), 'utf8'))).toEqual(
+          OPTIONAL_DEPENDENCY_LOCKS[SDK],
+        );
+        expect(JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8')).dependencies).toEqual({
+          [SDK]: VERSION,
+        });
+        await npm.run(args, cwd, e);
+      },
     });
     expect(mod.marker).toBe('installed');
-    expect(npm.calls).toHaveLength(1);
     const { args, cwd } = npm.calls[0];
-    expect(args[0]).toBe('install');
-    expect(args).toContain(`${SDK}@${VERSION}`);
-    expect(args).toContain('--ignore-scripts');
-    expect(args).toContain('--global=false');
-    expect(args).toContain(`--prefix=${cwd}`);
+    expect(args[0]).toBe('ci');
+    for (const f of ['--ignore-scripts', '--global=false', '--fetch-retries=0', `--prefix=${cwd}`])
+      expect(args).toContain(f);
+    expect(args.some((a) => a.startsWith('--fetch-timeout='))).toBe(true);
     expect(cwd.startsWith(depsRoot(env))).toBe(true);
-    // The staging directory was renamed into place; nothing else is left.
     expect(readdirSync(depsRoot(env)).sort()).toEqual([`${SDK.replace('/', '+')}@${VERSION}`]);
     expect(log.mock.calls[0][0]).toMatch(/Installing it once into/);
-    expect(log.mock.calls[0][0]).toMatch(/MONOMIND_NO_AUTO_INSTALL/);
   });
 
   it('reinstalls over a version that does not match the pin', async () => {
-    writeFakePackage(dependencyDir(SDK, env), 'stale', '0.0.1');
+    mkdirSync(depsRoot(env), { recursive: true, mode: 0o700 });
+    writeFakeSdk(dependencyDir(SDK, env), 'stale', { version: '0.0.1' });
     const npm = fakeNpm('fresh');
     const mod = await ensureOptionalDependency<{ marker: string }>(SDK, {
-      env,
-      importOwn: notFound,
+      ...base(),
       runNpm: npm.run,
-      log,
     });
     expect(mod.marker).toBe('fresh');
     expect(npm.calls).toHaveLength(1);
   });
 
-  it('with MONOMIND_NO_AUTO_INSTALL set, installs nothing and prints the exact command', async () => {
+  it('(minor 5) repairs an install that lacks the platform package with the Claude binary', async () => {
+    mkdirSync(depsRoot(env), { recursive: true, mode: 0o700 });
+    writeFakeSdk(dependencyDir(SDK, env), 'partial', { platform: false });
+    const npm = fakeNpm('repaired');
+    const mod = await ensureOptionalDependency<{ marker: string }>(SDK, {
+      ...base(),
+      runNpm: npm.run,
+    });
+    expect(mod.marker).toBe('repaired');
+    expect(npm.calls).toHaveLength(1);
+  });
+
+  it('with MONOMIND_NO_AUTO_INSTALL set, installs nothing and prints the single-quoted command', async () => {
     const npm = fakeNpm('unused');
     const err = (await ensureOptionalDependency(SDK, {
+      ...base(),
       env: { ...env, MONOMIND_NO_AUTO_INSTALL: '1' },
-      importOwn: notFound,
       runNpm: npm.run,
-      log,
     }).catch((e: unknown) => e)) as Error;
     expect(err).toBeInstanceOf(OptionalDependencyError);
     expect(err.message).toContain(manualInstallCommand(SDK, env));
-    expect(err.message).toContain(`npm install --prefix "${dependencyDir(SDK, env)}"`);
-    expect(err.message).toContain(`${SDK}@${VERSION}`);
+    expect(err.message).toContain(`npm install --prefix '${dependencyDir(SDK, env)}'`);
     expect(npm.calls).toHaveLength(0);
     expect(existsSync(depsRoot(env))).toBe(false);
+  });
+
+  it('quotes a path with a single quote safely in the manual command', () => {
+    const cmd = manualInstallCommand(SDK, { MONOMIND_HOME: "/h/o'brien" });
+    expect(cmd).toContain(`--prefix '/h/o'\\''brien/deps/`);
   });
 
   it('treats MONOMIND_NO_AUTO_INSTALL=0 as unset', async () => {
     const npm = fakeNpm('installed');
     await ensureOptionalDependency(SDK, {
+      ...base(),
       env: { ...env, MONOMIND_NO_AUTO_INSTALL: '0' },
-      importOwn: notFound,
       runNpm: npm.run,
-      log,
     });
     expect(npm.calls).toHaveLength(1);
   });
@@ -164,45 +172,49 @@ describe('ensureOptionalDependency', () => {
   it('refuses any package that is not in the allow-list', async () => {
     const npm = fakeNpm('unused');
     await expect(
-      ensureOptionalDependency('left-pad; rm -rf ~' as typeof SDK, {
-        env,
-        importOwn: notFound,
-        runNpm: npm.run,
-        log,
-      }),
+      ensureOptionalDependency('left-pad; rm -rf ~' as typeof SDK, { ...base(), runNpm: npm.run }),
     ).rejects.toThrow(/not a dependency monomind installs/);
     expect(npm.calls).toHaveLength(0);
   });
 
-  it('rethrows a load failure that is not "package missing"', async () => {
+  it('rethrows a resolution failure that is not "package missing"', async () => {
     await expect(
       ensureOptionalDependency(SDK, {
-        env,
-        importOwn: async () => {
-          throw new SyntaxError('broken module');
+        ...base(),
+        resolveOwn: () => {
+          throw new SyntaxError('broken package.json');
         },
         runNpm: fakeNpm('unused').run,
-        log,
       }),
-    ).rejects.toThrow('broken module');
+    ).rejects.toThrow('broken package.json');
   });
 
   it('reports a failed install with the manual command and leaves no partial directory', async () => {
     const err = (await ensureOptionalDependency(SDK, {
-      env,
-      importOwn: notFound,
+      ...base(),
       runNpm: async (args) => {
         const prefix = args.find((a) => a.startsWith('--prefix='))?.slice(9) as string;
         writeFileSync(join(prefix, 'half-written'), '');
         throw new Error('npm exited 1: E404');
       },
-      log,
     }).catch((e: unknown) => e)) as Error;
     expect(err).toBeInstanceOf(OptionalDependencyError);
     expect(err.message).toContain('E404');
     expect(err.message).toContain(manualInstallCommand(SDK, env));
     expect(existsSync(dependencyDir(SDK, env))).toBe(false);
     expect(readdirSync(depsRoot(env))).toEqual([]);
+  });
+
+  it('in a read-only deps dir (an org role), fails with a message for the operator', async () => {
+    const err = (await ensureOptionalDependency(SDK, {
+      ...base(),
+      runNpm: async () => {
+        throw Object.assign(new Error('EROFS: read-only file system'), { code: 'EROFS' });
+      },
+    }).catch((e: unknown) => e)) as Error;
+    expect(err).toBeInstanceOf(OptionalDependencyError);
+    expect(err.message).toMatch(/Org roles cannot install into it; ask the operator/);
+    expect(err.message).toContain(manualInstallCommand(SDK, env));
   });
 
   it('never runs npm in, or writes to, the current project', async () => {
@@ -213,7 +225,7 @@ describe('ensureOptionalDependency', () => {
     process.chdir(project);
     try {
       const npm = fakeNpm('installed');
-      await ensureOptionalDependency(SDK, { env, importOwn: notFound, runNpm: npm.run, log });
+      await ensureOptionalDependency(SDK, { ...base(), runNpm: npm.run });
       expect(npm.calls[0].cwd.startsWith(project)).toBe(false);
       expect(npm.calls[0].args.some((a) => a.includes(project))).toBe(false);
     } finally {
@@ -223,42 +235,104 @@ describe('ensureOptionalDependency', () => {
     expect(readdirSync(project)).toEqual(['package.json']);
     rmSync(project, { recursive: true, force: true });
   });
+});
 
-  it('installs once when two callers race (lock)', async () => {
+describe('install lock', () => {
+  it('installs once when two callers race', async () => {
     const npm = fakeNpm('raced', 300);
-    const opts = { env, importOwn: notFound, runNpm: npm.run, log };
+    const opts = { ...base(), runNpm: npm.run };
     const [a, b] = await Promise.all([
       ensureOptionalDependency<{ marker: string }>(SDK, opts),
       ensureOptionalDependency<{ marker: string }>(SDK, opts),
     ]);
-    expect(a.marker).toBe('raced');
-    expect(b.marker).toBe('raced');
+    expect([a.marker, b.marker]).toEqual(['raced', 'raced']);
     expect(npm.calls).toHaveLength(1);
     expect(existsSync(`${dependencyDir(SDK, env)}.lock`)).toBe(false);
   });
 
-  it('takes over a lock left by a process that died', async () => {
-    const lock = `${dependencyDir(SDK, env)}.lock`;
+  const writeOwner = (lock: string, owner: object) => {
     mkdirSync(lock, { recursive: true });
-    writeFileSync(join(lock, 'pid'), '2147483646'); // no such process
+    writeFileSync(join(lock, 'owner.json'), JSON.stringify(owner));
+  };
+  const id = { pidNamespace: () => 'pid:[1]', bootId: () => 'boot-a' };
+
+  it('takes over a lock whose owner died in our pid namespace', async () => {
+    const lock = `${dependencyDir(SDK, env)}.lock`;
+    writeOwner(lock, { pid: 2147483646, token: 't', ns: readNs(), boot: readBoot() });
     const npm = fakeNpm('recovered');
     const mod = await ensureOptionalDependency<{ marker: string }>(SDK, {
-      env,
-      importOwn: notFound,
+      ...base(),
       runNpm: npm.run,
-      log,
     });
     expect(mod.marker).toBe('recovered');
     expect(existsSync(lock)).toBe(false);
   });
+
+  it('(minor 1) never judges a pid from another pid namespace dead', () => {
+    const lock = join(home, 'x.lock');
+    writeOwner(lock, { pid: 2147483646, token: 't', ns: 'pid:[2]', boot: 'boot-a' });
+    expect(lockIsStale(lock, id)).toBe(false);
+    writeOwner(lock, { pid: 2147483646, token: 't', ns: 'pid:[1]', boot: 'boot-a' });
+    expect(lockIsStale(lock, id)).toBe(true);
+    writeOwner(lock, { pid: process.pid, token: 't', ns: 'pid:[1]', boot: 'boot-a' });
+    expect(lockIsStale(lock, id)).toBe(false);
+    // A lock from a previous boot is stale whatever its pid.
+    writeOwner(lock, { pid: process.pid, token: 't', ns: 'pid:[2]', boot: 'boot-old' });
+    expect(lockIsStale(lock, id)).toBe(true);
+  });
+
+  it('(minor 1) keeps a finished install and discards its own copy', async () => {
+    const npm = fakeNpm('second', 0);
+    const opts = {
+      ...base(),
+      runNpm: async (args: string[], cwd: string, e: NodeJS.ProcessEnv) => {
+        // Another process (whose lock we took over) finishes meanwhile.
+        writeFakeSdk(dependencyDir(SDK, env), 'first');
+        await npm.run(args, cwd, e);
+      },
+    };
+    mkdirSync(depsRoot(env), { recursive: true, mode: 0o700 });
+    const mod = await ensureOptionalDependency<{ marker: string }>(SDK, opts);
+    expect(mod.marker).toBe('first');
+    expect(readdirSync(depsRoot(env))).toEqual([`${SDK.replace('/', '+')}@${VERSION}`]);
+  });
 });
 
-describe('OPTIONAL_DEPENDENCIES', () => {
+describe('pins', () => {
   it('pins the SDK to the version the CLI develops and tests against', () => {
     const pkg = JSON.parse(
       readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
-    ) as { dependencies: Record<string, string>; devDependencies: Record<string, string> };
+    ) as {
+      dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+    };
     expect(pkg.devDependencies[SDK]).toBe(VERSION);
     expect(pkg.dependencies[SDK]).toBeUndefined();
   });
+
+  it('(minor 3) ships a lockfile per package, pinned to the same version, with integrity', () => {
+    for (const [name, spec] of Object.entries(OPTIONAL_DEPENDENCIES)) {
+      const lock = OPTIONAL_DEPENDENCY_LOCKS[name as keyof typeof OPTIONAL_DEPENDENCIES];
+      const pkgs = lock.packages as Record<string, { version?: string; integrity?: string }>;
+      expect(pkgs[''] as unknown).toMatchObject({ dependencies: { [name]: spec.version } });
+      expect(pkgs[`node_modules/${name}`].version).toBe(spec.version);
+      for (const [path, p] of Object.entries(pkgs))
+        if (path) expect(p.integrity).toMatch(/^sha512-/);
+    }
+  });
 });
+
+function readNs(): string | undefined {
+  try {
+    return readlinkSync('/proc/self/ns/pid');
+  } catch {
+    return undefined;
+  }
+}
+function readBoot(): string | undefined {
+  try {
+    return readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+  } catch {
+    return undefined;
+  }
+}
