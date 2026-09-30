@@ -934,7 +934,7 @@ Constructs system prompt containing:
 | Tool | Available to | Purpose |
 |---|---|---|
 | `org_send` | All roles | Send message to another role or org (`org:role` syntax) |
-| `ask_human` | All roles | Pause and queue a question for human answer |
+| `ask_human` | All roles | Queue a question for a human; the answer arrives as a new message. While a `blocking` question is unanswered, `org_complete` is refused except as `partial` with blocker `human` |
 | `org_recall` / `org_remember` / `org_learn` | All roles | Cross-run knowledge-graph memory |
 | `knowledge_search` | All roles (if enabled) | Semantic search over Second Brain |
 | `org_gate` | All roles | Create a decision gate — a hard-blocking human-approval checkpoint for irreversible actions ([`org-tools.ts → buildOrgTools`](packages/@monomind/cli/src/orgrt/org-tools.ts#buildOrgTools)) |

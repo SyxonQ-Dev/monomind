@@ -76,26 +76,6 @@ describe('P1-19: Command-output-honesty regression (prevents P0-1 to P0-6 recurr
     });
   });
 
-  describe('P0-4: swarm init/start — no theatrical output', () => {
-    const src = readSrc('commands/monoswarm-init.ts') + readSrc('commands/monoswarm-start.ts');
-
-    it('does NOT claim to create coordination topology', () => {
-      expect(src).not.toContain('Creating coordination topology');
-      expect(src).not.toContain('Initializing memory namespace');
-      expect(src).not.toContain('Setting up communication channels');
-    });
-
-    it('does NOT claim to configure SQLite-backed vector search in v1-mode', () => {
-      expect(src).not.toContain('Configuring SQLite-backed vector search');
-      expect(src).not.toContain('Initializing keyword routing');
-    });
-
-    it('start message is honest ("config written", not "initialized with slots")', () => {
-      expect(src).toContain('config written');
-      expect(src).not.toContain('initialized with');
-    });
-  });
-
   describe('P0-5: agent spawn — no fabricated precision numbers', () => {
     const src = readSrc('commands/agent-lifecycle.ts');
 
@@ -106,32 +86,6 @@ describe('P1-19: Command-output-honesty regression (prevents P0-1 to P0-6 recurr
 
     it('does NOT reference deprecated lancedb in capabilities', () => {
       expect(src).not.toContain("'lancedb'");
-    });
-  });
-
-  describe('P0-6: monoswarm vote strategies — no leftover unimplemented options', () => {
-    // monoswarm-tools.ts composes the monoswarm-*.ts siblings; check them all.
-    const src = [
-      'mcp-tools/monoswarm-tools.ts',
-      'mcp-tools/monoswarm-state.ts',
-      'mcp-tools/monoswarm-lifecycle-tools.ts',
-      'mcp-tools/monoswarm-membership-tools.ts',
-      'mcp-tools/monoswarm-vote-tools.ts',
-      'mcp-tools/monoswarm-coordination-tools.ts',
-    ]
-      .map(readSrc)
-      .join('\n');
-
-    it('gossip and crdt are gone entirely, not silently substituted for something else', () => {
-      // These were previously declared-but-rejected strategies; the rename
-      // removed them from the vocabulary altogether rather than keeping a
-      // rejection path, so there is nothing left to silently substitute.
-      expect(src).not.toContain('gossip');
-      expect(src).not.toContain('crdt');
-    });
-
-    it('the vote strategy vocabulary is exactly majority/supermajority/unanimous/threshold', () => {
-      expect(src).toContain("'majority' | 'supermajority' | 'unanimous' | 'threshold'");
     });
   });
 

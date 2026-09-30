@@ -29,9 +29,7 @@ Mode flags (`--auto` / `--confirm`) are parsed per command, not universally — 
 
 ## `/mastermind` (no namespace)
 
-**Purpose:** Monoswarm topology picker.
-
-Shows all monoswarm modes (topologies + vote strategies), asks for task description, gives ONE concrete recommendation with ready-to-use launch commands.
+**Purpose:** Intent router — matches a request to the right monomind capability (mastermind commands, CLI/MCP tools, skills, orgs), then runs it or gives exact steps.
 
 ```
 /mastermind

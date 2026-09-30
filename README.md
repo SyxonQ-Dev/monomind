@@ -36,8 +36,8 @@ Monomind is an **open-source CLI and MCP server** that plugs into Claude Code, [
 - **Codebase knowledge graph** — tree-sitter parses your code into a SQLite-backed graph of files, functions, classes, and their relationships. Query imports, callers, and blast radius before making changes.
 - **Persistent memory** — a JSON pattern store with episodic recall that survives across sessions. Agents and orgs share context without re-prompting.
 - **Multi-agent coordination** — in-session, spawn ad-hoc agent teams via Claude Code's Task tool; for persistent background work, `monomind org run` starts a real SDK-backed daemon with policy-gated role agents and a live dashboard.
-- **Agents, skills and picking** — ships <!-- doc-count:pickable-agents -->84<!-- /doc-count:pickable-agents --> pickable agents, <!-- doc-count:pickable-skills -->83<!-- /doc-count:pickable-skills --> skills and <!-- doc-count:org-skills -->376<!-- /doc-count:org-skills --> Org skills, and you add your own as Markdown files. One index of all of them ranks the best fit for each task; the prompt hook puts it in Claude's context as a `[PICK]` line, and `monomind pick` or the `pick` MCP tool return it on request. See [Agents & Skills](doc/concepts/agents-and-skills.md) and [Routing](doc/concepts/routing.md).
-- **Reusable slash commands** — <!-- doc-count:mastermind-commands -->42<!-- /doc-count:mastermind-commands --> workflows (plan, execute, review, debug, release, research, worktree) available as `/mastermind:*` commands inside Claude Code.
+- **Agents, skills and picking** — ships <!-- doc-count:pickable-agents -->83<!-- /doc-count:pickable-agents --> pickable agents, <!-- doc-count:pickable-skills -->82<!-- /doc-count:pickable-skills --> skills and <!-- doc-count:org-skills -->376<!-- /doc-count:org-skills --> Org skills, and you add your own as Markdown files. One index of all of them ranks the best fit for each task; the prompt hook puts it in Claude's context as a `[PICK]` line, and `monomind pick` or the `pick` MCP tool return it on request. See [Agents & Skills](doc/concepts/agents-and-skills.md) and [Routing](doc/concepts/routing.md).
+- **Reusable slash commands** — <!-- doc-count:mastermind-commands -->40<!-- /doc-count:mastermind-commands --> workflows (plan, execute, review, debug, release, research, worktree) available as `/mastermind:*` commands inside Claude Code.
 
 ```bash
 npm install -g monomind        # Apache 2.0 licensed; runs locally and keeps its state locally
@@ -247,7 +247,7 @@ monomind doctor --fix
 
 > **Native module install blocked?** If `doctor` reports a missing `better-sqlite3` binding (`Could not locate the bindings file`, or npm logs an install script that was "blocked because it is not covered by allowScripts"), your npm's `allowScripts` policy blocked its native build — this isn't a Monomind bug. Run `npm install-scripts approve better-sqlite3 && npm rebuild better-sqlite3`, then re-run `monomind doctor --fix`.
 
-Open Claude Code. The core `/mastermind:*` workflows are available (all <!-- doc-count:mastermind-commands -->42<!-- /doc-count:mastermind-commands --> come with `monomind packs add` or `init --all-packs`):
+Open Claude Code. The core `/mastermind:*` workflows are available (all <!-- doc-count:mastermind-commands -->40<!-- /doc-count:mastermind-commands --> come with `monomind packs add` or `init --all-packs`):
 
 ```bash
 /mastermind:review --tillend      # review and fix until nothing is left
@@ -364,7 +364,7 @@ In Claude Code, the live pre-bash/pre-write gate is wired up via its own lazy-lo
 
 ---
 
-## 📋 <!-- doc-count:mastermind-commands -->42<!-- /doc-count:mastermind-commands --> Mastermind Commands
+## 📋 <!-- doc-count:mastermind-commands -->40<!-- /doc-count:mastermind-commands --> Mastermind Commands
 
 Everything runs from inside Claude Code via slash commands. Here's the highlight reel:
 
@@ -396,7 +396,7 @@ Everything runs from inside Claude Code via slash commands. Here's the highlight
 | `/mastermind:finance` | Budgets, invoicing, modeling |
 | `/mastermind:ops` | Operations and workflow automation |
 
-**[→ Full reference (<!-- doc-count:mastermind-commands -->42<!-- /doc-count:mastermind-commands --> commands)](https://monoes.github.io/monomind/#slash)**
+**[→ Full reference (<!-- doc-count:mastermind-commands -->40<!-- /doc-count:mastermind-commands --> commands)](https://monoes.github.io/monomind/#slash)**
 
 ---
 
@@ -405,7 +405,7 @@ Everything runs from inside Claude Code via slash commands. Here's the highlight
 | Package | npm | Purpose |
 |---|---|---|
 | `monomind` | [![npm](https://img.shields.io/npm/v/monomind?style=flat-square&color=00D2AA)](https://www.npmjs.com/package/monomind) | Umbrella shim — **install this one** |
-| `@monoes/monomindcli` | [![npm](https://img.shields.io/npm/v/@monoes/monomindcli?style=flat-square&color=4F46E5)](https://www.npmjs.com/package/@monoes/monomindcli) | CLI engine (<!-- doc-count:cli-commands -->39<!-- /doc-count:cli-commands --> commands, MCP server) |
+| `@monoes/monomindcli` | [![npm](https://img.shields.io/npm/v/@monoes/monomindcli?style=flat-square&color=4F46E5)](https://www.npmjs.com/package/@monoes/monomindcli) | CLI engine (<!-- doc-count:cli-commands -->37<!-- /doc-count:cli-commands --> commands, MCP server) |
 | `@monoes/monograph` | [![npm](https://img.shields.io/npm/v/@monoes/monograph?style=flat-square&color=F59E0B)](https://www.npmjs.com/package/@monoes/monograph) | Code knowledge graph (tree-sitter + SQLite) |
 | `@monoes/memory` | [![npm](https://img.shields.io/npm/v/@monoes/memory?style=flat-square&color=8B5CF6)](https://www.npmjs.com/package/@monoes/memory) | Persistent memory backends (SQLite + vectors) |
 | `@monoes/hooks` | [![npm](https://img.shields.io/npm/v/@monoes/hooks?style=flat-square&color=10B981)](https://www.npmjs.com/package/@monoes/hooks) | Hook registry + 9 on-demand workers |
@@ -415,7 +415,7 @@ Everything runs from inside Claude Code via slash commands. Here's the highlight
 | `@monoes/monodesign` | [![npm](https://img.shields.io/npm/v/@monoes/monodesign?style=flat-square&color=EC4899)](https://www.npmjs.com/package/@monoes/monodesign) | Frontend design intelligence |
 | `monofence-ai` | [![npm](https://img.shields.io/npm/v/monofence-ai?style=flat-square&color=EF4444)](https://www.npmjs.com/package/monofence-ai) | AI manipulation defence |
 
-See [CLI Reference](./doc/commands/cli-reference.md) for the full <!-- doc-count:cli-commands -->39<!-- /doc-count:cli-commands -->-command index.
+See [CLI Reference](./doc/commands/cli-reference.md) for the full <!-- doc-count:cli-commands -->37<!-- /doc-count:cli-commands -->-command index.
 
 ---
 

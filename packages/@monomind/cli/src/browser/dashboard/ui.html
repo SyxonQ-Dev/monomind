@@ -76,10 +76,6 @@
     <div id="panel-workers" class="empty">loading...</div>
   </div>
   <div class="panel">
-    <h2>Swarm Status</h2>
-    <div id="panel-swarm" class="empty">loading...</div>
-  </div>
-  <div class="panel">
     <h2>Routing Info</h2>
     <div id="panel-route" class="empty">loading...</div>
   </div>
@@ -122,18 +118,6 @@ function renderDashboard(data) {
   } else {
     daemonEl.className = 'empty';
     daemonEl.textContent = 'No worker metrics yet. Workers run at session start (or: monomind hooks worker run map)';
-  }
-
-  const swarmEl = document.getElementById('panel-swarm');
-  if (data.monoswarm_status) {
-    swarmEl.className = '';
-    const s = data.monoswarm_status;
-    swarmEl.innerHTML = `<div class="kv-list">${Object.entries(s).map(([k, v]) =>
-      `<div class="kv-row"><span>${escapeHtml(k)}</span><b>${escapeHtml(typeof v === 'object' ? JSON.stringify(v) : v)}</b></div>`
-    ).join('')}</div>`;
-  } else {
-    swarmEl.className = 'empty';
-    swarmEl.textContent = 'No active swarm. Run: monomind swarm init';
   }
 
   const routeEl = document.getElementById('panel-route');

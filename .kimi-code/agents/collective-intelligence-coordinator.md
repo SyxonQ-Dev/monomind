@@ -57,7 +57,6 @@ All verified present:
   material.
 - `memory_feedback` — record which retrieved entries actually helped, which
   EWMA-trains ranking for later sessions.
-- `monoswarm_memory` — key/value bookkeeping on the monoswarm state file.
 
 **`memory_usage` does not exist.** Use `memory_batch` / `memory_pattern-store` instead.
 

@@ -6,7 +6,6 @@
 
 export { agentTools } from './agent-tools.js';
 export { analyzeTools } from './analyze-tools.js';
-export { autopilotTools } from './autopilot-tools.js';
 export { browserTools } from './browser-tools.js';
 // GLU-07: captures as MCP resources — the `capture://` scheme, its listing,
 // its reads, and the tools that expose the same thing to clients that do not
@@ -32,7 +31,6 @@ export { knowledgeTools } from './knowledge-tools.js';
 export { memoryTools } from './memory-tools.js';
 export { monographTools } from './monograph-tools.js';
 export { monomindTools } from './monomind-tools.js';
-export { monoswarmTools } from './monoswarm-tools.js';
 export { performanceTools } from './performance-tools.js';
 export { pickTools } from './pick-tools.js';
 export { platformsTools } from './platforms-tools.js';

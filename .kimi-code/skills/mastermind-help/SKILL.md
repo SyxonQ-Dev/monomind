@@ -6,8 +6,6 @@ name: mastermind-help
 
 # Mastermind Help
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
-
 Quick reference for all Mastermind skills and CLI commands available in this project.
 
 ## Mastermind Skills (invoke via Skill tool)
@@ -21,7 +19,6 @@ Quick reference for all Mastermind skills and CLI commands available in this pro
 | `mastermind:repeat` | Repeat a prompt on a schedule (default: 15 min, 10 times) |
 | `mastermind:understand` | Run semantic enrichment on the monograph knowledge graph (pack extras — `monomind packs add extras`) |
 | `mastermind:specialagents` | Activate a specialist agent persona (browse categories or auto-select) (pack orgs — `monomind packs add orgs`) |
-| `mastermind:swarm` | Swarm coordination reference — topologies, strategies, init patterns |
 | `mastermind:memory` | Memory CLI quick reference (pack orgs — `monomind packs add orgs`) |
 
 ## Org Runtime
@@ -53,11 +50,6 @@ npx monomind agent spawn -t coder --name my-coder
 npx monomind agent list
 npx monomind agent status --id <agent-id>
 npx monomind agent stop --id <agent-id>
-
-# Swarm management
-npx monomind monoswarm init --topology hierarchical --max-agents 8 --strategy specialized
-npx monomind monoswarm status
-npx monomind monoswarm stop
 
 # Memory operations
 npx monomind memory store --key "my-key" --value "my-value" --namespace patterns
@@ -99,15 +91,6 @@ npx monomind performance benchmark --suite all
 
 `development`, `research`, `testing`, `security-audit`, `code-review`, `refactoring`, `custom`
 
-## Swarm Topologies
-
-| Topology | Use When |
-|----------|----------|
-| `hierarchical` | Feature dev, bug fixes (anti-drift, tight control) |
-| `mesh` | Research, analysis (broad coverage) |
-| `star` | Parallel testing, parallel maintenance |
-| `hierarchical-mesh` | Large teams 10+ agents |
-
 ## Key MCP Tools
 
 ```javascript
@@ -118,10 +101,6 @@ mcp__monomind__memory_pattern-search({ query: "...", namespace: "..." })
 // Knowledge graph
 mcp__monomind__monograph_suggest({ task: "..." })
 mcp__monomind__monograph_query({ query: "..." })
-
-// Swarm
-mcp__monomind__monoswarm_init({ topology: "hierarchical", maxAgents: 8, strategy: "specialized" })
-mcp__monomind__monoswarm_status({})
 
 // System
 mcp__monomind__system_health({})
