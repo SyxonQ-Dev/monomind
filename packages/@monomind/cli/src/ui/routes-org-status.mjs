@@ -324,7 +324,7 @@ export async function handleOrgStatusRoutes(req, res, url, corsOrigin, ctx) {
           cacheRead: s.cache_read_tokens || 0,
           cacheCreation: s.cache_creation_tokens || 0,
           tokensUsed: s.tokens_used || 0,
-          costUsd: s.total_cost_usd || 0,
+          costUsd: s.total_cost_usd ?? null, // null = unknown (no reported cost)
         };
       });
       res.writeHead(200, {

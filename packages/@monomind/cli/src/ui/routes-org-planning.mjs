@@ -85,12 +85,14 @@ export async function handleOrgPlanningRoutes(req, res, url, corsOrigin, ctx) {
                   tokens_in: 0,
                   tokens_out: 0,
                   tokens_used: 0,
-                  total_cost_usd: 0,
+                  total_cost_usd: null, // null = no cost reported (unknown, rev 28)
                 };
               _usageByRole[role].tokens_in += tokensIn;
               _usageByRole[role].tokens_out += tokensOut;
               _usageByRole[role].tokens_used += tokensIn + tokensOut + tokensTotal;
-              _usageByRole[role].total_cost_usd += costUsd;
+              if (costUsd !== null && costUsd !== undefined && Number.isFinite(Number(costUsd)))
+                _usageByRole[role].total_cost_usd =
+                  (_usageByRole[role].total_cost_usd ?? 0) + Number(costUsd);
             };
             for (const f of fs.readdirSync(_runsDir)) {
               if (!f.endsWith('.jsonl') || f.startsWith('._')) continue;
@@ -107,16 +109,10 @@ export async function handleOrgPlanningRoutes(req, res, url, corsOrigin, ctx) {
                       Number(ev.tokens_in) || 0,
                       Number(ev.tokens_out) || 0,
                       0,
-                      Number(ev.cost_usd) || 0,
+                      ev.cost_usd ?? null,
                     );
                   } else if (ev.type === 'org:usage' && ev.from) {
-                    _bump(
-                      ev.from,
-                      0,
-                      0,
-                      Number(ev.data?.tokens) || 0,
-                      Number(ev.data?.cost_usd) || 0,
-                    );
+                    _bump(ev.from, 0, 0, Number(ev.data?.tokens) || 0, ev.data?.cost_usd ?? null);
                   }
                 } catch (_) {}
               }

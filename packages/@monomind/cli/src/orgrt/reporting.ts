@@ -15,7 +15,12 @@ export interface RoleStats {
    *  default (policy.ts budgetedUsage). A usage event without the ADR-O001
    *  breakdown counts entirely here. `tokens - uncachedTokens` is cache. */
   uncachedTokens: number;
-  costUsd: number;
+  /** Sum of the USD costs the runtime reported; null when no usage event
+   *  carried one (the runtime reports no cost — unknown, never $0). */
+  costUsd: number | null;
+  /** false when any of the role's usage events carried no cost: `costUsd` is
+   *  then a lower bound (or null when none did). */
+  costComplete: boolean;
   crashed: boolean;
 }
 
@@ -80,7 +85,11 @@ export interface RunSummary {
   runnableTasksAtStop: number;
   roles: Record<string, RoleStats>;
   totalTokens: number;
-  totalCostUsd: number;
+  /** Sum of the reported USD costs; null when no role reported any. */
+  totalCostUsd: number | null;
+  /** false when any usage event carried no cost: `totalCostUsd` is then a
+   *  lower bound (or null when none did). */
+  costComplete: boolean;
 }
 
 const roleStats = (): RoleStats => ({
@@ -89,7 +98,8 @@ const roleStats = (): RoleStats => ({
   toolsDenied: 0,
   tokens: 0,
   uncachedTokens: 0,
-  costUsd: 0,
+  costUsd: null,
+  costComplete: true,
   crashed: false,
 });
 
@@ -111,7 +121,8 @@ export function summarizeRun(events: BusEvent[]): RunSummary {
     runnableTasksAtStop: 0,
     roles: {},
     totalTokens: 0,
-    totalCostUsd: 0,
+    totalCostUsd: null,
+    costComplete: true,
   };
   if (s.startedAt !== null && s.endedAt !== null) s.durationMs = s.endedAt - s.startedAt;
   const role = (id: string | undefined): RoleStats => {
@@ -137,10 +148,12 @@ export function summarizeRun(events: BusEvent[]): RunSummary {
         break;
       case 'usage': {
         const d = e.data as
-          | { tokens?: number; cost_usd?: number; tokens_in?: number; tokens_out?: number }
+          | { tokens?: number; cost_usd?: number | null; tokens_in?: number; tokens_out?: number }
           | undefined;
         const tokens = Number(d?.tokens ?? 0);
-        const cost = Number(d?.cost_usd ?? 0);
+        // A missing/null cost_usd is unknown, not $0: it adds nothing and
+        // leaves a still-null total null.
+        const cost = typeof d?.cost_usd === 'number' ? d.cost_usd : Number.NaN;
         const hasSplit = d?.tokens_in !== undefined || d?.tokens_out !== undefined;
         const r = role(e.from);
         r.tokens += tokens;
@@ -149,8 +162,11 @@ export function summarizeRun(events: BusEvent[]): RunSummary {
           : tokens;
         s.totalTokens += tokens;
         if (Number.isFinite(cost)) {
-          r.costUsd += cost;
-          s.totalCostUsd += cost;
+          r.costUsd = (r.costUsd ?? 0) + cost;
+          s.totalCostUsd = (s.totalCostUsd ?? 0) + cost;
+        } else {
+          r.costComplete = false;
+          s.costComplete = false;
         }
         break;
       }

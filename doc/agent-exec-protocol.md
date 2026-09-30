@@ -1,4 +1,4 @@
-# Agent Exec Protocol — v1 (rev 27)
+# Agent Exec Protocol — v1 (rev 28)
 
 - **Status**: Implemented (Phase 0 of the mono-agent delegation plan — see
   `mono-agent:docs/plans/local-agent-monomind-delegation.md`)
@@ -6,6 +6,25 @@
   the Coder mode threat model, the `--access full` guardrails (root refusal, no transitive
   escalation, env hygiene, audit log), what callers own, and residual risks (issue #360).
 - **Revision history**:
+  - rev 28 (2026-09-30): **unknown cost is `null`, never `0`** (issue #533) — new capability
+    `agent-exec-cost-null`. `usage.cost_usd` and `result.cost_usd` (§3.2) are `null` when the
+    runtime reported no cost for the turn (`reports_cost: false` in §6, e.g. codex, kimicode,
+    hermes, vercel); before this revision they were `0`, indistinguishable from a free turn. A
+    `null` cost never counts toward `--budget-usd`. `agent test --json`'s `cost_usd` (§13) is
+    `null` when the runtime reported none and monomind has no price for the model (it was `0`
+    when no tokens were reported); a turn that never started still reports `0`. Org surfaces
+    follow: a `usage` bus event carries `cost_usd: null`, and `org report --json`'s
+    `total_cost_usd`, its per-role `roles[].costUsd`, and `org costs --json`'s
+    `items[].cost_usd` / `totals.cost_usd` are `null` when no usage event of that scope
+    reported a cost, otherwise the sum of the reported costs — a lower bound when some usage
+    had no cost, which `org report --json`'s `cost_complete` and `org costs --json`'s
+    `totals.cost_complete` (`false`) say. Callers that summed the field
+    must treat `null` as "unknown", not `0`. **Same rev** (issue #534), capability
+    `agent-models-alias-of`: `agent models --json` (§12) keeps every entry, and one that
+    resolves to the same model as an earlier entry carries `alias_of: <that entry's id>` (claude
+    `opus` → `"alias_of":"default"`); the earlier, canonical entry lists every id in `aliases`. A
+    caller that tests each model once skips `alias_of` entries; a lookup by id still finds them.
+    Neither alias's resolution changed.
   - rev 27 (2026-09-30): **a missing API key is `auth`** (issue #532) — no new capability. §3.4's
     `auth` also covers a credential that was never set: an error whose message says "missing API
     key", "no API key found/configured" (pi, and the pi-rpc runner's `pi auth check` pre-check)
@@ -498,12 +517,15 @@ by swarm management and is NOT reused by this protocol — the installed-only vi
 
 ```
 $ monomind --version --json
-{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-exec-background-pids","agent-exec-full-access-any","agent-exec-effort","agent-scan","agent-scan-read-only","agent-models","agent-test-json","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","org-role-full-access","doctor-json","doctor-read-only","doctor-offline","init-json","knowledge-profile-captures","agent-exec-subagent-events","agent-exec-rate-limit-retry","agent-exec-access-read","agent-exec-full-access-tools","agent-exec-sandbox","agent-test-sandbox","agent-exec-sandbox-restricted","agent-exec-sandbox-fallback"]}
+{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-exec-background-pids","agent-exec-full-access-any","agent-exec-effort","agent-scan","agent-scan-read-only","agent-models","agent-test-json","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","org-role-full-access","doctor-json","doctor-read-only","doctor-offline","init-json","knowledge-profile-captures","agent-exec-subagent-events","agent-exec-rate-limit-retry","agent-exec-access-read","agent-exec-full-access-tools","agent-exec-sandbox","agent-test-sandbox","agent-exec-sandbox-restricted","agent-exec-sandbox-fallback","agent-exec-cost-null","agent-models-alias-of"]}
 ```
 
 Callers MUST handshake before use and fail with an actionable message (install/upgrade hint)
 when a required capability is absent. `min_caller` is advisory. New capabilities are additive;
-removals or semantic changes bump the capability string (e.g. `org-json-v2`) or frame `v`.
+removals or semantic changes bump the capability string (e.g. `org-json-v2`) or frame `v`. A field
+that becomes nullable is a semantic change: it is announced by a new capability string, so a
+caller that sums or compares the field checks for it first — e.g. `agent-exec-cost-null` (rev 28):
+`cost_usd` may be `null` (unknown) on `agent exec`, `agent test` and the org surfaces.
 
 ## 3. `monomind agent exec`
 
@@ -573,8 +595,8 @@ done`. On failure: `start → … → error → done`.
 | `tool_call` | `v, id, name, args` | Only with `--tools stdio` — caller must execute and reply (§4) |
 | `tool_result` | `v, id, ok, result` | Echo of the applied result (post `canUseTool` gating) |
 | `tool_activity` | `v, id, phase ("start"\|"end"), name, kind?, input?, parent_tool_use_id?, ok?, output?, output_truncated?, denied?, cancelled?, duration_ms?, exit_code?` | **rev 12** (#357, capability `agent-exec-tool-activity`). NATIVE tool calls only (Bash, Edit, Write, Read, …) — a bridged `--tools stdio` call keeps its `tool_call`/`tool_result` frames instead. `id` is the SDK's own tool_use id (or a locally-minted one for a start-only runtime, see below), correlating a `"start"` with its `"end"`. `"start"`: `input` is the tool's raw input as the model sent it (`Edit`/`MultiEdit` carry `old_string`/`new_string`, `Write` carries `file_path`/`content`); `parent_tool_use_id` is non-null when the call was made inside a `Task`/`Agent` subagent's own turn, for nesting. `"end"`: `ok` (bool), `output` (the tool_result content flattened to text), `duration_ms`; a call denied under scoped mode's default-deny `canUseTool` ends with `ok:false, denied:true` instead of running; a turn cut short by `--timeout` or a `cancel` frame closes every still-open id with `ok:false, cancelled:true` before `done`. Every `input`/`output` string field is capped at 16 KiB with a sibling `<field>_truncated:true` when cut, and the whole event stays well under 64 KiB regardless of how many fields a call's own input has. **rev 19**: every `"start"` carries `kind` — `shell\|edit\|write\|read\|search\|web\|mcp\|task\|todo\|patch\|other` — from the runner when it knows it, else from the tool name (`orgrt/tool-kind.ts`: Claude's `Bash`→shell, `Edit`/`MultiEdit`/`NotebookEdit`→edit, `Write`→write, `Read`→read, `Glob`/`Grep`→search, `WebFetch`/`WebSearch`→web, `mcp__*`→mcp, `Task`/`Agent`→task, `TodoWrite`→todo, plus vendor names such as `exec_command`/`command_execution`→shell, `apply_patch`/`file_change`→patch, `read_file`→read, `mcp_tool_call`→mcp). `name` stays the runtime's own. Claude keeps its native `input`; other runtimes' runners translate theirs to canonical keys per kind — shell `{command, description?, cwd?}`, edit `{file_path, old_string, new_string}`, write `{file_path, content}`, read `{file_path}`, search `{pattern, path?}`, patch `{files:[{file_path, action:"add"\|"update"\|"delete", diff?}]}`, mcp `{server, tool, arguments}`, web `{url?, query?}`, other: raw. An `"end"` carries `exit_code` when the runtime reported one (shell calls). Fidelity varies by runtime (§9, `agent scan --json`'s `tool_activity_fidelity`): `"full"` (claude, codex, opencode, antigravity, kimicode, grok, qwen, copilot, pi) is a real id with a matched end; a runtime whose runner only yields a lightweight `{type:'tool_use', text: toolName}` liveness signal (no id) maps it to a `"start"`-only event with no matching `"end"` (`input: null`, `parent_tool_use_id: null`); a runtime with no tool signal at all emits none |
-| `usage` | `v, input_tokens, output_tokens, cost_usd` | Per-round delta (cumulative→delta conversion handled inside monomind) |
-| `result` | `v, subtype ("success"\|"error"), is_error, text, stop_reason, input_tokens, output_tokens, cost_usd` | Aggregate final result; **rev 7**: `text` is the complete final assistant text — the joined `assistant` texts for a `streams_incrementally` runtime, the last `assistant` message otherwise (omitted only if the turn produced none); `stop_reason`: `end_turn` \| `max_turns` \| `tool_round_cap` \| `cancelled` \| `timeout`. **rev 4**: `tool_round_cap` is detected best-effort — it matches the runner's tool-round-cap assistant note; a fence runner that stops without the note yields `end_turn` |
+| `usage` | `v, input_tokens, output_tokens, cost_usd` | Per-round delta (cumulative→delta conversion handled inside monomind). **rev 28** (capability `agent-exec-cost-null`): `cost_usd` is `null` when the runtime reported no cost for the round — unknown, not `$0` |
+| `result` | `v, subtype ("success"\|"error"), is_error, text, stop_reason, input_tokens, output_tokens, cost_usd` | Aggregate final result; **rev 28**: `cost_usd` is the sum of the rounds' reported costs, or `null` when no round reported one (see `reports_cost`, §6); **rev 7**: `text` is the complete final assistant text — the joined `assistant` texts for a `streams_incrementally` runtime, the last `assistant` message otherwise (omitted only if the turn produced none); `stop_reason`: `end_turn` \| `max_turns` \| `tool_round_cap` \| `cancelled` \| `timeout`. **rev 4**: `tool_round_cap` is detected best-effort — it matches the runner's tool-round-cap assistant note; a fence runner that stops without the note yields `end_turn` |
 | `error` | `v, code, message, fatal (bool)` | Codes in §3.4. `fatal:true` = auth/quota class — callers must not retry |
 | `done` | `v, exit_code, background_pids?` | Terminal event. Always emitted exactly once, even on error. **rev 13**, capability `agent-exec-background-pids`: `background_pids` (only for `--access full`, only after a NORMAL `end_turn` — never on `cancel`/`--timeout`/`--budget-usd`, which already kill the whole tree, §3) lists pids the turn's process-tree tracker (`orgrt/process-tree.ts`'s `trackDescendants`: the inherited `MONOMIND_EXEC_TREE` env marker plus continuous sampling) found still alive at that moment. A process whose `MONOMIND_EXEC_TREE` holds any other value (empty included) has left the turn's tree and is neither listed nor killed on `cancel`/`--timeout`/`--budget-usd` — monomind's own session-hook daemons (the dashboard, the helper self-heal, monograph refresh) set it empty, so they are never reported (#366) — e.g. a `sleep 600 &` the turn started and left running on purpose, including one reparented after its launching shell exited. A survivor that cleared its own environment and whose launching chain exited between samples can go unreported (residual v1 limitation, §3's rev 13 note). Omitted (not an empty array) when access is `scoped`, or on a platform where discovery isn't supported (win32, v1). **rev 19**: every full-access runtime, not only claude (§3.1) |
 
@@ -791,8 +813,8 @@ pi-rpc, cline, aider and dsh are `true`). **rev 12**
 five more static fields (`orgrt/runner-features.ts`), each saying what monomind's runner does
 today, not what the vendor CLI could do: `resume` (honors `--resume` and reports a session id to
 pass back), `effort` (maps `--effort`), `max_turns` (enforces `--max-turns` on the runtime's own
-loop), `reports_cost` (`result.cost_usd` is a real figure — a runtime without it never trips
-`--budget-usd`), and `init_target` (the `monomind init --target` value that writes this
+loop), `reports_cost` (`result.cost_usd` is a real figure — a runtime without it reports
+`cost_usd: null` since rev 28 and never trips `--budget-usd`), and `init_target` (the `monomind init --target` value that writes this
 runtime's setup files: `claude`, `codex`, `opencode`, `kimicode`, `antigravity`, and since
 rev 20 `cline`, `aider`, and `agents` (AGENTS.md only) for pi, pi-rpc, dsh, grok, copilot,
 qwen, qwen-rpc and crush; `null` for vercel and hermes). **rev 20**:
@@ -1241,8 +1263,10 @@ stays read-only.
 {"v":1,"runtime":"claude","supported":true,"models":[
   {"id":"default","resolved_id":"claude-opus-5-5","label":"Default (recommended)",
    "description":"Opus 5.5 · Best for everyday, complex tasks","default":true,
-   "effort_levels":["low","medium","high","xhigh","max"]},
-  {"id":"sonnet","resolved_id":"claude-sonnet-5","label":"Sonnet","effort_levels":["low","medium","high"]}
+   "aliases":["default","opus"],"effort_levels":["low","medium","high","xhigh","max"]},
+  {"id":"sonnet","resolved_id":"claude-sonnet-5","label":"Sonnet","effort_levels":["low","medium","high"]},
+  {"id":"opus","resolved_id":"claude-opus-5-5","label":"Opus","alias_of":"default",
+   "effort_levels":["low","medium","high","xhigh","max"]}
 ]}
 ```
 
@@ -1250,6 +1274,8 @@ stays read-only.
 |---|---|
 | `id` | What to pass as the runtime's model option (`agent exec --model`, a role's `model`) |
 | `resolved_id` | The concrete model an alias resolves to today (claude only; omitted when equal to `id`) |
+| `aliases` | rev 28, capability `agent-models-alias-of`. On the canonical (first) entry for a model: every id that resolves to it, `id` first (e.g. `["default","opus"]`); omitted when only one does |
+| `alias_of` | rev 28, capability `agent-models-alias-of`. On a later entry that resolves to the same model: the canonical entry's `id` (claude `opus` → `"default"`). The entry stays in the list, so a lookup by `id` works; a caller that runs each model once (`agent test` per model) skips entries with `alias_of` |
 | `label`, `description` | Display text from the runtime |
 | `default` | `true` on the runtime's own default choice (claude's `default` entry) |
 | `effort_levels` | Supported reasoning-effort values, when the runtime reports them |
@@ -1288,7 +1314,7 @@ temporary cwd that is removed afterwards, then prints a single JSON object on st
 | `reply` | The turn's final text, or `null` |
 | `latency_first_ms` | Time to the first `assistant` text; `null` when none arrived |
 | `latency_ms` | Time for the whole turn |
-| `cost_usd` | The runtime's reported cost; when it reports none, an estimate from monomind's pricing table; `null` when neither exists |
+| `cost_usd` | The runtime's reported cost; when it reports none, an estimate from monomind's pricing table; `null` when neither exists (rev 28: also when no tokens were reported; `0` only when the runtime reported `0` for no tokens, or the turn never started) |
 | `cost_estimated` | `true` when `cost_usd` is the pricing-table estimate |
 | `runtime_version` | From the runtime's install metadata, as `agent scan` reads it (§6); `null` when unknown |
 | `native_sandbox` | rev 25, capability `agent-test-sandbox`. The vendor CLI's sandbox for this turn, from the `start` event's `native_sandbox` (§3.2): `read-only`, `workspace-write`, `full`, `none` or `monomind`. `null` when the turn never started (missing binary, unsupported `--sandbox`) |

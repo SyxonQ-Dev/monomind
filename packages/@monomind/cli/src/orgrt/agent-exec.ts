@@ -110,7 +110,7 @@ export async function runAgentExecOnce(
   const usage = new UsageTracker();
   const rawTexts: string[] = [];
   let lastSession: string | undefined;
-  let totals = { in: 0, out: 0, usd: 0 };
+  const totals = usage.total;
   let lastResult: AgentMessage | undefined;
   // #359: set once the runner reports its spawned agent-CLI process (full
   // access only — see AgentRunArgs.onProcessSpawned). `getBackgroundSurvivors`
@@ -332,7 +332,6 @@ export async function runAgentExecOnce(
         } else if (m.type === 'subagent') safeEmit({ v: 1, type: 'subagent', ...m.subagent });
         else if (m.type === 'result') {
           const d = usage.delta(m);
-          totals = { in: totals.in + d.in, out: totals.out + d.out, usd: totals.usd + d.usd };
           safeEmit({
             v: 1,
             type: 'usage',
@@ -344,7 +343,8 @@ export async function runAgentExecOnce(
           // Budget is enforced at result granularity on a single-shot exec:
           // the turn has completed, but the overspend is surfaced as the
           // terminal outcome (no success result event) so callers stop.
-          if (opts.budgetUsd !== undefined && totals.usd > opts.budgetUsd) {
+          // An unknown cost (null) is not spend: it never trips the cap.
+          if (opts.budgetUsd !== undefined && totals.usd !== null && totals.usd > opts.budgetUsd) {
             terminate('budget', 1);
             safeEmit({
               v: 1,

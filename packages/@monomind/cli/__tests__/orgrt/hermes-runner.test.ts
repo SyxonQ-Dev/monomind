@@ -155,7 +155,7 @@ describe('HermesAgentRunner', () => {
       expect(result?.subtype).toBe('success');
       expect(result?.input_tokens).toBe(0);
       expect(result?.output_tokens).toBe(0);
-      expect(result?.cost_usd).toBe(0);
+      expect(result?.cost_usd).toBeUndefined(); // no cost reported: unknown, not $0 (rev 28)
       expect(result?.session_id).toBe('sess_fake_1');
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
