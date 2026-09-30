@@ -14,6 +14,7 @@ import type { TokenUsage } from './policy.js';
 import { summarizeToolOutput } from './policy.js';
 import { resolveRoleProvider } from './provider.js';
 import { resolveRoleGitEnforcement, roleAuthorityMask } from './role-sandbox.js';
+import { BUDGET_STOP_SUBTYPE } from './runner-usage.js'; // #550: a runner's budget stop
 import { type FaultRestarts, ProcessFaultError } from './sandbox-fault.js';
 import { sandboxStubPaths, sandboxStubs } from './sandbox-stubs.js';
 import { beginFullAccessSession, endFullAccessSession } from './session-full-access.js';
@@ -378,7 +379,7 @@ export async function runOneSession(
         if (typeof costDelta === 'number' && Number.isFinite(costDelta))
           policy.addUsageUsd(costDelta);
         emitUsage(bus, role.id, messageTokens, costDelta, m.subtype);
-        if (m.subtype && m.subtype !== 'success') {
+        if (m.subtype && m.subtype !== 'success' && m.subtype !== BUDGET_STOP_SUBTYPE) {
           if (m.subtype === 'error_max_turns') hitTurnLimit = true;
           bus.emit({
             type: 'audit',
@@ -404,7 +405,7 @@ export async function runOneSession(
         } else if (m.subtype === 'success' && opts.circuitBreaker) {
           opts.circuitBreaker.state.failures = 0;
         }
-        if (policy.overBudget) {
+        if (policy.overBudget || m.subtype === BUDGET_STOP_SUBTYPE) {
           bus.emit({
             type: 'status',
             from: role.id,

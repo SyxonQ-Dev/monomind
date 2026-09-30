@@ -15,6 +15,7 @@ import { classifyStderr } from './kimicode-runner.js';
 import { NativeToolCalls } from './kimicode-runner-tools.js';
 import { spawnRunnerProcess } from './process-group-spawn.js';
 import { omitAnthropicManagedKeys } from './provider.js';
+import { stepMeter } from './runner-usage.js';
 import { TOOL_CALL_RE } from './tool-fence.js';
 
 const TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours, matching kimi/codex runners
@@ -287,6 +288,25 @@ export async function* streamTurn(
     ];
   };
 
+  // #550: a step's usage (live: an agent_response DONE step carries
+  // { input_tokens, output_tokens, cache_read_tokens, total_tokens }) is
+  // that step's own model call, reported once per step_index, after the
+  // step's own events.
+  const stepGrowth = stepMeter();
+  const withUsage = (ev: AgyEvent): AgyStreamEvent[] => {
+    const events = handleEvent(ev);
+    const u = ev.event === 'step_update' ? ev.step_update?.usage : undefined;
+    const used =
+      u &&
+      stepGrowth(ev.step_update?.step_index ?? 'x', {
+        input: u.input_tokens,
+        output: u.output_tokens,
+        cached: u.cache_read_tokens,
+      });
+    if (used) events.push({ kind: 'usage', usage: used, conversationId: lastConversationId });
+    return events;
+  };
+
   // Normalize one parsed wire event: capture the conversation id from ANY
   // event that carries it (resume needs it on the next turn), record result
   // envelope state, and return the AgyStreamEvents to yield (zero, one, or
@@ -368,6 +388,7 @@ export async function* streamTurn(
       if (result.usage) {
         outcome.inputTokens = result.usage.input_tokens ?? 0;
         outcome.outputTokens = result.usage.output_tokens ?? 0;
+        outcome.cachedInputTokens = result.usage.cache_read_tokens ?? 0;
       }
       if (result.response) resultResponse = result.response;
     }
@@ -396,13 +417,13 @@ export async function* streamTurn(
         } catch {
           continue;
         }
-        for (const out of handleEvent(ev)) yield out;
+        for (const out of withUsage(ev)) yield out;
       }
     }
     const tail = buf.trim();
     if (tail?.startsWith('{')) {
       try {
-        for (const out of handleEvent(JSON.parse(tail) as AgyEvent)) yield out;
+        for (const out of withUsage(JSON.parse(tail) as AgyEvent)) yield out;
       } catch {
         /* not JSON, skip */
       }

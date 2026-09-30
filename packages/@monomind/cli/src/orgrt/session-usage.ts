@@ -3,7 +3,8 @@
 import type { AgentMessage } from './agent-runner.js';
 import type { OrgBus } from './bus.js';
 import type { CumulativeMeter } from './cumulative-meter.js';
-import type { TokenUsage } from './policy.js';
+import { isRecoverableCloseReason, type Mailbox } from './mailbox.js';
+import type { PolicyEngine, TokenUsage } from './policy.js';
 
 /** ADR-O001 D1 — token-metering helpers.
  *
@@ -81,4 +82,18 @@ export function emitUsage(
       cache_creation: t.cacheCreation,
     },
   });
+}
+
+/** #550: AgentRunArgs.tokenBudget for a session — what the role may still
+ *  spend on the budgeted basis. 0 once its mailbox was closed for budget
+ *  (its own cap, budget_usd, or the org-wide ceiling, which closes every
+ *  mailbox without touching the role's own meter). */
+export function sessionTokenBudget(
+  policy: PolicyEngine,
+  mailbox: Mailbox,
+): { left: number; max?: number } | undefined {
+  if (mailbox.isClosed && isRecoverableCloseReason(mailbox.closeReason)) return { left: 0 };
+  const max = policy.policy.maxTokens;
+  if (max == null) return undefined;
+  return { left: Math.max(0, max - policy.budgetedUsage), max };
 }

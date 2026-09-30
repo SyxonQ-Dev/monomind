@@ -144,6 +144,12 @@ export interface AgentRunArgs {
    *  abortController. Fired by agent-exec.ts's terminate() and session.ts's
    *  silent-stream abort. */
   signal?: AbortSignal;
+  /** #550: the role's token budget as the org meters it (policy's
+   *  budgetedUsage basis). `left` is 0 once the session was closed for
+   *  budget, including by the org-wide ceiling; `max` is the role's ceiling;
+   *  undefined = no token budget. Read by runners whose CLI reports usage
+   *  only per completed step or exec (runner-usage.ts); others ignore it. */
+  tokenBudget?: () => { left: number; max?: number } | undefined;
 }
 
 /** Wire `signal` to a child-process kill ladder: SIGTERM on abort, SIGKILL

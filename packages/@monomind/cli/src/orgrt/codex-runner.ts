@@ -147,6 +147,15 @@ import type { AgentMessage, AgentRunArgs, AgentRunner } from './agent-runner.js'
 import { streamTurn, turnError } from './codex-runner-stream.js';
 import type { TurnOutcome } from './codex-runner-types.js';
 import {
+  addUsage,
+  BUDGET_STOP_SUBTYPE,
+  budgetRefusal,
+  noUsage,
+  splitCachedInput,
+  usageFields,
+  usageMessage,
+} from './runner-usage.js';
+import {
   buildToolProtocol,
   formatToolResults,
   parseToolCalls,
@@ -168,14 +177,23 @@ export class CodexAgentRunner implements AgentRunner {
       for await (const p of args.prompt) {
         const text = typeof p === 'string' ? p : (p?.message?.content ?? String(p ?? ''));
         let nextPrompt = text;
-        let turnInputTokens = 0;
-        let turnOutputTokens = 0;
+        // #550: this mailbox message's usage (runner-usage.ts), and why it
+        // stopped short for budget, if it did.
+        const metered = noUsage();
+        let budgetStop: string | undefined;
 
         // Tool-call loop (same shape as KimiCodeAgentRunner/AntigravityAgentRunner):
         // keep driving the same codex session until a turn produces no
         // tool_call fences (or the round cap hits).
         // runToolRound ends this loop past the round cap (#326).
         for (let round = 0; ; round++) {
+          // #550: codex reports usage only when an exec ends, so a started
+          // exec can't be stopped for budget — don't start one without room.
+          const refusal = budgetRefusal(args);
+          if (refusal) {
+            budgetStop = `${refusal}; codex turn not started`;
+            break;
+          }
           // Prepend system prompt + tool protocol on first turn only (when
           // there's no thread to resume). Subsequent turns in the same
           // session carry context via the thread_id.
@@ -254,8 +272,17 @@ export class CodexAgentRunner implements AgentRunner {
           if (outcome.exitCode !== 0 || outcome.error) {
             throw turnError(outcome, round, bin);
           }
-          turnInputTokens += outcome.inputTokens;
-          turnOutputTokens += outcome.outputTokens;
+          // #550: meter each exec as it ends, cached input split out, so
+          // session-run checks the budget before the next round.
+          const exec = splitCachedInput({
+            input: outcome.inputTokens,
+            output: outcome.outputTokens,
+            cached: outcome.cachedInputTokens,
+            cacheWrite: outcome.cacheWriteInputTokens,
+          });
+          addUsage(metered, exec);
+          const usage = usageMessage(exec, threadId);
+          if (usage) yield usage;
 
           const malformed: string[] = [];
           const calls = parseToolCalls(rawTexts, (raw, err) =>
@@ -275,14 +302,17 @@ export class CodexAgentRunner implements AgentRunner {
           nextPrompt = formatToolResults(calls, results);
         }
 
+        if (budgetStop) {
+          const text = `[monomind] ${budgetStop}.`;
+          yield { type: 'assistant', session_id: threadId, text };
+        }
         // Synthesize one result message per mailbox prompt — session.ts uses
         // these for usage accounting and budget checks.
         yield {
           type: 'result',
           session_id: threadId,
-          subtype: 'success',
-          input_tokens: turnInputTokens,
-          output_tokens: turnOutputTokens,
+          subtype: budgetStop ? BUDGET_STOP_SUBTYPE : 'success',
+          ...usageFields(metered),
         };
       }
     } catch (err) {

@@ -1082,6 +1082,35 @@ share is above its spend. A role given an explicit budget by `org_respawn_role` 
 roles in a reload does not by itself move the live roles' shares; the next reload that changes a
 token budget counts them.
 
+#### Token budgets on codex and antigravity roles
+
+`budget_tokens` (a role's and `run_config.budget_tokens`) is charged on uncached input plus output,
+with cache reads and writes counted separately. The Claude runtime reports usage that way. The codex
+and agy CLIs report the whole prompt as input with the cached part inside it (codex
+`cached_input_tokens`, agy `cache_read_tokens`), so their runners move the cached part out of
+`tokens_in` into `cache_read` (and codex's `cache_write_input_tokens` into `cache_creation`) before
+metering ([`runner-usage.ts`](packages/@monomind/cli/src/orgrt/runner-usage.ts)). A usage event's
+`tokens` total is unchanged. Before #550 the cached part was charged as uncached, so one turn could
+spend 7-35 times a role's budget and exhaust the org-wide ceiling for every other role.
+
+Neither CLI reports usage while a model call runs, so the budget is checked at coarser points than on
+the Claude runtime:
+
+- **antigravity** reports usage per completed step. Each step is metered as it completes, and the
+  exec is killed at the step that exhausts the role's budget.
+- **codex** (`codex exec --json`) reports usage only when the exec ends, and an exec is a whole agent
+  run. Each exec is metered when it ends, and no further tool round is started once the budget is
+  spent. An exec that has started runs to its end, so a role can still overshoot its budget by one
+  exec.
+- Neither runner starts an exec when the role has less than 5% of its token cap left, or when its
+  session was closed for budget (its own cap, `budget_usd`, or the org-wide ceiling). The role is
+  then closed for budget (`budget-exhausted` status event, `error_budget` usage subtype) instead of
+  counted as a failed turn.
+- Neither CLI reports a cost, so `cost_usd` is `null` and `budget_usd` never binds on these roles.
+  Use `budget_tokens` for them.
+- The org-wide ceiling is checked on each `usage` event, which these roles emit once per mailbox
+  message, so it can still be passed by the message in flight when it is reached.
+
 #### Cancelled tasks
 
 `org_task_cancel(taskId, reason?)` marks the task `cancelled` and stops its assignee's work on it
