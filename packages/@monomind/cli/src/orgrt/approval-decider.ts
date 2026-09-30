@@ -66,11 +66,18 @@ const DEFAULT_TIERS: Record<string, Tier> = {
 
 /** Port of mono-agent TierFor (route.go:74-107): exact override, then the
  *  tool:* / grant:* wildcard, then the default; unclassified is irreversible.
- *  Two facts mono-agent reads from its DB are not visible here: a grant's own
- *  tier (so a grant with no override is irreversible, as mono-agent does
- *  when it knows none), and RoleHasGrantsAndBash, which only moves tool:Bash
- *  from routine to consequential — both routed away from a person at mid
- *  and full, so the ownership below is the same either way. */
+ *  Two facts mono-agent reads from its DB are not visible here:
+ *  - A grant's own tier. mono-agent stores it only in its DB (the GrantSpec
+ *    display copy in the org file has no tier) and gives a grant with no
+ *    outbound workflow nodes `consequential` (orggrant/outbound.go:60-65).
+ *    Here a grant with no grant:<alias> / grant:* override is irreversible,
+ *    so at mid such a call is treated as human-owned and denied as pending
+ *    at once, as before #553, while mono-agent actually routes it to the
+ *    decider — a missed wait, not a safety issue. At full both route to the
+ *    decider, so the ownership matches.
+ *  - RoleHasGrantsAndBash, which only moves tool:Bash from routine to
+ *    consequential — both routed away from a person at mid and full, so the
+ *    ownership below is the same either way. */
 export function tierFor(cls: string, overrides: Record<string, unknown>): Tier {
   const exact = overrides[cls];
   if (typeof exact === 'string' && TIERS.has(exact)) return exact as Tier;
