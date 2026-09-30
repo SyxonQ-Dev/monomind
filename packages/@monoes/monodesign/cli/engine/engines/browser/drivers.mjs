@@ -175,6 +175,31 @@ function createMonobrowsePage(mb, client, sessionId, targetId, port) {
   };
 }
 
+// monobrowse's "the CDP endpoint never opened in time" errors: port 0 waits for
+// DevToolsActivePort, a forced port for the listener itself. Other launch
+// failures (no Chrome, spawn refused, Chrome exited, port squatted) would only
+// fail the same way again.
+const CDP_PORT_TIMEOUT_RE = /did not report a CDP port in .* within \d+ms|failed to start on port \d+ within \d+ms/;
+
+// Chrome's first launch on a cold Windows CI runner can take longer than the
+// whole launch timeout to open its CDP port (#583), while every launch after it
+// in the same job is quick. So a timeout gets one more attempt. monobrowse has
+// already killed the timed-out Chrome; its profile dir is dropped and the retry
+// gets a new one, because a leftover Chrome process could still hold the old
+// dir's singleton lock and the retry would hand off to it and exit.
+async function launchWithColdStartRetry(launch, config) {
+  for (let attempt = 1; ; attempt++) {
+    const userDataDir = mkdtempSync(join(tmpdir(), 'monodesign-cdp-'));
+    try {
+      const port = await launch({ ...config, userDataDir });
+      return { port, userDataDir };
+    } catch (error) {
+      removeProfileDir(userDataDir);
+      if (attempt >= 2 || !CDP_PORT_TIMEOUT_RE.test(error?.message ?? '')) throw error;
+    }
+  }
+}
+
 async function launchMonobrowseBrowser(options = {}) {
   const mb = await import('@monoes/monobrowse');
   const headless = options.headless ?? true;
@@ -210,8 +235,10 @@ async function launchMonobrowseBrowser(options = {}) {
   // where this bites: its singleton lock survives the previous Chrome being
   // force-killed, and outlives the port being released. A unique dir removes
   // the sharing entirely rather than racing the lock's cleanup.
-  const userDataDir = mkdtempSync(join(tmpdir(), 'monodesign-cdp-'));
-  const launchedPort = await mb.launchBrowser({ port, headless, args: launchArgs, launchTimeoutMs, userDataDir });
+  const { port: launchedPort, userDataDir } = await launchWithColdStartRetry(
+    mb.launchBrowser,
+    { port, headless, args: launchArgs, launchTimeoutMs },
+  );
   // Control connection (to the initial about:blank tab) — used for lifecycle
   // commands; detection pages get their own dedicated connections.
   const control = await mb.connectToTarget(launchedPort);
@@ -334,6 +361,7 @@ export {
   launchDetectionBrowser,
   launchMonobrowseBrowser,
   launchPuppeteerBrowser,
+  launchWithColdStartRetry,
   normalizeBrowserHandle,
   wrapPuppeteerBrowser,
 };
