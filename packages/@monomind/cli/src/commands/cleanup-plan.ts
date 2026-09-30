@@ -12,7 +12,7 @@
  *  1. A git-tracked file, or a directory holding one, is never deleted or
  *     rewritten. Its untracked monomind-owned children may still be removed.
  *  2. User data (memory stores, org memory, knowledge index, monograph and
- *     other databases, org configs, backups) is kept unless `--purge-data`.
+ *     other databases, org configs, the catalog, backups) is kept unless `--purge-data`.
  *  3. Whole-path removal needs proof of ownership: a monomind-only namespace
  *     (.monomind/, monomind.config.json, legacy .swarm/.hive-mind), an entry
  *     listed in init's manifest, a file whose content still matches the hash
@@ -96,6 +96,7 @@ const DATA_PATHS = [
   '.monomind/knowledge',
   '.monomind/orgs',
   '.monomind/org-skills',
+  '.monomind/catalog',
   '.monomind/backups',
   '.monomind/episodic',
   '.monomind/neural',
