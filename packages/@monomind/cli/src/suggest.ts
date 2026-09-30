@@ -131,6 +131,15 @@ export function formatSuggestion(
 }
 
 /**
+ * Commands removed in an earlier release, mapped to what to use instead (#418).
+ */
+export const REMOVED_COMMANDS: Record<string, string> = {
+  monoswarm:
+    'monoswarm was removed in 2.22.0. Spawn agents with Claude Code\'s Task tool, or run an agent org with "monomind org run <org>".',
+  autopilot: 'autopilot was removed in 2.22.0. Run an agent org with "monomind org run <org>".',
+};
+
+/**
  * Common typos and their corrections
  */
 export const COMMON_TYPOS: Record<string, string> = {
@@ -141,10 +150,6 @@ export const COMMON_TYPOS: Record<string, string> = {
   stauts: 'status',
   stats: 'stats',
   stat: 'status',
-  swarrm: 'monoswarm',
-  swarn: 'monoswarm',
-  monoswrm: 'monoswarm',
-  moswarm: 'monoswarm',
   agnet: 'agent',
   agen: 'agent',
   memroy: 'memory',
@@ -193,6 +198,12 @@ export function suggestCommand(
   suggestions: string[];
   message: string;
 } {
+  // A command removed in an earlier release gets its replacement, not a typo guess
+  const removed = REMOVED_COMMANDS[unknownCommand.toLowerCase()];
+  if (removed) {
+    return { suggestions: [], message: removed };
+  }
+
   // Check for common typo first
   const correction = getTypoCorrection(unknownCommand);
   if (correction && availableCommands.includes(correction)) {

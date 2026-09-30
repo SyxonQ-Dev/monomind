@@ -42,32 +42,6 @@ function seedAgentStore(
   writeFileSync(join(agentsDir, 'store.json'), JSON.stringify(store, null, 2), 'utf-8');
 }
 
-function seedSwarmStore(
-  dir: string,
-  monoswarmId: string,
-  opts: { status: string; topology: string; agentCount: number },
-) {
-  const monoswarmDir = join(getMonomindDataRoot(dir), 'monoswarm');
-  mkdirSync(monoswarmDir, { recursive: true });
-  const now = new Date().toISOString();
-  const state = {
-    monoswarmId,
-    initialized: true,
-    topology: opts.topology,
-    maxAgents: 8,
-    status: opts.status,
-    agents: Array.from({ length: opts.agentCount }, (_, i) => `agent-${i}`),
-    tasks: [],
-    config: {},
-    votes: { pending: [], history: [] },
-    sharedMemory: {},
-    notices: [],
-    createdAt: now,
-    updatedAt: now,
-  };
-  writeFileSync(join(monoswarmDir, 'state.json'), JSON.stringify(state, null, 2), 'utf-8');
-}
-
 describe('ASL-18: `status agents` crash guard', () => {
   let dir: string;
 
@@ -116,11 +90,11 @@ describe('ASL-18: `status agents` crash guard', () => {
   });
 });
 
-describe('ASL-17: swarm panel maps real monoswarm_status fields', () => {
+describe('ASL-17: status reports the agent store, not monoswarm state (#418)', () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'status-swarm-test-'));
+    dir = mkdtempSync(join(tmpdir(), 'status-agents-test-'));
     process.env.MONOMIND_CWD = dir;
     mkdirSync(join(dir, '.monomind'), { recursive: true });
     writeFileSync(join(dir, '.monomind', 'config.yaml'), 'version: 1\n', 'utf-8');
@@ -131,40 +105,36 @@ describe('ASL-17: swarm panel maps real monoswarm_status fields', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('reports real agentCount as agents.total instead of a fake zero, and does not hardcode running:true', async () => {
-    seedSwarmStore(dir, 'monoswarm-abc', { status: 'running', topology: 'mesh', agentCount: 4 });
+  it('counts recorded agents as agents.total, has no swarm panel, and does not hardcode running:true', async () => {
+    seedAgentStore(dir, [
+      { agentId: 'agent-1', agentType: 'coder', status: 'idle' },
+      { agentId: 'agent-2', agentType: 'tester', status: 'busy' },
+      { agentId: 'agent-3', agentType: 'reviewer', status: 'terminated' },
+    ]);
 
     const result = (await statusCommand.action?.(
       makeCtx(dir, { format: 'json' }),
     )) as CommandResult;
     expect(result.success).toBe(true);
 
-    const data = result.data as {
-      running: boolean;
-      swarm: { id: string; topology: string; status: string; agents: { total: number } };
-    };
-
-    // agentCount (real field) must map to agents.total.
-    expect(data.swarm.agents.total).toBe(4);
-    expect(data.swarm.id).toBe('monoswarm-abc');
-    expect(data.swarm.topology).toBe('mesh');
-    expect(data.swarm.status).toBe('running');
+    const data = result.data as { running: boolean; agents: { total: number } };
+    // agent_list leaves terminated agents out.
+    expect(data.agents.total).toBe(2);
+    expect(data).not.toHaveProperty('swarm');
 
     // No `monomind start --daemon` process was started for this test, so
     // `running` must be false — not a hardcoded `true`.
     expect(data.running).toBe(false);
   });
 
-  it('does not throw and reports agents.total: 0 when no swarm has been initialized', async () => {
-    // No swarm-state.json seeded at all.
+  it('does not throw and reports agents.total: 0 with an empty agent store', async () => {
     const result = (await statusCommand.action?.(
       makeCtx(dir, { format: 'json' }),
     )) as CommandResult;
     expect(result.success).toBe(true);
 
-    const data = result.data as { swarm: { id: string | null; agents: { total: number } } };
-    expect(data.swarm.id).toBeNull();
-    expect(data.swarm.agents.total).toBe(0);
+    const data = result.data as { agents: { total: number } };
+    expect(data.agents.total).toBe(0);
   });
 });
 

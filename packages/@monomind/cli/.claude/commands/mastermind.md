@@ -81,7 +81,7 @@ Match the intent against this catalog. Pick ONE primary route, plus supporting s
 ### Research, ideas, content, business
 | Intent | Primary route |
 |---|---|
-| Market/competitor/user research | `Skill("mastermind-research")`; multi-agent research swarm: `Skill("monoswarm:research")` (pack swarm — `monomind packs add swarm`) |
+| Market/competitor/user research | `Skill("mastermind-research")` |
 | Ideation, feature brainstorm | `Skill("mastermind-idea")` / `Skill("mastermind:ideate")` (evaluate + decompose) |
 | Improve an existing component | `Skill("mastermind:improve")` |
 | Blog/docs/newsletter/threads | `Skill("mastermind:content")` (pack business — `monomind packs add business`); docs generation: `npx monomind doc` |
@@ -94,7 +94,6 @@ Match the intent against this catalog. Pick ONE primary route, plus supporting s
 | Multi-domain goal spanning several of the above | `/mastermind:master` (pack extras — `monomind packs add extras`) — spawns parallel domain managers |
 | Create a persistent agent org | `Skill("mastermind-createorg")` → `monomind org run <name>` (`Skill("mastermind-runorg")`) (pack orgs — `monomind packs add orgs`) |
 | Inspect running org | `monomind org status/logs/questions`; `Skill("mastermind-orgstatus")` (pack orgs — `monomind packs add orgs`) |
-| Pick swarm/hive-mind topology | `/mastermind:topology` (pack swarm — `monomind packs add swarm`) |
 | Recurring/scheduled task | `Skill("loop")` (in-session interval) / `Skill("schedule")` (cloud cron) / `Skill("mastermind-repeat")` |
 | Watch external boards & execute tasks | `Skill("mastermind-monitor")` (pack orgs — `monomind packs add orgs`) |
 

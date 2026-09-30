@@ -6,8 +6,6 @@ type: flow
 
 # workflow-select
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
-
 Pick a predefined multi-agent workflow for a common task. The CLI has no `workflow` command; predefined workflows are org starter templates, run with `monomind org`.
 
 ## Templates
@@ -55,4 +53,3 @@ For a one-off workflow inside the conversation, skip the org and spawn the stage
 
 - `auto-agent` — spawn agents without a template
 - `smart-spawn` — auto-select agents from task description
-- `monoswarm init` — manual monoswarm initialization

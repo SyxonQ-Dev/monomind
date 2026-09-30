@@ -285,9 +285,11 @@ npm run complexity-check
 ## MCP Tool Integration
 
 ### Memory Coordination
+`monomindMemory { action, key, namespace, value }` in the examples below is pseudo-code for the `monomind memory` CLI: `set` is `npx monomind memory store --namespace <ns> --key <key> --value <json>`, `get` is `npx monomind memory retrieve --namespace <ns> --key <key>`.
+
 ```javascript
 // Report review status
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/reviewer/status",
   namespace: "coordination",
@@ -301,7 +303,7 @@ mcp__monomind__monoswarm_memory {
 }
 
 // Share review findings
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/shared/review-findings",
   namespace: "coordination",
@@ -314,7 +316,7 @@ mcp__monomind__monoswarm_memory {
 }
 
 // Check implementation details
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "get",
   key: "swarm/coder/status",
   namespace: "coordination"

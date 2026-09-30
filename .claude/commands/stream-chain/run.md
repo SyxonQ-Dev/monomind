@@ -5,8 +5,6 @@ description: Execute custom stream chains where you define the prompt sequence. 
 
 # Stream-Chain Run Mode
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
-
 Execute custom multi-step workflows with your own prompt sequence. Each step's full output becomes context for the next.
 
 ## How to Invoke
@@ -125,15 +123,9 @@ Build on previous outputs:
 
 ## Multi-Agent Integration
 
-For complex chains, combine with swarm coordination:
-
-```javascript
-// Initialize swarm first
-mcp__monomind__monoswarm_init({ topology: "hierarchical", maxAgents: 4, strategy: "specialized" })
-```
-
-Then direct the stream chain:
-> "With our 4-agent swarm, run a stream chain:
+For complex chains, run each step as a subagent with Claude Code's Task tool and
+pass each step's output into the next step's prompt:
+> "Using Task-tool subagents, run a stream chain:
 > 1. Research: best practices for API design
 > 2. Design: REST API with discovered patterns
 > 3. Implement: API endpoints with validation

@@ -1,7 +1,7 @@
 ---
 name: Topology Optimizer
 description: Dynamic swarm topology reconfiguration and communication pattern optimization
-when_to_use: Use when a running swarm's topology or communication pattern needs reconfiguring for latency or throughput; for first setup use monoswarm-init
+when_to_use: Use when a running swarm's topology or communication pattern needs reconfiguring for latency or throughput; for first setup spawn agents with the Task tool
 tags: [topology, swarm, optimization, coordination]
 category: coordination
 ---

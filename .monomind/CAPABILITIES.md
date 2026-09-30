@@ -5,14 +5,12 @@
 ## 📋 Table of Contents
 
 1. [Overview](#overview)
-2. [Monoswarm Orchestration](#monoswarm-orchestration)
-3. [Available Agents (60+)](#available-agents)
-4. [CLI Commands](#cli-commands)
-5. [Hooks System (28 Hook Subcommands + 9 Background Workers)](#hooks-system)
-6. [Memory & Intelligence](#memory--intelligence)
-7. [Monoswarm Vote Strategies](#monoswarm-vote-strategies)
-8. [Performance Targets](#performance-targets)
-9. [Integration Ecosystem](#integration-ecosystem)
+2. [Available Agents (60+)](#available-agents)
+3. [CLI Commands](#cli-commands)
+4. [Hooks System (28 Hook Subcommands + 9 Background Workers)](#hooks-system)
+5. [Memory & Intelligence](#memory--intelligence)
+6. [Performance Targets](#performance-targets)
+7. [Integration Ecosystem](#integration-ecosystem)
 
 ---
 
@@ -20,10 +18,8 @@
 
 Monomind is a domain-driven design architecture for multi-agent AI coordination with:
 
-- **15-Agent Monoswarm Coordination** with hierarchical and mesh topologies
 - **ANN Vector Search** - indexed pattern retrieval via SQLite (better-sqlite3, sql.js WASM fallback)
 - **Keyword Routing** - deterministic task→agent routing with outcome measurement
-- **Vote-Threshold Consensus** - majority/supermajority/unanimous/threshold decisions
 - **MCP Server Integration** - Model Context Protocol support
 
 ### Current Configuration
@@ -33,39 +29,6 @@ Monomind is a domain-driven design architecture for multi-agent AI coordination 
 | Max Agents | 15 |
 | Memory Backend | hybrid |
 | `neural.enabled` | On (session start loads the local pattern store only when on; no model is trained) |
-
----
-
-## Monoswarm Orchestration
-
-Monoswarm records topology, roster and votes in a state file; it starts no process, and Claude Code's Task-tool agents do the work.
-
-### Topologies
-| Topology | Description | Best For |
-|----------|-------------|----------|
-| `hierarchical` | Coordinator controls workers directly | Anti-drift, tight control |
-| `mesh` | Fully connected peer network | Parallel, independent tasks |
-| `hierarchical-mesh` | Hybrid (recommended) | 10+ agents |
-| `ring` | Circular communication | Sequential workflows |
-| `star` | Central coordinator | Simple coordination |
-| `adaptive` / `hybrid` | Caller-interpreted label — no automatic reconfiguration | Variable workloads |
-
-### Strategies
-- `balanced` - Even distribution across agents
-- `specialized` - Clear roles, no overlap (anti-drift)
-- `adaptive` - Dynamic task routing
-
-### Quick Commands
-```bash
-# Initialize monoswarm
-npx monomind monoswarm init --topology hierarchical --max-agents 8 --strategy specialized
-
-# Check status
-npx monomind monoswarm status
-
-# Monitor activity
-npx monomind monoswarm monitor
-```
 
 ---
 
@@ -90,7 +53,6 @@ Fallback when picking returns nothing — real core agents:
 |---------|-------------|-------------|
 | `init` | 6 | Project initialization |
 | `agent` | 11 | Agent lifecycle management |
-| `monoswarm` | 5 | Multi-agent coordination |
 | `memory` | 12 | SQLite with ANN vector search |
 | `mcp` | 11 | MCP server management |
 | `task` | 5 | Task assignment |
@@ -217,26 +179,6 @@ npx monomind memory init --force
 
 ---
 
-## Monoswarm Vote Strategies
-
-Reach monoswarm coordination through MCP tools (`monoswarm_*`) or the
-`npx monomind monoswarm` CLI command. See `doc/concepts/monoswarm.md`
-for the full picture.
-
-### Agent Types
-Monoswarm members are registry agents (any agent `name`); common ones:
-`researcher`, `coder`, `tester`, `reviewer`, `planner`, `system-architect`, `Performance Benchmarker`, `Technical Writer`
-
-### Vote Strategies
-| Strategy | Threshold |
-|----------|-----------|
-| `majority` | More than 50% of votes |
-| `supermajority` | At least 2/3 of votes |
-| `unanimous` | 100% of votes |
-| `threshold` | Custom `minVotes` count |
-
----
-
 ## Performance Targets
 
 | Metric | Target | Status |
@@ -281,10 +223,6 @@ claude mcp add monomind -- npx -y monomind mcp start
 # Setup
 npx monomind init wizard
 npx monomind doctor --fix
-
-# Monoswarm
-npx monomind monoswarm init --topology hierarchical --max-agents 8
-npx monomind monoswarm status
 
 # Agents
 npx monomind agent spawn -t coder

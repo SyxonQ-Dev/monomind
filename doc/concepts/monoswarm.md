@@ -1,152 +1,22 @@
-# Monoswarm
+# Monoswarm (removed)
 
-> **Deprecated.** Monoswarm records state only: `monoswarm init` writes a state
-> file (status `initialized`, empty roster), `monoswarm start` records a config
-> and shows a suggested roster, and `agent spawn` adds a row to the agent store.
-> None of them starts an agent process, and the topology changes no behaviour.
-> `monoswarm status` reports progress only from recorded task files (`n/a` when
-> there are none). To run agents, use Claude Code's Task tool,
-> `monomind agent exec`, or `monomind org run`. The `autopilot` command is
-> deprecated too — nothing in monomind writes its `swarm-tasks` source. Both
-> are removed in 2.22.0
-> ([#418](https://github.com/monoes/monomind/issues/418)). Until then every
-> `monoswarm` and `autopilot` subcommand, and `monomind start` / `start stop`,
-> prints a one-line deprecation notice on stderr (`-Q` drops it). The notice
-> never goes to stdout, so subcommands that emit JSON keep it clean. The
-> `monoswarm_*` and `autopilot_*` MCP tools start their descriptions with a
-> short `DEPRECATED` prefix and carry the full notice in their results.
+Monoswarm and autopilot were removed in monomind 2.22.0
+([#418](https://github.com/monoes/monomind/issues/418)). They recorded topology,
+roster, vote and task state in local JSON files and started no agents.
 
-Monoswarm is monomind's multi-agent coordination layer: topology bookkeeping, agent
-roster management, vote-based decisions, and shared state for a group of agents
-working on the same task.
+What was removed:
 
-## How It Works
+- The `monomind monoswarm` and `monomind autopilot` CLI commands and all their
+  subcommands.
+- The 13 `monoswarm_*` and 8 `autopilot_*` MCP tools. MCP clients that call
+  those tool names now get an unknown-tool error.
+- The `monoswarm` skill, the `/monoswarm` commands, and the
+  `coordinator-monoswarm-init` agent.
 
-Coordination state lives in a single JSON file, `.monomind/monoswarm/state.json`
-— topology, agent roster, vote history, and shared memory keys. Votes are counted
-by threshold in one process (majority, supermajority, unanimous, or a custom
-count). Real concurrent execution happens through Claude Code's Task tool: the
-monoswarm layer records who's doing what and tallies decisions, while spawned
-Task-tool agents do the actual work.
+What to use instead:
 
----
-
-## Topologies
-
-| Topology | When to use |
-|---|---|
-| `hierarchical` | Default — feature dev, clear task decomposition, one team lead |
-| `mesh` | Research, exploration, peer-to-peer knowledge sharing |
-| `hierarchical-mesh` | Recommended for 10+ agents |
-| `hybrid` | Complex work requiring both hierarchy and peer communication |
-| `ring` | Circular communication pattern |
-| `star` | Central coordinator with spokes |
-| `adaptive` | A label recorded in state; the caller decides how to interpret it — monoswarm doesn't auto-reconfigure coordination based on it |
-
-### Default Config
-
-```bash
-monomind monoswarm init \
-  --topology hierarchical \
-  --strategy specialized \
-  --max-agents 8
-```
-
----
-
-## Strategies
-
-| Strategy | Description |
-|---|---|
-| `specialized` | Agents have fixed roles (architect, coder, tester). Best for feature work. |
-| `adaptive` | Agents adapt roles to workload. Best for mixed tasks. |
-| `balanced` | Even distribution of work. Best for homogeneous tasks. |
-| `sequential` | One agent at a time. Best for dependent tasks. |
-| `parallel` | Maximum concurrency. Best for independent tasks. |
-
----
-
-## Vote Strategies
-
-Each strategy is a threshold applied to votes tallied by `monoswarm_vote` in a
-single process:
-
-| Strategy | Threshold |
-|---|---|
-| `majority` | More than 50% of votes |
-| `supermajority` | At least 2/3 of votes |
-| `unanimous` | 100% of votes |
-| `threshold` | Custom `minVotes` count |
-
----
-
-## Agent Types
-
-A roster entry's `agentType` (`monoswarm_agent_add`, `monoswarm_scale`, `agent_spawn`) is a
-free-form bookkeeping label; `worker` is the default. An entry that stands for a Task agent
-should carry that agent's registry `name` — the value the Task tool takes as `subagent_type`
-(`coder`, `Security Engineer`, ...); `mcp__monomind__pick` ranks them for a task.
-
-### Agent Routing Table
-
-| Code | Task | Recommended agents |
-|---|---|---|
-| 1 | Bug Fix | coordinator, researcher, coder, tester |
-| 3 | Feature | coordinator, system-architect, coder, tester, reviewer |
-| 5 | Refactor | coordinator, system-architect, coder, reviewer |
-| 7 | Performance | coordinator, Performance Benchmarker, coder |
-| 9 | Security | coordinator, Security Engineer, reviewer |
-| 11 | Memory | coordinator, monoswarm-memory-manager, Performance Benchmarker |
-| 13 | Docs | researcher, Technical Writer |
-
----
-
-## CLI Commands
-
-The `monoswarm` and `agent` commands run in-process — no separate MCP server is
-required.
-
-```bash
-# Initialize
-monomind monoswarm init --topology hierarchical --max-agents 8 --strategy specialized
-
-# Start (after init)
-monomind monoswarm start
-
-# Status
-monomind monoswarm status
-
-# Scale up/down
-monomind monoswarm scale --agents 12
-
-# Stop
-monomind monoswarm stop
-```
-
-## Slash Command
-
-```
-/mastermind          — topology picker: lists all monoswarm modes and
-                       gives one concrete recommendation for the current task
-/mastermind:monoswarm — full monoswarm coordination reference
-```
-
----
-
-## MCP Tools
-
-```
-mcp__monomind__monoswarm_init          — record a topology, agent roster, and vote strategy in the state file
-mcp__monomind__monoswarm_status        — read merged coordination + vote state (roster, topology, pending/resolved votes, memory key count)
-mcp__monomind__monoswarm_scale         — adjust the roster to a target agent count
-mcp__monomind__monoswarm_health        — inspect state and roster, report derived healthy/degraded status
-mcp__monomind__monoswarm_shutdown      — mark the state file terminated and remove roster agents
-mcp__monomind__monoswarm_agent_add     — add agent record(s) to the roster and agent store
-mcp__monomind__monoswarm_join          — append an agent id to the roster array
-mcp__monomind__monoswarm_leave         — remove an agent id from the roster array
-mcp__monomind__monoswarm_vote          — create or vote on a proposal; resolves when the chosen strategy's threshold is met
-mcp__monomind__monoswarm_notice        — append a message to the shared noticeboard array
-mcp__monomind__monoswarm_memory        — key/value bookkeeping in the state file
-mcp__monomind__monoswarm_audit_list    — list tamper-evident vote audit records (HMAC-signed JSONL trail)
-mcp__monomind__monoswarm_audit_verify  — verify tamper-evidence of a vote decision
-```
+- **Claude Code's Task tool** — spawn the agents you need in one message so they
+  run in parallel. This is what did the work under monoswarm too.
+- **`monomind org run <org>`** — run a standing team of roles with the Org
+  Runtime (budgets, approvals, schedules, logs). See the `mastermind-createorg`
+  and `mastermind-runorg` skills.

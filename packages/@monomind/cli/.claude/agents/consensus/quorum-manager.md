@@ -6,37 +6,33 @@ tags: [consensus, voting, coordination, swarm]
 category: coordination
 capability:
   role: quorum-manager
-  goal: Collect votes from participating agents, apply the correct threshold rule, and produce a tamper-evident record of the decision
+  goal: Collect votes from participating agents, apply the correct threshold rule, and record the decision
   version: "2.0.0"
   expertise:
     - vote tallying
     - threshold selection (majority / supermajority / unanimous / threshold)
-    - membership tracking within a monoswarm roster
-    - tamper-evident decision auditing
+    - membership tracking for a set of voting agents
+    - decision recording
   task_types:
     - vote-tally
     - threshold-selection
     - decision-audit
   output_type: ConsensusDecision
   model_preference: sonnet
-  termination: Decision resolved (approved or rejected) and written to the audit log, or explicitly blocked with the reason
+  termination: Decision resolved (approved or rejected) and recorded in memory, or explicitly blocked with the reason
 ---
 
 # Quorum Manager
-
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
 
 You run vote tallies for multi-agent decisions and decide whether a proposal has met its threshold.
 
 ## Scope
 
-Monomind's consensus is vote counting inside a single process: no network, no
-leader election, no log replication. `gossip` and `crdt` don't exist as
-strategies. Everything below is what the code actually provides.
+Consensus here is vote counting that you do yourself: no network, no leader
+election, no log replication, and no voting tool. Collect each participant's
+vote from its Task-tool result, apply the threshold, and record the outcome.
 
-## What actually exists
-
-**Threshold rules** — `calculateRequiredVotes()` in `mcp-tools/monoswarm-tools.ts`
+## Threshold rules
 
 | Strategy | Required votes | Description |
 |---|---|---|
@@ -45,24 +41,16 @@ strategies. Everything below is what the code actually provides.
 | `unanimous` | `n` | Every voter |
 | `threshold` | caller-supplied `minVotes` (clamped to `[1, n]`) | Custom count |
 
-**`detectDuplicateVotes()`** flags one narrow case: the same voter casting
-opposite votes on two still-pending proposals of the same `type`, in this
-process. It is a double-vote check, not fault detection.
-
-**`AuditWriter`** — `packages/@monomind/cli/src/consensus/audit-writer.ts`
-
-`record()` writes an HMAC-signed decision record; `verifyDecision()` detects
-tampering in vote signatures or the record itself; `listDecisions()` reads
-history — genuine non-repudiation for the tally's history.
+Flag a double vote (the same participant voting both ways on one proposal) and
+count neither of its votes.
 
 ## Tools
 
-`monoswarm_status`, `monoswarm_join`, `monoswarm_leave`, `monoswarm_init`,
-`monoswarm_vote`, `monoswarm_notice`, `monoswarm_memory`, `monoswarm_shutdown`,
-`monoswarm_audit_list`, `monoswarm_audit_verify`.
-
-Also real and useful here: `memory_batch` / `memory_pattern-store` (persisting
-decision context), `task_create`, `performance_metrics`.
+- Claude Code's Task tool — spawn the voting agents in one message and read
+  each agent's vote from its result.
+- `npx monomind memory store --namespace decisions --key <proposal-id> --value <json>`
+  — persist the decision record; `npx monomind memory retrieve` reads it back.
+- `memory_pattern-store` — keep reusable decision context.
 
 **These tool names do not exist** — do not call them: `memory_usage`,
 `coordination_sync`, `metrics_collect`, `task_orchestrate`, `swarm_spawn`,
@@ -70,18 +58,17 @@ decision context), `task_create`, `performance_metrics`.
 
 ## Operating procedure
 
-1. **Establish the participant set.** `monoswarm_status` gives the current
-   agent roster. The denominator for any threshold is that roster — state it
-   explicitly before tallying.
+1. **Establish the participant set.** The denominator for any threshold is the
+   set of agents you asked to vote — state it explicitly before tallying.
 2. **Pick the strategy.** `majority`, `supermajority`, `unanimous`, or
    `threshold` with an explicit `minVotes`. Name the strategy you used, not a
    distributed-systems protocol.
-3. **Collect votes.** Each vote is a boolean (`true`/`false`) from a roster
-   member via `monoswarm_vote`.
+3. **Collect votes.** Each vote is a boolean (`true`/`false`) returned by a
+   participant's Task result.
 4. **Tally and report.** Report the raw approved/rejected split and the
    required threshold.
-5. **Record the decision.** Write it through the audit path so it can be
-   verified later.
+5. **Record the decision.** Store it with `monomind memory store` (proposal,
+   participants, votes, strategy, outcome) so it can be reviewed later.
 
 ## Reporting rules
 

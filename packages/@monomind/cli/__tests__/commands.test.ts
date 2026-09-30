@@ -1,6 +1,6 @@
 /**
  * CLI Commands Tests
- * Tests for agent, swarm, memory, and config commands
+ * Tests for agent, memory, and config commands
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
@@ -8,7 +8,6 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { agentCommand } from '../src/commands/agent.js';
-import { monoswarmCommand as swarmCommand } from '../src/commands/monoswarm.js';
 import { memoryCommand } from '../src/commands/memory.js';
 import { configCommand } from '../src/commands/config.js';
 import { configManager } from '../src/services/config-file-manager.js';
@@ -138,30 +137,6 @@ vi.mock('../src/mcp-client.js', () => ({
         agentId: input.agentId,
         terminated: true,
         terminatedAt: new Date().toISOString()
-      };
-    }
-
-    if (toolName === 'monoswarm_init') {
-      return {
-        monoswarmId: 'monoswarm-mock-123',
-        topology: input.topology,
-        initializedAt: new Date().toISOString(),
-        config: {
-          topology: input.topology,
-          maxAgents: input.maxAgents || 15,
-        }
-      };
-    }
-
-    if (toolName === 'monoswarm_scale') {
-      return {
-        success: true,
-        monoswarmId: input.swarmId,
-        previousCount: 5,
-        currentCount: input.targetAgents,
-        targetAgents: input.targetAgents,
-        spawned: Array.from({ length: Math.max(0, (input.targetAgents as number) - 5) }, (_, i) => `agent-mock-${i}`),
-        terminated: []
       };
     }
 
@@ -414,154 +389,6 @@ describe('Agent Commands', () => {
       expect(result.success).toBe(true);
     });
   });
-});
-
-describe('Swarm Commands', () => {
-  let ctx: CommandContext;
-
-  beforeEach(() => {
-    ctx = {
-      args: [],
-      flags: { _: [] },
-      cwd: '/test',
-      interactive: false
-    };
-  });
-
-  describe('swarm init', () => {
-    it('should initialize swarm with default topology', async () => {
-      const initCmd = swarmCommand.subcommands?.find(c => c.name === 'init');
-      expect(initCmd).toBeDefined();
-
-      const result = await initCmd!.action!(ctx);
-
-      expect(result.success).toBe(true);
-      expect(result.data).toHaveProperty('monoswarmId');
-      expect(result.data).toHaveProperty('topology');
-    });
-
-    it('should initialize swarm with custom topology', async () => {
-      const initCmd = swarmCommand.subcommands?.find(c => c.name === 'init');
-
-      ctx.flags = { topology: 'mesh', _: [] };
-      const result = await initCmd!.action!(ctx);
-
-      expect(result.success).toBe(true);
-      expect(result.data).toHaveProperty('topology', 'mesh');
-    });
-
-    it('should enable V1 mode', async () => {
-      const initCmd = swarmCommand.subcommands?.find(c => c.name === 'init');
-
-      ctx.flags = { v1Mode: true, _: [] };
-      const result = await initCmd!.action!(ctx);
-
-      expect(result.success).toBe(true);
-    });
-
-    it('should set max agents', async () => {
-      const initCmd = swarmCommand.subcommands?.find(c => c.name === 'init');
-
-      ctx.flags = { 'max-agents': 20, _: [] };
-      const result = await initCmd!.action!(ctx);
-
-      expect(result.success).toBe(true);
-      expect(result.data?.config).toHaveProperty('maxAgents', 20);
-    });
-  });
-
-  describe('swarm start', () => {
-    it('should start swarm with objective', async () => {
-      const startCmd = swarmCommand.subcommands?.find(c => c.name === 'start');
-      expect(startCmd).toBeDefined();
-
-      ctx.flags = { objective: 'Build REST API', _: [] };
-      const result = await startCmd!.action!(ctx);
-
-      expect(result.success).toBe(true);
-      expect(result.data).toHaveProperty('objective', 'Build REST API');
-    });
-
-    it('should fail without objective', async () => {
-      const startCmd = swarmCommand.subcommands?.find(c => c.name === 'start');
-
-      const result = await startCmd!.action!(ctx);
-
-      expect(result.success).toBe(false);
-      expect(result.exitCode).toBe(1);
-    });
-
-    it('should accept strategy option', async () => {
-      const startCmd = swarmCommand.subcommands?.find(c => c.name === 'start');
-
-      ctx.flags = { objective: 'Test project', strategy: 'testing', _: [] };
-      const result = await startCmd!.action!(ctx);
-
-      expect(result.success).toBe(true);
-      expect(result.data).toHaveProperty('strategy', 'testing');
-    });
-  });
-
-  describe('swarm status', () => {
-    it('should show swarm status', async () => {
-      const statusCmd = swarmCommand.subcommands?.find(c => c.name === 'status');
-      expect(statusCmd).toBeDefined();
-
-      const result = await statusCmd!.action!(ctx);
-
-      expect(result.success).toBe(true);
-      expect(result.data).toHaveProperty('agents');
-      expect(result.data).toHaveProperty('tasks');
-      expect(result.data).toHaveProperty('metrics');
-    });
-  });
-
-  describe('swarm stop', () => {
-    it('should stop swarm', async () => {
-      const stopCmd = swarmCommand.subcommands?.find(c => c.name === 'stop');
-      expect(stopCmd).toBeDefined();
-
-      ctx.args = ['swarm-123'];
-      ctx.flags = { force: true, _: [] };
-      const result = await stopCmd!.action!(ctx);
-
-      expect(result.success).toBe(true);
-      expect(result.data).toHaveProperty('swarmId', 'swarm-123');
-      expect(result.data).toHaveProperty('stopped', true);
-    });
-
-    it('should fail without swarm ID', async () => {
-      const stopCmd = swarmCommand.subcommands?.find(c => c.name === 'stop');
-
-      const result = await stopCmd!.action!(ctx);
-
-      expect(result.success).toBe(false);
-    });
-  });
-
-  describe('swarm scale', () => {
-    it('should scale swarm', async () => {
-      const scaleCmd = swarmCommand.subcommands?.find(c => c.name === 'scale');
-      expect(scaleCmd).toBeDefined();
-
-      ctx.args = ['swarm-123'];
-      ctx.flags = { agents: 20, _: [] };
-      const result = await scaleCmd!.action!(ctx);
-
-      expect(result.success).toBe(true);
-      expect(result.data).toHaveProperty('currentCount', 20);
-    });
-
-    it('should fail without target agent count', async () => {
-      const scaleCmd = swarmCommand.subcommands?.find(c => c.name === 'scale');
-
-      ctx.args = ['swarm-123'];
-      const result = await scaleCmd!.action!(ctx);
-
-      expect(result.success).toBe(false);
-    });
-  });
-
 });
 
 describe('Memory Commands', () => {

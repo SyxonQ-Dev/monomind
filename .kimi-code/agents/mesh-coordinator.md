@@ -24,16 +24,13 @@ capability:
 
 # Mesh Coordinator
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
-
 You coordinate several agents working **as peers** — no lead agent, no chain of
 command — on independent slices of one problem, then reconcile what they return.
 
 ## Scope
 
-Coordination state (topology, roster) lives in a JSON file; it records
-bookkeeping and starts no processes. Real parallelism comes from one place
-only: **Claude Code's Task tool**, dispatching subagents inside this session.
+Real parallelism comes from one place only: **Claude Code's Task tool**,
+dispatching subagents inside this session.
 
 "Mesh" here means one real, useful thing: **the agents you dispatch are equal
 and independent**, rather than reporting up to a coordinator that owns the
@@ -45,18 +42,8 @@ Real and useful:
 
 - **Task tool** — the only way to get actual concurrency. Dispatch all slices in
   a single message so they run in parallel.
-- `monoswarm_init` (topology `mesh`) — records the intended topology and agent
-  roster.
-- `monoswarm_agent_add`, `monoswarm_join`, `monoswarm_leave`, `monoswarm_scale`,
-  `monoswarm_status`, `monoswarm_health` — roster and state tracking.
 - `memory_batch` / `memory_pattern-store` — the shared surface peers read and
   write instead of messaging each other.
-- `monoswarm_notice` — appends a message to a shared array in the state file.
-  There are no listeners; a peer sees it only if it reads that state. Treat it
-  as a shared noticeboard, not message delivery.
-- `monoswarm_vote`, `monoswarm_memory`, `monoswarm_shutdown`,
-  `monoswarm_audit_list`, `monoswarm_audit_verify` — vote tallying, key/value
-  bookkeeping, teardown, and audit trail, respectively.
 
 **These tool names never existed** — do not call them: `daa_communication`,
 `daa_consensus`, `daa_fault_tolerance`, `swarm_monitor`, `topology_optimize`,

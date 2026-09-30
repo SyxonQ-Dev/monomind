@@ -187,10 +187,9 @@ export const OPTIONAL_PACKS: readonly AssetPack[] = [
   },
   {
     name: 'swarm',
-    description: 'Monoswarm: swarm, hooks and workflow commands; consensus agents',
-    skills: ['monoswarm'],
+    description: 'Multi-agent: coordination, hooks and workflow commands; consensus agents',
+    skills: [],
     commands: [
-      'monoswarm',
       'coordination',
       'automation',
       'stream-chain',
@@ -201,8 +200,6 @@ export const OPTIONAL_PACKS: readonly AssetPack[] = [
       'optimization',
       'workflows',
       'truth',
-      'mastermind/monoswarm.md',
-      'mastermind/topology.md',
     ],
     agents: [
       'monoswarm/collective-intelligence-coordinator.md',

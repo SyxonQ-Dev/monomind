@@ -1,11 +1,11 @@
 ---
 name: coordination:agent-spawn
-description: Spawn a new agent in the current swarm.
+description: Record a new agent in the agent store (starts no process).
 ---
 
 # agent-spawn
 
-Spawn a new agent in the current swarm.
+Record a new agent in the agent store. No process is started: to run agent work, spawn it with Claude Code's Task tool, run one turn with `monomind agent exec`, or run an org with `monomind org run`.
 
 ## Usage
 
@@ -64,7 +64,5 @@ mcp__monomind__agent_spawn({
 
 ## See Also
 
-- `swarm-init` — initialize the swarm before spawning agents
 - `agent list` — list all active agents (`monomind agent list`)
 - `agent status` — check agent status (`monomind agent status --id <id>`)
-- `task-orchestrate` — coordinate tasks across spawned agents
