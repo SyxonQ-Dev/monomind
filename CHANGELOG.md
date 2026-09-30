@@ -2,6 +2,12 @@
 
 All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
+## [Unreleased]
+
+### Added
+
+- **`monomind org sign --check` and `--project <dir>`** ([#558](https://github.com/monoes/monomind/issues/558)). Tools that rewrite org files themselves, such as mono-agent, re-sign only their own writes: they verify the org before writing and sign with `--yes` only if it verified. They had to scrape the review text for that. `org sign <org> --check` (or `--check --all`) only reports each org's state and never prompts, signs or writes anything (it skips the startup update check and subsystem init too, and does not record the plant watch's first look). It prints one line per org (`release: signed`), or with `--format json` `{"orgs":[{"org","state","signedAt","message"}]}`, where `state` is `signed`, `changed`, `unsigned`, `invalid-signature`, `forbidden-key`, `not-found` or `invalid`. It exits 0 when every org checked is signed and unchanged, 1 otherwise, and 2 for an org that is not there or a usage error. Being read-only, it also runs inside a role. `--project <dir>` (with or without `--check`) uses that directory's real path as the project root instead of the current directory; it must hold `.monomind/orgs`. Signing through `--project` binds the same path as signing from inside the directory, and the refusal inside a role or `agent exec` process tree still applies.
+
 ## [2.21.0] — 2026-09-30
 
 ### Deprecated
