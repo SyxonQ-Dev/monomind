@@ -10,7 +10,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const stream = vi.hoisted(() => ({ parts: [] as unknown[], failAfter: -1 }));
+const stream = vi.hoisted(() => ({
+  parts: [] as unknown[],
+  failAfter: -1,
+  usageError: undefined as Error | undefined,
+}));
 
 vi.mock('ai', () => ({
   tool: (def: unknown) => def,
@@ -24,7 +28,11 @@ vi.mock('ai', () => ({
         yield part;
       }
     })(),
-    usage: Promise.resolve({ inputTokens: 1, outputTokens: 2 }),
+    get usage() {
+      return stream.usageError
+        ? Promise.reject(stream.usageError)
+        : Promise.resolve({ inputTokens: 1, outputTokens: 2 });
+    },
   }),
 }));
 vi.mock('@ai-sdk/openai', () => ({ createOpenAI: () => () => ({}) }));
@@ -36,6 +44,8 @@ const delta = (text: string) => ({ type: 'text-delta', id: 't1', text });
 
 let dir: string;
 beforeEach(() => {
+  stream.failAfter = -1;
+  stream.usageError = undefined;
   dir = mkdtempSync(join(tmpdir(), 'vercel-chat-563-'));
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
@@ -111,5 +121,18 @@ describe('VercelAgentRunner chat events (#563)', () => {
     stream.parts = [delta('a'), delta('b'), { type: 'finish-step' }];
     const { msgs } = await collect({ includePartialMessages: true });
     expect(assistantTexts(msgs)).toEqual(['a', 'b']);
+  });
+
+  it('emits no assistant message for a tool-only step', async () => {
+    stream.parts = [
+      { type: 'tool-call', toolCallId: 'c1', toolName: 'org_send', input: {} },
+      { type: 'tool-result', toolCallId: 'c1', toolName: 'org_send', output: 'ok' },
+      { type: 'finish-step' },
+      delta('sent'),
+      { type: 'finish-step' },
+      { type: 'finish' },
+    ];
+    const { msgs } = await collect();
+    expect(assistantTexts(msgs)).toEqual(['sent']);
   });
 });
