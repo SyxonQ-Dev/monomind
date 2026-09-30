@@ -40,6 +40,7 @@ import {
   installRoots,
   mountPointAncestors,
   resetToolchainMemo,
+  TOOLCHAIN_ENV,
   toolchainPaths,
 } from '../../src/orgrt/operator-toolchain-paths.js';
 import { plantCandidates } from '../../src/orgrt/planted-paths.js';
@@ -222,8 +223,14 @@ describe('one list, every layer', () => {
     const env = { HOME: home } as NodeJS.ProcessEnv;
     const nvm = join(home, '.nvm');
 
-    // File tools (policy.ts reads homedir() and process.env).
+    // File tools (policy.ts reads homedir() and process.env). Pin every
+    // toolchain variable: a CI runner sets its own (NVM_DIR, XDG_*, PATH to
+    // /opt/hostedtoolcache…), which would move nvm's root away from this
+    // temp HOME.
     vi.stubEnv('HOME', home);
+    for (const k of TOOLCHAIN_ENV) vi.stubEnv(k, '');
+    vi.stubEnv('NVM_DIR', nvm);
+    vi.stubEnv('PATH', dirname(node));
     const engine = new PolicyEngine('dev', {} as never, new OrgBus('o', 'r', scratch('tc-bus-')), root, [root, home], root);
     const denied = await engine.decide('Write', { file_path: node, content: 'x' });
     expect(denied.behavior).toBe('deny');
