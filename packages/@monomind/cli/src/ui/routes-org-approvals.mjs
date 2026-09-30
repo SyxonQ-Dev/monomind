@@ -71,6 +71,31 @@ export async function handleOrgApprovalRoutes(req, res, url, corsOrigin, ctx) {
     });
   }
 
+  // POST /api/questions/dismiss { dir, org, questionId, reason? } — #572: close
+  // a question without an answer, live or recorded like an answer.
+  if (req.method === 'POST' && url === '/api/questions/dismiss') {
+    return hilRespond(res, corsOrigin, async () => {
+      const body = await readHilBody(req);
+      const { org, questionId, reason } = body || {};
+      if (!validOrgName(org) || !questionId || (reason !== undefined && typeof reason !== 'string'))
+        throw Object.assign(new Error('org and questionId are required; reason must be text'), {
+          status: 400,
+        });
+      const root = path.resolve(body.dir || ctx.projectDir || process.cwd());
+      const why = reason?.trim() ? reason.trim().slice(0, 4000) : undefined;
+      const r = await hil.dismissQuestion(root, org, String(questionId), why);
+      hilEvent(ctx, root, {
+        type: 'org:question-answered',
+        org,
+        role: r.role,
+        questionId,
+        delivery: r.delivery,
+        dismissed: true,
+      });
+      return { ok: true, ...r };
+    });
+  }
+
   // POST /api/org/:name/gates/:id { approved: boolean, resolution? } — resolve
   // a decision gate, live or (org not running) in gates.json.
   if (

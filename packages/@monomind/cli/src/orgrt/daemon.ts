@@ -286,8 +286,13 @@ export class OrgDaemon {
   }
   async answerQuestion(
     ...args: DaemonArgs<typeof questionOps.answerQuestion>
-  ): Promise<{ ok: true } | { ok: false; error: string }> {
+  ): ReturnType<typeof questionOps.answerQuestion> {
     return questionOps.answerQuestion(this, ...args);
+  }
+  async dismissQuestion(
+    ...args: DaemonArgs<typeof questionOps.dismissQuestion>
+  ): ReturnType<typeof questionOps.dismissQuestion> {
+    return questionOps.dismissQuestion(this, ...args);
   }
 
   // decisions.ts

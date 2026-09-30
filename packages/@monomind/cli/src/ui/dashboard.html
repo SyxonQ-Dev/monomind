@@ -4430,12 +4430,13 @@ let _hiEntries = [];
 let _hiTab = 'pending';
 
 function _hiIsPending(e) {
-  if (e.kind === 'question') return e.item.answer === null || e.item.answer === undefined;
+  if (e.kind === 'question')
+    return (e.item.answer === null || e.item.answer === undefined) && e.item.state !== 'dismissed';
   return (e.item.status || 'pending') === 'pending';
 }
 function _hiWhen(e) {
   const i = e.item;
-  return i.answeredAt || i.resolvedAt || i.ts || i.createdAt || 0;
+  return i.answeredAt || i.dismissedAt || i.resolvedAt || i.ts || i.createdAt || 0;
 }
 
 async function renderHumanInputView() {
@@ -4509,9 +4510,12 @@ function _hiEntryHtml(e) {
       ? _hiPill('non-blocking', 'var(--text-lo)')
       : _hiPill('blocking — run waits', 'var(--amber, #d29922)');
     body = `<div style="color:var(--text-hi);white-space:pre-wrap;max-height:240px;overflow:auto">${esc(i.question)}</div>`;
-    resolved = `<span style="color:var(--text-xs)">Answer:</span> ${esc(i.answer ?? '')}`;
-    actions = `<input type="text" class="hi-answer-input" placeholder="Your answer…" aria-label="Answer" style="flex:1;padding:4px 8px;font-size:12px" />
-      <button class="btn" style="font-size:11px" ${data} onclick="hiAct(this,'answer')">Answer</button>`;
+    resolved = i.state === 'dismissed'
+      ? `<span style="color:var(--text-xs)">Dismissed${i.dismissReason ? ':' : ''}</span> ${esc(i.dismissReason ?? '')}`
+      : `<span style="color:var(--text-xs)">Answer:</span> ${esc(i.answer ?? '')}`;
+    actions = `<input type="text" class="hi-answer-input" placeholder="Your answer (or a reason to dismiss)…" aria-label="Answer" style="flex:1;padding:4px 8px;font-size:12px" />
+      <button class="btn" style="font-size:11px" ${data} onclick="hiAct(this,'answer')">Answer</button>
+      <button class="btn" style="font-size:11px" title="Close without an answer; the role is told" ${data} onclick="hiAct(this,'dismiss')">Dismiss</button>`;
   } else if (e.kind === 'approval') {
     badge = _hiPill(i.action || 'tool', 'var(--accent, #58a6ff)');
     body = `<div style="color:var(--text-hi)">Wants to run <b>${esc(i.action)}</b></div>` +
@@ -4539,7 +4543,7 @@ function _hiEntryHtml(e) {
       ? `<div style="display:flex;gap:6px;align-items:center">${actions}</div>`
       : `<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 8px;background:var(--surface-hi);border-radius:4px">
           <div style="white-space:pre-wrap;max-height:160px;overflow:auto;min-width:0">${resolved}</div>
-          <div style="color:var(--text-xs);font-size:11px;font-family:var(--mono);flex-shrink:0">${relTime(i.answeredAt || i.resolvedAt)}${who}</div>
+          <div style="color:var(--text-xs);font-size:11px;font-family:var(--mono);flex-shrink:0">${relTime(i.answeredAt || i.dismissedAt || i.resolvedAt)}${who}</div>
         </div>`}
   </div>`;
 }
@@ -4597,7 +4601,9 @@ async function _hiAct(btnEl, verb) {
   const q = `?dir=${enc(dir)}`;
   let ok = null;
   row?.querySelectorAll('button').forEach(b => { b.disabled = true; });
-  if (kind === 'question') {
+  if (kind === 'question' && verb === 'dismiss') {
+    ok = await _hilPost('/api/questions/dismiss', { dir, org, questionId: id, reason: text || undefined });
+  } else if (kind === 'question') {
     if (!text) { row?.querySelectorAll('button').forEach(b => { b.disabled = false; }); return; }
     ok = await _hilPost('/api/questions/answer', { dir, org, questionId: id, answer: text });
   } else if (kind === 'approval') {

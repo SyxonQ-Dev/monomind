@@ -32,6 +32,7 @@ export {
   answerAction,
   questionsAction,
 } from './org-observe-questions.js';
+export { dismissAction } from './org-observe-questions-dismiss.js';
 export {
   costsAction,
   flowAction,
