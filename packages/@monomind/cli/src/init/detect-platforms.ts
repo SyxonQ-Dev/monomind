@@ -75,6 +75,11 @@ function isDir(p: string): boolean {
   }
 }
 
+/** `~` or `~/x` expanded against `home`. */
+function expandHome(p: string, home: string): string {
+  return p === '~' || p.startsWith('~/') || p.startsWith('~\\') ? path.join(home, p.slice(1)) : p;
+}
+
 function onPath(bin: string, dirs: string[], exts: string[]): boolean {
   return dirs.some((dir) => exts.some((ext) => isFile(path.join(dir, bin + ext))));
 }
@@ -84,10 +89,21 @@ export function detectInstalledPlatforms(opts: DetectOptions = {}): DetectedPlat
   const env = opts.env ?? process.env;
   const home = opts.homeDir ?? os.homedir();
   const win = (opts.platform ?? process.platform) === 'win32';
-  const dirs = String(opts.pathEnv ?? env.PATH ?? '')
-    .split(path.delimiter)
+  const delimiter = win ? ';' : path.delimiter;
+  const dirs = String(opts.pathEnv ?? env.PATH ?? env.Path ?? '')
+    .split(delimiter)
+    // Windows PATH entries may be quoted.
+    .map((dir) => (win ? dir.replace(/^"(.*)"$/, '$1') : dir))
     .filter(Boolean);
-  const exts = win ? ['', '.cmd', '.exe', '.bat', '.ps1'] : [''];
+  const exts = win
+    ? [
+        '',
+        ...String(env.PATHEXT || '.COM;.EXE;.BAT;.CMD')
+          .split(';')
+          .filter(Boolean),
+      ].flatMap((ext) => (ext ? [ext.toLowerCase(), ext.toUpperCase()] : ['']))
+    : [''];
+  const xdg = env.XDG_CONFIG_HOME ? expandHome(env.XDG_CONFIG_HOME, home) : undefined;
 
   const found: DetectedPlatform[] = [];
   for (const id of INIT_PLATFORMS) {
@@ -95,13 +111,29 @@ export function detectInstalledPlatforms(opts: DetectOptions = {}): DetectedPlat
     const via: string[] = [];
     for (const bin of probe.bins) if (onPath(bin, dirs, exts)) via.push(`${bin} on PATH`);
     for (const rel of probe.homeDirs) if (isDir(path.join(home, rel))) via.push(`~/${rel}`);
+    if (id === 'opencode' && xdg && isDir(path.join(xdg, 'opencode'))) {
+      via.push('$XDG_CONFIG_HOME/opencode');
+    }
     for (const name of probe.envDirs ?? []) {
       const dir = env[name];
-      if (dir && isDir(dir)) via.push(`$${name}`);
+      if (dir && isDir(expandHome(dir, home))) via.push(`$${name}`);
     }
     if (via.length > 0) found.push({ id, via });
   }
   return found;
+}
+
+/** `detected` plus the project's own platforms, in INIT_PLATFORMS order. */
+export function withProjectPlatforms(
+  detected: DetectedPlatform[],
+  inProject: readonly InitPlatform[],
+): DetectedPlatform[] {
+  const via = 'already in this project';
+  return INIT_PLATFORMS.flatMap((id) => {
+    const hit = detected.find((d) => d.id === id);
+    if (!inProject.includes(id)) return hit ? [hit] : [];
+    return [{ id, via: [...(hit?.via ?? []), via] }];
+  });
 }
 
 /** How `init` arrived at its platform list, for the summary line. */
@@ -120,7 +152,9 @@ export function chooseDefaultPlatforms(detected: DetectedPlatform[]): PlatformCh
 
 /**
  * The platforms an existing project already has on disk, judged by the files
- * `init` writes for each one. `init upgrade` keeps exactly these.
+ * `init` writes for each one. A plain `init` (no platform flags) adds these
+ * to the detected ones, so `init --force` refreshes every platform a project
+ * has, installed here or not.
  */
 export function platformsInProject(targetDir: string): InitPlatform[] {
   const has = (...rel: string[]) => rel.some((r) => fs.existsSync(path.join(targetDir, r)));
@@ -157,7 +191,7 @@ export function describePlatformChoice(choice: PlatformChoice): string[] {
       `  Not written: ${names(others)}. Add them with \`monomind init --platforms ${[
         ...choice.platforms,
         ...others,
-      ].join(',')} --force\` or \`--all-platforms\`.`,
+      ].join(',')} --yes\` or \`monomind init --all-platforms --yes\`.`,
     );
   }
   return lines;

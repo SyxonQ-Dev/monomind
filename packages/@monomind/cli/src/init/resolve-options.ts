@@ -18,6 +18,8 @@ import {
   type DetectedPlatform,
   detectInstalledPlatforms,
   type PlatformChoice,
+  platformsInProject,
+  withProjectPlatforms,
 } from './detect-platforms.js';
 import {
   DEFAULT_INIT_OPTIONS,
@@ -48,6 +50,9 @@ export function resolveInitOptions(
   const onlyClaude = ctx.flags['only-claude'] as boolean;
   const requestedTarget = ctx.flags.target as string | undefined;
   // `--platforms` is the documented spelling; `--platform` predates it.
+  if (ctx.flags.platforms !== undefined && ctx.flags.platform !== undefined) {
+    return { ok: false, message: 'Use either --platforms or --platform, not both' };
+  }
   let requestedPlatforms = (ctx.flags.platforms ?? ctx.flags.platform) as string | undefined;
   const allPlatforms = ctx.flags['all-platforms'] === true || ctx.flags.allPlatforms === true;
   const enablePlatformHooks = ctx.flags['enable-hooks'] === true;
@@ -103,18 +108,39 @@ export function resolveInitOptions(
   const legacyTargets = ['opencode', 'kimicode', 'codex'].filter(
     (name) => ctx.flags[name] === true,
   );
-  // #420: with no flag naming platforms, write only the installed ones.
-  // `--all-platforms`, `--full` and an explicit `--target all` keep all five.
+  if (allPlatforms) {
+    const narrowing = [
+      requestedPlatforms !== undefined && '--platforms',
+      requestedTarget !== undefined && requestedTarget !== 'all' && '--target',
+      onlyClaude && '--only-claude',
+      skipClaude && '--skip-claude',
+      ...legacyTargets.map((name) => `--${name}`),
+    ].filter(Boolean);
+    if (narrowing.length > 0) {
+      return {
+        ok: false,
+        message: `--all-platforms cannot be combined with ${narrowing.join(', ')}`,
+      };
+    }
+  }
+
+  // #420: with no flag naming platforms, write the installed ones plus the
+  // ones this project already has (so `init --force` refreshes them).
+  // `--all-platforms`, `--full`, `--skip-claude` (all minus Claude) and an
+  // explicit `--target all` keep all five.
   let platformChoice: PlatformChoice | undefined;
   if (
     !requestedPlatforms &&
     !requestedTarget &&
     !onlyClaude &&
+    !skipClaude &&
     legacyTargets.length === 0 &&
     !allPlatforms &&
     !full
   ) {
-    platformChoice = chooseDefaultPlatforms(detect());
+    platformChoice = chooseDefaultPlatforms(
+      withProjectPlatforms(detect(), platformsInProject(targetDir)),
+    );
     requestedPlatforms = platformChoice.platforms.join(',');
   }
   const target =

@@ -32,18 +32,18 @@ cd your-project
 monomind init
 ```
 
-This sets up the coding systems installed on your machine, out of Claude Code, Antigravity, OpenCode, Kimi Code, and Codex. A system counts as installed when its CLI is on your `PATH` (`claude`, `gemini`/`agy`, `opencode`, `kimi`, `codex`) or its config directory exists in your home (`~/.claude`, `~/.gemini`, `~/.config/opencode`, `~/.kimi`, `~/.codex`). If none is found, init sets up Claude Code and says so. Init prints what it detected and how to add the others. For each system it writes the native instructions/configuration, shared skills, and MCP wiring, then builds the initial code graph. It takes 30–60 seconds and spawns a background process for the graph build.
+This sets up the coding systems installed on your machine, out of Claude Code, Antigravity, OpenCode, Kimi Code, and Codex, plus any of them the project already has. A system counts as installed when its CLI is on your `PATH` (`claude`, `gemini`/`agy`/`antigravity`, `opencode`, `kimi`, `codex`) or its config directory exists (`~/.claude` or `$CLAUDE_CONFIG_DIR`, `~/.gemini` or `~/.antigravity`, `~/.config/opencode`, `$XDG_CONFIG_HOME/opencode` or `~/.opencode`, `~/.kimi` or `~/.kimi-code`, `~/.codex` or `$CODEX_HOME`). If none is found, init sets up Claude Code and says so. Init prints what it detected and how to add the others. For each system it writes the native instructions/configuration, shared skills, and MCP wiring, then builds the initial code graph. It takes 30–60 seconds and spawns a background process for the graph build.
 
-Init never installs anything into your project: your `package.json` and lockfile stay as they are. The code graph is built with the copy of `@monoes/monograph` that ships with the monomind CLI, and the hooks find that same copy (or a global install) later.
+Init never installs anything into your project: your `package.json` and lockfile stay as they are. If Claude Code is selected but its CLI is missing, init asks whether to install it globally (`npm install -g @anthropic-ai/claude-code`), and only in an interactive terminal; otherwise it prints that command. `--no-install` turns the question off. The code graph is built with the copy of `@monoes/monograph` that ships with the monomind CLI, and the hooks find that same copy (or a global install) later.
 
 To choose the systems yourself:
 
 ```bash
 monomind init --platforms claude,codex   # exactly these, installed or not
-monomind init --all-platforms            # all five (same as --target all or --full)
+monomind init --all-platforms            # all five platforms (same as --target all)
 ```
 
-`monomind init wizard` asks the same question, with the detected systems pre-selected. `monomind init upgrade` keeps the systems a project already has and never adds new ones; re-run `monomind init --platforms ... --force` to add one later.
+`--full` also writes all five, along with every component and pack. `monomind init wizard` asks the same question, with the detected systems pre-selected (all five for the Full preset). Re-running `monomind init --yes` (or `--force`, which also refreshes the managed files) keeps every system the project already has, so it re-pins their MCP entries after an upgrade. `monomind init upgrade` refreshes the Claude Code helpers, statusline and CLAUDE.md, and with `--add-missing` copies new skills into `.gemini/` and `.agents/` only if the project has them; it does not refresh `.codex/`, `opencode.json`/`.opencode/` or `.kimi-code/`, and never adds a system. To add one later, run `monomind init --platforms claude,codex --yes`.
 
 Init also sets up the memory database (`.swarm/memory.db`, the same one `monomind memory init` creates, copied to `.claude/memory.db`), so `monomind doctor` reports **Memory Database ✓** straight away. Re-running init keeps an existing database and everything in it. Pass `--no-memory` to skip it; `--only-claude` skips it too, since that mode writes no runtime state, and `--skip-claude` creates the database without the `.claude/` copy. If the database can't be created (for example, `sql.js` is missing), init still finishes and prints a warning: run `monomind memory init` to retry.
 

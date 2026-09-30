@@ -425,7 +425,12 @@ export async function executeInit(options: InitOptions): Promise<InitResult> {
     // Run doctor auto-fix (non-blocking, best-effort) — unless the caller
     // runs it itself once all of its own writes are done (#425).
     if (!options.deferDoctor)
-      await runDoctorFix(targetDir, result, options.installClaudeCode !== false);
+      await runDoctorFix(
+        targetDir,
+        result,
+        options.installClaudeCode !== false,
+        options.selectedPlatforms?.includes('claude') ?? true,
+      );
 
     // Hash what this run left on disk (after adapters and doctor rewrote some
     // of it), so the next run can tell a user edit from an untouched file.

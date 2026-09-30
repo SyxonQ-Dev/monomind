@@ -14,6 +14,7 @@ import {
   describePlatformChoice,
   detectInstalledPlatforms,
   platformsInProject,
+  withProjectPlatforms,
 } from '../init/detect-platforms.js';
 import type { CommandContext } from '../types.js';
 
@@ -91,6 +92,31 @@ describe('detectInstalledPlatforms', () => {
     expect(detect()).toEqual([]);
   });
 
+  it('checks $XDG_CONFIG_HOME/opencode', () => {
+    const xdg = path.join(root, 'xdg');
+    fs.mkdirSync(path.join(xdg, 'opencode'), { recursive: true });
+    expect(detect({ XDG_CONFIG_HOME: xdg })).toEqual([
+      { id: 'opencode', via: ['$XDG_CONFIG_HOME/opencode'] },
+    ]);
+  });
+
+  it('expands a leading ~ in CODEX_HOME and CLAUDE_CONFIG_DIR', () => {
+    fs.mkdirSync(path.join(homeDir, 'codex-conf'));
+    fs.mkdirSync(path.join(homeDir, 'claude-conf'));
+    expect(detect({ CODEX_HOME: '~/codex-conf', CLAUDE_CONFIG_DIR: '~/claude-conf' })).toEqual([
+      { id: 'claude', via: ['$CLAUDE_CONFIG_DIR'] },
+      { id: 'codex', via: ['$CODEX_HOME'] },
+    ]);
+  });
+
+  it('reads PATHEXT and unquotes PATH entries on win32', () => {
+    fs.writeFileSync(path.join(binDir, 'kimi.foo'), '');
+    const win = (env: Record<string, string>) =>
+      detectInstalledPlatforms({ homeDir, env, platform: 'win32' }).map((d) => d.id);
+    expect(win({ PATH: `"${binDir}"`, PATHEXT: '.EXE;.FOO' })).toEqual(['kimi']);
+    expect(win({ PATH: `"${binDir}"`, PATHEXT: '.EXE' })).toEqual([]);
+  });
+
   it('tries Windows executable extensions on win32', () => {
     fs.writeFileSync(path.join(binDir, 'codex.cmd'), '');
     expect(detect({}, 'win32').map((d) => d.id)).toEqual(['codex']);
@@ -117,7 +143,8 @@ describe('chooseDefaultPlatforms / describePlatformChoice', () => {
     const lines = describePlatformChoice(choice).join('\n');
     expect(lines).toContain('Claude Code (claude on PATH); Codex (~/.codex)');
     expect(lines).toContain('Not written: Antigravity / Gemini, OpenCode, Kimi Code');
-    expect(lines).toContain('--platforms claude,codex,antigravity,opencode,kimi');
+    expect(lines).toContain('--platforms claude,codex,antigravity,opencode,kimi --yes');
+    expect(lines).not.toContain('--force');
   });
 
   it('prints nothing about missing platforms when all five are chosen', () => {
@@ -189,9 +216,60 @@ describe('resolveInitOptions platform selection (#420)', () => {
     expect(r.detectCalls).toBe(0);
   });
 
+  it('keeps the platforms the project already has (so init --force refreshes them)', () => {
+    fs.mkdirSync(path.join(root, '.codex'));
+    fs.writeFileSync(path.join(root, 'opencode.json'), '{}');
+    const r = resolve({}, [{ id: 'claude', via: ['claude on PATH'] }]);
+    expect(r.options.selectedPlatforms).toEqual(['claude', 'opencode', 'codex']);
+    expect(r.platforms.detected).toEqual([
+      { id: 'claude', via: ['claude on PATH'] },
+      { id: 'opencode', via: ['already in this project'] },
+      { id: 'codex', via: ['already in this project'] },
+    ]);
+  });
+
+  it('--skip-claude writes every platform but Claude Code, without detection', () => {
+    const r = resolve({ 'skip-claude': true }, [{ id: 'claude', via: ['claude on PATH'] }]);
+    expect(r.options.selectedPlatforms).toEqual(['antigravity', 'opencode', 'kimi', 'codex']);
+    expect(r.detectCalls).toBe(0);
+  });
+
+  it.each([
+    [{ 'all-platforms': true, platforms: 'claude' }, '--platforms'],
+    [{ 'all-platforms': true, target: 'codex' }, '--target'],
+    [{ 'all-platforms': true, 'only-claude': true }, '--only-claude'],
+    [{ 'all-platforms': true, 'skip-claude': true }, '--skip-claude'],
+    [{ 'all-platforms': true, codex: true }, '--codex'],
+  ])('rejects %j', (flags, named) => {
+    const r = resolveInitOptions(ctx(flags), root, () => []);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.message).toBe(`--all-platforms cannot be combined with ${named}`);
+  });
+
+  it('accepts --all-platforms with --target all', () => {
+    expect(resolve({ 'all-platforms': true, target: 'all' }).options.selectedPlatforms).toEqual(
+      ALL,
+    );
+  });
+
+  it('rejects --platform together with --platforms', () => {
+    const r = resolveInitOptions(ctx({ platform: 'claude', platforms: 'codex' }), root, () => []);
+    expect(r).toEqual({ ok: false, message: 'Use either --platforms or --platform, not both' });
+  });
+
   it('rejects an unknown --platforms id', () => {
     const r = resolveInitOptions(ctx({ platforms: 'claude,nope' }), root, () => []);
     expect(r).toEqual({ ok: false, message: 'Unknown init platform: claude,nope' });
+  });
+});
+
+describe('withProjectPlatforms', () => {
+  it('adds project platforms to the detected ones, in order', () => {
+    const merged = withProjectPlatforms([{ id: 'codex', via: ['~/.codex'] }], ['claude', 'codex']);
+    expect(merged).toEqual([
+      { id: 'claude', via: ['already in this project'] },
+      { id: 'codex', via: ['~/.codex', 'already in this project'] },
+    ]);
   });
 });
 

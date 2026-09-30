@@ -47,6 +47,27 @@ export const wizardCommand: Command = {
         ],
       });
 
+      // #420: which platforms, asked before the component questions. The
+      // installed ones come pre-selected (Claude Code if none is), all five
+      // for Full. Applied after the component answers so they can't re-enable
+      // Claude Code's files when it is deselected.
+      const platformDefault = chooseDefaultPlatforms(detectInstalledPlatforms());
+      const detectedNote =
+        preset === 'full'
+          ? 'Full pre-selects all five'
+          : platformDefault.source === 'detected'
+            ? 'pre-selected: installed here'
+            : 'none detected, Claude Code pre-selected';
+      const platforms = await multiSelect({
+        message: `Coding platforms to set up (${detectedNote}):`,
+        options: INIT_PLATFORMS.map((id) => ({
+          value: id,
+          label: INIT_PLATFORM_LABELS[id],
+          hint: platformDefault.detected.find((d) => d.id === id)?.via.join(', ') ?? 'not detected',
+          selected: preset === 'full' || platformDefault.platforms.includes(id),
+        })),
+      });
+
       if (preset === 'minimal') {
         options = { ...structuredClone(MINIMAL_INIT_OPTIONS), targetDir: ctx.cwd };
       } else if (preset === 'full') {
@@ -166,21 +187,6 @@ export const wizardCommand: Command = {
         }
       }
 
-      // #420: the installed platforms come pre-selected (Claude Code if none is).
-      const platformDefault = chooseDefaultPlatforms(detectInstalledPlatforms());
-      const detectedNote =
-        platformDefault.source === 'detected'
-          ? 'pre-selected: installed here'
-          : 'none detected, Claude Code pre-selected';
-      const platforms = await multiSelect({
-        message: `Coding platforms to set up (${detectedNote}):`,
-        options: INIT_PLATFORMS.map((id) => ({
-          value: id,
-          label: INIT_PLATFORM_LABELS[id],
-          hint: platformDefault.detected.find((d) => d.id === id)?.via.join(', ') ?? 'not detected',
-          selected: platformDefault.platforms.includes(id),
-        })),
-      });
       applyPlatformSelection(options, platforms.length > 0 ? platforms : ['claude']);
 
       // Core is always installed; the rest are opt-in (GH #411). Full has them all.

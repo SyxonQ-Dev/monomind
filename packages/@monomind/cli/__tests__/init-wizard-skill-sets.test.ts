@@ -75,7 +75,7 @@ describe('init wizard packs (GH #411)', () => {
   });
 
   it('asks for packs after the Custom component choice', async () => {
-    const options = await run('custom', [['skills', 'commands'], ['claude'], ['extras']]);
+    const options = await run('custom', [['claude'], ['skills', 'commands'], ['extras']]);
     expect(options.components.agents).toBe(false);
     expect(options.packs).toEqual(['extras']);
   });
@@ -88,7 +88,7 @@ describe('init wizard packs (GH #411)', () => {
 
   it('leaves the shared default presets untouched', async () => {
     const before = structuredClone(DEFAULT_INIT_OPTIONS);
-    await run('custom', [['skills'], ['claude'], ['business']]);
+    await run('custom', [['claude'], ['skills'], ['business']]);
     expect(DEFAULT_INIT_OPTIONS).toEqual(before);
   });
 });
@@ -111,6 +111,21 @@ describe('init wizard platforms (#420)', () => {
     expect(options.selectedPlatforms).toEqual(['codex']);
     expect(options.components.claudeMd).toBe(false);
     expect(options.components.settings).toBe(false);
+  });
+
+  it('asks for platforms before the component questions', async () => {
+    const options = await run('custom', [['codex'], ['claudeMd', 'skills'], []]);
+    expect(multiSelectCalls[0].message).toMatch(/^Coding platforms/);
+    expect(multiSelectCalls[1].message).toMatch(/^Select components/);
+    // Deselecting Claude Code wins over the component answers.
+    expect(options.components.claudeMd).toBe(false);
+    expect(options.components.skills).toBe(true);
+  });
+
+  it('Full pre-selects all five platforms', async () => {
+    await run('full', [['claude']]);
+    expect(multiSelectCalls[0].options.every((o) => o.selected)).toBe(true);
+    expect(multiSelectCalls[0].options).toHaveLength(5);
   });
 
   it('falls back to Claude Code when nothing is picked', async () => {

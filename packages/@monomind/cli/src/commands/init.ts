@@ -78,7 +78,7 @@ export const initCommand: Command = {
     {
       name: 'no-install',
       description:
-        'Skip the post-init `doctor --install` pass, which may otherwise run a global `npm install -g @anthropic-ai/claude-code`',
+        'Never offer to install the Claude Code CLI (`npm install -g @anthropic-ai/claude-code`). Without it, init asks first, and only in an interactive terminal',
       type: 'boolean',
       default: false,
     },

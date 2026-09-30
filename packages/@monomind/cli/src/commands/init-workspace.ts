@@ -93,6 +93,8 @@ export async function runInitWorkspace(ctx: CommandContext, cwd: string): Promis
     );
   }
   const options = resolved.options;
+  // Headless: never stop to ask about installing the Claude Code CLI (#420).
+  options.installClaudeCode = false;
 
   // executeInit's deeper writers (capability scan, doctor auto-fix — which
   // runs the `doctor` command's own action, spinner included, …) print
@@ -157,6 +159,12 @@ export async function runInitWorkspace(ctx: CommandContext, cwd: string): Promis
     created: [...result.created.directories, ...result.created.files],
     skipped: result.skipped,
     claude_project_registered: isClaudeProjectRegistered(options.targetDir),
+    // #420: which platforms were written and why.
+    platforms: {
+      source: resolved.platforms.source,
+      selected: resolved.platforms.platforms,
+      detected: resolved.platforms.detected,
+    },
     duration_ms: Date.now() - start,
   };
   return printAndReturn(payload, true);

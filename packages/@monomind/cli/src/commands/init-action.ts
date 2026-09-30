@@ -496,7 +496,12 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
       }
     }
 
-    await runDoctorFix(options.targetDir, result, options.installClaudeCode !== false);
+    await runDoctorFix(
+      options.targetDir,
+      result,
+      options.installClaudeCode !== false,
+      options.selectedPlatforms?.includes('claude') ?? true,
+    );
 
     if (!startAll) {
       output.writeln(output.bold('Next steps:'));
