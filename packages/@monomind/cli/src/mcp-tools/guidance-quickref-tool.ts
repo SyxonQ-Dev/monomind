@@ -5,6 +5,7 @@
  * `guidanceTools`.
  */
 
+import { MONOSWARM_AUTOPILOT_REMOVAL_VERSION } from '../deprecations.js';
 import type { MCPTool } from './types.js';
 
 export const guidanceQuickRef: MCPTool = {
@@ -79,7 +80,7 @@ export const guidanceQuickRef: MCPTool = {
           ],
         },
         'swarm-ops': {
-          title: 'Monoswarm Operations (deprecated — removed in the next minor release)',
+          title: `Monoswarm Operations (deprecated — removed in ${MONOSWARM_AUTOPILOT_REMOVAL_VERSION})`,
           commands: [
             {
               cmd: 'npx monomind@latest monoswarm init --topology hierarchical --max-agents 8',
