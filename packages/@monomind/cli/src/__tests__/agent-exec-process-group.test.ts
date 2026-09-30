@@ -18,9 +18,10 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { type AgentExecOptions, runAgentExec, type ToolSpec } from '../orgrt/agent-exec.js';
 import { ClaudeAgentRunner } from '../orgrt/agent-runner.js';
+import { loadClaudeSdk } from '../orgrt/agent-runner-claude.js';
 import { listGroupMembers } from '../orgrt/process-tree.js';
 
 function isAlive(pid: number): boolean {
@@ -105,6 +106,13 @@ describe('#359: --access full kills the whole process group on cancel/timeout, a
   let scratchDir: string;
   let spawnedPid: number | undefined;
   let recordedMembers: number[] = [];
+
+  // The first SDK load in a process hashes the Claude binary against its pin
+  // (#526), which takes longer than the 80 ms --timeout below; load it once
+  // up front so the timeout measures the run.
+  beforeAll(async () => {
+    await loadClaudeSdk();
+  }, 60_000);
 
   beforeEach(() => {
     scratchDir = mkdtempSync(join(tmpdir(), 'monomind-359-'));
