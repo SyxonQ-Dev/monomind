@@ -3,6 +3,13 @@
  */
 
 import {
+  applyPlatformSelection,
+  chooseDefaultPlatforms,
+  detectInstalledPlatforms,
+  INIT_PLATFORM_LABELS,
+  INIT_PLATFORMS,
+} from '../init/detect-platforms.js';
+import {
   DEFAULT_INIT_OPTIONS,
   executeInit,
   FULL_INIT_OPTIONS,
@@ -38,6 +45,27 @@ export const wizardCommand: Command = {
           { value: 'full', label: 'Full', hint: 'All features enabled' },
           { value: 'custom', label: 'Custom', hint: 'Choose each component' },
         ],
+      });
+
+      // #420: which platforms, asked before the component questions. The
+      // installed ones come pre-selected (Claude Code if none is), all five
+      // for Full. Applied after the component answers so they can't re-enable
+      // Claude Code's files when it is deselected.
+      const platformDefault = chooseDefaultPlatforms(detectInstalledPlatforms());
+      const detectedNote =
+        preset === 'full'
+          ? 'Full pre-selects all five'
+          : platformDefault.source === 'detected'
+            ? 'pre-selected: installed here'
+            : 'none detected, Claude Code pre-selected';
+      const platforms = await multiSelect({
+        message: `Coding platforms to set up (${detectedNote}):`,
+        options: INIT_PLATFORMS.map((id) => ({
+          value: id,
+          label: INIT_PLATFORM_LABELS[id],
+          hint: platformDefault.detected.find((d) => d.id === id)?.via.join(', ') ?? 'not detected',
+          selected: preset === 'full' || platformDefault.platforms.includes(id),
+        })),
       });
 
       if (preset === 'minimal') {
@@ -158,6 +186,8 @@ export const wizardCommand: Command = {
           options.hooks.sessionStart = hooks.includes('sessionStart');
         }
       }
+
+      applyPlatformSelection(options, platforms.length > 0 ? platforms : ['claude']);
 
       // Core is always installed; the rest are opt-in (GH #411). Full has them all.
       const { components } = options;

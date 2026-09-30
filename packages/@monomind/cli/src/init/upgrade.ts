@@ -401,12 +401,13 @@ export async function executeUpgradeWithMissing(
         }
       }
 
-      // Mirror added skills to .gemini/skills/ and .agents/skills/ (#100)
+      // Mirror added skills to .gemini/skills/ and .agents/skills/ (#100),
+      // only where the project already has that platform's tree (#420):
+      // upgrade keeps the project's platforms and never adds new ones.
       if (result.addedSkills.length > 0) {
-        const mirrorDirs = [
-          path.join(targetDir, '.gemini', 'skills'),
-          path.join(targetDir, '.agents', 'skills'),
-        ];
+        const mirrorDirs = ['.gemini', '.agents']
+          .filter((dir) => fs.existsSync(path.join(targetDir, dir)))
+          .map((dir) => path.join(targetDir, dir, 'skills'));
         for (const mirrorDir of mirrorDirs) {
           fs.mkdirSync(mirrorDir, { recursive: true });
           for (const skillName of result.addedSkills) {

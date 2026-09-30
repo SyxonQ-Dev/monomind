@@ -33,6 +33,9 @@ import { writeKimiTree } from '../src/init/write-kimicode.js';
 import { writeOpencodeTree } from '../src/init/write-opencode.js';
 import type { CommandContext } from '../src/types.js';
 
+// Platform detection is stubbed so the results don't depend on this machine (#420).
+const noPlatforms = () => [];
+
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function freshResult(): InitResult {
@@ -102,7 +105,7 @@ describe('pack selection', () => {
   });
 
   it('--packs adds the named packs on top of core', async () => {
-    const resolved = resolveInitOptions(ctx({ packs: 'orgs,specialists' }), target);
+    const resolved = resolveInitOptions(ctx({ packs: 'orgs,specialists' }), target, noPlatforms);
     expect(resolved.ok && resolved.options.packs).toEqual(['orgs', 'specialists']);
     if (!resolved.ok) return;
     await copyAll({ ...resolved.options, sourceBaseDir: source });
@@ -116,7 +119,7 @@ describe('pack selection', () => {
   });
 
   it('--all-packs selects every pack; --full installs every skill', async () => {
-    const resolved = resolveInitOptions(ctx({ 'all-packs': true }), target);
+    const resolved = resolveInitOptions(ctx({ 'all-packs': true }), target, noPlatforms);
     expect(resolved.ok && resolved.options.packs).toEqual([...PACK_NAMES]);
     await copyAll(options(FULL_INIT_OPTIONS));
     const all = [...CORE_PACK.skills, ...OPTIONAL_PACKS.flatMap((p) => p.skills)].sort();
@@ -124,14 +127,14 @@ describe('pack selection', () => {
   });
 
   it('rejects an unknown pack name', () => {
-    const resolved = resolveInitOptions(ctx({ packs: 'orgs,nope' }), target);
+    const resolved = resolveInitOptions(ctx({ packs: 'orgs,nope' }), target, noPlatforms);
     expect(resolved.ok).toBe(false);
     expect(!resolved.ok && resolved.message).toMatch(/Unknown pack: nope/);
     expect(parsePackList('core,github')).toEqual({ ok: true, packs: ['github'] });
   });
 
   it('--minimal still installs only core skills, and takes --packs', () => {
-    const resolved = resolveInitOptions(ctx({ minimal: true, packs: 'extras' }), target);
+    const resolved = resolveInitOptions(ctx({ minimal: true, packs: 'extras' }), target, noPlatforms);
     expect(resolved.ok).toBe(true);
     if (!resolved.ok) return;
     expect(resolved.options.components.commands).toBe(false);

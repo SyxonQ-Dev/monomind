@@ -25,6 +25,12 @@ export interface InitOptions {
   sourceBaseDir?: string;
   /** Explicit adapter targets selected by init flags; absent keeps legacy init behavior. */
   selectedPlatforms?: readonly import('../platform-adapters/types.js').PlatformId[];
+  /**
+   * The non-Claude trees (`.gemini/`, `.agents/`) this run may create, when
+   * set; overrides what `selectedPlatforms` implies. `init skills` passes the
+   * ones the project already has (#420).
+   */
+  platformTrees?: readonly ('gemini' | 'agents')[];
   /** Opt in to platform-native deterministic hooks; disabled by default. */
   enablePlatformHooks?: boolean;
   /** Force overwrite existing files */
@@ -61,11 +67,11 @@ export interface InitOptions {
   /** Embeddings configuration */
   embeddings: EmbeddingsConfig;
   /**
-   * Run the post-init `doctor --install` pass, which may perform a global
-   * `npm install -g @anthropic-ai/claude-code` if the Claude Code CLI isn't
-   * already present. Defaults to true (undefined is treated as true) for
-   * backward compatibility; set false (`monomind init --no-install`) to skip
-   * it entirely.
+   * Allow the post-init doctor pass to offer a global
+   * `npm install -g @anthropic-ai/claude-code` when Claude Code is selected
+   * and missing. It asks first and only in an interactive terminal (#420).
+   * Defaults to true (undefined is treated as true); set false
+   * (`monomind init --no-install`) to never offer it.
    */
   installClaudeCode?: boolean;
   /**

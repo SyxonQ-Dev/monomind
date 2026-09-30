@@ -6,7 +6,7 @@
 import { exec, execSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -335,6 +335,19 @@ export async function checkClaudeCode(): Promise<HealthCheck> {
     const m = version.match(/v?(\d+\.\d+\.\d+)/);
     return { name: 'Claude Code CLI', status: 'pass', message: m ? `v${m[1]}` : version };
   } catch {
+    // The native installer puts claude in ~/.local/bin (often off PATH in a
+    // non-login shell); older installs used ~/.claude/local (#420).
+    const local = [
+      join(homedir(), '.local', 'bin', 'claude'),
+      join(homedir(), '.claude', 'local', 'claude'),
+    ].find((p) => existsSync(p));
+    if (local) {
+      return {
+        name: 'Claude Code CLI',
+        status: 'pass',
+        message: `installed at ${local} (not on PATH)`,
+      };
+    }
     return {
       name: 'Claude Code CLI',
       status: 'warn',
