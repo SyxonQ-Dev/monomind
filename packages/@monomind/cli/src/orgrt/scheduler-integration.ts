@@ -4,6 +4,7 @@
 import { waitForCapacity } from '../utils/resource-governor.js';
 import { pushMessage } from './cross-org.js';
 import { activeRoleCount, OrgDaemon, type RunningOrg } from './daemon.js';
+import { dispatchReadyTasks, queueDispatch } from './decisions.js';
 import { isEndpointRole } from './endpoint-roles.js';
 import { drainInbox, newMessageId, queueMessage } from './inbox.js';
 import type { OrgRole } from './types.js';
@@ -204,7 +205,15 @@ export function scheduleDeferredSpawn(
  *  org's own concurrency cap instead of waitForCapacity(). Bails quietly if
  *  the org is stopped (or restarted under the same name) before a slot
  *  frees; `running` is compared by identity, not `name`, so a stale retry can
- *  never spawn into a different run. */
+ *  never spawn into a different run.
+ *
+ *  #551: while it waits the role is recorded in running.concurrencyDeferred,
+ *  so it stays a known assignee (its tasks wait, dag-dispatch.ts), and a
+ *  second caller for the same role joins this loop instead of starting
+ *  another. Once spawned, ready tasks go out whichever caller deferred it. If
+ *  no slot frees in time, the role goes back to pendingRoles (a later task or
+ *  message defers it again) and the tasks waiting on it are failed with the
+ *  reason and the coordinator is told, instead of sitting 'ready' forever. */
 export function scheduleConcurrencyDeferredSpawn(
   daemon: OrgDaemon,
   name: string,
@@ -212,8 +221,14 @@ export function scheduleConcurrencyDeferredSpawn(
   role: OrgRole,
   spawnRole: (role: OrgRole) => void,
 ): void {
-  const MAX_ATTEMPTS = 180; // ~15 min at 5s intervals before giving up loudly
-  const POLL_MS = 5_000;
+  const deferred = (running.concurrencyDeferred ??= new Map());
+  if (deferred.has(role.id)) return;
+  const entry = { role, noted: new Set<string>() };
+  deferred.set(role.id, entry);
+  // ~15 min at 5s intervals before giving up loudly
+  const MAX_ATTEMPTS = daemon.opts.concurrencyDeferMaxAttempts ?? 180;
+  const POLL_MS = daemon.opts.concurrencyDeferPollMs ?? 5_000;
+  const stillDeferred = (): boolean => deferred.get(role.id) === entry;
   (async () => {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       await new Promise<void>((resolve) => {
@@ -221,6 +236,7 @@ export function scheduleConcurrencyDeferredSpawn(
         (t as { unref?: () => void }).unref?.();
       });
       if (daemon.orgs.get(name) !== running) return; // org stopped/restarted — abandon quietly
+      if (!stillDeferred()) return;
       const limit = running.def.run_config.max_concurrent_agents;
       if (limit == null || activeRoleCount(running) < limit) {
         running.bus.emit({
@@ -229,7 +245,9 @@ export function scheduleConcurrencyDeferredSpawn(
           reason: 'concurrency-recovered',
           msg: `a concurrency slot freed up after ${attempt} retr${attempt === 1 ? 'y' : 'ies'} — spawning deferred role "${role.id}"`,
         });
+        deferred.delete(role.id);
         await spawnNowAndDrain(daemon, name, running, role, spawnRole);
+        dispatchReadyTasks(daemon, name, running);
         return;
       }
       running.bus.emit({
@@ -239,16 +257,29 @@ export function scheduleConcurrencyDeferredSpawn(
         msg: `still at the max_concurrent_agents ceiling (attempt ${attempt}/${MAX_ATTEMPTS}) — retrying "${role.id}" spawn`,
       });
     }
-    const missing = daemon.abandoned.get(name) ?? new Set<string>();
-    missing.add(role.id);
-    daemon.abandoned.set(name, missing);
-    daemon.persistState(name, 'running', running.run);
+    if (!stillDeferred()) return;
+    deferred.delete(role.id);
+    if (!running.agents.has(role.id)) (running.pendingRoles ??= new Map()).set(role.id, role);
+    const why = `"${role.id}" could not start: the org stayed at its max_concurrent_agents ceiling (${running.def.run_config.max_concurrent_agents}) for ${MAX_ATTEMPTS} checks`;
+    const failed: string[] = [];
+    for (const t of running.taskDag?.all() ?? []) {
+      if (t.assignee !== role.id || t.status !== 'ready') continue;
+      running.taskDag!.fail(t.id, `not started — ${why}`);
+      failed.push(t.id);
+    }
     running.bus.emit({
       type: 'audit',
       from: role.id,
       reason: 'concurrency-abandoned',
-      msg: `giving up spawning "${role.id}" after ${MAX_ATTEMPTS} retries at the max_concurrent_agents ceiling — org will run without this role until manually restarted`,
+      msg: `giving up spawning "${role.id}" after ${MAX_ATTEMPTS} retries at the max_concurrent_agents ceiling — it stays pending for later work${failed.length ? `; failed its waiting task(s) ${failed.join(', ')}` : ''}`,
+      data: { roleId: role.id, failedTasks: failed },
     });
+    if (failed.length && running.bossRoleId && running.bossRoleId !== role.id)
+      queueDispatch(
+        running,
+        running.bossRoleId,
+        `[concurrency] ${why}, so its waiting task(s) ${failed.join(', ')} are marked failed and NOT being re-dispatched. Reassign them, re-file them once a role finishes, or raise run_config.max_concurrent_agents.`,
+      );
   })().catch((err) =>
     console.error(
       `org ${name}: concurrency-deferred spawn of "${role.id}" failed:`,

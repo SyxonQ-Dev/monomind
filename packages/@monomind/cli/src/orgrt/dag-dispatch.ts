@@ -216,10 +216,12 @@ export function dispatchReadyTasks(daemon: OrgDaemon, org: string, running: Runn
           msg: `deferring lazy spawn of "${task.assignee}" for task ${task.id}: org is at its max_concurrent_agents ceiling (${concurrencyLimit})`,
           data: { taskId: task.id, assignee: task.assignee },
         });
-        daemon.scheduleConcurrencyDeferredSpawn(org, running, pending, (role) => {
-          running.spawnRole?.(role);
-          dispatchReadyTasks(daemon, org, running);
-        });
+        // #551: the role stays resolvable (running.concurrencyDeferred) and
+        // the deferred spawn dispatches its ready tasks once it is up.
+        daemon.scheduleConcurrencyDeferredSpawn(org, running, pending, (role) =>
+          running.spawnRole?.(role),
+        );
+        running.concurrencyDeferred?.get(task.assignee)?.noted.add(task.id);
         continue;
       }
       // spawnRole registers the runtime synchronously, so the agent is either
@@ -247,6 +249,19 @@ export function dispatchReadyTasks(daemon: OrgDaemon, org: string, running: Runn
           data: { taskId: task.id, assignee: task.assignee },
         });
       }
+    } else if (running.concurrencyDeferred?.has(task.assignee)) {
+      // #551: its lazy spawn is waiting for a max_concurrent_agents slot — the
+      // task waits 'ready' and goes out once the role is up. Said once per task.
+      const { noted } = running.concurrencyDeferred.get(task.assignee)!;
+      if (noted.has(task.id)) continue;
+      noted.add(task.id);
+      running.bus.emit({
+        type: 'audit',
+        from: task.assignee,
+        reason: 'concurrency-limit',
+        msg: `task ${task.id} waiting — "${task.assignee}" is deferred by max_concurrent_agents (${running.def.run_config.max_concurrent_agents}) and starts when a slot frees`,
+        data: { taskId: task.id, assignee: task.assignee },
+      });
     } else {
       // No live agent and no pending role for this assignee — it doesn't
       // resolve to anything (typo at task-creation time, or the role was
