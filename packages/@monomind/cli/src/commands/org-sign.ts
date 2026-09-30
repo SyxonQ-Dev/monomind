@@ -25,6 +25,7 @@ import { ORG_DIR, OrgDefSchema } from '../orgrt/types.js';
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { listOrgConfigFiles, validateOrgName } from './org-control.js';
+import { checkAction, resolveSignRoot } from './org-sign-check.js';
 
 const log = (text: string): void => {
   console.log(text);
@@ -99,7 +100,9 @@ async function signOne(
   return undefined;
 }
 
-export const signAction = async (ctx: CommandContext): Promise<CommandResult> => {
+export const signAction = async (input: CommandContext): Promise<CommandResult> => {
+  // Read-only (#558): runs anywhere, including inside a role.
+  if (input.flags.check === true) return checkAction(input);
   // A role's own process tree must never sign — it would approve its own
   // changes. A human's own coding-agent session (the createorg skill) is the
   // operator and may; the key's location is the real barrier for roles.
@@ -113,6 +116,9 @@ export const signAction = async (ctx: CommandContext): Promise<CommandResult> =>
     );
     return { success: false, message: `refused: role context (${marker})` };
   }
+  const where = resolveSignRoot(input);
+  if ('error' in where) return { success: false, message: where.error, exitCode: 2 };
+  const ctx: CommandContext = { ...input, cwd: where.root };
   const all = ctx.flags.all === true;
   let names: string[];
   if (all) {
@@ -209,10 +215,26 @@ export const signSubcommand: Command = {
       description: 'Skip the per-org confirmation (required when not on a TTY)',
       type: 'boolean',
     },
+    {
+      name: 'check',
+      description:
+        'Only report whether each org verifies (signed, changed, unsigned, …); never prompts, signs or writes. Exit 0 all signed, 1 otherwise, 2 not found or usage error. With --format json: {"orgs":[…]}',
+      type: 'boolean',
+    },
+    {
+      name: 'project',
+      description:
+        'Use <dir> (its real path; must hold .monomind/orgs) as the project root instead of the current directory',
+      type: 'string',
+    },
   ],
   examples: [
     { command: 'monomind org sign growth', description: 'Review and sign one org' },
     { command: 'monomind org sign --all', description: 'Sign every org (migration)' },
+    {
+      command: 'monomind org sign growth --check --format json --project ~/work/app',
+      description: 'Machine-readable signature state, without signing',
+    },
   ],
   action: signAction,
 };

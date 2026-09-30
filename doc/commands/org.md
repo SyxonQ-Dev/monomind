@@ -755,14 +755,69 @@ org growth: the definition has no operator signature — run `monomind org sign 
 ```
 
 ```bash
-monomind org sign <org> [--yes]
-monomind org sign --all [--yes]
+monomind org sign <org> [--yes] [--project <dir>]
+monomind org sign --all [--yes] [--project <dir>]
+monomind org sign <org> --check [--format json] [--project <dir>]
+monomind org sign --all --check [--format json] [--project <dir>]
 ```
 
 | Flag | Purpose |
 |---|---|
 | `--all` | Sign every org definition in the project (the one-time migration) |
 | `--yes`, `-y` | Skip the per-org confirmation. Without a TTY and without it, `sign` prints the review and signs nothing |
+| `--check` | Only report whether each org verifies. Never prompts, never signs, writes nothing (#558) |
+| `--project <dir>` | Use `<dir>` as the project root instead of the current directory. It is resolved to its real path and must hold `.monomind/orgs` |
+
+**Checking without signing:** `--check` is for tools that rewrite org files themselves, such as
+mono-agent. Such a tool verifies an org before its edit and, after writing, signs with `--yes`
+only if the org verified before, so it re-signs only its own change. `--check` writes nothing:
+not the signature directory, not the plant watch's first look, not the startup update check or
+the project registry. It is read-only, so it also runs inside an org role. It prints one line
+per org:
+
+```text
+release: signed
+growth: changed
+```
+
+With `--format json` it prints one document:
+
+```json
+{"orgs":[{"org":"release","state":"signed","signedAt":"2026-09-30T12:00:00.000Z"},
+         {"org":"growth","state":"changed","signedAt":"2026-09-01T08:00:00.000Z","message":"org growth: the definition changed since the operator signed it …"}]}
+```
+
+| `state` | Meaning |
+|---|---|
+| `signed` | The signature verifies and the definition is unchanged |
+| `changed` | The signature verifies, but the definition changed since it was signed |
+| `unsigned` | No signature on this machine for this project |
+| `invalid-signature` | A signature file is there but does not verify (wrong or missing key, unsafe file) |
+| `forbidden-key` | The definition holds a `__proto__`, `constructor` or `prototype` key |
+| `invalid` | The file is not valid JSON or not a valid org definition |
+| `not-found` | There is no `.monomind/orgs/<org>.json` |
+
+`signedAt` is the time of the verified signature (`signed` and `changed` only). `message` is
+present on every state but `signed`. For the signature states (`changed`, `unsigned`,
+`invalid-signature`, `forbidden-key`) it is the same text `run` and `reload` print; `not-found`
+(`org not found: <org>`) and `invalid` (unreadable JSON, or "invalid definition — run
+`monomind org validate <org>`") have their own wording. The exit code is 0 when every org checked
+is `signed`, 1 otherwise, and 2 when an org is `not-found` or on a usage error (no org name, an
+invalid name, or a bad `--project`; with `--format json` the error is printed as
+`{"error":"…"}`).
+
+`--all --check` in a project with no org definitions is not a pass: it prints `{"orgs":[]}` with
+`--format json` (nothing on stdout otherwise), a `no org definitions in …` note on stderr, and
+exits 2.
+
+Inside a role's sandbox the operator directory is hidden or unreadable, so `--check` there sees
+no usable signature or key and reports `unsigned` or `invalid-signature` for an org the operator
+did sign. It never reports `signed` for an org that does not verify, so a caller can trust a
+`signed`; for a definitive answer, run the check outside the role.
+
+**`--project`:** the signature binds the project's real path, so signing with
+`--project <dir>` (also through a symlink) makes the same signature as running `org sign` inside
+`<dir>`. The refusal inside a role's process tree (below) still applies when signing.
 
 For each org it prints everything that decides what a role may run, reach or be granted: each
 role's runtime, git level and access, `adapter_config`, `provider`, `endpoint`,
