@@ -7,7 +7,14 @@
  * call this: once classifyRun finds no sign of life, the record is rewritten
  * as crashed and the change is logged in the org's `liveness.jsonl`.
  */
-import { appendFileSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  linkSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { deadPidReason, recordedPidLiveness, recordedPidVerified } from '../orgrt/run-liveness.js';
 import { ORG_DIR } from '../orgrt/types.js';
@@ -41,22 +48,62 @@ const readRecord = (path: string): RuntimeRecord | undefined => {
   }
 };
 
-/** Write runtime.json atomically; false when it can't be written (a role
- *  sandbox binds it read-only, #498), leaving no temp file behind. */
-const tryWriteRecord = (path: string, data: RuntimeRecord): boolean => {
-  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+/** Replace the dead run's record with `crashed`, but only while runtime.json
+ *  still holds that record (#586). Re-reading and then renaming could still
+ *  overwrite a record a new run wrote in between, so this compares and swaps:
+ *   1. rename runtime.json to a private claim file, which atomically takes
+ *      whatever record is current at that instant;
+ *   2. if the claim is the dead record, write `crashed` to an exclusive-create
+ *      temp file; otherwise (or if that write fails) keep the claim as is;
+ *   3. link() the result back to runtime.json. link fails with EEXIST when a
+ *      new run wrote runtime.json after step 1: that record is newer and
+ *      stays. A claimed record that is not the dead one is put back.
+ *  A live run's writes are never blocked or overwritten. False when nothing
+ *  was marked (lost the race, or the file can't be written: a role sandbox
+ *  binds it read-only, #498); no claim or temp file is left behind. */
+const swapInCrashed = (path: string, dead: RuntimeRecord, crashed: RuntimeRecord): boolean => {
+  const base = `${path}.${process.pid}.${Date.now()}`;
+  const claim = `${base}.claim`;
+  const tmp = `${base}.tmp`;
   try {
-    writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
-    renameSync(tmp, path);
-    return true;
+    renameSync(path, claim);
   } catch {
-    try {
-      unlinkSync(tmp);
-    } catch {
-      /* never created */
-    }
-    return false;
+    return false; // gone, or read-only
   }
+  let marked = false;
+  try {
+    const cur = readRecord(claim);
+    if (
+      cur?.status === 'running' &&
+      cur.run === dead.run &&
+      cur.pid === dead.pid &&
+      cur.pidStart === dead.pidStart
+    ) {
+      try {
+        writeFileSync(tmp, JSON.stringify(crashed, null, 2), { encoding: 'utf-8', flag: 'wx' });
+        linkSync(tmp, path);
+        marked = true;
+      } catch {
+        /* EEXIST (a newer record stays) or the write failed: restore below */
+      }
+    }
+    if (!marked) {
+      try {
+        linkSync(claim, path);
+      } catch {
+        /* EEXIST: a newer record landed after the claim and stays */
+      }
+    }
+  } finally {
+    for (const f of [claim, tmp]) {
+      try {
+        unlinkSync(f);
+      } catch {
+        /* never created, or already gone */
+      }
+    }
+  }
+  return marked;
 };
 
 /** Check one org's runtime.json and mark it crashed when its run is dead.
@@ -81,15 +128,12 @@ export function reconcileStaleRun(
   // runtime.json is the daemon's record (#498): a role's process never writes
   // it, and inside a role sandbox its pids are not the host's anyway.
   if (process.env.MONOMIND_ORG_ROLE) return { outcome: 'none' };
-  // Re-read before writing: a run that started since the first read owns the
-  // file now and must not be overwritten.
-  const again = readRecord(path);
-  if (again?.status !== 'running' || again.run !== rt.run || again.pid !== rt.pid)
-    return { outcome: 'none' };
   const reason = deadPidReason(rt.pid, recordedPidLiveness(rt.pid, rt.pidStart));
   const updated = new Date(now).toISOString();
+  // A run that started since the read above owns the file now and must not
+  // be overwritten; swapInCrashed replaces only this exact record.
   if (
-    !tryWriteRecord(path, {
+    !swapInCrashed(path, rt, {
       ...rt,
       status: 'crashed',
       updated,
