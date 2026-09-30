@@ -25,9 +25,34 @@ export function findChrome(executablePath?: string): string {
   } catch {
     // ignore
   }
+  // A browser some other tool fetched for us (monomind sets this for its own
+  // child processes). Last, so an installed browser always wins.
+  const fromEnv = process.env.MONOBROWSE_CHROME_PATH;
+  if (fromEnv && existsSync(fromEnv)) return fromEnv;
   throw new Error(
     'No supported browser found. Install Google Chrome, Microsoft Edge, or Chromium — or pass executablePath in BrowserConfig.',
   );
+}
+
+let chromeFallback: (() => Promise<string>) | undefined;
+
+/**
+ * Registers where launchBrowser() gets a browser when findChrome() finds none
+ * (monomind downloads one on first use). Pass undefined to clear it.
+ */
+export function setChromeFallback(fallback: (() => Promise<string>) | undefined): void {
+  chromeFallback = fallback;
+}
+
+/** findChrome(), then the registered fallback when no browser is installed.
+ *  An explicit executablePath never falls back. */
+export async function resolveChrome(executablePath?: string): Promise<string> {
+  try {
+    return findChrome(executablePath);
+  } catch (err) {
+    if (executablePath || !chromeFallback) throw err;
+    return chromeFallback();
+  }
 }
 
 export async function isPortOpen(port: number): Promise<boolean> {

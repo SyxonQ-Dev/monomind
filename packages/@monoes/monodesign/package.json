@@ -1,6 +1,6 @@
 {
   "name": "@monoes/monodesign",
-  "version": "1.2.23",
+  "version": "1.2.24",
   "description": "Frontend design intelligence for AI agents — design tokens, antipattern detection, and the monodesign skill",
   "type": "module",
   "main": "./dist/index.js",
@@ -51,7 +51,9 @@
     "marked": "^18.0.0"
   },
   "optionalDependencies": {
-    "@monoes/monobrowse": "workspace:*",
+    "@monoes/monobrowse": "workspace:*"
+  },
+  "devDependencies": {
     "puppeteer": "^25.1.0"
   }
 }

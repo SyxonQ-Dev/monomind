@@ -1,6 +1,7 @@
 /**
  * Deprecation notices for `monoswarm` and `autopilot` (#418). Both record
- * state and start no agents; they are removed in the next minor release.
+ * state and start no agents. 2.21.0 is the first release that ships this
+ * deprecation, so they are removed in the minor release after it.
  *
  * Shared by the CLI commands (a one-line notice on stderr) and the MCP tools
  * (a `deprecated` note on each tool's description and result).
@@ -9,15 +10,15 @@
 import { output } from './output.js';
 import type { Command, CommandContext } from './types.js';
 
-/** The release that removes monoswarm and autopilot (the next minor). */
-export const MONOSWARM_AUTOPILOT_REMOVAL_VERSION = '2.21.0';
+/** The release that removes monoswarm and autopilot (the minor after the first one that ships the deprecation). */
+export const MONOSWARM_AUTOPILOT_REMOVAL_VERSION = '2.22.0';
 
-export const MONOSWARM_DEPRECATION = `monoswarm is deprecated and will be removed in the next minor release (${MONOSWARM_AUTOPILOT_REMOVAL_VERSION}); it records state and starts no agents. Use Claude Code's Task tool or 'monomind org run' instead.`;
+export const MONOSWARM_DEPRECATION = `monoswarm is deprecated and will be removed in ${MONOSWARM_AUTOPILOT_REMOVAL_VERSION}; it records state and starts no agents. Use Claude Code's Task tool or 'monomind org run' instead.`;
 
 /** Short prefix for deprecated MCP tool descriptions; the full notice goes in each result. */
 export const DEPRECATED_TOOL_PREFIX = `DEPRECATED (removed in ${MONOSWARM_AUTOPILOT_REMOVAL_VERSION}; use the Task tool or 'monomind org run'):`;
 
-export const AUTOPILOT_DEPRECATION = `autopilot is deprecated and will be removed in the next minor release (${MONOSWARM_AUTOPILOT_REMOVAL_VERSION}); it reads local task files and starts no agents. Use 'monomind org run' instead.`;
+export const AUTOPILOT_DEPRECATION = `autopilot is deprecated and will be removed in ${MONOSWARM_AUTOPILOT_REMOVAL_VERSION}; it reads local task files and starts no agents. Use 'monomind org run' instead.`;
 
 /**
  * Prints `notice` on stderr — never stdout, so a command's JSON output stays

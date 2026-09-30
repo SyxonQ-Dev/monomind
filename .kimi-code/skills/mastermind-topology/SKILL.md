@@ -1,10 +1,10 @@
 ---
 name: mastermind-topology
-description: Deprecated, removed in 2.21.0 — Monoswarm architecture picker — presents all topologies, consensus protocols, and strategies, then gives one concrete recommendation for the current task
+description: Deprecated, removed in 2.22.0 — Monoswarm architecture picker — presents all topologies, consensus protocols, and strategies, then gives one concrete recommendation for the current task
 type: flow
 ---
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.21.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
+> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
 
 IMPORTANT: Do NOT dump all the reference content at once. Follow the two-phase flow below exactly.
 

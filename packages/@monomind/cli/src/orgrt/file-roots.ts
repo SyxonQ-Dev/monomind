@@ -23,6 +23,8 @@
 import { readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
+import { depsRoot } from '../utils/optional-deps.js';
+import { normalizeSegment, type SegmentFold } from './policy-paths.js';
 
 /** Files under $HOME that would undo the guard (git/shell/Claude config) —
  *  writable $HOME must not include them. Moved verbatim from
@@ -42,6 +44,12 @@ export const HOME_DENY_WRITE = [
   '.zlogin',
   '.claude',
   '.claude.json',
+  // #518 review (B1): code monomind installs on first use and loads in its
+  // unsandboxed daemons (utils/optional-deps.ts), and the npm config that
+  // install reads. $MONOMIND_HOME/deps is added where the list is applied.
+  '.monomind/deps',
+  '.npmrc',
+  '.config/npm',
 ];
 /** Credential stores sandboxed commands (and the file tools) may not read. */
 export const HOME_DENY_READ = [
@@ -65,8 +73,12 @@ export const HOME_DENY_READ = [
  *  credential, so its token carries the same human authority. */
 const DASHBOARD_CREDENTIAL = /^dashboard-token(-\d+)?$/;
 
-export function isDashboardCredential(p: string): boolean {
-  return DASHBOARD_CREDENTIAL.test(basename(p));
+export function isDashboardCredential(p: string, fold: SegmentFold = 'exact'): boolean {
+  const name = basename(p);
+  // #496: `Dashboard-Token` is the same file where the filesystem folds case.
+  return DASHBOARD_CREDENTIAL.test(
+    fold === 'exact' ? name : normalizeSegment(name, process.platform, fold),
+  );
 }
 
 /** Existing dashboard credential files in each root's `.monomind/` — the
@@ -143,6 +155,7 @@ export function fileToolDenied(home: string, env: NodeJS.ProcessEnv): string[] {
   return uniq([
     ...HOME_DENY_READ.map((p) => join(home, p)),
     ...HOME_DENY_WRITE.map((p) => join(home, p)),
+    depsRoot(env, home),
     ...DAEMON_SOCKETS,
     runtimeDir(env),
     operatorDirOverride(env),

@@ -3,7 +3,7 @@
 // re-exports everything it used to define, so every existing import path
 // keeps working.
 
-export { isPortOpen } from './browser-discovery.js';
+export { findChrome, isPortOpen, setChromeFallback } from './browser-discovery.js';
 export { launchBrowser } from './browser-launch.js';
 export { closeBrowser, reapIdleLaunchedBrowser } from './browser-lifecycle.js';
 export {
