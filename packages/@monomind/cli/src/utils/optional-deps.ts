@@ -77,6 +77,11 @@ export const OPTIONAL_DEPENDENCIES = {
     size: 'about 2 MB',
     feature: 'The Chrome download for `monomind browse`',
   },
+  'monofence-ai': {
+    version: '1.0.7',
+    size: 'under 1 MB',
+    feature: 'MonoFence (the monofence_* MCP tools, `security defend`, org role fences)',
+  },
 } as const satisfies Record<string, OptionalDependencySpec>;
 
 export type OptionalDependencyName = keyof typeof OPTIONAL_DEPENDENCIES;
@@ -338,7 +343,50 @@ function ownEntry(
   return pj && readVersion(pj) === OPTIONAL_DEPENDENCIES[name].version ? entry : undefined;
 }
 
-const defaultResolveOwn = (name: string): string => createRequire(import.meta.url).resolve(name);
+/** The "import" entry of a package's exports (or its main), relative to it. */
+function esmEntry(pkg: { exports?: unknown; main?: string }): string | undefined {
+  let target = pkg.exports;
+  if (target && typeof target === 'object' && Object.keys(target).some((k) => k.startsWith('.'))) {
+    target = (target as Record<string, unknown>)['.'];
+  }
+  while (target && typeof target === 'object' && !Array.isArray(target)) {
+    const c = target as Record<string, unknown>;
+    target = c.import ?? c.node ?? c.default;
+  }
+  if (typeof target === 'string') return target;
+  return pkg.exports === undefined ? (pkg.main ?? 'index.js') : undefined;
+}
+
+/**
+ * Resolves `name` from `from` as `import` would. require.resolve covers
+ * packages with a require (or default) condition; an ESM-only package such
+ * as monofence-ai, whose exports have only an "import" condition, throws
+ * ERR_PACKAGE_PATH_NOT_EXPORTED there, so its entry is read from the
+ * package.json on the same node_modules lookup path.
+ */
+function resolveEntry(name: string, from: string): string {
+  const req = createRequire(from);
+  try {
+    return req.resolve(name);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED') throw err;
+    for (const base of req.resolve.paths(name) ?? []) {
+      const pkgDir = join(base, name);
+      let pkg: { exports?: unknown; main?: string };
+      try {
+        pkg = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'));
+      } catch {
+        continue;
+      }
+      const entry = esmEntry(pkg);
+      if (entry) return join(pkgDir, entry);
+      break;
+    }
+    throw err;
+  }
+}
+
+const defaultResolveOwn = (name: string): string => resolveEntry(name, import.meta.url);
 
 /**
  * Loads one of OPTIONAL_DEPENDENCIES, installing it into monomind's deps
@@ -363,7 +411,7 @@ export async function ensureOptionalDependency<T = unknown>(
   const dir = dependencyDir(name, env);
   const load = async (): Promise<T> => {
     assertTrustedTree(root, dir);
-    const entry = createRequire(join(dir, 'package.json')).resolve(name);
+    const entry = resolveEntry(name, join(dir, 'package.json'));
     return (await importFile(entry)) as T;
   };
   if (isInstalled(name, dir, host)) return load();
