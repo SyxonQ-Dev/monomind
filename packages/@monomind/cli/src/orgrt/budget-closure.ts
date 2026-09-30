@@ -53,12 +53,19 @@ export function orgBudgetedUsage(running: RunningOrg): number {
 const orgDetail = (running: RunningOrg): string =>
   `org-wide budget_tokens exhausted (${orgBudgetedUsage(running)} / ${running.def.run_config.budget_tokens})`;
 
+export { orgDetail as orgCeilingDetail };
+
 /** Why `roleId`'s session is closed for budget, or undefined when it is not.
  *  A role closed by the org-wide run_config.budget_tokens ceiling carries the
  *  same close reason without being over its own caps. */
 export function budgetClosureDetail(running: RunningOrg, roleId: string): string | undefined {
   const rt = running.agents.get(roleId);
-  if (!rt?.mailbox.isClosed || !isRecoverableCloseReason(rt.mailbox.closeReason)) return undefined;
+  // #552: a role the ceiling kept from spawning (pending or deferred then).
+  if (!rt)
+    return running.orgBudgetClosed && running.orgBudgetPendingRoles?.has(roleId)
+      ? orgDetail(running)
+      : undefined;
+  if (!rt.mailbox.isClosed || !isRecoverableCloseReason(rt.mailbox.closeReason)) return undefined;
   const own = exhaustedDetail(rt.policy);
   if (own) return own;
   if (running.orgBudgetClosed?.has(roleId)) return orgDetail(running);
@@ -73,10 +80,49 @@ const holdReason = (roleId: string, detail: string): string =>
 const ORG_REMEDY =
   "Raise run_config.budget_tokens in the org definition and hot-reload it (`monomind org reload`) — the closed roles reopen with the run's spend so far kept.";
 
-const remedy = (running: RunningOrg, roleId: string): string =>
-  running.orgBudgetClosed?.has(roleId) && !exhaustedDetail(running.agents.get(roleId)!.policy)
+const remedy = (running: RunningOrg, roleId: string): string => {
+  const rt = running.agents.get(roleId);
+  return running.orgBudgetClosed &&
+    (rt ? running.orgBudgetClosed.has(roleId) && !exhaustedDetail(rt.policy) : true)
     ? `${ORG_REMEDY} Or reassign the work to another role.`
     : `Raise budget_usd / budget_tokens for "${roleId}" in the org definition and hot-reload it (\`monomind org reload\`) — the role reopens with its spend so far kept — or reassign the work to another role.`;
+};
+
+/** #552: why `roleId` must not be spawned (or its replacement published) now
+ *  — the org-wide ceiling is spent, or the role's own session is closed for
+ *  budget (its own caps, including #550's turn floor) — or undefined when it
+ *  may. The own-closure half can only fire for a role that has a runtime: a
+ *  role that never started has spent nothing of its own, so for a deferred
+ *  lazy spawn it matters only when another path started (and closed) the
+ *  role meanwhile — spawnRole would no-op then anyway; this makes the skip
+ *  explicit and audited. */
+export function spawnClosedDetail(running: RunningOrg, roleId: string): string | undefined {
+  return running.orgBudgetClosed ? orgDetail(running) : budgetClosureDetail(running, roleId);
+}
+
+/** Hold `roleId`'s open tasks with a budget-closure reason (#557 review: a
+ *  deferral registered while the org-wide ceiling is spent). */
+export function holdTasksForBudget(running: RunningOrg, roleId: string, detail: string): void {
+  holdOpenTasks(running, roleId, detail);
+}
+
+/** #557 review: a replacement incarnation found the budget closed before it
+ *  was published (role-respawn.ts). The old incarnation stays in `agents`;
+ *  under the org-wide ceiling it is closed and recorded like the roles the
+ *  ceiling closed, so a reload that raises it reopens it. Its open tasks are
+ *  held with the reason. */
+export function holdReplacedRoleForBudget(
+  running: RunningOrg,
+  roleId: string,
+  detail: string,
+): void {
+  const rt = running.agents.get(roleId);
+  if (running.orgBudgetClosed && rt) {
+    if (!rt.mailbox.isClosed) rt.mailbox.close('token-budget');
+    running.orgBudgetClosed.add(roleId);
+  }
+  holdOpenTasks(running, roleId, detail);
+}
 
 /** Hold `roleId`'s open tasks — one it was working would otherwise sit
  *  'running' with no one on it. */
@@ -161,11 +207,18 @@ function enforceOrgBudget(running: RunningOrg): void {
   }
   const closed = new Set<string>();
   running.orgBudgetClosed = closed;
-  if (running.pendingRoles?.size) {
-    // prevent lazy spawns after the org budget is exhausted; put back on reopen
-    running.orgBudgetPendingRoles = new Map(running.pendingRoles);
-    running.pendingRoles.clear();
+  // Prevent lazy spawns after the org budget is exhausted — pending ones, and
+  // (#552) ones already deferred by max_concurrent_agents, whose retry loop
+  // stops once its entry is gone. Put back on reopen.
+  const unspawned = new Map(running.pendingRoles ?? []);
+  running.pendingRoles?.clear();
+  const cancelled: string[] = [];
+  for (const [roleId, { role }] of running.deferredSpawns ?? []) {
+    unspawned.set(roleId, role);
+    cancelled.push(roleId);
   }
+  running.deferredSpawns?.clear();
+  if (unspawned.size) running.orgBudgetPendingRoles = unspawned;
   for (const [roleId, rt] of running.agents) {
     if (rt.mailbox.isClosed) continue;
     rt.mailbox.close('token-budget');
@@ -176,7 +229,16 @@ function enforceOrgBudget(running: RunningOrg): void {
     reason: 'org-budget-exhausted',
     msg: `org-wide token budget exhausted (${used}/${cap}) — closing all roles`,
   });
-  for (const roleId of closed) holdOpenTasks(running, roleId, orgDetail(running));
+  for (const roleId of cancelled)
+    running.bus.emit({
+      type: 'audit',
+      from: roleId,
+      reason: 'deferred-spawn-cancelled',
+      msg: `cancelled the deferred spawn of "${roleId}": ${orgDetail(running)}`,
+      data: { roleId },
+    });
+  for (const roleId of [...closed, ...unspawned.keys()])
+    holdOpenTasks(running, roleId, orgDetail(running));
 }
 
 function warnNearBudget(running: RunningOrg, roleId: string): void {
@@ -326,6 +388,12 @@ function respawnFromCheckpoint(running: RunningOrg, roleId: string): boolean {
   }
   next.policy.setTokenUsage(rt.policy.tokenUsage);
   next.policy.setUsageUsd(rt.policy.usageUsd);
+  // Mail a replacement cancelled by the ceiling had swept up (role-respawn.ts).
+  const slot = running.roleSlots.get(roleId);
+  if (slot?.queuedDuringSwap.length) {
+    for (const m of slot.queuedDuringSwap) next.mailbox.push(m);
+    slot.queuedDuringSwap = [];
+  }
   return true;
 }
 
@@ -339,7 +407,9 @@ function reopenOrgBudgetClosedRoles(running: RunningOrg): string[] {
   const cap = running.def.run_config.budget_tokens;
   const used = orgBudgetedUsage(running);
   if (cap != null && used >= cap) {
-    for (const roleId of closed) refreshHolds(running, roleId);
+    // Also roles the ceiling kept from spawning (their tasks are held too).
+    for (const roleId of [...closed, ...(running.orgBudgetPendingRoles?.keys() ?? [])])
+      refreshHolds(running, roleId);
     return [];
   }
   running.orgBudgetClosed = undefined;
@@ -378,7 +448,10 @@ export function reopenBudgetClosedRoles(
   onDef: Set<string> = new Set(),
 ): string[] {
   reapplyDefTokenCaps(running, onDef);
+  const wasOrgClosed = running.orgBudgetClosed !== undefined;
   const reopened = reopenOrgBudgetClosedRoles(running);
+  // Tasks held for roles the ceiling kept from spawning go out (and spawn them).
+  const orgReopened = wasOrgClosed && running.orgBudgetClosed === undefined;
   for (const roleId of [...(running.budgetClosed ?? [])]) {
     const rt = running.agents.get(roleId);
     const role = running.def.roles.find((r) => r.id === roleId);
@@ -402,6 +475,6 @@ export function reopenBudgetClosedRoles(
       data: { roleId, spentUsd: rt.policy.usageUsd, budgetUsd: role.budget_usd ?? null },
     });
   }
-  if (reopened.length) dispatchReadyTasks(daemon, org, running);
+  if (reopened.length || orgReopened) dispatchReadyTasks(daemon, org, running);
   return reopened;
 }
