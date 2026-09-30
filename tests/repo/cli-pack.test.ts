@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { missingFromPack, requiredPackFiles } from '../../scripts/check-cli-pack.mjs';
+import { missingFromPack, packEntries, requiredPackFiles } from '../../scripts/check-cli-pack.mjs';
 import { compileGeneratedSkills } from '../../scripts/sync-claude-trees.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -40,6 +40,14 @@ describe('CLI package contents', () => {
         required,
       ),
     ).toEqual([]);
+  });
+
+  it('reads npm pack --json from npm 11 (array) and npm 12 (object keyed by name)', () => {
+    const entry = { id: '@x/demo@1.0.0', name: '@x/demo', files: [{ path: 'index.js' }] };
+    const npm11 = JSON.stringify([entry], null, 2);
+    const npm12 = JSON.stringify({ '@x/demo': entry }, null, 2);
+    expect(packEntries(npm11)).toEqual([entry]);
+    expect(packEntries(npm12)).toEqual([entry]);
   });
 
   it('prepack compiles monodesign and prepublishOnly checks the pack after building', () => {
