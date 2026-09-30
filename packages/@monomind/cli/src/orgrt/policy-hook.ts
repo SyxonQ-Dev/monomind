@@ -29,7 +29,8 @@ const REMEMBERED = 256;
 
 /** Hook timeout in seconds. The CLI lets a call proceed when its hook times
  *  out, so this stays far above what the gate takes (approvals return a
- *  pending decision at once rather than waiting for the human). */
+ *  pending decision at once rather than waiting for the human; #553's wait
+ *  for a decider is capped at DECIDER_WAIT_MAX_S, 300s). */
 export const POLICY_HOOK_TIMEOUT_S = 600;
 
 export function coverEveryToolCall(gate: Gate): {

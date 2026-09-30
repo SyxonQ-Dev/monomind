@@ -2,6 +2,7 @@
 // Extracted from session.ts — the options a role session runs with.
 import type { query } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentRunner, OrgToolDef } from './agent-runner.js';
+import type { ApprovalVerdict } from './approval-decider.js';
 import type { OrgBus } from './bus.js';
 import type { TaskEvidence } from './completion-gate.js';
 import type { RoleFence } from './fence.js';
@@ -93,12 +94,14 @@ export interface SessionOpts {
   /** Guardrail beforeTool hook: checks if a tool call requires approval before execution.
    *  `input` is the tool's actual call arguments — required so the approval cache can
    *  key on what's actually being called (e.g. the Bash command, the WebFetch url),
-   *  not just the tool name; see approvals.ts's checkApproval for why. */
+   *  not just the tool name; see approvals.ts's checkApproval for why.
+   *  #553: may return an ApprovalVerdict naming who owns the request (a bare
+   *  boolean/null is read as human-owned). */
   beforeTool?: (
     role: string,
     toolName: string,
     input: Record<string, unknown>,
-  ) => Promise<boolean | null>;
+  ) => Promise<boolean | null | ApprovalVerdict>;
   /** Called whenever gatedCanUseTool denies a tool call — wired to daemon.recordDecision()
    *  so those denials show up in `org decisions` traces. `kind` (#290) says which
    *  deny path fired, so the trace is machine-readable rather than prose-only. */
