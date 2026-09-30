@@ -48,11 +48,12 @@ let installed: Promise<RoleDepsResult> | undefined;
 
 /** Makes sure the SDK a role running `runtime` may need is installed. Never
  *  throws: a failure is returned, and the role then fails with the
- *  operator's command. `probe` is for tests. */
-export async function ensureRoleDeps(
+ *  operator's command. Synchronous when there is nothing to install, so a
+ *  session start does not yield for it. `probe` is for tests. */
+export function ensureRoleDeps(
   runtime: string,
   probe?: RoleDepsProbe,
-): Promise<RoleDepsResult> {
+): RoleDepsResult | Promise<RoleDepsResult> {
   const p = probe ?? defaultRoleDepsProbe();
   if (roleContextMarker(p.env)) return { status: 'in-role' };
   if (runtime !== 'claude' && !p.claudeOnPath()) return { status: 'not-needed' };

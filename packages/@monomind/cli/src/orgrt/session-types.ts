@@ -120,7 +120,7 @@ export interface SessionOpts {
   runner?: AgentRunner;
   /** #559: installs, host side, the pinned deps the role may need before
    *  its runner starts (role-deps.ts). Tests replace it. */
-  ensureRoleDeps?: (runtime: string) => Promise<RoleDepsResult>;
+  ensureRoleDeps?: (runtime: string) => RoleDepsResult | Promise<RoleDepsResult>;
   /** Caller-owned cancellation handle for THIS incarnation. Every session
    *  attempt runs on its own AbortController linked to this one: aborting it
    *  aborts the in-flight attempt, which lets the daemon force-stop a specific

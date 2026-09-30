@@ -148,8 +148,9 @@ export async function runOneSession(
     // deny rules for Claude. Throws (session fails) when the role requires
     // the sandbox and it can't start.
     // #559: the role cannot write ~/.monomind/deps, so the host installs what
-    // it may need there first.
-    const deps = await (opts.ensureRoleDeps ?? ensureRoleDeps)(runtimeKey);
+    // it may need there first. Nothing to install: no await, no yield.
+    let deps = (opts.ensureRoleDeps ?? ensureRoleDeps)(runtimeKey);
+    if (deps instanceof Promise) deps = await deps;
     if (deps.status === 'failed')
       bus.emit({
         type: 'audit',
