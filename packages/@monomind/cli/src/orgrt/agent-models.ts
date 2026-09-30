@@ -16,7 +16,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { executableOption, loadClaudeSdk } from './claude-sdk.js';
+import { loadClaudeSdk } from './claude-sdk.js';
 import { DSH_MODELS } from './dsh-runner-models.js';
 import { locateBinary, resolveBinary, runnerSpec } from './runner-registry.js';
 
@@ -148,17 +148,14 @@ const runCli: CliRunner = (bin, args, timeoutMs) =>
  *  prompt is ever sent (the prompt iterable never yields). */
 const listClaudeViaSdk: ClaudeLister = async (timeoutMs) => {
   // Installed on first use (#428); a failure lands in listRuntimeModels' catch.
-  const sdk = await loadClaudeSdk();
+  const { query } = await loadClaudeSdk();
   const abortController = new AbortController();
   async function* never(): AsyncGenerator<never> {
     await new Promise<void>((resolve) =>
       abortController.signal.addEventListener('abort', () => resolve()),
     );
   }
-  const q = sdk.query({
-    prompt: never(),
-    options: { settingSources: [], abortController, ...executableOption(sdk) },
-  });
+  const q = query({ prompt: never(), options: { settingSources: [], abortController } });
   let timer: NodeJS.Timeout | undefined;
   try {
     return (await Promise.race([

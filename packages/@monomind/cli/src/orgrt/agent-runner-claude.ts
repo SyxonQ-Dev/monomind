@@ -8,7 +8,7 @@ import { createSubagentTracker } from './agent-runner-claude-subagent.js';
 import type { AgentMessage, AgentRunArgs, AgentRunner } from './agent-runner-types.js';
 import { killOnAbort } from './agent-runner-types.js';
 import { maskedCommand } from './authority-mask.js';
-import { type ClaudeSdk, executableOption, loadClaudeSdk } from './claude-sdk.js';
+import { type ClaudeSdk, loadClaudeSdk } from './claude-sdk.js';
 import { coverEveryToolCall, POLICY_HOOK_TIMEOUT_S } from './policy-hook.js';
 import { type DescendantTracker, trackDescendants } from './process-tree.js';
 import { omitAnthropicManagedKeys } from './provider.js';
@@ -55,8 +55,9 @@ export class ClaudeAgentRunner implements AgentRunner {
   ) {}
 
   async *run(args: AgentRunArgs): AsyncIterable<AgentMessage> {
-    const sdk = await this.loadSdk();
-    const { createSdkMcpServer, query, tool } = sdk;
+    // #522: with an installed Claude Code, this query() passes it as
+    // pathToClaudeCodeExecutable (claude-sdk.ts).
+    const { createSdkMcpServer, query, tool } = await this.loadSdk();
     const queryFn = this.queryFn ?? query;
     // Wrap each OrgToolDef handler ({ text }) into the Claude SDK's
     // { content: [{ type: 'text', text }] } return shape.
@@ -163,8 +164,6 @@ export class ClaudeAgentRunner implements AgentRunner {
         ...(args.effort && args.effort !== 'off' ? { effort: args.effort } : {}),
         ...(args.effort === 'off' ? { thinking: { type: 'disabled' as const } } : {}),
         cwd: args.cwd,
-        // #522: an installed Claude Code instead of the SDK's bundled one.
-        ...executableOption(sdk),
         // The SDK's own default (`env = {...process.env}`) only applies when
         // this option is omitted entirely — passing `args.env` directly, even
         // as `{}` (the common case: most callers only set one or two

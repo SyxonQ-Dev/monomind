@@ -11,6 +11,7 @@ import {
   GIT_GUARD_DIR,
   ORG_STATE_FILES,
 } from './authority-mask.js';
+import { protectedClaudeBinary } from './claude-sdk.js';
 import {
   DAEMON_SOCKETS,
   dashboardCredentialPaths,
@@ -196,6 +197,8 @@ export function buildClaudeRestrictions(
   // paths are passed below), and its parent becomes a mount point so the
   // role cannot rename ~/.monomind aside and plant a new deps dir.
   const deps = protectableDepsRoot(env, home);
+  // #522: the same for an operator-chosen Claude Code the daemons run.
+  const claude = protectedClaudeBinary(env, home);
   // Stubs first: with all of the cwd's in place, bwrap creates nothing there.
   const missingStubs =
     (ctx.platform ?? process.platform) === 'linux' ? ctx.holdStubs?.(allowWrite) : undefined;
@@ -209,6 +212,7 @@ export function buildClaudeRestrictions(
       ...gitDirs.flatMap(gitLocalRemotePaths),
       ...HOME_DENY_WRITE.map((p) => join(home, p)),
       ...(deps ? [deps] : []),
+      ...(claude ? [claude.file] : []),
       ...authorityFilePaths(ctx.orgRoot, ctx.current),
       // Every role's guard dir, not only this one's (#498).
       ...gitGuardDirs(ctx.orgRoot),
@@ -240,6 +244,7 @@ export function buildClaudeRestrictions(
         // denied here, and new files in it stay possible (authority-mask.ts).
         ...orgsMountPoints(ctx.orgRoot).filter((d) => underAnyRoot(d, allowWrite)),
         ...(deps ? [dirname(deps)] : []).filter((d) => underAnyRoot(d, allowWrite)),
+        ...(claude?.dirs ?? []).filter((d) => underAnyRoot(d, allowWrite)),
       ]),
       denyWrite: existing(expanded.denyWrite),
       denyRead: existing([

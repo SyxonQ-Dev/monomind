@@ -37,8 +37,9 @@
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { protectableDepsRoot } from '../utils/optional-deps.js';
+import { protectedClaudeBinary } from './claude-sdk.js';
 import { dashboardCredentialPaths, operatorDirOverride } from './file-roots.js';
 import { ensureOrgWorkDirs, orgsMaskLayout } from './org-authority-files.js';
 import { realPath } from './policy-paths.js';
@@ -93,6 +94,13 @@ export function authorityMaskArgs(ctx: {
   fileWrite?: string[];
 }): string[] {
   const args = ['--dev-bind', '/', '/'];
+  // #522: an operator-chosen Claude Code (MONOMIND_CLAUDE_PATH), which the
+  // daemons run unsandboxed: read-only, and every directory on the way to it
+  // a mount point, so none can be renamed aside and replaced. First, so the
+  // binds below nest inside these mount points instead of covering them.
+  const claude = protectedClaudeBinary(ctx.env, ctx.home);
+  const afterClaude = args.length;
+  if (claude) args.push(...claude.dirs.flatMap((d) => ['--bind', d, d]));
   // #498: the mask binds only existing work dirs read-write, so create them
   // first (a `git worktree add … work/src` in a masked role needs `work/`).
   ensureOrgWorkDirs(ctx.orgRoot, ctx.fileWrite, ctx.cwd ?? ctx.orgRoot);
@@ -118,10 +126,25 @@ export function authorityMaskArgs(ctx: {
     const deps = realPath(made);
     args.push('--bind', dirname(deps), dirname(deps), '--ro-bind', deps, deps);
   }
+  if (claude) {
+    // A writable bind above that covers one of those mount points hid it
+    // again: repeat it. Under a read-only bind nothing can be renamed.
+    const covering = bindTargets(args.slice(afterClaude), '--bind');
+    for (const d of claude.dirs)
+      if (covering.some((t) => d === t || d.startsWith(t + sep))) args.push('--bind', d, d);
+    args.push('--ro-bind', claude.file, claude.file);
+  }
   // Last, so that no bind above can uncover them.
   for (const d of hidden) if (existsSync(d)) args.push('--tmpfs', d);
   for (const f of dashboardCredentialPaths(ctx.roots)) args.push('--ro-bind', '/dev/null', f);
   return args;
+}
+
+/** Destinations of the `flag` binds in bwrap `args`. */
+function bindTargets(args: string[], flag: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) if (args[i] === flag) out.push(args[i + 2]);
+  return out;
 }
 
 let probed: { available: boolean; reason?: string } | undefined;

@@ -24,6 +24,7 @@ import { readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { depsRoot } from '../utils/optional-deps.js';
+import { protectedClaudeBinary } from './claude-sdk.js';
 import { normalizeSegment, type SegmentFold } from './policy-paths.js';
 
 /** Files under $HOME that would undo the guard (git/shell/Claude config) —
@@ -156,6 +157,8 @@ export function fileToolDenied(home: string, env: NodeJS.ProcessEnv): string[] {
     ...HOME_DENY_READ.map((p) => join(home, p)),
     ...HOME_DENY_WRITE.map((p) => join(home, p)),
     depsRoot(env, home),
+    // #522: an operator-chosen Claude Code the daemons run.
+    ...[protectedClaudeBinary(env, home)?.file].filter((f): f is string => !!f),
     ...DAEMON_SOCKETS,
     runtimeDir(env),
     operatorDirOverride(env),

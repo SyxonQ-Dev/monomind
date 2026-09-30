@@ -167,32 +167,53 @@ the copy bundled with the SDK, when it finds a usable one
 ([#522](https://github.com/monoes/monomind/issues/522)). The SDK is then
 installed with `--omit=optional`: its JavaScript package only (about 4 MB),
 still from the shipped lockfile. If that Claude Code later goes away, the
-next run installs the full SDK over it.
+next run installs the full SDK over it. If it goes away while a process is
+using it (an update pruned that version), that process's next Claude turn
+fails with a message saying so, and the turn after that looks again.
 
 monomind looks, in order, at `$MONOMIND_CLAUDE_PATH`, `claude` on `PATH`,
 `~/.local/bin/claude` and `~/.claude/local/claude`, and uses the first one
 that passes these checks:
 
 - Its real path (symlinks resolved) is what runs.
-- Found on its own, it must be a system install: the file and every
-  directory above it owned by root and not writable by group or others.
-  Org roles run as your user, and the bubblewrap mask leaves writable
-  everything your user can write, so a binary your user owns could be
-  replaced by a role and then run by the org daemon outside every sandbox.
-  This rules out per-user installs such as the native installer's
+- The real path must be named `claude` (`claude.exe`) or be the native
+  installer's `versions/<x.y.z>`, and must not be a script (starting with
+  `#!`): Claude Code 2.1.226 and later is a native binary, and a script
+  would run whatever `PATH` finds. A shim that resolves to another program
+  (mise's resolves to `mise`) is never run.
+- Found on its own, it must be a system install: not under `$HOME`, a temp
+  directory or the current directory, and the file and every directory
+  above it owned by root and not writable by group or others. Org roles
+  run as your user, and the bubblewrap mask leaves writable everything
+  your user can write, so a binary your user owns could be replaced by a
+  role and then run by the org daemon outside every sandbox. This rules
+  out per-user installs such as the native installer's
   `~/.local/share/claude`, mise, nvm or Homebrew (see
-  [#527](https://github.com/monoes/monomind/issues/527)).
+  [#527](https://github.com/monoes/monomind/issues/527)). When monomind
+  runs as root (a container), roles are root too and ownership proves
+  nothing, so nothing is picked up on its own; set `MONOMIND_CLAUDE_PATH`.
+  On Windows there are no uids to check, so nothing is picked up on its
+  own there either.
 - `MONOMIND_CLAUDE_PATH` is your explicit choice and is not held to the
   location rule: the file only has to be owned by you or root and not
-  writable by group or others. Pointing it at a per-user install trades the
-  4 MB install for the risk above; protecting that path from org roles is
-  then up to you. If it fails a check, monomind says why on stderr and uses
-  the SDK's bundled binary; it does not try the other locations.
+  writable by group or others. On Windows even that is not checked (file
+  ACLs are not inspected), so point it only at a file that org roles
+  cannot write. When it is not a system install, monomind warns on stderr
+  that org roles could replace it, and keeps it read-only for them: its
+  real path is denied to the file tools and in the Claude sandbox, and
+  read-only in the bubblewrap mask, where every directory between `$HOME`
+  (or `/`) and the file is also pinned so none can be renamed aside. A
+  role that runs with neither the sandbox nor the mask (sandbox off, or
+  no bubblewrap, e.g. on macOS) is not held back, and on macOS the
+  sandbox denies writes to the file but not renaming a directory above
+  it. If the path fails a check, monomind says why on stderr and uses the
+  SDK's bundled binary; it does not try the other locations.
   `MONOMIND_CLAUDE_PATH=bundled` always uses the bundled binary.
 - Then `claude --version` runs once per process, with no shell and a
-  5-second timeout. The version must be 2.x and at least the Claude Code
-  release the pinned SDK bundles (2.1.226 for SDK 0.3.226): the SDK passes
-  that release's flags and control messages, which older CLIs reject.
+  5-second timeout. It must print `x.y.z (Claude Code)`, and the version
+  must be 2.x and at least the Claude Code release the pinned SDK bundles
+  (2.1.226 for SDK 0.3.226): the SDK passes that release's flags and
+  control messages, which older CLIs reject.
 
 When a Claude Code was found but not used, the install notice says which
 and why.

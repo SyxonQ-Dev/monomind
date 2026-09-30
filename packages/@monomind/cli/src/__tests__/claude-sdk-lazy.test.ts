@@ -18,6 +18,7 @@ vi.mock('../utils/optional-deps.js', async (orig) => ({
 const { OptionalDependencyError } = await import('../utils/optional-deps.js');
 const { ClaudeAgentRunner } = await import('../orgrt/agent-runner-claude.js');
 const { listRuntimeModels } = await import('../orgrt/agent-models.js');
+const { defaultClaudeProbe, loadClaudeSdk } = await import('../orgrt/claude-sdk.js');
 
 const MESSAGE =
   'The Claude runtime needs @anthropic-ai/claude-agent-sdk@0.3.226, which is not installed, and ' +
@@ -84,15 +85,21 @@ describe('Claude SDK call sites load it lazily', () => {
     async () => {
       const dir = mkdtempSync(join(tmpdir(), 'mm-claude-'));
       const exe = join(dir, 'claude');
-      writeFileSync(exe, "#!/bin/sh\necho '2.1.300 (Claude Code)'\n");
+      writeFileSync(exe, '\x7fELF');
       chmodSync(exe, 0o755);
-      vi.stubEnv('MONOMIND_CLAUDE_PATH', exe);
       const query = vi.fn((_: { options: Record<string, unknown> }) => ({
         supportedModels: async () => [{ value: 'haiku', displayName: 'Haiku' }],
         interrupt: async () => {},
       }));
       ensure.mockResolvedValue({ query, tool: () => ({}), createSdkMcpServer: () => ({}) });
       try {
+        // Detection with a stand-in for `--version`; the loaded SDK is cached
+        // for the process, so listRuntimeModels below uses it.
+        await loadClaudeSdk({
+          ...defaultClaudeProbe({ PATH: '', MONOMIND_CLAUDE_PATH: exe }),
+          version: async () => '2.1.300 (Claude Code)\n',
+          log: () => {},
+        });
         const r = await listRuntimeModels('claude', { timeoutMs: 1000 });
         expect(r.models.map((m) => m.id)).toEqual(['haiku']);
         expect(ensure).toHaveBeenCalledWith('@anthropic-ai/claude-agent-sdk', {
@@ -100,7 +107,6 @@ describe('Claude SDK call sites load it lazily', () => {
         });
         expect(query.mock.calls[0][0].options.pathToClaudeCodeExecutable).toBe(realpathSync(exe));
       } finally {
-        vi.unstubAllEnvs();
         rmSync(dir, { recursive: true, force: true });
       }
     },
