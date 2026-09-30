@@ -68,6 +68,17 @@ import type { AgentMessage, AgentRunArgs, AgentRunner } from './agent-runner.js'
 import { streamTurn, turnError } from './antigravity-runner-stream.js';
 import type { TurnOutcome } from './antigravity-runner-types.js';
 import {
+  addUsage,
+  BUDGET_STOP_SUBTYPE,
+  budgetExhausted,
+  budgetRefusal,
+  noUsage,
+  splitCachedInput,
+  usageBeyond,
+  usageFields,
+  usageMessage,
+} from './runner-usage.js';
+import {
   buildToolProtocol,
   formatToolResults,
   parseToolCalls,
@@ -77,6 +88,7 @@ import {
 export { computeSafeChunk } from './antigravity-runner-stream.js';
 
 export class AntigravityAgentRunner implements AgentRunner {
+  readonly budgetFloorGated = true; // #550
   constructor(private agyBin?: string) {}
 
   async *run(args: AgentRunArgs): AsyncIterable<AgentMessage> {
@@ -87,14 +99,21 @@ export class AntigravityAgentRunner implements AgentRunner {
       for await (const p of args.prompt) {
         const text = typeof p === 'string' ? p : (p?.message?.content ?? String(p ?? ''));
         let nextPrompt = text;
-        let turnInputTokens = 0;
-        let turnOutputTokens = 0;
+        // #550: this mailbox message's usage (runner-usage.ts), and why it
+        // stopped short for budget, if it did.
+        const metered = noUsage();
+        let budgetStop: string | undefined;
 
         // Tool-call loop (same shape as KimiCodeAgentRunner / CodexAgentRunner):
         // keep driving the same agy session until a turn produces no tool_call
         // fences (or the round cap hits).
         // runToolRound ends this loop past the round cap (#326).
         for (let round = 0; ; round++) {
+          const refusal = budgetRefusal(args); // #550: no exec without room for one
+          if (refusal) {
+            budgetStop = `${refusal}; agy turn not started`;
+            break;
+          }
           // Prepend system prompt + tool protocol on first turn only (when
           // there's no conversation to resume). Subsequent turns in the same
           // conversation carry context via the conversation_id.
@@ -115,10 +134,23 @@ export class AntigravityAgentRunner implements AgentRunner {
           // parsing — fence parsing needs the complete text, so fences are
           // collected here while the stripped prose streams out live below.
           const rawTexts: string[] = [];
+          // #550: what this exec's steps reported as they completed.
+          const steps = noUsage();
 
           for await (const ev of streamTurn(bin, promptWithSystem, conversationId, args, outcome)) {
             if (ev.conversationId) conversationId = ev.conversationId;
-            if (ev.kind === 'assistant') {
+            if (ev.kind === 'usage' && ev.usage) {
+              // #550: meter each step as it completes; session-run checks
+              // the budget on it. Leaving the loop at the step that spends
+              // the budget ends streamTurn, whose finally kills agy.
+              addUsage(steps, ev.usage);
+              const usage = usageMessage(ev.usage, conversationId);
+              if (usage) yield usage;
+              if (budgetExhausted(args)) {
+                budgetStop = 'token budget exhausted; agy turn stopped at the step that spent it';
+                break;
+              }
+            } else if (ev.kind === 'assistant') {
               // rawText bookkeeping (fence-parsing input) and visible text
               // are independent: an incremental event carries text with no
               // rawText (must NOT feed rawTexts — it's a fragment, not the
@@ -145,13 +177,25 @@ export class AntigravityAgentRunner implements AgentRunner {
               for (const m of ev.native) yield { ...m, session_id: conversationId };
             }
           }
+          addUsage(metered, steps);
+          if (budgetStop) break;
           if (outcome.conversationId) conversationId = outcome.conversationId;
 
           if (outcome.exitCode !== 0 || outcome.error) {
             throw turnError(outcome, round, bin);
           }
-          turnInputTokens += outcome.inputTokens;
-          turnOutputTokens += outcome.outputTokens;
+          // #550: whatever the exec's result counts beyond its steps.
+          const rest = usageBeyond(
+            splitCachedInput({
+              input: outcome.inputTokens,
+              output: outcome.outputTokens,
+              cached: outcome.cachedInputTokens,
+            }),
+            steps,
+          );
+          addUsage(metered, rest);
+          const restUsage = usageMessage(rest, conversationId);
+          if (restUsage) yield restUsage;
 
           const malformed: string[] = [];
           const calls = parseToolCalls(rawTexts, (raw, err) =>
@@ -171,14 +215,17 @@ export class AntigravityAgentRunner implements AgentRunner {
           nextPrompt = formatToolResults(calls, results);
         }
 
+        if (budgetStop) {
+          const text = `[monomind] ${budgetStop}.`;
+          yield { type: 'assistant', session_id: conversationId, text };
+        }
         // Synthesize one result message per mailbox prompt — session.ts uses
         // these for usage accounting and budget checks.
         yield {
           type: 'result',
           session_id: conversationId,
-          subtype: 'success',
-          input_tokens: turnInputTokens,
-          output_tokens: turnOutputTokens,
+          subtype: budgetStop ? BUDGET_STOP_SUBTYPE : 'success',
+          ...usageFields(metered),
         };
       }
     } catch (err) {

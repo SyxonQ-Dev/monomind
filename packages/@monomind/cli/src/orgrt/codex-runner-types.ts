@@ -114,7 +114,11 @@ export interface TurnOutcome {
   exitCode: number;
   stderrTail: string;
   timedOut: boolean;
+  /** Total input, cached part included (OpenAI convention, #550). */
   inputTokens: number;
   outputTokens: number;
+  /** #550: the parts of inputTokens served from / written to the cache. */
+  cachedInputTokens?: number;
+  cacheWriteInputTokens?: number;
   error?: string;
 }
