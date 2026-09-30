@@ -7,7 +7,14 @@
 
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { type OrgSignatureReason, orgSignedAt, verifyOrgDef } from '../orgrt/org-signature.js';
+import {
+  computeOrgDefHash,
+  forbiddenKeyPath,
+  instructionsDigests,
+  type OrgSignatureReason,
+  orgSignedAt,
+  verifyOrgDef,
+} from '../orgrt/org-signature.js';
 import { ORG_DIR, OrgDefSchema } from '../orgrt/types.js';
 import type { CommandContext, CommandResult } from '../types.js';
 import { listOrgConfigFiles, ORG_NAME_RE } from './org-control.js';
@@ -18,6 +25,8 @@ export interface OrgCheckEntry {
   org: string;
   state: OrgCheckState;
   signedAt?: string;
+  /** The hash `org sign --expect-hash` compares (doc/commands/org.md). */
+  hash?: string;
   message?: string;
 }
 
@@ -39,6 +48,38 @@ export function resolveSignRoot(ctx: CommandContext): { root: string } | { error
   return { root };
 }
 
+const HASH_RE = /^[0-9a-f]{64}$/i;
+
+/** `--expect-hash`, per org to sign: absent (no check), `<hex>` for one org,
+ *  or with `--all` one `<org>=<hex>` for each org signed and no other. */
+export function parseExpectHashes(
+  ctx: CommandContext,
+  names: string[],
+): { hashes?: Map<string, string> } | { error: string } {
+  const flag = ctx.flags['expect-hash'] ?? ctx.flags.expectHash;
+  if (flag === undefined) return {};
+  const values = (Array.isArray(flag) ? flag : [flag]).map(String);
+  const hashes = new Map<string, string>();
+  if (ctx.flags.all !== true) {
+    if (values.length !== 1 || !HASH_RE.test(values[0]))
+      return { error: '--expect-hash needs one 64-character hex sha256' };
+    hashes.set(names[0], values[0].toLowerCase());
+    return { hashes };
+  }
+  for (const v of values) {
+    const [org, hex] = v.split('=', 2);
+    if (!hex || !ORG_NAME_RE.test(org) || !HASH_RE.test(hex))
+      return { error: `--all --expect-hash takes <org>=<hex sha256>, got: ${v}` };
+    if (hashes.has(org)) return { error: `--expect-hash: ${org} given more than once` };
+    hashes.set(org, hex.toLowerCase());
+  }
+  const missing = names.filter((n) => !hashes.has(n));
+  if (missing.length) return { error: `--expect-hash: no hash for ${missing.join(', ')}` };
+  const extra = [...hashes.keys()].filter((o) => !names.includes(o));
+  if (extra.length) return { error: `--expect-hash: no org definition for ${extra.join(', ')}` };
+  return { hashes };
+}
+
 /** One org's signature state. Reads only. */
 export function checkOrg(root: string, org: string): OrgCheckEntry {
   const file = join(root, ORG_DIR, `${org}.json`);
@@ -53,19 +94,28 @@ export function checkOrg(root: string, org: string): OrgCheckEntry {
       message: `org ${org}: unreadable JSON (${(err as Error).message})`,
     };
   }
-  const check = verifyOrgDef(root, org, raw);
-  if (!check.ok && check.reason === 'forbidden-key')
-    return { org, state: check.reason, message: check.message };
-  if (!OrgDefSchema.safeParse(raw).success)
+  if (forbiddenKeyPath(raw) === undefined && !OrgDefSchema.safeParse(raw).success)
     return {
       org,
       state: 'invalid',
       message: `org ${org}: invalid definition — run \`monomind org validate ${org}\``,
     };
-  if (check.ok) return { org, state: 'signed', signedAt: orgSignedAt(root, org) };
+  // One read of each instructions file feeds both the check and the hash.
+  const digests = instructionsDigests(raw, root);
+  const check = verifyOrgDef(root, org, raw, { digests });
+  if (!check.ok && check.reason === 'forbidden-key')
+    return { org, state: check.reason, message: check.message };
+  const hash = computeOrgDefHash(raw, root, digests);
+  if (check.ok) return { org, state: 'signed', signedAt: orgSignedAt(root, org), hash };
   // The HMAC verified for 'changed', so its timestamp is the operator's.
   const signedAt = check.reason === 'changed' ? orgSignedAt(root, org) : undefined;
-  return { org, state: check.reason, ...(signedAt ? { signedAt } : {}), message: check.message };
+  return {
+    org,
+    state: check.reason,
+    ...(signedAt ? { signedAt } : {}),
+    hash,
+    message: check.message,
+  };
 }
 
 function usageError(json: boolean, message: string): CommandResult {

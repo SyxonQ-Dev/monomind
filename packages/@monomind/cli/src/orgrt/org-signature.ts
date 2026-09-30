@@ -295,6 +295,11 @@ export function orgSignatureMessage(
   return `org ${org}: the definition ${detail} — run \`monomind org sign ${org}\` as the operator after reviewing the change`;
 }
 
+/** `org sign --expect-hash`'s refusal, naming both hashes. */
+export function orgHashMismatchMessage(org: string, expected: string, actual: string): string {
+  return `org ${org}: not signed — the definition changed: expected ${expected.toLowerCase()}, actual ${actual}`;
+}
+
 /** Verify `raw` (the parsed JSON of `.monomind/orgs/<org>.json`) against the
  *  operator's signature. Always checks, whatever the enforcement switch;
  *  never throws for a missing key or sidecar. */
@@ -365,23 +370,29 @@ function writePrivate(path: string, text: string): void {
 /** Sign `raw` as the operator: creates the key on first use (same key and
  *  directory as #365's full-access grants) and writes the sidecar and the
  *  signed projection atomically. Callers are the human-only paths (`org
- *  sign`, `org create`, `org role set-access`) — never the runtime. */
+ *  sign`, `org create`, `org role set-access`) — never the runtime.
+ *  `digests` are the instructions digests the caller already read, so the
+ *  content it compared is the content signed; `expectHash` refuses, before
+ *  anything is written, unless the hash about to be signed is that one. */
 export function signOrgDef(
   root: string,
   org: string,
   raw: unknown,
-  opts: { dir?: string; now?: Date } = {},
+  opts: { dir?: string; now?: Date; digests?: Record<string, string>; expectHash?: string } = {},
 ): { hash: string; at: string; path: string } {
   const forbidden = forbiddenKeyPath(raw);
   if (forbidden) throw new Error(orgSignatureMessage(org, 'forbidden-key', forbidden));
+  const digests = opts.digests ?? instructionsDigests(raw, root);
+  const hash = computeOrgDefHash(raw, root, digests);
+  if (opts.expectHash !== undefined && opts.expectHash.toLowerCase() !== hash)
+    throw new Error(orgHashMismatchMessage(org, opts.expectHash, hash));
   const dir = opts.dir ?? defaultOperatorDir();
   const key = ensureFullAccessGrantKey(dir);
-  const digests = instructionsDigests(raw, root);
   const base = {
     v: SIGNATURE_VERSION,
     org,
     root: projectRoot(root),
-    hash: computeOrgDefHash(raw, root, digests),
+    hash,
     at: (opts.now ?? new Date()).toISOString(),
   };
   const rec: SignatureRecord = { ...base, sig: hmac(key, base) };

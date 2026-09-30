@@ -755,8 +755,8 @@ org growth: the definition has no operator signature — run `monomind org sign 
 ```
 
 ```bash
-monomind org sign <org> [--yes] [--project <dir>]
-monomind org sign --all [--yes] [--project <dir>]
+monomind org sign <org> [--yes] [--project <dir>] [--expect-hash <hex>]
+monomind org sign --all [--yes] [--project <dir>] [--expect-hash <org>=<hex> …]
 monomind org sign <org> --check [--format json] [--project <dir>]
 monomind org sign --all --check [--format json] [--project <dir>]
 ```
@@ -767,6 +767,7 @@ monomind org sign --all --check [--format json] [--project <dir>]
 | `--yes`, `-y` | Skip the per-org confirmation. Without a TTY and without it, `sign` prints the review and signs nothing |
 | `--check` | Only report whether each org verifies. Never prompts, never signs, writes nothing (#558) |
 | `--project <dir>` | Use `<dir>` as the project root instead of the current directory. It is resolved to its real path and must hold `.monomind/orgs` |
+| `--expect-hash <hex>` | Sign only if the [signable hash](#the-signable-hash) about to be signed is `<hex>`; otherwise exit 1 and write nothing. With `--all`, repeat it as `<org>=<hex>`, once for every org |
 
 **Checking without signing:** `--check` is for tools that rewrite org files themselves, such as
 mono-agent. Such a tool verifies an org before its edit and, after writing, signs with `--yes`
@@ -783,8 +784,8 @@ growth: changed
 With `--format json` it prints one document:
 
 ```json
-{"orgs":[{"org":"release","state":"signed","signedAt":"2026-09-30T12:00:00.000Z"},
-         {"org":"growth","state":"changed","signedAt":"2026-09-01T08:00:00.000Z","message":"org growth: the definition changed since the operator signed it …"}]}
+{"orgs":[{"org":"release","state":"signed","signedAt":"2026-09-30T12:00:00.000Z","hash":"a895d86c…"},
+         {"org":"growth","state":"changed","signedAt":"2026-09-01T08:00:00.000Z","hash":"2bb0a6ad…","message":"org growth: the definition changed since the operator signed it …"}]}
 ```
 
 | `state` | Meaning |
@@ -797,7 +798,10 @@ With `--format json` it prints one document:
 | `invalid` | The file is not valid JSON or not a valid org definition |
 | `not-found` | There is no `.monomind/orgs/<org>.json` |
 
-`signedAt` is the time of the verified signature (`signed` and `changed` only). `message` is
+`signedAt` is the time of the verified signature (`signed` and `changed` only). `hash` is the
+org's current [signable hash](#the-signable-hash), computed from the same read of the files as
+the state; it is there for `signed`, `changed`, `unsigned` and `invalid-signature`, the states
+`org sign` can sign from. `message` is
 present on every state but `signed`. For the signature states (`changed`, `unsigned`,
 `invalid-signature`, `forbidden-key`) it is the same text `run` and `reload` print; `not-found`
 (`org not found: <org>`) and `invalid` (unreadable JSON, or "invalid definition — run
@@ -814,6 +818,19 @@ Inside a role's sandbox the operator directory is hidden or unreadable, so `--ch
 no usable signature or key and reports `unsigned` or `invalid-signature` for an org the operator
 did sign. It never reports `signed` for an org that does not verify, so a caller can trust a
 `signed`; for a definitive answer, run the check outside the role.
+
+**Signing only what you wrote (`--expect-hash`):** a tool that checks an org, writes it and
+then runs `org sign <org> --yes` leaves a window: a role could edit the org JSON or one of its
+`instructions_file`s after the tool's check and before monomind reads the files, and that edit
+would be signed. With `--expect-hash <hex>`, the tool passes the hash of the content it wrote
+(computed as below, or taken from `--check --format json`). monomind reads the org file and each
+instructions file once, computes the hash from those bytes, and signs those same bytes only if
+the hash equals `<hex>` (case does not matter). Otherwise it prints
+`org <org>: not signed — the definition changed: expected <hex>, actual <hash>`, exits 1 and
+writes nothing to the operator directory. It works with `--yes` and `--project`. With `--all`,
+pass `--expect-hash <org>=<hex>` once for every org in the project. A missing, repeated or
+unknown org, or a malformed value, is a usage error (exit 2). If any org does not match, none is
+signed.
 
 **`--project`:** the signature binds the project's real path, so signing with
 `--project <dir>` (also through a symlink) makes the same signature as running `org sign` inside
@@ -860,6 +877,58 @@ a TTY (`org serve`, a detached `org run`, the mastermind skills), is refused wit
 above. Run `monomind org sign --all` once per checkout, including for the shipped
 `.monomind/orgs/*.json` and `config/orgs/release.json`, whose signatures are per machine and never
 committed.
+
+### The signable hash
+
+The hash `--expect-hash` compares, `--check` reports and the signature records is:
+
+1. **Parse** `.monomind/orgs/<org>.json` as JSON. A repeated key keeps its last value.
+2. **Project** it: drop the top-level `goal` and `status`. If `roles` is an array, drop
+   `title`, `responsibilities` and `ui` from each role object in it. Keep everything else,
+   including fields monomind does not know.
+3. **Digest the instructions files.** For each role in `roles` whose `instructions_file` is a
+   string, add the entry `role:<id>`. For each entry `<name>` of the `loadouts` object whose
+   `instructions_file` is a string, add `loadout:<name>`. The path is resolved against the
+   project root. The value is `sha256:` followed by the lowercase hex SHA-256 of the file's
+   content. monomind reads the file as UTF-8 and hashes that text as UTF-8, which for a valid
+   UTF-8 file is the SHA-256 of its bytes. A file monomind refuses to read (outside the project,
+   a symlink to a protected path, a hard link, missing) is recorded as `unreadable: <reason>`
+   instead. A tool can't rebuild that reason, so take the `hash` from `--check` for such an org.
+4. **Combine.** With no digests, the value to hash is the projection itself. Otherwise it is the
+   object `{"definition": <projection>, "instructions": {<digests>}}`.
+5. **Canonical JSON.** Sort the keys of every object at every depth by UTF-16 code units. That
+   is the byte order of the UTF-8 keys unless a key holds a character above U+FFFF. Keep array
+   order. Serialize with no whitespace, as ECMAScript `JSON.stringify` does:
+   - Strings escape `"` and `\` as `\"` and `\\`, and use `\b` `\f` `\n` `\r` `\t` for those
+     control characters. Any other character below U+0020 is `\u00xx` with lowercase hex. A
+     lone surrogate is `\udxxx`. Every other character, including `<`, `>`, `&`, U+2028 and
+     U+2029, is written as-is in UTF-8. Go's `encoding/json` escapes these last five, so turn
+     off `SetEscapeHTML` and write U+2028/U+2029 raw.
+   - Numbers are IEEE-754 doubles printed as ECMAScript `Number.prototype.toString` prints
+     them: `1.0` → `1`, `1e2` → `100`, `1.5e-7` → `1.5e-7`. Go's `encoding/json` prints a
+     `float64` the same way.
+   - `true`, `false` and `null` are literal.
+6. **Hash:** the lowercase hex SHA-256 of that UTF-8 string, 64 characters.
+
+For example, this org, with `boss.md` holding `Be the boss.\n`:
+
+```json
+{"name":"fx","goal":"ship it","roles":[
+  {"id":"boss","type":"boss","reports_to":null,"title":"CEO","instructions_file":"boss.md"},
+  {"reports_to":"boss","id":"dev","responsibilities":["code"],"policy":{"git":"read"}}]}
+```
+
+has the canonical JSON
+
+```json
+{"definition":{"name":"fx","roles":[{"id":"boss","instructions_file":"boss.md","reports_to":null,"type":"boss"},{"id":"dev","policy":{"git":"read"},"reports_to":"boss"}]},"instructions":{"role:boss":"sha256:272f6cf685a554faa4bc04a7890d434994aefcf98e9bfdfd339de87234e512cc"}}
+```
+
+and the hash `a895d86cd63d1374360add64ce590de7591895b523e53512f5a2d9257ddf7125`. Without the
+`instructions_file`, the canonical JSON is the bare projection
+`{"name":"fx","roles":[{"id":"boss","reports_to":null,"type":"boss"},{"id":"dev","policy":{"git":"read"},"reports_to":"boss"}]}`,
+with the hash `2bb0a6ad90aa73e34b175333c401695c88079fb8faee131a43e27030689f247c`. A test pins
+both (`org-sign-expect-hash.test.ts`), so the algorithm can't change silently.
 
 **Source:** [`commands/org-sign.ts → signAction`](packages/@monomind/cli/src/commands/org-sign.ts#signAction), [`orgrt/org-signature.ts → verifyOrgDef`](packages/@monomind/cli/src/orgrt/org-signature.ts#verifyOrgDef)
 

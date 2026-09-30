@@ -13,7 +13,10 @@ import {
   projectionDiff,
 } from '../orgrt/org-sign-review.js';
 import {
+  computeOrgDefHash,
+  instructionsDigests,
   lastSignedProjection,
+  orgHashMismatchMessage,
   orgSignatureEnforced,
   roleContextMarker,
   signedProjection,
@@ -25,7 +28,7 @@ import { ORG_DIR, OrgDefSchema } from '../orgrt/types.js';
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { listOrgConfigFiles, validateOrgName } from './org-control.js';
-import { checkAction, resolveSignRoot } from './org-sign-check.js';
+import { checkAction, parseExpectHashes, resolveSignRoot } from './org-sign-check.js';
 
 const log = (text: string): void => {
   console.log(text);
@@ -37,8 +40,13 @@ function readRaw(cwd: string, name: string): unknown {
 
 /** The whole review: state, every authority-relevant setting, the
  *  unconfined roles, and what changed since the last signature. */
-function printReview(cwd: string, name: string, raw: unknown): void {
-  const check = verifyOrgDef(cwd, name, raw);
+function printReview(
+  cwd: string,
+  name: string,
+  raw: unknown,
+  digests?: Record<string, string>,
+): void {
+  const check = verifyOrgDef(cwd, name, raw, { digests });
   const state = check.ok ? 'signed, unchanged' : check.reason;
   log(output.bold(`\norg ${name} (${state}):`));
   for (const line of describeOrgAuthority(raw)) log(line);
@@ -63,7 +71,10 @@ function printReview(cwd: string, name: string, raw: unknown): void {
     log(output.dim('  (no earlier signature on this machine to compare with)'));
     return;
   }
-  const diff = projectionDiff(before, JSON.parse(JSON.stringify(signedProjection(raw, cwd))));
+  const diff = projectionDiff(
+    before,
+    JSON.parse(JSON.stringify(signedProjection(raw, cwd, digests))),
+  );
   log(
     output.bold(
       diff.length ? '  Changed since the last signature:' : '  No change since the last signature.',
@@ -72,16 +83,21 @@ function printReview(cwd: string, name: string, raw: unknown): void {
   for (const line of diff) log(line);
 }
 
-/** Sign one org. Returns an error string, or undefined on success. */
-async function signOne(
-  ctx: CommandContext,
-  name: string,
-  confirmEach: boolean,
-): Promise<string | undefined> {
-  if (!existsSync(join(ctx.cwd, ORG_DIR, `${name}.json`))) return `org not found: ${name}`;
+/** An org read for signing: its definition and instructions digests, each
+ *  file read once, and the hash that signing them records. */
+interface LoadedOrg {
+  name: string;
+  raw: unknown;
+  digests: Record<string, string>;
+  hash: string;
+}
+
+/** Read one org to sign, or an error string. */
+function loadOrg(root: string, name: string): LoadedOrg | string {
+  if (!existsSync(join(root, ORG_DIR, `${name}.json`))) return `org not found: ${name}`;
   let raw: unknown;
   try {
-    raw = readRaw(ctx.cwd, name);
+    raw = readRaw(root, name);
   } catch (err) {
     return `org ${name}: unreadable JSON (${(err as Error).message})`;
   }
@@ -89,13 +105,30 @@ async function signOne(
   if (!parsed.success) {
     return `org ${name}: invalid definition — run \`monomind org validate ${name}\` first`;
   }
-  printReview(ctx.cwd, name, raw);
+  const digests = instructionsDigests(raw, root);
+  return { name, raw, digests, hash: computeOrgDefHash(raw, root, digests) };
+}
+
+/** Sign one loaded org. Returns an error string, or undefined on success. */
+async function signOne(
+  ctx: CommandContext,
+  org: LoadedOrg,
+  confirmEach: boolean,
+  expectHash: string | undefined,
+): Promise<string | undefined> {
+  const { name, raw, digests } = org;
+  printReview(ctx.cwd, name, raw, digests);
   if (confirmEach) {
     const { confirm } = await import('../prompt.js');
     const ok = await confirm({ message: `Sign org "${name}" as the operator?`, default: false });
     if (!ok) return `org ${name}: not signed (declined)`;
   }
-  const { at } = signOrgDef(ctx.cwd, name, raw);
+  let at: string;
+  try {
+    ({ at } = signOrgDef(ctx.cwd, name, raw, { digests, expectHash }));
+  } catch (err) {
+    return (err as Error).message;
+  }
   log(output.success(`org ${name}: signed (${at})`));
   return undefined;
 }
@@ -133,6 +166,11 @@ export const signAction = async (input: CommandContext): Promise<CommandResult> 
     if (!validated.ok) return validated.result;
     names = [validated.name];
   }
+  const expect = parseExpectHashes(ctx, names);
+  if ('error' in expect) {
+    log(output.error(expect.error));
+    return { success: false, message: expect.error, exitCode: 2 };
+  }
   const yes = ctx.flags.yes === true;
   if (!ctx.interactive && !yes) {
     // Show what would be signed (the createorg skill relies on this), sign nothing.
@@ -150,9 +188,29 @@ export const signAction = async (input: CommandContext): Promise<CommandResult> 
     );
     return { success: false, message: 'confirmation required (--yes)' };
   }
+  const loaded = names.map((name) => loadOrg(ctx.cwd, name));
+  if (expect.hashes) {
+    // Compare before signing anything: with --expect-hash, one org that is
+    // not as expected signs none.
+    const refusals = loaded.map((org) =>
+      typeof org === 'string'
+        ? org
+        : org.hash === expect.hashes?.get(org.name)
+          ? undefined
+          : orgHashMismatchMessage(org.name, expect.hashes?.get(org.name) ?? '', org.hash),
+    );
+    const failed = refusals.filter((r): r is string => r !== undefined);
+    if (failed.length) {
+      for (const r of failed) log(output.error(r));
+      return { success: false, message: failed.join('; '), exitCode: 1 };
+    }
+  }
   const errors: string[] = [];
-  for (const name of names) {
-    const err = await signOne(ctx, name, ctx.interactive && !yes);
+  for (const org of loaded) {
+    const err =
+      typeof org === 'string'
+        ? org
+        : await signOne(ctx, org, ctx.interactive && !yes, expect.hashes?.get(org.name));
     if (err) {
       errors.push(err);
       log(output.error(err));
@@ -226,6 +284,12 @@ export const signSubcommand: Command = {
       description:
         'Use <dir> (its real path; must hold .monomind/orgs) as the project root instead of the current directory',
       type: 'string',
+    },
+    {
+      name: 'expect-hash',
+      description:
+        'Sign only if the hash about to be signed is <hex> (the "hash" of --check --format json); otherwise exit 1 and write nothing. With --all, repeat as <org>=<hex> for every org',
+      type: 'array',
     },
   ],
   examples: [
