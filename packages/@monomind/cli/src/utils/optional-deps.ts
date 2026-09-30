@@ -32,6 +32,12 @@
  *     Before loading anything from it, the deps root and the entry are checked
  *     here as well: no symlink on the way to it or leading out of it, every
  *     file owned by this user and not group- or other-writable.
+ *   - That cannot tell a same-user plant from a real install, so the file
+ *     it imports and, for the SDK, the Claude binary the SDK will spawn must
+ *     also match SHA-256 hashes shipped beside the lockfiles, whether the
+ *     copy is in the deps dir or up monomind's own module path; and no
+ *     directory above the deps root may be a symlink this user could
+ *     replace (optional-deps-verify.ts, #526).
  *   - The staging directory is renamed into place only once complete, so a
  *     crashed or concurrent install never leaves a half-populated directory
  *     where a later run would find it. A lock directory next to it keeps two
@@ -59,7 +65,12 @@ import { basename, dirname, join, relative, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { defaultIdentity } from '../orgrt/sandbox-stubs-ledger.js';
 import { npmInvocation } from './npm-command.js';
-import { OPTIONAL_DEPENDENCY_LOCKS } from './optional-deps-locks.js';
+import {
+  type CodePins,
+  OPTIONAL_DEPENDENCY_CODE_PINS,
+  OPTIONAL_DEPENDENCY_LOCKS,
+} from './optional-deps-locks.js';
+import { assertNoSymlinkAncestor, type PinHost, verifyPinnedCode } from './optional-deps-verify.js';
 
 interface OptionalDependencySpec {
   /** Exact version; keep in step with the CLI's devDependencies. */
@@ -100,10 +111,7 @@ export class OptionalDependencyError extends Error {
 type Env = NodeJS.ProcessEnv;
 type Log = (line: string) => void;
 export type NpmRunner = (args: string[], cwd: string, env: Env) => Promise<void>;
-interface Host {
-  platform: NodeJS.Platform;
-  arch: string;
-}
+type Host = PinHost;
 
 export interface EnsureOptions {
   env?: Env;
@@ -114,6 +122,8 @@ export interface EnsureOptions {
   log?: Log;
   /** For the SDK's platform-package check; tests replace it. */
   host?: Host;
+  /** The hashes loaded code must match (#526); tests replace them. */
+  pins?: Partial<Record<string, CodePins>>;
   /** #522: an installed Claude Code runs instead of the SDK's bundled
    *  binary, so the SDK is installed without its platform package
    *  (`--omit=optional`), and an install that lacks it counts as installed. */
@@ -356,7 +366,7 @@ function isModuleNotFound(err: unknown, name: string): boolean {
 function ownEntry(
   name: OptionalDependencyName,
   resolveOwn: (n: string) => string,
-): string | undefined {
+): { entry: string; pkgDir: string } | undefined {
   let entry: string;
   try {
     entry = resolveOwn(name);
@@ -365,8 +375,14 @@ function ownEntry(
     throw err;
   }
   const pj = packageJsonAbove(entry, name);
-  return pj && readVersion(pj) === OPTIONAL_DEPENDENCIES[name].version ? entry : undefined;
+  return pj && readVersion(pj) === OPTIONAL_DEPENDENCIES[name].version
+    ? { entry, pkgDir: dirname(pj) }
+    : undefined;
 }
+
+const refuseLoad = (message: string): never => {
+  throw new OptionalDependencyError(message);
+};
 
 /** The "import" entry of a package's exports (or its main), relative to it. */
 function esmEntry(pkg: { exports?: unknown; main?: string }): string | undefined {
@@ -431,14 +447,32 @@ export async function ensureOptionalDependency<T = unknown>(
   const noBinary = !!opts.withoutSdkBinary && name === '@anthropic-ai/claude-agent-sdk';
   const size = noBinary ? 'about 4 MB without its bundled Claude binary' : spec.size;
 
+  const pins = (opts.pins ?? OPTIONAL_DEPENDENCY_CODE_PINS)[name];
+
+  // #526: a copy found up the module path (~/node_modules, say) is held to
+  // the same pins as one in the deps dir.
   const own = ownEntry(name, opts.resolveOwn ?? defaultResolveOwn);
-  if (own) return (await importFile(own)) as T;
+  if (own) {
+    if (pins) {
+      const where = { ...own, remove: own.pkgDir, checkBinary: !noBinary };
+      await verifyPinnedCode(name, pins, where, host, refuseLoad);
+    }
+    return (await importFile(own.entry)) as T;
+  }
 
   const root = depsRoot(env);
   const dir = dependencyDir(name, env);
   const load = async (): Promise<T> => {
+    assertNoSymlinkAncestor(root, (why) =>
+      refuseLoad(`Refusing to load code from ${root}: ${why}.`),
+    );
     assertTrustedTree(root, dir);
     const entry = resolveEntry(name, join(dir, 'package.json'));
+    if (pins) {
+      const pkgDir = join(dir, 'node_modules', name);
+      const where = { entry, pkgDir, remove: dir, checkBinary: !noBinary };
+      await verifyPinnedCode(name, pins, where, host, refuseLoad);
+    }
     return (await importFile(entry)) as T;
   };
   if (isInstalled(name, dir, host, noBinary)) return load();

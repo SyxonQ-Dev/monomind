@@ -26,6 +26,7 @@ import {
 } from '../utils/optional-deps.js';
 import { OPTIONAL_DEPENDENCY_LOCKS } from '../utils/optional-deps-locks.js';
 import {
+  FAKE_PINS,
   fakeNpm,
   HOST,
   notFound,
@@ -37,7 +38,7 @@ import {
 let home: string;
 let env: NodeJS.ProcessEnv;
 const log = vi.fn();
-const base = () => ({ env, resolveOwn: notFound, log, host: HOST });
+const base = () => ({ env, resolveOwn: notFound, log, host: HOST, pins: FAKE_PINS });
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'mm-deps-'));

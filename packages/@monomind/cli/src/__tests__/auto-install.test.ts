@@ -91,6 +91,8 @@ describe('tryImportOrInstall (#519)', () => {
       resolveOwn: notFound,
       runNpm: npm.run,
       silent: true,
+      // The fake npm installs a stand-in, not the pinned files (#526).
+      pins: {},
     });
 
     expect(mod?.isSafe()).toBe(true);

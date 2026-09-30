@@ -26,7 +26,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { protectedClaudeBinary } from './claude-sdk.js';
 import {
   ensureToolchainDirs,
@@ -277,11 +277,13 @@ export function maskReadOnlyPaths(ctx: {
  *  OS sandbox can only protect a path that exists, and a role creating one
  *  of these first would plant it. The skill libraries and the npx cache are
  *  empty directories; the terminal gate is written as disabled, which is
- *  what its absence already meant (terminal-tools-core.ts). */
+ *  what its absence already meant (terminal-tools-core.ts); and the
+ *  HOME_DENY_WRITE stubs below (#526). */
 export function ensureOperatorProtectedPaths(ctx: {
   home: string;
   env: NodeJS.ProcessEnv;
   orgRoot?: string;
+  platform?: NodeJS.Platform;
 }): void {
   const mmHome = monomindHome(ctx.home, ctx.env);
   const dirs = [join(mmHome, 'org-skills'), join(ctx.home, '.npm', '_npx')];
@@ -303,4 +305,85 @@ export function ensureOperatorProtectedPaths(ctx: {
   // after the directories it expects are created.
   ensureToolchainDirs(ctx.home, ctx.env);
   resetToolchainMemo();
+  ensureHomeDenyWriteStubs(ctx.home, ctx.env, ctx.platform ?? process.platform);
+}
+
+/** #526: HOME_DENY_WRITE entries created in the operator's HOME when they
+ *  are absent, at org or session start (never overwriting), so the SDK
+ *  sandbox's denyWrite (which drops missing paths) and the mask's read-only
+ *  binds cover them too. Each is either an empty file or an empty 0700
+ *  directory, and each means exactly what its absence meant:
+ *  - `.npmrc`: npm merges an empty user config into nothing;
+ *  - `.bashrc`: read only by interactive bash, which runs nothing from it;
+ *  - `.profile`: read by sh/dash login shells, and by bash only when
+ *    `.bash_profile` and `.bash_login` are absent; zsh never reads it;
+ *    empty, it runs nothing in any of them. Not created when $SHELL is zsh
+ *    or fish: installers such as nvm's append to ~/.profile when it exists
+ *    instead of the shell's own rc file, which that shell would then miss;
+ *  - `.ssh`, `.config/git`, `.config/gh`, `.config/npm`: tools read files
+ *    inside them, never the directory itself (git's `--global` target
+ *    depends on `~/.config/git/config`, a file, not on the directory).
+ *  `~/.config` is created too when it is missing.
+ *  Linux only. On macOS the SDK's seatbelt denies a missing path by rule
+ *  (role-sandbox-restrictions.ts), so only `~/.config` is created there, so
+ *  that the entries below it can be passed (their parent must exist). */
+export const HOME_DENY_WRITE_STUB_DIRS = ['.ssh', '.config/git', '.config/gh', '.config/npm'];
+export const HOME_DENY_WRITE_STUB_FILES = ['.npmrc', '.bashrc', '.profile'];
+/** Never created, left to the planted-path watch (planted-paths.ts; on
+ *  macOS the SDK's seatbelt also denies creating them, by path):
+ *  - `.bash_profile`, `.bash_login`: an empty one makes a bash login shell
+ *    skip `~/.profile`;
+ *  - `.gitconfig`: once it exists, `git config --global` writes go to it
+ *    instead of a `~/.config/git/config` the operator creates later;
+ *  - `.zshrc`, `.zprofile`, `.zshenv`, `.zlogin`: with none of them, zsh
+ *    runs its new-user setup, and an empty one would stop that;
+ *  - `.claude`, `.claude.json`: Claude Code's own state (an empty
+ *    `.claude.json` is a corrupt config);
+ *  - `.monomind/deps`: optional-deps.ts creates it. */
+export const HOME_DENY_WRITE_NOT_STUBBED = [
+  '.bash_profile',
+  '.bash_login',
+  '.gitconfig',
+  '.zshrc',
+  '.zprofile',
+  '.zshenv',
+  '.zlogin',
+  '.claude',
+  '.claude.json',
+  '.monomind/deps',
+];
+
+function ensureHomeDenyWriteStubs(
+  home: string,
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): void {
+  if (platform === 'darwin') {
+    try {
+      mkdirSync(join(home, '.config'));
+    } catch {
+      /* exists, or unwritable */
+    }
+    return;
+  }
+  if (platform !== 'linux') return;
+  const loginShell = basename(env.SHELL ?? '');
+  const files = HOME_DENY_WRITE_STUB_FILES.filter(
+    (f) => f !== '.profile' || (loginShell !== 'zsh' && loginShell !== 'fish'),
+  );
+  for (const d of HOME_DENY_WRITE_STUB_DIRS) {
+    try {
+      mkdirSync(dirname(join(home, d)), { recursive: true });
+      mkdirSync(join(home, d), { mode: 0o700 });
+    } catch {
+      /* exists, or unwritable: nothing can plant it either */
+    }
+  }
+  for (const f of files) {
+    try {
+      writeFileSync(join(home, f), '', { flag: 'wx', mode: 0o600 });
+    } catch {
+      /* exists, or unwritable */
+    }
+  }
 }

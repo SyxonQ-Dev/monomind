@@ -62,6 +62,7 @@ import {
 import { homedir, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { type EnsureOptions, ensureOptionalDependency } from '../utils/optional-deps.js';
+import { withPinnedExecutable } from './claude-sdk-pin.js';
 
 export const CLAUDE_PATH_ENV = 'MONOMIND_CLAUDE_PATH';
 /** The Claude Code version bundled with the pinned SDK (its manifest.json);
@@ -388,7 +389,10 @@ export const loadClaudeSdk = (probe?: ClaudeProbe): Promise<ClaudeSdk> =>
     const found = await findInstalledClaude(probe ?? defaultClaudeProbe());
     const sdk = await ensureOptionalDependency<ClaudeSdk>(SDK, sdkLoadOptions(found));
     const { createSdkMcpServer, query, tool } = sdk;
-    if (!found.path) return { createSdkMcpServer, query, tool };
+    // #526: the SDK's own binary, pinned by hash, is passed to and rechecked
+    // at every query (claude-sdk-pin.ts). An installed Claude Code below is
+    // not ours to pin: #522's checks above cover it.
+    if (!found.path) return withPinnedExecutable({ createSdkMcpServer, query, tool });
     return {
       createSdkMcpServer,
       tool,

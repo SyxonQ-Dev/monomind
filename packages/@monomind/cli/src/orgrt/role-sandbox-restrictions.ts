@@ -1,7 +1,7 @@
 // packages/@monomind/cli/src/orgrt/role-sandbox-restrictions.ts
-import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
+import { accessSync, constants, existsSync, readdirSync, realpathSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { protectableDepsRoot } from '../utils/optional-deps.js';
 import {
   authorityDirs,
@@ -119,6 +119,23 @@ const existing = (xs: Array<string | undefined>): string[] =>
       .filter((p) => existsSync(p))
       .map(maskTarget),
   );
+/** #526, macOS: seatbelt (sandbox-exec) denies by path rule, so a deny for
+ *  a path that does not exist yet also denies creating it; nothing has to
+ *  exist, unlike bwrap's binds. Kept only when the parent exists: the SDK
+ *  also denies creating or unlinking every ancestor of a denied path, and a
+ *  missing ancestor (~/.config for ~/.config/npm) would become uncreatable.
+ *  The parent is resolved, as seatbelt matches resolved paths. */
+const seatbeltDenyWrite = (xs: string[]): string[] =>
+  uniq(
+    uniq(xs).map((p) => {
+      if (existsSync(p)) return p;
+      try {
+        return join(realpathSync(dirname(p)), basename(p));
+      } catch {
+        return undefined;
+      }
+    }),
+  );
 /** bwrap cannot bind over a path inside a directory it cannot list ("Can't
  *  mkdir parents … Permission denied" — /run/containerd is drwx--x--x on a
  *  stock docker host), and that failure kills every sandboxed Bash call. Mask
@@ -205,15 +222,18 @@ export function buildClaudeRestrictions(
 
   const allowWrite = uniq([ctx.cwd, ctx.orgRoot, home, tmp, ...(cfg?.allowWrite ?? [])]);
   // #518 review (B1): the deps dir must exist to be denied (only existing
-  // paths are passed below), and its parent becomes a mount point so the
-  // role cannot rename ~/.monomind aside and plant a new deps dir.
+  // paths are passed below on Linux), and its parent becomes a mount point so
+  // the role cannot rename ~/.monomind aside and plant a new deps dir; the
+  // directories above a custom MONOMIND_HOME are among #527's
+  // operatorMountPoints. On macOS the SDK's seatbelt already denies
+  // unlinking every ancestor of a denied path (#526).
   const deps = protectableDepsRoot(env, home);
   // #522: an operator-chosen Claude Code the daemons run: its file is in
   // operatorPaths; the directories above it become mount points (below).
   const claudeAnchors = protectedClaudeBinary(env, home)?.dirs ?? [];
+  const platform = ctx.platform ?? process.platform;
   // Stubs first: with all of the cwd's in place, bwrap creates nothing there.
-  const missingStubs =
-    (ctx.platform ?? process.platform) === 'linux' ? ctx.holdStubs?.(allowWrite) : undefined;
+  const missingStubs = platform === 'linux' ? ctx.holdStubs?.(allowWrite) : undefined;
   const cwdClaude = join(ctx.cwd, '.claude');
   const cwdClaudeStubsHeld =
     !!missingStubs &&
@@ -277,7 +297,10 @@ export function buildClaudeRestrictions(
         }).filter((d) => underAnyRoot(d, allowWrite)),
         ...claudeAnchors.filter((d) => underAnyRoot(d, allowWrite)),
       ]),
-      denyWrite: existing(expanded.denyWrite),
+      denyWrite:
+        platform === 'darwin'
+          ? seatbeltDenyWrite(expanded.denyWrite)
+          : existing(expanded.denyWrite),
       denyRead: existing([
         ...(guard.level === 'none' ? gitDirs : []),
         runtimeDir(env),

@@ -427,3 +427,166 @@ export const OPTIONAL_DEPENDENCY_LOCKS = {
     },
   },
 } as const satisfies Record<OptionalDependencyName, unknown>;
+
+/** SHA-256 of one file inside an installed package. */
+export interface PinnedFile {
+  /** Relative to the package's directory. */
+  file: string;
+  sha256: string;
+}
+
+/** What monomind loads or runs from one optional dependency. */
+export interface CodePins {
+  /** The version these hashes belong to. */
+  version: string;
+  /** The file ensureOptionalDependency() imports. */
+  entry: PinnedFile;
+  /** Every other file of the package the entry can load (relative imports). */
+  modules?: PinnedFile[];
+  /** Native binaries the package spawns, by the platform package that
+   *  carries each one. */
+  binaries?: Record<string, PinnedFile>;
+}
+
+/**
+ * #526: SHA-256 of the code monomind loads from the trees above, checked
+ * once per process before the entry is imported and before the SDK can
+ * spawn its Claude binary (optional-deps-verify.ts). assertTrustedTree tells
+ * a foreign or group-writable tree from monomind's own, but not a tree
+ * planted by this same user; a planted file fails here. sdk.mjs is one
+ * bundle that imports only Node built-ins, so it and the platform binary
+ * are all the SDK runs. monofence-ai has no dependencies: its entry and
+ * the 15 other dist/*.js files it can import are all it runs. What is not pinned is listed, with the reason, in
+ * OPTIONAL_DEPENDENCIES_UNPINNED.
+ *
+ * Regenerate together with the lockfile, from the registry tarballs it
+ * names. For the SDK and each of its platform packages:
+ *   curl -sSLO <its "resolved" URL above>
+ *   echo "sha512-$(openssl dgst -sha512 -binary <tgz> | base64 -w0)"  # must equal its "integrity"
+ *   tar -xOzf <tgz> package/sdk.mjs | sha256sum   # the SDK's entry
+ *   tar -xOzf <tgz> package/claude | sha256sum    # package/claude.exe for win32-*
+ * and for monofence-ai, each dist/*.js file of its tarball:
+ *   tar -xzf <tgz> && (cd package && find dist -name '*.js' | xargs sha256sum)
+ * optional-deps-pins.test.ts checks these stay in step with the pins in
+ * optional-deps.ts and with the lockfile above.
+ */
+export const OPTIONAL_DEPENDENCY_CODE_PINS: Partial<Record<string, CodePins>> = {
+  '@anthropic-ai/claude-agent-sdk': {
+    version: '0.3.226',
+    entry: {
+      file: 'sdk.mjs',
+      sha256: '70c16db85d75e8aa46f558d35ab34138ec6f18d6e260f78e62e2cae4d24967a8',
+    },
+    binaries: {
+      '@anthropic-ai/claude-agent-sdk-darwin-arm64': {
+        file: 'claude',
+        sha256: '013a1cf17df5ff1dcc189d5d6fd3fdd5f097ddc3cd41aa9992e99805574febbe',
+      },
+      '@anthropic-ai/claude-agent-sdk-darwin-x64': {
+        file: 'claude',
+        sha256: '773b095876f13ddb8336bfae202a57c62e358b1882746f1d55e3680601a32c59',
+      },
+      '@anthropic-ai/claude-agent-sdk-linux-arm64': {
+        file: 'claude',
+        sha256: 'feb715ee066d02a400c9d83941592f11c8e8fa6628c1e3c14262bc529f950498',
+      },
+      '@anthropic-ai/claude-agent-sdk-linux-arm64-musl': {
+        file: 'claude',
+        sha256: '8c58e37c14e09f0be1b5b42e1fc4f409f1124ccc584a8633b99b7e8e63d79bd0',
+      },
+      '@anthropic-ai/claude-agent-sdk-linux-x64': {
+        file: 'claude',
+        sha256: '4e9bec1177ce9690e8bd988b710ac24105e70da428dd094c5adcbbe786a55555',
+      },
+      '@anthropic-ai/claude-agent-sdk-linux-x64-musl': {
+        file: 'claude',
+        sha256: 'd199d62f2ce2fca6138256f788ecd6157cacc40edb3b50ce22b8f974f816111a',
+      },
+      '@anthropic-ai/claude-agent-sdk-win32-arm64': {
+        file: 'claude.exe',
+        sha256: '6512422580a1f705301f7a1f6cebe436b207ed4f8a3fc23caf23295b7e8745bd',
+      },
+      '@anthropic-ai/claude-agent-sdk-win32-x64': {
+        file: 'claude.exe',
+        sha256: 'cec4e772e8237357554a8a5a86f821db9081e9fb05499bc4e5fd14b73f48708c',
+      },
+    },
+  },
+  'monofence-ai': {
+    version: '1.0.7',
+    entry: {
+      file: 'dist/index.js',
+      sha256: '9d70a9308b912e568f3de2114c5842f734d7bc7cff3b1fec12471b80ddf51a3b',
+    },
+    modules: [
+      {
+        file: 'dist/consensus.js',
+        sha256: 'a9f1a6518d3450bc3c2ebf86d506c4368eb39444dd804d866dd37c20c729d8c0',
+      },
+      {
+        file: 'dist/domain/entities/index.js',
+        sha256: 'ed485c74b616f0b06cdaeb16346e8bb1bbe4f1cc51e62ee3621e4caa6435efe6',
+      },
+      {
+        file: 'dist/domain/entities/threat.js',
+        sha256: 'ed3c2667487e4ecb0c6fdb667b1b08197627375cc472489bd43aaf99ca9335cc',
+      },
+      {
+        file: 'dist/domain/services/allowlist.js',
+        sha256: '8d8336b301a2bfaef3b152a44b73e5449841c2c43e7d4b5eb7675bea6b516671',
+      },
+      {
+        file: 'dist/domain/services/context-tracker.js',
+        sha256: '071f2fb9ae00b55f2e3ec7b4e7981b18fdb9e378a92473b5b35252ea49f2d8e3',
+      },
+      {
+        file: 'dist/domain/services/evasion-detector.js',
+        sha256: '857c8189dac99e4bbe9699319dd166478105c79170123dd8274b8e775787273a',
+      },
+      {
+        file: 'dist/domain/services/index.js',
+        sha256: '3e2bdb4c3a7cc0aa7a8fa9f0319bfa7f92d2f87f87f696fc1d2f92b6a325f597',
+      },
+      {
+        file: 'dist/domain/services/output-scanner.js',
+        sha256: 'eae307ae6df634c74a66859fc8d806afb7a0f9d00ac41dbbe1011cf59fd661ae',
+      },
+      {
+        file: 'dist/domain/services/threat-detection-service.js',
+        sha256: 'cdd3dd10e6ababd13853e488479a48e6ba1d0cee8886edd3cdcff5ef3a593135',
+      },
+      {
+        file: 'dist/domain/services/threat-learning-inmemory-store.js',
+        sha256: '0c19f2bf5f26cfbddeb9acaecf2493c76d799e8723cc590ed8c3c4c576e297e1',
+      },
+      {
+        file: 'dist/domain/services/threat-learning-service.js',
+        sha256: '9c95a61f6ea061234816f42350e8756e11f314993ed79a3f6b0902fb630e2885',
+      },
+      {
+        file: 'dist/domain/services/threat-patterns.js',
+        sha256: '6d270b5fc1be3cc3dea23160279698396dc46175610da5c6ebe3826993f977ec',
+      },
+      {
+        file: 'dist/facade.js',
+        sha256: '7f7fdbcc06f0a3410ad3169ae4f7c62ced3e491f54898f0a61aa48291d48e653',
+      },
+      {
+        file: 'dist/hooks/security-hook.js',
+        sha256: '91211476d372801b4b4e205097e11b4822d56bd11769ea8f3f5858ed1b7f86ce',
+      },
+      {
+        file: 'dist/singleton.js',
+        sha256: '4a39cc92ec0d087ccef7f07ecd86989734e18399fbbb1511354ae31d00b8f805',
+      },
+    ],
+  },
+};
+
+/** Optional dependencies loaded without code pins, each with the reason.
+ *  optional-deps-pins.test.ts fails for one that is in neither list. */
+export const OPTIONAL_DEPENDENCIES_UNPINNED: Record<string, string> = {
+  '@puppeteer/browsers':
+    'it loads its own dependency tree (about 30 packages) rather than one bundle, and only ' +
+    'downloads Chrome; the lockfile integrity and assertTrustedTree still apply',
+};

@@ -34,14 +34,21 @@ const {
 const { ensureManagedChrome, managedChromeDir, CHROME_BUILD_ID } = await import(
   '../browser/managed-chrome.js'
 );
-const { fakeNpm, HOST, notFound, SDK, writeFakeSdk } = await import(
+const { FAKE_PINS, fakeNpm, HOST, notFound, SDK, writeFakeSdk } = await import(
   './fixtures/optional-deps-fixture.js'
 );
 
 let home: string;
 let env: NodeJS.ProcessEnv;
 const log = vi.fn();
-const opts = () => ({ env, resolveOwn: notFound, log, host: HOST, runNpm: fakeNpm('npm').run });
+const opts = () => ({
+  env,
+  resolveOwn: notFound,
+  log,
+  host: HOST,
+  pins: FAKE_PINS,
+  runNpm: fakeNpm('npm').run,
+});
 const plantSdk = (marker = 'PLANTED CODE RAN') => {
   mkdirSync(depsRoot(env), { recursive: true, mode: 0o700 });
   writeFakeSdk(dependencyDir(SDK, env), marker);
@@ -86,10 +93,10 @@ describe('the deps dir is only loaded when monomind could have written it alone'
   it('refuses a symlink inside the entry that leads out of it', async () => {
     plantSdk();
     const pkg = join(dependencyDir(SDK, env), 'node_modules', SDK);
-    rmSync(join(pkg, 'index.js'));
+    rmSync(join(pkg, 'sdk.mjs'));
     const outside = join(home, 'evil.js');
     writeFileSync(outside, 'export const marker = "PLANTED CODE RAN";\n');
-    symlinkSync(outside, join(pkg, 'index.js'));
+    symlinkSync(outside, join(pkg, 'sdk.mjs'));
     await expect(ensureOptionalDependency(SDK, opts())).rejects.toThrow(/links outside it/);
   });
 
@@ -112,11 +119,11 @@ describe('the deps dir is only loaded when monomind could have written it alone'
   it('refuses a group- or other-writable file or directory', async () => {
     plantSdk();
     const pkg = join(dependencyDir(SDK, env), 'node_modules', SDK);
-    chmodSync(join(pkg, 'index.js'), 0o666);
+    chmodSync(join(pkg, 'sdk.mjs'), 0o666);
     await expect(ensureOptionalDependency(SDK, opts())).rejects.toThrow(
       /writable by group or others/,
     );
-    chmodSync(join(pkg, 'index.js'), 0o644);
+    chmodSync(join(pkg, 'sdk.mjs'), 0o644);
     chmodSync(depsRoot(env), 0o777);
     await expect(ensureOptionalDependency(SDK, opts())).rejects.toThrow(
       /writable by group or others/,
