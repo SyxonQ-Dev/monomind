@@ -7,7 +7,7 @@ import { pushMessage } from './cross-org.js';
 import { activeRoleCount, OrgDaemon, type RunningOrg } from './daemon.js';
 import { dispatchReadyTasks, queueDispatch } from './decisions.js';
 import { isEndpointRole } from './endpoint-roles.js';
-import { drainInbox, newMessageId, queueMessage } from './inbox.js';
+import { newMessageId, peekInbox, queueMessage, takeQueued } from './inbox.js';
 import type { OrgRole } from './types.js';
 
 /** #552: a deferred spawn re-checks budget closure right before it starts —
@@ -30,46 +30,46 @@ function cancelIfBudgetClosed(running: RunningOrg, role: OrgRole): boolean {
   return true;
 }
 
-/** Shared by scheduleDeferredSpawn and scheduleConcurrencyDeferredSpawn: spawn
- *  the role now that its gate has cleared, then deliver any messages queued
- *  for it while it was deferred (drained BEFORE spawning to avoid a race with
- *  messages arriving during the spawn window). */
-async function spawnNowAndDrain(
+/** Deliver the messages queued in the org inbox for `roleId` now that it is
+ *  live — only its own: messages for other roles stay queued (#557 review).
+ *  Endpoint entries stay queued (M2: delivered by POST), and a role that is
+ *  not live after all gets its messages put back. Called after every lazy
+ *  spawn that may follow a deferral: the deferred-spawn loops here and
+ *  dispatchReadyTasks's lazy spawn (e.g. after a reload reopens the org). */
+export async function deliverQueuedFor(
   daemon: OrgDaemon,
   name: string,
   running: RunningOrg,
-  role: OrgRole,
-  spawnRole: (role: OrgRole) => void,
+  roleId: string,
 ): Promise<void> {
-  const queued = drainInbox(daemon.root, name);
-  spawnRole(role);
+  if (isEndpointRole(running.def.roles.find((r) => r.id === roleId))) return;
+  const agent = running.agents.get(roleId);
+  if (!agent || agent.mailbox.isClosed) return;
+  const queued = takeQueued(daemon.root, name, (m) => m.toRole === roleId && !m.endpoint);
   for (const msg of queued) {
-    // M2: endpoint-role entries are delivered by POST — keep them queued.
-    if (msg.endpoint || isEndpointRole(running.def.roles.find((r) => r.id === msg.toRole))) {
-      queueMessage(daemon.root, name, { ...msg, endpoint: true });
+    const live = running.agents.get(roleId);
+    if (!live || live.mailbox.isClosed) {
+      queueMessage(daemon.root, name, msg);
       continue;
     }
-    const agent = running.agents.get(msg.toRole);
-    if (agent && !agent.mailbox.isClosed) {
-      running.bus.emit({
-        type: 'xorg',
-        from: msg.fromQualified,
-        to: `${name}:${msg.toRole}`,
-        subject: msg.subject,
-        msg: msg.body,
-        data: { messageId: msg.messageId ?? newMessageId() },
-      });
-      await pushMessage(
-        daemon,
-        name,
-        running,
-        msg.toRole,
-        msg.fromQualified,
-        msg.subject,
-        msg.body,
-        `inbox-${msg.ts}-${Math.random().toString(36).slice(2, 8)}`,
-      );
-    }
+    running.bus.emit({
+      type: 'xorg',
+      from: msg.fromQualified,
+      to: `${name}:${msg.toRole}`,
+      subject: msg.subject,
+      msg: msg.body,
+      data: { messageId: msg.messageId ?? newMessageId() },
+    });
+    await pushMessage(
+      daemon,
+      name,
+      running,
+      msg.toRole,
+      msg.fromQualified,
+      msg.subject,
+      msg.body,
+      `inbox-${msg.ts}-${Math.random().toString(36).slice(2, 8)}`,
+    );
   }
 }
 
@@ -162,54 +162,92 @@ export function scheduleBossRestart(daemon: OrgDaemon, name: string): void {
   (t as { unref?: () => void }).unref?.();
 }
 
-/** A role that failed its resource gate at boot isn't abandoned — keep polling
- *  for capacity in the background (bounded) and spawn it the moment resources
- *  free up, instead of silently running the org shorthanded for its whole life.
- *  Bails quietly if the org is stopped (or restarted under the same name)
- *  before capacity returns; `running` is compared by identity, not `name`,
- *  so a stale retry can never spawn into a different run. */
-export function scheduleDeferredSpawn(
+type Gate = 'concurrency' | 'resources';
+
+const GATE = {
+  concurrency: {
+    recovered: 'concurrency-recovered',
+    waiting: 'concurrency-limit',
+    abandoned: 'concurrency-abandoned',
+    freed: 'a concurrency slot freed up',
+    still: 'still at the max_concurrent_agents ceiling',
+  },
+  resources: {
+    recovered: 'resource-recovered',
+    waiting: 'resource-pressure',
+    abandoned: 'resource-abandoned',
+    freed: 'resources recovered',
+    still: 'still under pressure',
+  },
+} as const;
+
+/** One retry loop per deferred role (#551): record it in
+ *  running.deferredSpawns so it stays a known assignee — its tasks wait
+ *  (dag-dispatch.ts) and messages to it are queued (cross-org-deferred.ts) —
+ *  and a second deferral of the same role joins this loop. Each turn waits on
+ *  the gate; once it clears, the role spawns, its queued messages are
+ *  delivered and ready tasks go out, whichever caller deferred it. Before
+ *  spawning it re-checks budget closure (#552), and a closure that removed
+ *  its entry cancels it. Bails quietly if the org is stopped (or restarted
+ *  under the same name); `running` is compared by identity, not `name`, so a
+ *  stale retry can never spawn into a different run. */
+function runDeferredSpawn(
   daemon: OrgDaemon,
   name: string,
   running: RunningOrg,
   role: OrgRole,
   spawnRole: (role: OrgRole) => void,
+  gate: Gate,
+  maxAttempts: number,
+  waitTurn: () => Promise<{ ok: boolean; reason?: string }>,
 ): void {
-  const MAX_ATTEMPTS = 6; // ~30 min of retrying before giving up loudly
+  const deferred = (running.deferredSpawns ??= new Map());
+  if (deferred.has(role.id)) return;
+  const entry = { role, gate, noted: new Set<string>() };
+  deferred.set(role.id, entry);
+  const stillDeferred = (): boolean => deferred.get(role.id) === entry;
+  const words = GATE[gate];
   (async () => {
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      const waited = await waitForCapacity(5 * 60_000);
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const waited = await waitTurn();
       if (daemon.orgs.get(name) !== running) return; // org stopped/restarted — abandon quietly
-      if (cancelIfBudgetClosed(running, role)) return;
+      if (!stillDeferred()) return; // cancelled — e.g. the org-wide budget closed (#552)
+      if (cancelIfBudgetClosed(running, role)) {
+        deferred.delete(role.id);
+        return;
+      }
       if (waited.ok) {
         running.bus.emit({
           type: 'audit',
           from: role.id,
-          reason: 'resource-recovered',
-          msg: `resources recovered after ${attempt} retr${attempt === 1 ? 'y' : 'ies'} — spawning deferred role "${role.id}"`,
+          reason: words.recovered,
+          msg: `${words.freed} after ${attempt} retr${attempt === 1 ? 'y' : 'ies'} — spawning deferred role "${role.id}"`,
         });
-        // Drain messages queued while the role was deferred BEFORE spawning
-        // to prevent race condition where messages arrive during spawn window
-        await spawnNowAndDrain(daemon, name, running, role, spawnRole);
+        deferred.delete(role.id);
+        spawnRole(role);
+        await deliverQueuedFor(daemon, name, running, role.id);
+        dispatchReadyTasks(daemon, name, running);
         return;
       }
       running.bus.emit({
         type: 'audit',
         from: role.id,
-        reason: 'resource-pressure',
-        msg: `still under pressure (attempt ${attempt}/${MAX_ATTEMPTS}) — retrying "${role.id}" spawn: ${waited.reason}`,
+        reason: words.waiting,
+        msg: `${words.still} (attempt ${attempt}/${maxAttempts}) — retrying "${role.id}" spawn${waited.reason ? `: ${waited.reason}` : ''}`,
       });
     }
-    const missing = daemon.abandoned.get(name) ?? new Set<string>();
-    missing.add(role.id);
-    daemon.abandoned.set(name, missing);
-    daemon.persistState(name, 'running', running.run);
-    running.bus.emit({
-      type: 'audit',
-      from: role.id,
-      reason: 'resource-abandoned',
-      msg: `giving up spawning "${role.id}" after ${MAX_ATTEMPTS} retries — org will run without this role until manually restarted`,
-    });
+    if (!stillDeferred()) return;
+    deferred.delete(role.id);
+    giveUpDeferral(
+      daemon,
+      name,
+      running,
+      role,
+      words.abandoned,
+      gate === 'concurrency'
+        ? `the org stayed at its max_concurrent_agents ceiling (${running.def.run_config.max_concurrent_agents}) for ${maxAttempts} checks`
+        : `the host stayed under resource pressure for ${maxAttempts} checks`,
+    );
   })().catch((err) =>
     console.error(
       `org ${name}: deferred spawn of "${role.id}" failed:`,
@@ -218,24 +256,76 @@ export function scheduleDeferredSpawn(
   );
 }
 
+/** A deferral that ran out of retries: the role goes back to pendingRoles (a
+ *  later task or message defers it again), the tasks waiting on it are failed
+ *  with the reason instead of sitting 'ready' forever, the abandonment is
+ *  persisted to the org state, and the coordinator is told — also when only
+ *  queued messages were waiting (they stay queued for when it starts). */
+function giveUpDeferral(
+  daemon: OrgDaemon,
+  name: string,
+  running: RunningOrg,
+  role: OrgRole,
+  reason: string,
+  cause: string,
+): void {
+  if (!running.agents.has(role.id)) (running.pendingRoles ??= new Map()).set(role.id, role);
+  const why = `"${role.id}" could not start: ${cause}`;
+  const failed: string[] = [];
+  for (const t of running.taskDag?.all() ?? []) {
+    if (t.assignee !== role.id || t.status !== 'ready') continue;
+    running.taskDag!.fail(t.id, `not started — ${why}`);
+    failed.push(t.id);
+  }
+  const queued = peekInbox(daemon.root, name).filter((m) => m.toRole === role.id);
+  const missing = daemon.abandoned.get(name) ?? new Set<string>();
+  missing.add(role.id);
+  daemon.abandoned.set(name, missing);
+  daemon.persistState(name, 'running', running.run);
+  running.bus.emit({
+    type: 'audit',
+    from: role.id,
+    reason,
+    msg: `giving up spawning "${role.id}" (${cause}) — it stays pending for later work${failed.length ? `; failed its waiting task(s) ${failed.join(', ')}` : ''}${queued.length ? `; ${queued.length} queued message(s) wait for it` : ''}`,
+    data: { roleId: role.id, failedTasks: failed, queuedMessages: queued.length },
+  });
+  if ((!failed.length && !queued.length) || !running.bossRoleId || running.bossRoleId === role.id)
+    return;
+  const parts: string[] = [];
+  if (failed.length)
+    parts.push(
+      `its waiting task(s) ${failed.join(', ')} are marked failed and NOT being re-dispatched — reassign or re-file them`,
+    );
+  if (queued.length)
+    parts.push(
+      `${queued.length} message(s) to it (from ${[...new Set(queued.map((m) => m.fromQualified))].join(', ')}) stay queued and are delivered only once it starts`,
+    );
+  queueDispatch(running, running.bossRoleId, `[deferred spawn] ${why}, so ${parts.join('; ')}.`);
+}
+
+/** A role that failed its resource gate isn't abandoned — keep polling for
+ *  capacity in the background (bounded, ~30 min) and spawn it the moment
+ *  resources free up, instead of silently running the org shorthanded. Same
+ *  deferral as the concurrency one (runDeferredSpawn): the role stays a known
+ *  assignee and its tasks go out once it is up. */
+export function scheduleDeferredSpawn(
+  daemon: OrgDaemon,
+  name: string,
+  running: RunningOrg,
+  role: OrgRole,
+  spawnRole: (role: OrgRole) => void,
+): void {
+  runDeferredSpawn(daemon, name, running, role, spawnRole, 'resources', 6, () =>
+    waitForCapacity(5 * 60_000),
+  );
+}
+
 /** Bug 4: a role deferred because the org is already at its
  *  run_config.max_concurrent_agents ceiling isn't abandoned either — poll
  *  until a slot frees up (another role in this org ends, crashes, or is
  *  stopped — activeRoleCount() recomputes live each check, so nothing here
- *  needs to explicitly track "a slot freed") and spawn it then. Same shape as
- *  scheduleDeferredSpawn's host-resource-pressure case, just gated on the
- *  org's own concurrency cap instead of waitForCapacity(). Bails quietly if
- *  the org is stopped (or restarted under the same name) before a slot
- *  frees; `running` is compared by identity, not `name`, so a stale retry can
- *  never spawn into a different run.
- *
- *  #551: while it waits the role is recorded in running.concurrencyDeferred,
- *  so it stays a known assignee (its tasks wait, dag-dispatch.ts), and a
- *  second caller for the same role joins this loop instead of starting
- *  another. Once spawned, ready tasks go out whichever caller deferred it. If
- *  no slot frees in time, the role goes back to pendingRoles (a later task or
- *  message defers it again) and the tasks waiting on it are failed with the
- *  reason and the coordinator is told, instead of sitting 'ready' forever. */
+ *  needs to explicitly track "a slot freed") and spawn it then (~15 min at
+ *  5s intervals before giving up loudly). */
 export function scheduleConcurrencyDeferredSpawn(
   daemon: OrgDaemon,
   name: string,
@@ -243,73 +333,22 @@ export function scheduleConcurrencyDeferredSpawn(
   role: OrgRole,
   spawnRole: (role: OrgRole) => void,
 ): void {
-  const deferred = (running.concurrencyDeferred ??= new Map());
-  if (deferred.has(role.id)) return;
-  const entry = { role, noted: new Set<string>() };
-  deferred.set(role.id, entry);
-  // ~15 min at 5s intervals before giving up loudly
-  const MAX_ATTEMPTS = daemon.opts.concurrencyDeferMaxAttempts ?? 180;
-  const POLL_MS = daemon.opts.concurrencyDeferPollMs ?? 5_000;
-  const stillDeferred = (): boolean => deferred.get(role.id) === entry;
-  (async () => {
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+  const pollMs = daemon.opts.concurrencyDeferPollMs ?? 5_000;
+  runDeferredSpawn(
+    daemon,
+    name,
+    running,
+    role,
+    spawnRole,
+    'concurrency',
+    daemon.opts.concurrencyDeferMaxAttempts ?? 180,
+    async () => {
       await new Promise<void>((resolve) => {
-        const t = setTimeout(resolve, POLL_MS);
+        const t = setTimeout(resolve, pollMs);
         (t as { unref?: () => void }).unref?.();
       });
-      if (daemon.orgs.get(name) !== running) return; // org stopped/restarted — abandon quietly
-      if (!stillDeferred()) return; // cancelled — e.g. the org-wide budget closed (#552)
-      if (cancelIfBudgetClosed(running, role)) {
-        deferred.delete(role.id);
-        return;
-      }
       const limit = running.def.run_config.max_concurrent_agents;
-      if (limit == null || activeRoleCount(running) < limit) {
-        running.bus.emit({
-          type: 'audit',
-          from: role.id,
-          reason: 'concurrency-recovered',
-          msg: `a concurrency slot freed up after ${attempt} retr${attempt === 1 ? 'y' : 'ies'} — spawning deferred role "${role.id}"`,
-        });
-        deferred.delete(role.id);
-        await spawnNowAndDrain(daemon, name, running, role, spawnRole);
-        dispatchReadyTasks(daemon, name, running);
-        return;
-      }
-      running.bus.emit({
-        type: 'audit',
-        from: role.id,
-        reason: 'concurrency-limit',
-        msg: `still at the max_concurrent_agents ceiling (attempt ${attempt}/${MAX_ATTEMPTS}) — retrying "${role.id}" spawn`,
-      });
-    }
-    if (!stillDeferred()) return;
-    deferred.delete(role.id);
-    if (!running.agents.has(role.id)) (running.pendingRoles ??= new Map()).set(role.id, role);
-    const why = `"${role.id}" could not start: the org stayed at its max_concurrent_agents ceiling (${running.def.run_config.max_concurrent_agents}) for ${MAX_ATTEMPTS} checks`;
-    const failed: string[] = [];
-    for (const t of running.taskDag?.all() ?? []) {
-      if (t.assignee !== role.id || t.status !== 'ready') continue;
-      running.taskDag!.fail(t.id, `not started — ${why}`);
-      failed.push(t.id);
-    }
-    running.bus.emit({
-      type: 'audit',
-      from: role.id,
-      reason: 'concurrency-abandoned',
-      msg: `giving up spawning "${role.id}" after ${MAX_ATTEMPTS} retries at the max_concurrent_agents ceiling — it stays pending for later work${failed.length ? `; failed its waiting task(s) ${failed.join(', ')}` : ''}`,
-      data: { roleId: role.id, failedTasks: failed },
-    });
-    if (failed.length && running.bossRoleId && running.bossRoleId !== role.id)
-      queueDispatch(
-        running,
-        running.bossRoleId,
-        `[concurrency] ${why}, so its waiting task(s) ${failed.join(', ')} are marked failed and NOT being re-dispatched. Reassign them, re-file them once a role finishes, or raise run_config.max_concurrent_agents.`,
-      );
-  })().catch((err) =>
-    console.error(
-      `org ${name}: concurrency-deferred spawn of "${role.id}" failed:`,
-      err instanceof Error ? err.message : err,
-    ),
+      return { ok: limit == null || activeRoleCount(running) < limit };
+    },
   );
 }

@@ -294,7 +294,10 @@ async function startOrgInner(
     if (isEndpointRole(role)) return; // M2: no session, mailbox or slot
     // #552: nothing spawns while the org-wide run_config.budget_tokens ceiling
     // is spent — a reload that raises it clears this and re-spawns the roles.
+    // A caller that took the role out of pendingRoles doesn't lose it: it is
+    // set aside with the other unspawned roles, which the reload restores.
     if (running.orgBudgetClosed) {
+      if (!roleCheckpoint) (running.orgBudgetPendingRoles ??= new Map()).set(role.id, role);
       bus.emit({
         type: 'audit',
         from: role.id,
@@ -312,6 +315,7 @@ async function startOrgInner(
       { roleCheckpoint },
     );
     running.agents.set(role.id, runtime);
+    daemon.abandoned.get(name)?.delete(role.id); // a gave-up deferral that started after all
     running.roleSlots.set(role.id, {
       generation: roleCheckpoint?.generation ?? 0,
       phase: 'running',

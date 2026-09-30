@@ -5,12 +5,13 @@
  * org defines, and a deferral that gave up left the role's tasks 'ready' with
  * no owner.
  */
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OrgDaemon, type RunningOrg } from '../../src/orgrt/daemon.js';
 import { dagCreateTask } from '../../src/orgrt/decisions.js';
+import { peekInbox } from '../../src/orgrt/inbox.js';
 
 async function waitUntil(pred: () => boolean, timeoutMs = 5000): Promise<boolean> {
   const t0 = Date.now();
@@ -42,6 +43,7 @@ async function startAtCeiling(opts: { maxAttempts?: number } = {}) {
         { id: 'boss', title: 'Boss', type: 'boss', reports_to: null },
         { id: 'workerA', title: 'A', type: 'specialist', reports_to: 'boss' },
         { id: 'workerB', title: 'B', type: 'specialist', reports_to: 'boss' },
+        { id: 'workerC', title: 'C', type: 'specialist', reports_to: 'boss' },
       ],
     }),
   );
@@ -49,8 +51,9 @@ async function startAtCeiling(opts: { maxAttempts?: number } = {}) {
   const gate = new Promise<void>((resolve) => {
     freeSlot = resolve;
   });
+  const received = new Map<string, string[]>();
   const queryFn = ({ prompt, options }: any) => {
-    const roleId = /You are agent "([^"]+)"/.exec(options.systemPrompt)?.[1];
+    const roleId = /You are agent "([^"]+)"/.exec(options.systemPrompt)?.[1] ?? '?';
     if (roleId === 'workerA')
       return (async function* () {
         for await (const _m of prompt) {
@@ -58,8 +61,13 @@ async function startAtCeiling(opts: { maxAttempts?: number } = {}) {
           throw new Error('workerA crashes to free its slot');
         }
       })();
+    // Others record what reaches them and keep their slot.
     return (async function* () {
-      await new Promise(() => {});
+      for await (const m of prompt) {
+        const got = received.get(roleId) ?? [];
+        got.push(String(m.message.content));
+        received.set(roleId, got);
+      }
     })();
   };
   daemon = new OrgDaemon(root, {
@@ -73,7 +81,7 @@ async function startAtCeiling(opts: { maxAttempts?: number } = {}) {
   const running = await daemon.startOrg('o');
   await daemon.deliver('o', 'boss', 'workerA', 'task', 'go');
   expect(running.agents.has('workerA')).toBe(true);
-  return { d: daemon, running, freeSlot };
+  return { d: daemon, running, freeSlot, received };
 }
 
 const events = (running: RunningOrg, reason: string) =>
@@ -84,7 +92,7 @@ describe('#551 — max_concurrent_agents deferral keeps the assignee resolvable'
     const { d, running, freeSlot } = await startAtCeiling();
     const t1 = JSON.parse(dagCreateTask(d, 'o', 'boss', 'first', 'workerB', []));
     expect(running.agents.has('workerB')).toBe(false);
-    expect(running.concurrencyDeferred?.has('workerB')).toBe(true);
+    expect(running.deferredSpawns?.has('workerB')).toBe(true);
     // Later dispatch passes (another task for the same role, one for another).
     const t2 = JSON.parse(dagCreateTask(d, 'o', 'boss', 'second', 'workerB', []));
     dagCreateTask(d, 'o', 'boss', 'third', 'workerA', []);
@@ -107,7 +115,7 @@ describe('#551 — max_concurrent_agents deferral keeps the assignee resolvable'
           running.taskDag!.get(t2.id)?.status === 'running',
       ),
     ).toBe(true);
-    expect(running.concurrencyDeferred?.has('workerB')).toBe(false);
+    expect(running.deferredSpawns?.has('workerB')).toBe(false);
     expect(events(running, 'dispatch-assignee-unresolved')).toEqual([]);
   }, 15_000);
 
@@ -144,13 +152,65 @@ describe('#551 — max_concurrent_agents deferral keeps the assignee resolvable'
       failedTasks: [t1.id],
     });
     expect(running.pendingRoles?.has('workerB')).toBe(true);
-    expect(running.concurrencyDeferred?.has('workerB')).toBe(false);
+    expect(running.deferredSpawns?.has('workerB')).toBe(false);
     expect(await waitUntil(() => boxed.some((m) => m.includes(t1.id)), 2000)).toBe(true);
     expect(boxed.find((m) => m.includes(t1.id))).toMatch(/marked failed/);
 
     // Still a known role: new work for it defers again instead of being unresolved.
     dagCreateTask(d, 'o', 'boss', 'later', 'workerB', []);
-    expect(running.concurrencyDeferred?.has('workerB')).toBe(true);
+    expect(running.deferredSpawns?.has('workerB')).toBe(true);
     expect(events(running, 'dispatch-assignee-unresolved')).toEqual([]);
+  }, 15_000);
+
+  it('#557 review: a deferred role that spawns delivers only its own queued messages — others stay queued', async () => {
+    const { d, running, freeSlot, received } = await startAtCeiling();
+    const got = (role: string, text: string) =>
+      (received.get(role) ?? []).some((m) => m.includes(text));
+    expect(await d.deliver('o', 'boss', 'workerB', 'for-b', 'hello B')).toMatch(
+      /waiting for a concurrency slot/,
+    );
+    expect(await d.deliver('o', 'boss', 'workerC', 'for-c', 'hello C')).toMatch(
+      /waiting for a concurrency slot/,
+    );
+    // workerA crashes: one slot frees, workerB (deferred first) takes it.
+    freeSlot();
+    expect(await waitUntil(() => running.agents.has('workerB'))).toBe(true);
+    expect(await waitUntil(() => got('workerB', 'hello B'))).toBe(true);
+    await new Promise((r) => setTimeout(r, 150));
+    expect(running.agents.has('workerC')).toBe(false);
+    expect(peekInbox(d.root, 'o').map((m) => m.toRole)).toEqual(['workerC']);
+
+    // A slot for workerC: its message is still there for it.
+    running.def.run_config.max_concurrent_agents = 5;
+    expect(await waitUntil(() => running.agents.has('workerC'))).toBe(true);
+    expect(await waitUntil(() => got('workerC', 'hello C'))).toBe(true);
+    expect(got('workerB', 'hello C')).toBe(false);
+  }, 15_000);
+
+  it('#557 review: giving up on a deferral with only queued messages persists it and tells the coordinator', async () => {
+    const { d, running } = await startAtCeiling({ maxAttempts: 3 });
+    const boxed: string[] = [];
+    const box = running.agents.get('boss')!.mailbox;
+    const push = box.push.bind(box);
+    box.push = (m: string) => {
+      boxed.push(m);
+      return push(m);
+    };
+    await d.deliver('o', 'boss', 'workerB', 'for-b', 'hello B');
+    expect(await waitUntil(() => events(running, 'concurrency-abandoned').length > 0)).toBe(true);
+    expect(events(running, 'concurrency-abandoned')[0].data).toMatchObject({
+      failedTasks: [],
+      queuedMessages: 1,
+    });
+    const state = JSON.parse(
+      readFileSync(join(d.root, '.monomind/orgs/o/runtime.json'), 'utf8'),
+    );
+    expect(state.abandonedRoles).toContain('workerB');
+    expect(await waitUntil(() => boxed.some((m) => m.includes('[deferred spawn]')), 2000)).toBe(
+      true,
+    );
+    expect(boxed.find((m) => m.includes('[deferred spawn]'))).toMatch(
+      /1 message\(s\) to it \(from boss\)/,
+    );
   }, 15_000);
 });

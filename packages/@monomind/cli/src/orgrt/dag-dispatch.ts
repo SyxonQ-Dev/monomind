@@ -4,6 +4,7 @@ import { holdForBudgetClosedAssignee, releaseBudgetHolds } from './budget-closur
 import { activeRoleCount, type OrgDaemon, type RunningOrg } from './daemon.js';
 import { holdTaskLine, resolveHeld, settleHeld } from './dispatch-hold.js';
 import { taskTag } from './loadouts.js';
+import { deliverQueuedFor } from './scheduler-integration.js';
 import { resolveSessionScope } from './session-ledger.js';
 import type { OrgTask } from './task-dag.js';
 import { dispatchLine } from './task-provenance.js';
@@ -216,12 +217,12 @@ export function dispatchReadyTasks(daemon: OrgDaemon, org: string, running: Runn
           msg: `deferring lazy spawn of "${task.assignee}" for task ${task.id}: org is at its max_concurrent_agents ceiling (${concurrencyLimit})`,
           data: { taskId: task.id, assignee: task.assignee },
         });
-        // #551: the role stays resolvable (running.concurrencyDeferred) and
+        // #551: the role stays resolvable (running.deferredSpawns) and
         // the deferred spawn dispatches its ready tasks once it is up.
         daemon.scheduleConcurrencyDeferredSpawn(org, running, pending, (role) =>
           running.spawnRole?.(role),
         );
-        running.concurrencyDeferred?.get(task.assignee)?.noted.add(task.id);
+        running.deferredSpawns?.get(task.assignee)?.noted.add(task.id);
         continue;
       }
       // spawnRole registers the runtime synchronously, so the agent is either
@@ -240,7 +241,10 @@ export function dispatchReadyTasks(daemon: OrgDaemon, org: string, running: Runn
           msg: `task ${task.id} dispatched to ${task.assignee}`,
           data: { taskId: task.id, assignee: task.assignee },
         });
-      } else {
+        // Messages queued for it while it could not start — deferred, or held
+        // back by a budget closure a reload has since lifted.
+        void deliverQueuedFor(daemon, org, running, task.assignee);
+      } else if (!holdForBudgetClosedAssignee(running, task)) {
         running.bus.emit({
           type: 'audit',
           from: 'dag',
@@ -249,17 +253,21 @@ export function dispatchReadyTasks(daemon: OrgDaemon, org: string, running: Runn
           data: { taskId: task.id, assignee: task.assignee },
         });
       }
-    } else if (running.concurrencyDeferred?.has(task.assignee)) {
-      // #551: its lazy spawn is waiting for a max_concurrent_agents slot — the
-      // task waits 'ready' and goes out once the role is up. Said once per task.
-      const { noted } = running.concurrencyDeferred.get(task.assignee)!;
+    } else if (running.deferredSpawns?.has(task.assignee)) {
+      // #551: its lazy spawn is waiting for a max_concurrent_agents slot or for
+      // host resources — the task waits 'ready' and goes out once the role is
+      // up. Said once per task.
+      const { noted, gate } = running.deferredSpawns.get(task.assignee)!;
       if (noted.has(task.id)) continue;
       noted.add(task.id);
       running.bus.emit({
         type: 'audit',
         from: task.assignee,
-        reason: 'concurrency-limit',
-        msg: `task ${task.id} waiting — "${task.assignee}" is deferred by max_concurrent_agents (${running.def.run_config.max_concurrent_agents}) and starts when a slot frees`,
+        reason: gate === 'concurrency' ? 'concurrency-limit' : 'resource-pressure',
+        msg:
+          gate === 'concurrency'
+            ? `task ${task.id} waiting — "${task.assignee}" is deferred by max_concurrent_agents (${running.def.run_config.max_concurrent_agents}) and starts when a slot frees`
+            : `task ${task.id} waiting — "${task.assignee}" is deferred by host resource pressure and starts when resources free`,
         data: { taskId: task.id, assignee: task.assignee },
       });
     } else {

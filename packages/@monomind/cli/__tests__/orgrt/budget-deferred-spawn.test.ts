@@ -9,10 +9,14 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { OrgDaemon, type RunningOrg } from '../../src/orgrt/daemon.js';
+import { activeRoleCount, OrgDaemon, type RunningOrg } from '../../src/orgrt/daemon.js';
 import { dagCreateTask } from '../../src/orgrt/decisions.js';
 
-function writeOrg(root: string, budgetTokens: number): void {
+function writeOrg(
+  root: string,
+  budgetTokens: number,
+  opts: { maxConcurrent?: number; extraRoles?: string[]; runConfig?: object } = {},
+): void {
   mkdirSync(join(root, '.monomind/orgs'), { recursive: true });
   const role = (id: string) => ({
     id,
@@ -27,17 +31,25 @@ function writeOrg(root: string, budgetTokens: number): void {
     JSON.stringify({
       name: 'o',
       goal: 'g',
-      run_config: { budget_tokens: budgetTokens, max_concurrent_agents: 2 },
-      roles: ['boss', 'workerA', 'workerB', 'workerC'].map(role),
+      run_config: {
+        budget_tokens: budgetTokens,
+        max_concurrent_agents: opts.maxConcurrent ?? 2,
+        ...opts.runConfig,
+      },
+      roles: ['boss', 'workerA', 'workerB', 'workerC', ...(opts.extraRoles ?? [])].map(role),
     }),
   );
 }
 
 // A message's input tokens are read from its text: the largest `tok=<n>` in
 // it (a coalesced turn-end nudge can repeat an earlier task's title).
-const tokQuery = ({ prompt }: any) =>
+const received = new Map<string, string[]>();
+const got = (role: string, text: string) => (received.get(role) ?? []).some((m) => m.includes(text));
+const tokQuery = ({ prompt, options }: any) =>
   (async function* () {
+    const roleId = /You are agent "([^"]+)"/.exec(options.systemPrompt)?.[1] ?? '?';
     for await (const m of prompt) {
+      received.set(roleId, [...(received.get(roleId) ?? []), String(m.message.content)]);
       const toks = [...String(m.message.content).matchAll(/tok=(\d+)/g)].map((x) => Number(x[1]));
       const tok = Math.max(1, ...toks);
       yield { type: 'assistant', message: { content: [{ type: 'text', text: 'ok' }] } };
@@ -73,6 +85,7 @@ afterEach(async () => {
  *  defers its spawn. */
 async function startWithDeferredWorkerB() {
   const root = mkdtempSync(join(tmpdir(), 'budget-deferred-spawn-'));
+  received.clear();
   writeOrg(root, 1000);
   daemon = new OrgDaemon(root, {
     queryFn: tokQuery as any,
@@ -86,20 +99,23 @@ async function startWithDeferredWorkerB() {
   expect(running.agents.has('workerA')).toBe(true);
   expect(await waitUntil(() => running.taskDag!.get(a1.id)?.status === 'running')).toBe(true);
   const b = JSON.parse(dagCreateTask(daemon, 'o', 'boss', 'b work tok=5', 'workerB', []));
-  expect(running.concurrencyDeferred?.has('workerB')).toBe(true);
+  expect(running.deferredSpawns?.has('workerB')).toBe(true);
   return { root, d: daemon, running, bTask: b.id as string };
 }
 
 describe('#552 — budget closure cancels deferred lazy spawns', () => {
   it('a spawn deferred by max_concurrent_agents does not start after the org-wide ceiling closes the org', async () => {
     const { root, d, running, bTask } = await startWithDeferredWorkerB();
+    expect(await d.deliver('o', 'boss', 'workerB', 'note', 'hello B')).toMatch(/queued/);
     dagCreateTask(d, 'o', 'boss', 'spend tok=1200', 'workerA', []);
     expect(await waitUntil(() => events(running, 'org-budget-exhausted').length === 1)).toBe(true);
-    // The closure frees workerA's slot; the deferred loop polls every 30ms.
-    expect(
-      await waitUntil(() => running.agents.get('workerA')?.status !== 'running', 3000),
-    ).toBe(true);
-    await new Promise((r) => setTimeout(r, 300));
+    // The closure frees the slots: from here on nothing but the closure
+    // stops the deferred loop (polling every 30ms) from spawning workerB.
+    expect(await waitUntil(() => activeRoleCount(running) < 2, 3000)).toBe(true);
+    const polls = events(running, 'concurrency-limit').length;
+    await new Promise((r) => setTimeout(r, 400)); // > 10 poll intervals with a free slot
+    expect(activeRoleCount(running)).toBeLessThan(2);
+    expect(events(running, 'concurrency-limit').length).toBe(polls); // the loop is gone
 
     expect(running.agents.has('workerB')).toBe(false);
     expect(events(running, 'concurrency-recovered')).toEqual([]);
@@ -115,13 +131,45 @@ describe('#552 — budget closure cancels deferred lazy spawns', () => {
     );
     expect(events(running, 'dispatch-assignee-unresolved')).toEqual([]);
 
-    // A reload that raises the ceiling brings it back: its task is released
-    // and its spawn deferred again (boss and workerA are respawned at the cap).
-    writeOrg(root, 100_000);
+    // A reload that is not enough keeps it closed; its held task gets the
+    // new numbers although workerB never spawned.
+    writeOrg(root, 1100);
+    d.reloadOrgDef('o');
+    expect(running.taskDag!.get(bTask)?.blockedReason).toMatch(/\(\d+ \/ 1100\)/);
+
+    // A reload that raises the ceiling brings it back: dispatch spawns it,
+    // hands it its task and delivers the message queued while it waited.
+    writeOrg(root, 100_000, { maxConcurrent: 5 });
     d.reloadOrgDef('o');
     expect(running.orgBudgetClosed).toBeUndefined();
-    expect(running.taskDag!.get(bTask)?.status).toBe('ready');
-    expect(running.concurrencyDeferred?.has('workerB')).toBe(true);
+    expect(running.agents.has('workerB')).toBe(true);
+    expect(running.taskDag!.get(bTask)?.status).toBe('running');
+    expect(await waitUntil(() => got('workerB', 'hello B'))).toBe(true);
+  }, 20_000);
+
+  it('a role a reload adds while the org is closed is set aside, and its task is held, not unresolved', async () => {
+    const { root, d, running } = await startWithDeferredWorkerB();
+    dagCreateTask(d, 'o', 'boss', 'spend tok=1200', 'workerA', []);
+    expect(await waitUntil(() => events(running, 'org-budget-exhausted').length === 1)).toBe(true);
+    writeOrg(root, 1100, { extraRoles: ['workerD'] });
+    d.reloadOrgDef('o');
+    expect(running.pendingRoles?.has('workerD')).toBe(false);
+    expect(running.orgBudgetPendingRoles?.has('workerD')).toBe(true);
+    const t = JSON.parse(dagCreateTask(d, 'o', 'boss', 'd work', 'workerD', []));
+    expect(running.taskDag!.get(t.id)?.status).toBe('blocked');
+    expect(running.taskDag!.get(t.id)?.blockedReason).toMatch(/org-wide budget_tokens exhausted/);
+    expect(events(running, 'dispatch-assignee-unresolved')).toEqual([]);
+
+    // spawnRole refusing a role a caller took out of pendingRoles keeps it too.
+    const workerC = running.def.roles.find((r) => r.id === 'workerC')!;
+    running.pendingRoles?.delete('workerC');
+    running.spawnRole!(workerC);
+    expect(running.orgBudgetPendingRoles?.has('workerC')).toBe(true);
+
+    writeOrg(root, 100_000, { maxConcurrent: 6, extraRoles: ['workerD'] });
+    d.reloadOrgDef('o');
+    expect(running.agents.has('workerD')).toBe(true);
+    expect(running.taskDag!.get(t.id)?.status).toBe('running');
   }, 20_000);
 
   it('spawnRole refuses while the org-wide ceiling is spent', async () => {
@@ -154,6 +202,50 @@ describe('#552 — budget closure cancels deferred lazy spawns', () => {
       ),
     ).toBe(true);
     expect(spawned).toEqual([]);
-    expect(running.concurrencyDeferred?.has('workerC')).toBe(false);
+    expect(running.deferredSpawns?.has('workerC')).toBe(false);
+  }, 20_000);
+});
+
+describe('#557 review — budget closure during a role replacement', () => {
+  it('the ceiling closing while the replacement starts stops it instead of publishing it', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'budget-respawn-'));
+    received.clear();
+    writeOrg(root, 1000, {
+      maxConcurrent: 4,
+      runConfig: { max_role_respawns: 1, respawn_start_timeout_ms: 2000 },
+    });
+    daemon = new OrgDaemon(root, { queryFn: tokQuery as any, forward: false, stopWaitMs: 200 });
+    const d = daemon;
+    const running = await d.startOrg('o');
+    const a1 = JSON.parse(dagCreateTask(d, 'o', 'boss', 'a work tok=5', 'workerA', []));
+    expect(await waitUntil(() => running.taskDag!.get(a1.id)?.status === 'running')).toBe(true);
+    const oldRuntime = running.agents.get('workerA')!;
+    const starts = () =>
+      running.busEvents().filter((e) => e.from === 'workerA' && e.msg === 'session starting').length;
+    const startsBefore = starts();
+
+    const pending = d.respawnRole('o', 'boss', {
+      roleId: 'workerA',
+      reason: 'test',
+      briefing: 'carry on',
+    });
+    // The replacement incarnation is up and inside its start window...
+    expect(await waitUntil(() => starts() > startsBefore, 5000)).toBe(true);
+    // ...when the org-wide ceiling closes the org.
+    dagCreateTask(d, 'o', 'boss', 'spend tok=1200', 'boss', []);
+    expect(await waitUntil(() => events(running, 'org-budget-exhausted').length === 1)).toBe(true);
+
+    const receipt = await pending;
+    expect(receipt.success).toBe(false);
+    expect(receipt.error).toMatch(/replacement cancelled: org-wide budget_tokens exhausted/);
+    expect(events(running, 'role-respawned')).toEqual([]);
+    expect(events(running, 'role-respawn-cancelled')).toHaveLength(1);
+    // The closed old incarnation stays; the role is closed like the others and
+    // its task is held with the reason.
+    expect(running.agents.get('workerA')).toBe(oldRuntime);
+    expect(oldRuntime.mailbox.isClosed).toBe(true);
+    expect(running.orgBudgetClosed?.has('workerA')).toBe(true);
+    expect(running.taskDag!.get(a1.id)?.status).toBe('blocked');
+    expect(running.taskDag!.get(a1.id)?.blockedReason).toMatch(/org-wide budget_tokens exhausted/);
   }, 20_000);
 });

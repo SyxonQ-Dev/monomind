@@ -42,7 +42,7 @@ export function isDeferredSpawn(
   role: string,
 ): boolean {
   // #551: a spawn waiting on max_concurrent_agents, whichever path deferred it.
-  if (org?.concurrencyDeferred?.has(role)) return true;
+  if (org?.deferredSpawns?.has(role)) return true;
   const key = deferredKey(orgName, role);
   const deferredAt = deferredSpawns.get(key);
   if (deferredAt === undefined) return false;

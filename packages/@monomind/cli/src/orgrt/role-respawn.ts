@@ -1,5 +1,6 @@
 // packages/@monomind/cli/src/orgrt/role-respawn.ts
 // Extracted from daemon.ts — org_respawn_role: mid-run replacement of one role.
+import { holdReplacedRoleForBudget, orgCeilingDetail } from './budget-closure.js';
 import type { OrgDaemon } from './daemon.js';
 import { resolveRoleProvider } from './provider.js';
 import {
@@ -183,6 +184,29 @@ export async function respawnRole(
       error: `org "${name}" stopped or restarted during replacement`,
     });
   };
+  // The budget closed during the replacement: keep the (closed) old
+  // incarnation, hold its tasks and report the replacement as not done.
+  const cancelForBudget = (detail: string): RespawnReceipt => {
+    // Mail swept out of the old mailbox rides in queuedDuringSwap; what is
+    // still in the old mailbox needn't. A reopen delivers the rest
+    // (budget-closure.ts respawnFromCheckpoint).
+    const inBox = new Set(slot.runtime!.mailbox.serialize().queue);
+    slot.queuedDuringSwap = slot.queuedDuringSwap.filter((m) => !inBox.has(m));
+    slot.phase = 'running';
+    running.respawning.delete(input.roleId);
+    holdReplacedRoleForBudget(running, input.roleId, detail);
+    running.bus.emit({
+      type: 'audit',
+      from: callerId,
+      reason: 'role-respawn-cancelled',
+      msg: `role "${input.roleId}" not replaced: ${detail}`,
+      data: { roleId: input.roleId },
+    });
+    return buildRespawnReceipt(slot, maxRespawns, false, {
+      roleId: input.roleId,
+      error: `replacement cancelled: ${detail}`,
+    });
+  };
   const oldRuntime = slot.runtime!;
   const sweptQueue = oldRuntime.mailbox.beginDrain();
   slot.queuedDuringSwap.push(...sweptQueue);
@@ -234,6 +258,11 @@ export async function respawnRole(
     costUsd: slot.retiredUsage.costUsd + (oldRuntime.metrics.costUsd ?? 0),
   };
 
+  // #557 review: the org-wide ceiling may have closed while the old
+  // incarnation drained — don't start a replacement past it. (A role closed
+  // for its own budget may be replaced — e.g. with a larger budgetTokens.)
+  if (running.orgBudgetClosed) return cancelForBudget(orgCeilingDetail(running));
+
   // Step 10: spawn generation N+1 (generation already bumped in step 6).
   const { runtime: newRuntime, abort: newAbort } = daemon.spawnRoleIncarnation(
     name,
@@ -274,6 +303,17 @@ export async function respawnRole(
   if (!stillOwned()) {
     newAbort.abort();
     return abandonedReceipt();
+  }
+  // #557 review: the org-wide ceiling may have closed during the start
+  // window — enforceOrgBudget only closes runtimes in `agents`, so publishing
+  // now would run the replacement past "closing all roles". Stop it instead.
+  // (The replacement closing on its OWN budget in that window needs nothing
+  // here: its session closed its mailbox and the budget-exhausted bus hook
+  // already held the role's tasks.)
+  if (running.orgBudgetClosed) {
+    newAbort.abort();
+    newRuntime.mailbox.close('token-budget');
+    return cancelForBudget(orgCeilingDetail(running));
   }
   if (!ready) {
     // Step 12: rollback — one attempt with the prior effective config.

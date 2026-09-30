@@ -89,12 +89,16 @@ export interface RunningOrg {
   busEvents: () => BusEvent[];
   /** Roles not yet spawned — spawned lazily on first message. */
   pendingRoles?: Map<string, OrgRole>;
-  /** #551: roles taken out of pendingRoles whose lazy spawn waits for a
-   *  run_config.max_concurrent_agents slot (scheduler-integration.ts's
-   *  scheduleConcurrencyDeferredSpawn, one retry loop per role). Still a known
-   *  assignee: its tasks wait here instead of reading as unresolved. `noted`
-   *  holds the task ids already audited as waiting. */
-  concurrencyDeferred?: Map<string, { role: OrgRole; noted: Set<string> }>;
+  /** #551: roles taken out of pendingRoles whose lazy spawn waits — for a
+   *  run_config.max_concurrent_agents slot or for host resources
+   *  (scheduler-integration.ts, one retry loop per role). Still a known
+   *  assignee: its tasks wait here instead of reading as unresolved, and
+   *  messages to it are queued. `noted` holds the task ids already audited as
+   *  waiting. */
+  deferredSpawns?: Map<
+    string,
+    { role: OrgRole; gate: 'concurrency' | 'resources'; noted: Set<string> }
+  >;
   /** Spawn a pending role on demand — or, with a checkpoint, resume one
    *  (budget-closure.ts reopens a budget-closed role this way). */
   spawnRole?: (role: OrgRole, roleCheckpoint?: RoleCheckpoint) => void;
