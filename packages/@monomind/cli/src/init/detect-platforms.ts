@@ -141,6 +141,8 @@ export interface PlatformChoice {
   source: 'detected' | 'fallback' | 'explicit';
   platforms: PlatformId[];
   detected: DetectedPlatform[];
+  /** `--skip-claude`: leave Claude Code out of the "Not written" hint (#525). */
+  skipClaude?: boolean;
 }
 
 /** The default selection: what is installed, else Claude Code alone. */
@@ -185,13 +187,18 @@ export function describePlatformChoice(choice: PlatformChoice): string[] {
         .join('; ')}`,
     );
   }
-  const others = INIT_PLATFORMS.filter((id) => !choice.platforms.includes(id));
+  const others = INIT_PLATFORMS.filter(
+    (id) => !choice.platforms.includes(id) && !(choice.skipClaude && id === 'claude'),
+  );
   if (others.length > 0) {
+    // `--all-platforms` would add Claude Code back, so it is no alternative
+    // after `--skip-claude`.
+    const allPlatforms = choice.skipClaude ? '' : ' or `monomind init --all-platforms --yes`';
     lines.push(
       `  Not written: ${names(others)}. Add them with \`monomind init --platforms ${[
         ...choice.platforms,
         ...others,
-      ].join(',')} --yes\` or \`monomind init --all-platforms --yes\`.`,
+      ].join(',')} --yes\`${allPlatforms}.`,
     );
   }
   return lines;

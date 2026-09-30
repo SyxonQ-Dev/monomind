@@ -124,6 +124,24 @@ export function resolveInitOptions(
     }
   }
 
+  // `--only-claude` already names the platform; another platform flag would
+  // be silently dropped (#525). `--target claude` just repeats it.
+  if (onlyClaude) {
+    const narrowing = [
+      requestedPlatforms !== undefined &&
+        (ctx.flags.platforms !== undefined ? '--platforms' : '--platform'),
+      requestedTarget !== undefined && requestedTarget !== 'claude' && '--target',
+      skipClaude && '--skip-claude',
+      ...legacyTargets.map((name) => `--${name}`),
+    ].filter(Boolean);
+    if (narrowing.length > 0) {
+      return {
+        ok: false,
+        message: `--only-claude cannot be combined with ${narrowing.join(', ')}`,
+      };
+    }
+  }
+
   // #420: with no flag naming platforms, write the installed ones plus the
   // ones this project already has (so `init --force` refreshes them).
   // `--all-platforms`, `--full`, `--skip-claude` (all minus Claude) and an
@@ -273,6 +291,11 @@ export function resolveInitOptions(
     options,
     platforms: platformChoice
       ? { ...platformChoice, platforms: selectedPlatforms }
-      : { source: 'explicit', platforms: selectedPlatforms, detected: [] },
+      : {
+          source: 'explicit',
+          platforms: selectedPlatforms,
+          detected: [],
+          ...(skipClaude && { skipClaude: true }),
+        },
   };
 }
