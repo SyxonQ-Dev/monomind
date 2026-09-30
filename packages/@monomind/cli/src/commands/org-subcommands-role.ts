@@ -17,6 +17,7 @@ import { ensureFullAccessGrantKey, signAccessAck } from '../orgrt/access-grant-k
 import { detectAgentContextMarker } from '../orgrt/agent-context.js';
 import { roleContextMarker, signOrgDef, verifyOrgDef } from '../orgrt/org-signature.js';
 import { runnerSpec } from '../orgrt/runner-registry.js';
+import { effectiveRoleRuntime } from '../orgrt/runner-specs.js';
 import { ORG_DIR, OrgDefSchema } from '../orgrt/types.js';
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
@@ -122,7 +123,9 @@ export const setAccessAction = async (ctx: CommandContext): Promise<CommandResul
     log(output.error(`Role "${roleId}" not found in org "${name}"`));
     return { success: false, message: 'role not found' };
   }
-  const runtimeId = role.runtime ?? def.runtime ?? 'claude';
+  // #567: the runner that hosts the role (provider.kind included), the one
+  // resolveRoleAccess checks at session start and the prompt below names.
+  const runtimeId = effectiveRoleRuntime(role.runtime, def.runtime, role.provider?.kind);
   if (!runnerSpec(runtimeId)?.supportsFullAccess) {
     log(
       output.error(
