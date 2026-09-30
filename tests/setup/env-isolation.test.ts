@@ -55,7 +55,7 @@ describe('useTestHome', () => {
     const home = join(base, 'use-home');
     try {
       for (const k of UNSET_KEYS) process.env[k] = '/real/home/elsewhere';
-      process.env.XDG_DATA_HOME = '/real/home/.local/share';
+      process.env.XDG_DATA_HOME = '/real/elsewhere/.local/share';
       useTestHome(home);
       expect(process.env.HOME).toBe(home);
       for (const [key, rel] of Object.entries(XDG_DIRS)) {
