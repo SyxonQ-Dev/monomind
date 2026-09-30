@@ -49,7 +49,6 @@ describe('MCP core-roster filter', () => {
     // Non-core categories stay unadvertised too.
     expect(names).not.toContain('browser_open');
     expect(names).not.toContain('github_pr_manage');
-    expect(names).not.toContain('monoswarm_init');
   });
 
   it('keeps the advertised schema payload under a byte budget', async () => {

@@ -27,7 +27,7 @@
 | [`costs`](#costs) | Per-role cost tracking |
 | [`inbox`](#inbox) | Deliver an inbound cross-org message (live or queued) |
 | [`flow`](#flow) | Export Mermaid message flow diagram |
-| [`questions`](#questions) | List pending ask_human questions |
+| [`questions`](#questions) | List pending ask_human questions (`questions dismiss` closes one without an answer) |
 | [`approvals`](#approvals) | List pending tool/action approval requests |
 | [`answer`](#answer) | Deliver answer to an ask_human question |
 | [`approve`](#approve) | Approve a pending tool/action approval |
@@ -414,18 +414,49 @@ monomind org questions <name> [--all] [--format json]
 
 | Flag | Purpose |
 |---|---|
-| `--all` | Include answered questions (shown with `✓` and the answer) |
+| `--all` | Include answered questions (shown with `✓` and the answer) and dismissed ones (`✗` and the reason) |
 | `--format json` | Print `{v, org, items}` |
 
 Questions are stored in `<org>/questions.json`. Each entry has a `questionId`, `role`,
 `question`, `ts` and `answer` (null while pending; answered entries add `answeredAt`
-and `resolvedBy`).
+and `resolvedBy`). A dismissed entry keeps `answer: null` and adds
+`state: "dismissed"`, `dismissedAt`, `dismissReason` (when given) and `resolvedBy`.
 
 ```text
 ❓ [q-1] 2026-09-21 14:13Z  coder: ship?
 ✓ [q-2] 2026-09-10 00:26Z  coder: old?
      ↳ no
+✗ [q-3] 2026-09-09 08:02Z  boss: which region?
+     ↳ dismissed: decided elsewhere
 ```
+
+### `questions dismiss`
+
+Close a pending question without an answer, for a question nobody will
+answer or one that no longer matters.
+
+```bash
+monomind org questions dismiss <name> <question-id> [--reason "<text>"] [--by <resolver>] [--format json]
+```
+
+- Marks the question dismissed in `questions.json`. A dismissed question no longer
+  holds the idle watchdog or `org_complete` (an open **blocking** question refuses
+  every `org_complete` except `partial` with blocker `human`).
+- The asking role gets a short note that no answer is coming, with the reason:
+  **live** into its mailbox while the org runs, **queued** in `inbox.jsonl` while it
+  is stopped (the org is not woken for it). A role that is no longer in the org
+  definition gets no note.
+- A running org records a `decision-resolved` audit event with `verdict: "dismissed"`,
+  the `reason`, and `delivery` (`live`, `queued` or `skipped`, with a `note` saying why
+  when skipped).
+- `--format json` prints `{v, org, question_id, role, delivery, dismissed, resolvedBy}`.
+- An unknown id, or a question that is already answered or dismissed, fails with a
+  message and exit code 1.
+- While a daemon runs the org, the dismissal goes only through it (with the operator
+  credential): if that daemon refuses it, nothing is recorded. Only an unreachable
+  daemon falls back to recording it in `questions.json`.
+- The dashboard's Human Input view has a **Dismiss** button next to **Answer**
+  (`POST /api/questions/dismiss`, same human-session auth as answering).
 
 ---
 
@@ -474,6 +505,13 @@ monomind org answer <name> <question-id> "<answer text>" [--by <resolver>]
 - `--by` is recorded as `resolvedBy` (default `human`; 1-128 printable characters).
 - **Live delivery** if the org is running.
 - **Queued to disk** if the org is stopped (consumed on next start).
+- If the daemon hosting this project's org refuses the answer (for example 403
+  without the operator credential), nothing is recorded or queued and the command
+  exits 1. Only an unreachable daemon falls back to the offline queue.
+- If the asking role is no longer in the org definition, the answer is recorded
+  (the question stops being pending) but not delivered or queued; a running org
+  notes that in its `decision-resolved` audit event (`delivery: "skipped"`).
+- A dismissed question cannot be answered (see [`questions dismiss`](#questions-dismiss)).
 
 ---
 
@@ -489,6 +527,10 @@ monomind org approve <name> <role> <action> [--request <apr-id>] [--by <resolver
   named by `--request`. `--by` is recorded as `resolvedBy` (default `human`).
 - **Live** through the hosting daemon when the org is running, otherwise written
   straight to `approvals.json`.
+- If the daemon hosting this project's org refuses the decision (for example 403
+  without the operator credential), nothing is written and the command exits 1.
+  Only an unreachable daemon falls back to writing `approvals.json`. The same holds
+  for `deny`, `gate-approve` and `gate-reject` (`gates.json`).
 
 ---
 
@@ -769,6 +811,21 @@ monomind org sign --all --check [--format json] [--project <dir>]
 | `--check` | Only report whether each org verifies. Never prompts, never signs, writes nothing (#558) |
 | `--project <dir>` | Use `<dir>` as the project root instead of the current directory. It is resolved to its real path and must hold `.monomind/orgs` |
 | `--expect-hash <hex>` | Sign only if the [signable hash](#the-signable-hash) about to be signed is `<hex>`; otherwise exit 1 and write nothing. With `--all`, repeat it as `<org>=<hex>`, once for every org |
+
+**Unknown options:** `org sign` rejects any option it does not know. It prints
+`org sign: unknown option --<name> — nothing signed.`, exits 2 and signs nothing, not even with
+`--yes`. Monomind builds before this change silently ignored an option they did not know, such as
+`--expect-hash`, and signed anyway.
+
+**Checking what this monomind supports:** `monomind --version --json` lists these capabilities
+(see [the Agent Exec Protocol](../agent-exec-protocol.md#2-capability-handshake)), so a tool can
+check before relying on a flag:
+
+| Capability | What it guarantees |
+|---|---|
+| `org-sign-check` | `--check` (text and `--format json`) and `--project <dir>` (#561) |
+| `org-sign-expect-hash` | `--expect-hash`, the `hash` in `--check --format json`, and the exit 2 on an unknown option |
+| `org-sign-review-json` | `org sign <org> --format json` prints the review as JSON and never signs |
 
 **Checking without signing:** `--check` is for tools that rewrite org files themselves, such as
 mono-agent. Such a tool verifies an org before its edit and, after writing, signs with `--yes`

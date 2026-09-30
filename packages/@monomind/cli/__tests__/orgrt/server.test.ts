@@ -338,6 +338,9 @@ describe('credential separation: agent (delivery) vs operator (approvals/gates)'
     const answer = await post('/api/answer-question', agentCred, { org: 'alpha', role: 'boss', questionId: 'q', answer: 'yes' });
     expect(answer.status).toBe(403);
 
+    const dismiss = await post('/api/dismiss-question', agentCred, { org: 'alpha', questionId: 'q' });
+    expect(dismiss.status).toBe(403);
+
     const human = await post('/api/human-message', agentCred, { org: 'alpha', role: 'boss', text: 'hi' });
     expect(human.status).toBe(403);
 

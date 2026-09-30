@@ -1,25 +1,10 @@
 /**
  * CLAUDE.md section generators: behavioral rules, coding principles, layout,
- * architecture and swarm/concurrency/execution rules.
+ * architecture and concurrency/agent execution rules.
  */
 
-import { MONOSWARM_AUTOPILOT_REMOVAL_VERSION } from '../deprecations.js';
 import { detectStackConventions } from './claudemd-detect.js';
 import type { InitOptions } from './types.js';
-
-// i-035: `monoswarm_init` writes a JSON state record and starts no process —
-// nothing links its state to Claude Code's Task agents. The templates used to
-// tell every project it "MUST initialize the monoswarm" before complex work;
-// this is the honest replacement, worded from the same disclosure this repo
-// already carries at .claude/agents/core/coordinator.md:105 and
-// packages/@monomind/cli/CLAUDE.md's `adaptive`/`hybrid` topology annotation.
-export const HONEST_MONOSWARM_SENTENCE =
-  "Monoswarm records topology, roster and votes in a state file; it starts no process, and Claude Code's Task-tool agents do the work.";
-
-// #418: monoswarm and autopilot are deprecated and removed in
-// MONOSWARM_AUTOPILOT_REMOVAL_VERSION (2.22.0). Headings stay as they are (renaming one needs a
-// RETIRED_GENERATED_HEADINGS entry); each monoswarm section carries this line.
-export const MONOSWARM_DEPRECATED_LINE = `DEPRECATED: the \`monoswarm\` and \`autopilot\` CLI commands and \`monoswarm_*\`/\`autopilot_*\` MCP tools are removed in ${MONOSWARM_AUTOPILOT_REMOVAL_VERSION}. Don't initialize a monoswarm; spawn agents with Claude Code's Task tool, or run an org with \`monomind org run\`.`;
 
 // --- Section Generators (each returns enforceable markdown) ---
 
@@ -94,32 +79,10 @@ export function concurrencyRules(): string {
 - ALWAYS spawn ALL agents in ONE message with full instructions via Claude Code's Task tool`;
 }
 
-export function swarmOrchestration(): string {
-  return `## Monoswarm Orchestration
-
-- ${MONOSWARM_DEPRECATED_LINE}
-- MUST spawn concurrent agents using Claude Code's Task tool
-- ${HONEST_MONOSWARM_SENTENCE}`;
-}
-
-export function antiDriftConfig(): string {
-  return `## Monoswarm Configuration & Anti-Drift
-
-- ${MONOSWARM_DEPRECATED_LINE} Topology and consensus settings are recorded only and change no behaviour.
-- ALWAYS use hierarchical topology for coding swarms
-- Keep maxAgents at 6-8 for tight coordination
-- Use specialized strategy for clear role boundaries
-- Use \`majority\` consensus for monoswarm
-- Run frequent checkpoints via \`post-task\` hooks
-- Keep shared memory namespace for all agents`;
-}
-
 export function autoStartProtocol(): string {
-  return `## Monoswarm Protocols & Routing
+  return `## Agent Spawning & Routing
 
-- ${MONOSWARM_DEPRECATED_LINE}
-
-### Auto-Start Monoswarm Protocol
+### Spawning Agents
 
 When the user requests a complex task, spawn agents in background and WAIT:
 
@@ -147,12 +110,11 @@ neither answers, these real agents are safe defaults:
 }
 
 export function executionRules(): string {
-  return `## Monoswarm Execution Rules
+  return `## Agent Execution Rules
 
-- ${MONOSWARM_DEPRECATED_LINE}
 - ALWAYS use \`run_in_background: true\` for all agent Task calls
 - ALWAYS put ALL agent Task calls in ONE message for parallel execution
 - After spawning, STOP — do NOT add more tool calls or check status
-- Never poll TaskOutput or check monoswarm status — trust agents to return
+- Never poll TaskOutput — trust agents to return
 - When agent results arrive, review ALL results before proceeding`;
 }

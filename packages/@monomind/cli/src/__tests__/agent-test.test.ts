@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isJsonTest, runAgentTestCommand } from '../commands/agent-test.js';
 import type { AgentMessage, AgentRunArgs, AgentRunner } from '../orgrt/agent-runner.js';
 import {
+  AGENT_TEST_MAX_TURNS,
   AGENT_TEST_PROMPT,
   type AgentTestOptions,
   agentTestExitCode,
@@ -65,12 +66,12 @@ const run = (runtime: string, runner: AgentRunner, over: Partial<AgentTestOption
   });
 
 describe('runAgentTest: turn setup', () => {
-  it('sends one ok-prompt turn: max turns 1, no tools, scoped, fresh temp cwd removed after', async () => {
+  it('sends one ok-prompt turn: max turns AGENT_TEST_MAX_TURNS (#564), no tools, scoped, fresh temp cwd removed after', async () => {
     const runner = mockRunner(okTurn('ok'));
     await run('claude', runner);
     expect(runner.calls).toHaveLength(1);
     const args = runner.calls[0];
-    expect(args.maxTurns).toBe(1);
+    expect(args.maxTurns).toBe(AGENT_TEST_MAX_TURNS);
     expect(args.tools).toEqual([]);
     expect(args.access).toBe('scoped');
     expect(args.cwd).toMatch(/monomind-agent-test-/);

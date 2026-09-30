@@ -1,5 +1,5 @@
 // Human-in-the-loop actions for the dashboard: approvals, decision gates,
-// ask_human answers and human chat messages for Org Runtime v2 orgs.
+// ask_human answers and dismissals, and human chat messages for Org Runtime v2 orgs.
 //
 // Same shape as the `monomind org approve|deny|gate-*|answer` commands
 // (commands/org-observe.ts): when a daemon hosts the org, the decision goes to
@@ -14,6 +14,12 @@ import path from 'node:path';
 // Compiled from orgrt/*.ts, like forwarder.js in routes-org-runs.mjs.
 import { lookupOrg, normalizeRoot, readOperatorCredential } from '../orgrt/broker.js';
 import { queueMessage } from '../orgrt/inbox.js';
+import {
+  closedQuestionReason,
+  dismissalNote,
+  isOpenQuestion,
+  roleRemovedFromOrgDef,
+} from '../orgrt/question-state.js';
 
 /** Recorded as resolvedBy on everything decided here (normalizeResolver-valid). */
 export const DASHBOARD_RESOLVER = 'human:dashboard';
@@ -270,8 +276,8 @@ export async function answerQuestion(root, org, questionId, answer) {
     (x) => x.questionId === questionId,
   );
   if (!q) throw new HilError(404, `question "${questionId}" not found for org "${org}"`);
-  if (q.answer !== null && q.answer !== undefined)
-    throw new HilError(409, `question "${questionId}" was already answered`);
+  const closed = closedQuestionReason(questionId, q);
+  if (closed) throw new HilError(409, closed);
   const live = await callDaemon(root, org, '/api/answer-question', {
     org,
     role: q.role,
@@ -279,20 +285,25 @@ export async function answerQuestion(root, org, questionId, answer) {
     answer,
     resolvedBy: DASHBOARD_RESOLVER,
   });
-  if (live) return { delivery: 'live', role: q.role };
+  if (live) return { delivery: live.delivery === 'skipped' ? 'skipped' : 'live', role: q.role };
   const fresh = readList(root, org, 'questions.json', 'questions');
   const freshQ = fresh.find((x) => x.questionId === questionId);
-  if (freshQ && freshQ.answer !== null && freshQ.answer !== undefined)
-    throw new HilError(409, `question "${questionId}" was answered meanwhile`);
+  if (freshQ && !isOpenQuestion(freshQ))
+    throw new HilError(409, `question "${questionId}" was answered or dismissed meanwhile`);
+  // #572: a role removed from the org definition never runs again — record
+  // the answer without queueing it for nobody.
+  const skipped = roleRemovedFromOrgDef(root, org, q.role);
   // Queue BEFORE marking answered (daemon.answerQuestion's rule): a failed
   // append must leave the question pending and answerable.
-  const queued = queueMessage(root, org, {
-    fromQualified: 'human',
-    toRole: q.role,
-    subject: `answer:${questionId}`,
-    body: `question: ${q.question}\n\nanswer: ${answer}`,
-    ts: Date.now(),
-  });
+  const queued =
+    skipped ||
+    queueMessage(root, org, {
+      fromQualified: 'human',
+      toRole: q.role,
+      subject: `answer:${questionId}`,
+      body: `question: ${q.question}\n\nanswer: ${answer}`,
+      ts: Date.now(),
+    });
   if (!queued) throw new HilError(500, 'could not queue the answer — it was NOT recorded, retry');
   const now = Date.now();
   const answered = { answer, answeredAt: now, resolvedBy: DASHBOARD_RESOLVER };
@@ -300,7 +311,51 @@ export async function answerQuestion(root, org, questionId, answer) {
     ? fresh.map((x) => (x.questionId === questionId ? { ...x, ...answered } : x))
     : [...fresh, { ...q, ...answered }];
   writeList(root, org, 'questions.json', 'questions', merged);
-  return { delivery: 'queued', role: q.role };
+  return { delivery: skipped ? 'skipped' : 'queued', role: q.role };
+}
+
+/** #572: close a pending question without an answer — live through the
+ *  daemon's operator-only route, else recorded here with a note queued for
+ *  the asking role (none for a role removed from the org definition). */
+export async function dismissQuestion(root, org, questionId, reason) {
+  const q = readList(root, org, 'questions.json', 'questions').find(
+    (x) => x.questionId === questionId,
+  );
+  if (!q) throw new HilError(404, `question "${questionId}" not found for org "${org}"`);
+  const closed = closedQuestionReason(questionId, q);
+  if (closed) throw new HilError(409, closed);
+  const live = await callDaemon(root, org, '/api/dismiss-question', {
+    org,
+    questionId,
+    ...(reason ? { reason } : {}),
+    resolvedBy: DASHBOARD_RESOLVER,
+  });
+  if (live) return { delivery: live.delivery || 'live', role: q.role };
+  const fresh = readList(root, org, 'questions.json', 'questions');
+  const freshQ = fresh.find((x) => x.questionId === questionId);
+  if (freshQ && !isOpenQuestion(freshQ))
+    throw new HilError(409, `question "${questionId}" was answered or dismissed meanwhile`);
+  // The note is best-effort; the dismissal is recorded either way.
+  const queued =
+    !roleRemovedFromOrgDef(root, org, q.role) &&
+    queueMessage(root, org, {
+      fromQualified: 'human',
+      toRole: q.role,
+      subject: `dismissed:${questionId}`,
+      body: dismissalNote(q.question, reason),
+      ts: Date.now(),
+    });
+  const dismissal = {
+    state: 'dismissed',
+    dismissedAt: Date.now(),
+    ...(reason ? { dismissReason: reason } : {}),
+    resolvedBy: DASHBOARD_RESOLVER,
+  };
+  const merged = freshQ
+    ? fresh.map((x) => (x.questionId === questionId ? { ...x, ...dismissal } : x))
+    : [...fresh, { ...q, ...dismissal }];
+  writeList(root, org, 'questions.json', 'questions', merged);
+  return { delivery: queued ? 'queued' : 'skipped', role: q.role };
 }
 
 /** Deliver `text` to `role`: live into its mailbox, else into the org's

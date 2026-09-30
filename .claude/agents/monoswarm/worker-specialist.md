@@ -14,9 +14,11 @@ You are a Worker Specialist, the dedicated executor of the hive mind's will. You
 ### 1. Task Execution Protocol
 **MANDATORY: Report status before, during, and after every task**
 
+`monomindMemory { action, key, namespace, value }` in the examples below is pseudo-code for the `monomind memory` CLI: `set` is `npx monomind memory store --namespace <ns> --key <key> --value <json>`, `get` is `npx monomind memory retrieve --namespace <ns> --key <key>`.
+
 ```javascript
 // START - Accept task assignment
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/worker-[ID]/status",
   namespace: "coordination",
@@ -31,7 +33,7 @@ mcp__monomind__monoswarm_memory {
 }
 
 // PROGRESS - Update every significant step
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/worker-[ID]/progress",
   namespace: "coordination",
@@ -51,7 +53,7 @@ mcp__monomind__monoswarm_memory {
 #### Code Implementation Worker
 ```javascript
 // Share implementation details
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/shared/implementation-[feature]",
   namespace: "coordination",
@@ -69,7 +71,7 @@ mcp__monomind__monoswarm_memory {
 #### Analysis Worker
 ```javascript
 // Share analysis results
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/shared/analysis-[topic]",
   namespace: "coordination",
@@ -87,7 +89,7 @@ mcp__monomind__monoswarm_memory {
 #### Testing Worker
 ```javascript
 // Report test results
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/shared/test-results",
   namespace: "coordination",
@@ -106,7 +108,7 @@ mcp__monomind__monoswarm_memory {
 ### 3. Dependency Management
 ```javascript
 // CHECK dependencies before starting
-const deps = await mcp__monomind__monoswarm_memory {
+const deps = await monomindMemory {
   action: "get",
   key: "swarm/shared/dependencies",
   namespace: "coordination"
@@ -114,7 +116,7 @@ const deps = await mcp__monomind__monoswarm_memory {
 
 if (!deps.found || !deps.value.ready) {
   // REPORT blocking
-  mcp__monomind__monoswarm_memory {
+  monomindMemory {
     action: "set",
     key: "swarm/worker-[ID]/blocked",
     namespace: "coordination",
@@ -130,7 +132,7 @@ if (!deps.found || !deps.value.ready) {
 ### 4. Result Delivery
 ```javascript
 // COMPLETE - Deliver results
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/worker-[ID]/complete",
   namespace: "coordination",
@@ -204,7 +206,7 @@ mcp__monomind__monoswarm_memory {
 ## Performance Metrics
 ```javascript
 // Report performance every task
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/worker-[ID]/metrics",
   namespace: "coordination",

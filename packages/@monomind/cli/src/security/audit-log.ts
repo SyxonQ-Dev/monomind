@@ -3,11 +3,9 @@
  * `.claude/helpers/audit-log-writer.cjs` (gates-handler.cjs's block/deny
  * decisions) and consumed by `monomind security audit`.
  *
- * Deliberately separate from `src/consensus/audit-writer.ts` (HMAC-signed,
- * built for monoswarm vote audits — no adversary model applies to a local
- * security log a user can already edit their own files in) and from the
- * high-volume general event log under `.git/monomind/events/` (so `clear`
- * can truncate this log without wiping unrelated debug telemetry).
+ * Deliberately separate from the high-volume general event log under
+ * `.git/monomind/events/` (so `clear` can truncate this log without wiping
+ * unrelated debug telemetry).
  *
  * Path resolution mirrors getMonomindDataRoot() — same canonical,
  * branch-agnostic, worktree-shared root every other monomind data file uses.

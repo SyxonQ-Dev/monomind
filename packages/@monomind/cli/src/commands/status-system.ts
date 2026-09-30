@@ -11,16 +11,8 @@ import {
 export async function getSystemStatus(cwd: string): Promise<{
   initialized: boolean;
   running: boolean;
-  swarm: {
-    id: string | null;
-    topology: string;
-    // monoswarm_status (mcp-tools/monoswarm-tools.ts) only ever returns a `status`
-    // string and an `agentCount` number for agents — never a health verdict,
-    // an uptime, or an active/idle breakdown. Those used to be read anyway
-    // and silently resolved to `undefined`/`NaN` in the display.
-    status: string;
-    agents: { total: number };
-  };
+  // Agents recorded in the agent store (agent_list excludes terminated ones).
+  agents: { total: number };
   mcp: {
     running: boolean;
     port: number | null;
@@ -51,17 +43,8 @@ export async function getSystemStatus(cwd: string): Promise<{
   const daemonRunning = isDaemonRunning(cwd);
 
   try {
-    // Get monoswarm status. monoswarm_status genuinely returns: monoswarmId,
-    // status, topology, maxAgents, agentCount, taskCount, config, createdAt,
-    // updatedAt — no `agents.{total,active,idle}` object, no `health`, no
-    // `uptime`. Reading those non-existent fields used to resolve to
-    // `undefined`/`NaN` in the rendered table instead of throwing.
-    const swarmStatus = await callMCPTool<{
-      monoswarmId?: string;
-      status?: string;
-      topology?: string;
-      agentCount?: number;
-    }>('monoswarm_status', { verbose: true });
+    // Agents recorded in the agent store.
+    const agentList = await callMCPTool<{ total?: number }>('agent_list', {});
 
     // Get MCP status
     let mcpStatus = { running: false, port: null as number | null, transport: 'stdio' };
@@ -123,12 +106,7 @@ export async function getSystemStatus(cwd: string): Promise<{
     return {
       initialized: true,
       running: daemonRunning,
-      swarm: {
-        id: swarmStatus.monoswarmId ?? null,
-        topology: swarmStatus.topology ?? 'none',
-        status: swarmStatus.status ?? 'no_swarm',
-        agents: { total: swarmStatus.agentCount ?? 0 },
-      },
+      agents: { total: agentList.total ?? 0 },
       mcp: mcpStatus,
       memory: {
         entries: memoryStatus.entries,
@@ -165,12 +143,7 @@ export async function getSystemStatus(cwd: string): Promise<{
     return {
       initialized: true,
       running: daemonRunning,
-      swarm: {
-        id: null,
-        topology: 'none',
-        status: 'no_swarm',
-        agents: { total: 0 },
-      },
+      agents: { total: 0 },
       mcp: { running: false, port: null, transport: 'stdio' },
       memory: {
         entries: 0,

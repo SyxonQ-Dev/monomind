@@ -9,7 +9,7 @@ import { utcDateMinute } from '../orgrt/reporting.js';
 import { ORG_DIR } from '../orgrt/types.js';
 import { output } from '../output.js';
 import type { CommandContext, CommandResult } from '../types.js';
-import { orgJson, printOrgJson, resolverFlag } from './org-observe-shared.js';
+import { hostingDaemonFor, orgJson, printOrgJson, resolverFlag } from './org-observe-shared.js';
 
 const log = (text: string): void => {
   console.log(text);
@@ -116,8 +116,9 @@ export const approvalsAction = async (
 /** `org approve <org> <role> <action>` — approve a pending tool/action approval */
 /** Shared by approveAction/denyAction: try the live daemon first (updates its
  *  in-memory state and notifies the waiting agent's mailbox immediately), and
- *  fall back to writing approvals.json directly when the org isn't running or
- *  the daemon is unreachable — mirrors answerAction's live-then-offline shape. */
+ *  fall back to writing approvals.json directly only when no daemon hosts this
+ *  project's org or it is unreachable. A refusal from the daemon fails with
+ *  nothing recorded (see hostingDaemonFor). */
 async function resolveApproval(
   ctx: CommandContext,
   name: string,
@@ -137,8 +138,8 @@ async function resolveApproval(
 
   // SEC: approvals carry human authority — the operator credential, never the
   // broker entry's agent credential (which any agent subprocess can read).
-  const { lookupOrg, readOperatorCredential } = await import('../orgrt/broker.js');
-  const remote = lookupOrg(name);
+  const { readOperatorCredential } = await import('../orgrt/broker.js');
+  const remote = await hostingDaemonFor(ctx.cwd, name);
   if (remote) {
     const cred = readOperatorCredential(name);
     try {
@@ -178,11 +179,11 @@ async function resolveApproval(
         );
         return { success: true, message: `${verb} ${action} for ${role}` };
       }
-      log(
-        output.warning(
-          `Live delivery rejected (${data.error ?? res.status}) — falling back to offline queue.`,
-        ),
-      );
+      // SEC: a refusal (403 without the operator credential included) must
+      // not fall through to writing approvals.json — that approved a call
+      // without the operator check or the audit event.
+      log(output.error(`Live ${verb} rejected (${data.error ?? res.status}) — nothing recorded.`));
+      return { success: false, message: `approval rejected: ${data.error ?? res.status}` };
     } catch (err) {
       log(
         output.warning(

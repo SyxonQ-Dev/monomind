@@ -131,9 +131,11 @@ grep -r "specific-pattern" --include="*.ts"
 ## MCP Tool Integration
 
 ### Memory Coordination
+`monomindMemory { action, key, namespace, value }` in the examples below is pseudo-code for the `monomind memory` CLI: `set` is `npx monomind memory store --namespace <ns> --key <key> --value <json>`, `get` is `npx monomind memory retrieve --namespace <ns> --key <key>`.
+
 ```javascript
 // Report research status
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/researcher/status",
   namespace: "coordination",
@@ -147,7 +149,7 @@ mcp__monomind__monoswarm_memory {
 }
 
 // Share research findings
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/shared/research-findings",
   namespace: "coordination",
