@@ -8248,7 +8248,7 @@ async function v2RenderOrgRuntime() {
   const pct = b.tokens && b.used !== null ? Math.min(100, (b.used / b.tokens) * 100) : null;
   const budget = b.used === null ? 'unknown' : `${_rtTok(b.used)} / ${_rtTok(b.tokens)}`;
   const budgetWhy = b.used === null ? ' · run predates cache metering' : '';
-  const budgetSub = `${esc(b.basis)} basis${pct !== null ? ` · ${pct.toFixed(1)}%` : ''}${budgetWhy} · ${fmtCost(v.totals?.cost_usd)}`;
+  const budgetSub = `${esc(b.basis)} basis${pct !== null ? ` · ${pct.toFixed(1)}%` : ''}${budgetWhy} · ${v.totals?.cost_usd == null ? 'cost unknown' : fmtCost(v.totals.cost_usd)}`;
   const gate = s.completion_evidence ? 'evidence required' : 'off';
   const gateSub = s.completion_evidence
     ? `escalate after ${esc(s.max_evidence_attempts)} refusals · org_complete: ${esc(s.completion)}`
@@ -8282,7 +8282,7 @@ async function v2RenderOrgRuntime() {
         ? [`<span title="Recorded before the meter split input, output and cache tokens">${mono(_rtTok(r.usage.legacy_tokens))} in+out</span>`, '—', '—', '—']
         : [mono(_rtTok(r.usage.tokens_in)), mono(_rtTok(r.usage.tokens_out)),
            mono(_rtTok(r.usage.cache_read)), mono(_rtTok(r.usage.cache_creation))]),
-      mono(fmtCost(r.usage.cost_usd)),
+      r.usage.cost_usd == null ? '<span style="color:var(--text-xs)">unknown</span>' : mono(fmtCost(r.usage.cost_usd)),
       `<span style="color:var(--text-xs)">${r.lastActivity ? relTime(r.lastActivity) : '—'}</span>`,
     ]), 'No roles');
 
@@ -8320,7 +8320,7 @@ async function v2RenderOrgRuntime() {
         : '<span style="color:var(--text-xs)">none claimed</span>',
       h.runnableTasksAtStop ? `<span style="color:var(--amber, #d29922)">${esc(h.runnableTasksAtStop)}</span>` : '0',
       mono(_rtTok(h.totalTokens)),
-      mono(fmtCost(h.totalCostUsd)),
+      h.totalCostUsd == null ? '<span style="color:var(--text-xs)">unpriced</span>' : mono(fmtCost(h.totalCostUsd)),
     ]), 'No finished runs yet');
   html += '</div>';
   el.innerHTML = html;

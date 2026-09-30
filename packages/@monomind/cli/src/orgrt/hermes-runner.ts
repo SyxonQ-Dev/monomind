@@ -51,7 +51,22 @@
  * liveness message is yielded the instant the subprocess spawns, before
  * waiting on exit.
  *
- * Invocation (live-verified against `hermes chat --help` and real runs):
+ * TWO INVOCATIONS, chosen once per runner by `hermes chat --help`:
+ *   - hermes 0.19.0 (the PyPI release, 2026.7.20) has neither `--query-file`
+ *     nor `--oneshot`: passing them is an argparse error, so every turn
+ *     failed. Its `chat -q QUERY` is already single-query mode (answers and
+ *     exits; confirmed in its cli.py), so the runner sends
+ *       hermes chat --query=<prompt> -Q [-m <model>]
+ *     `--query=` keeps a prompt that starts with `-` from being read as a
+ *     flag. The prompt is one argv element, so it is capped below Linux's
+ *     128 KiB per-argument limit with a clear error (HERMES_MAX_QUERY_ARG_BYTES).
+ *     It is also visible to other local users in `ps` and /proc/<pid>/cmdline
+ *     while the turn runs; 0.19.0 has no private channel for it.
+ *   - builds whose help lists `--query-file` (the installer build this
+ *     header was first verified against) get the file-based form below,
+ *     since there `-q` without `--oneshot` seeds an interactive session.
+ *
+ * File-based invocation (live-verified against `hermes chat --help` and real runs):
  *   hermes chat --query-file <path> --oneshot -Q [-m <model>]
  *   - `--query-file PATH`: "Read the single query from a file instead of
  *     the command line ('-' reads stdin). Safe for arbitrary text: nothing
@@ -77,9 +92,9 @@
  *     confirmed live. The top-level `-z` form takes the prompt as a raw
  *     argv string, reintroducing the exact argv-length/quoting problem
  *     `--query-file` exists to avoid — not worth it just for usage
- *     accounting. This runner always reports input_tokens/output_tokens/
- *     cost_usd as 0 (same documented limitation as vercel-runner.ts's
- *     cost_usd:0 — token budgets still enforce via policy.ts elsewhere).
+ *     accounting. This runner always reports input_tokens/output_tokens
+ *     as 0 and omits cost_usd (unknown, reported as null — never a $0
+ *     spend; token budgets still enforce via policy.ts elsewhere).
  *
  * CORRECTIONS FROM LIVE TESTING (what the docs-only version got wrong):
  *   1. `--usage-file` is NOT a `chat` flag (see above) — the original
@@ -102,10 +117,11 @@
  *   sends, not by re-reading documentation more carefully — the docs page
  *   this was originally built from didn't mention either.
  */
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { UNCLASSIFIED_MARKER } from './agent-exec-errors.js';
 import {
   type AgentMessage,
   type AgentRunArgs,
@@ -124,6 +140,33 @@ import {
 } from './tool-fence.js';
 
 const TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours, matching codex/kimi runners
+const HELP_PROBE_TIMEOUT_MS = 30_000;
+
+/** Linux rejects a single argv element of 128 KiB or more (MAX_ARG_STRLEN)
+ *  with E2BIG; stay under it with room for the `--query=` prefix. */
+export const HERMES_MAX_QUERY_ARG_BYTES = 128 * 1024 - 64;
+
+/** How this hermes takes a headless prompt — see file header. */
+export type HermesQueryMode = 'query-file' | 'query-arg';
+
+/** The `hermes chat` argv for one turn. */
+export function hermesChatArgs(
+  mode: HermesQueryMode,
+  prompt: { file: string; text: string },
+  model?: string,
+): string[] {
+  const out =
+    mode === 'query-file'
+      ? ['chat', '--query-file', prompt.file, '--oneshot', '-Q']
+      : ['chat', `--query=${prompt.text}`, '-Q'];
+  if (model) out.push('-m', model);
+  return out;
+}
+
+/** Pick the query mode from `hermes chat --help` output. */
+export function hermesQueryMode(chatHelp: string): HermesQueryMode {
+  return /--query-file\b/.test(chatHelp) ? 'query-file' : 'query-arg';
+}
 
 /** Lines hermes has been observed to leak onto stdout despite -Q ("quiet
  *  mode") — see file header's "CORRECTIONS FROM LIVE TESTING". Pattern-based,
@@ -151,8 +194,62 @@ interface TurnOutcome {
   sessionId?: string;
 }
 
+/** Run `hermes chat --help`: its help text (stdout + stderr) and whether
+ *  the run was clean (exit 0 with output) and so safe to cache. */
+function probeChatHelp(
+  bin: string,
+  args: AgentRunArgs,
+  timeoutMs: number,
+): Promise<{ help: string; clean: boolean }> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      bin,
+      ['chat', '--help'],
+      {
+        cwd: args.cwd,
+        env: { ...omitAnthropicManagedKeys(process.env), ...args.env },
+        timeout: timeoutMs,
+        killSignal: 'SIGKILL',
+        signal: args.signal,
+      },
+      (err, stdout, stderr) => {
+        // A missing binary rethrows (ENOENT → install hint); an abort ends the run.
+        if ((err as NodeJS.ErrnoException | null)?.code === 'ENOENT') return reject(err);
+        if (args.signal?.aborted) {
+          return reject(
+            new Error('HermesAgentRunner: aborted by the caller during the hermes --help probe'),
+          );
+        }
+        const help = `${stdout ?? ''}${stderr ?? ''}`;
+        resolve({ help, clean: !err && help.trim() !== '' });
+      },
+    );
+  });
+}
+
 export class HermesAgentRunner implements AgentRunner {
-  constructor(private hermesBin?: string) {}
+  /** Set only from a clean `--help` probe; a failed one is retried next run. */
+  private queryMode: HermesQueryMode | undefined;
+
+  constructor(
+    private hermesBin?: string,
+    private opts: { helpProbeTimeoutMs?: number } = {},
+  ) {}
+
+  /** Pick the query mode from `hermes chat --help`, cached per runner once a
+   *  probe succeeds. A timed-out, failed or empty probe falls back to
+   *  `--query=` for this run only (0.19.0's form) and is not cached. */
+  private async detectQueryMode(bin: string, args: AgentRunArgs): Promise<HermesQueryMode> {
+    if (this.queryMode) return this.queryMode;
+    const probe = await probeChatHelp(
+      bin,
+      args,
+      this.opts.helpProbeTimeoutMs ?? HELP_PROBE_TIMEOUT_MS,
+    );
+    const mode = hermesQueryMode(probe.help);
+    if (probe.clean) this.queryMode = mode;
+    return mode;
+  }
 
   async *run(args: AgentRunArgs): AsyncIterable<AgentMessage> {
     const bin = this.hermesBin || process.env.HERMES_CLI_BIN || 'hermes';
@@ -160,6 +257,7 @@ export class HermesAgentRunner implements AgentRunner {
     const promptFile = path.join(tmpDir, 'prompt.txt');
 
     try {
+      const mode = await this.detectQueryMode(bin, args);
       for await (const p of args.prompt) {
         const text = typeof p === 'string' ? p : (p?.message?.content ?? String(p ?? ''));
         let sessionId: string | undefined;
@@ -170,7 +268,16 @@ export class HermesAgentRunner implements AgentRunner {
 
         // runToolRound ends this loop past the round cap (#326).
         for (let round = 0; ; round++) {
-          fs.writeFileSync(promptFile, transcript.join('\n\n---\n\n'));
+          const promptText = transcript.join('\n\n---\n\n');
+          if (mode === 'query-file') fs.writeFileSync(promptFile, promptText);
+          else if (Buffer.byteLength(promptText) > HERMES_MAX_QUERY_ARG_BYTES) {
+            throw new Error(
+              `HermesAgentRunner: the round-${round} prompt is ${Buffer.byteLength(promptText)} bytes, over the ` +
+                `${HERMES_MAX_QUERY_ARG_BYTES}-byte limit for one command-line argument. This hermes has no ` +
+                '--query-file; shorten the system prompt or task, or use a hermes build that has --query-file.',
+            );
+          }
+          const cliArgs = hermesChatArgs(mode, { file: promptFile, text: promptText }, args.model);
 
           const outcome: TurnOutcome = {
             exitCode: 1,
@@ -179,7 +286,7 @@ export class HermesAgentRunner implements AgentRunner {
             stdout: '',
           };
 
-          for await (const ev of this.streamTurn(bin, promptFile, args, outcome)) {
+          for await (const ev of this.streamTurn(bin, cliArgs, args, outcome)) {
             yield ev;
           }
 
@@ -222,7 +329,6 @@ export class HermesAgentRunner implements AgentRunner {
           subtype: 'success',
           input_tokens: 0,
           output_tokens: 0,
-          cost_usd: 0,
         };
       }
     } catch (err) {
@@ -240,7 +346,7 @@ export class HermesAgentRunner implements AgentRunner {
   }
 
   /**
-   * Run one `hermes chat --oneshot` invocation. Yields exactly one liveness
+   * Run one headless `hermes chat` invocation. Yields exactly one liveness
    * `tool_use` message the instant the subprocess spawns (see file header —
    * hermes has no intermediate event stream to yield from, unlike codex),
    * then drains stdout to completion. End-of-turn facts (exit code, stderr
@@ -250,13 +356,10 @@ export class HermesAgentRunner implements AgentRunner {
    */
   private async *streamTurn(
     bin: string,
-    promptFile: string,
+    cliArgs: string[],
     args: AgentRunArgs,
     outcome: TurnOutcome,
   ): AsyncGenerator<AgentMessage> {
-    const cliArgs: string[] = ['chat', '--query-file', promptFile, '--oneshot', '-Q'];
-    if (args.model) cliArgs.push('-m', args.model);
-
     const child = spawn(...maskedCommand(args.authorityMask, bin, cliArgs), {
       cwd: args.cwd,
       // o-18: ambient ANTHROPIC_* creds never belong to a non-Anthropic
@@ -340,6 +443,23 @@ export class HermesAgentRunner implements AgentRunner {
   }
 }
 
+/** hermes 0.19.0's own "no credentials" sentences, printed on stdout as
+ *  the first line: hermes_cli/auth.py:1929 and hermes_cli/main.py:2501.
+ *  Anchored at the start so model text that merely mentions them is not
+ *  taken for hermes's error. */
+const HERMES_NO_CREDENTIALS_RE =
+  /^(?:No inference provider configured\. Run 'hermes model'|It looks like Hermes isn't configured yet -- no API keys or providers found)/;
+
+/** The first non-empty line of stdout when it is hermes's own
+ *  no-credentials sentence (ANSI colour codes ignored), else undefined. */
+function hermesCredentialLine(stdout: string): string | undefined {
+  const first = stdout
+    .split('\n')
+    .map((l) => l.replace(/\x1b\[[0-9;]*m/g, '').trim())
+    .find((l) => l !== '');
+  return first && HERMES_NO_CREDENTIALS_RE.test(first) ? first : undefined;
+}
+
 /** Build the actionable error for a failed hermes turn. Same shape as
  *  codex-runner.ts's turnError. */
 function turnError(outcome: TurnOutcome, round: number): Error {
@@ -358,8 +478,22 @@ function turnError(outcome: TurnOutcome, round: number): Error {
     (err as Error & { fatal?: boolean }).fatal = true;
     return err;
   }
-  return new Error(
+  if (outcome.stderrTail) {
+    return new Error(
+      `HermesAgentRunner: hermes chat failed (exit ${outcome.exitCode})` +
+        `\nstderr: ${outcome.stderrTail.slice(-500)}`,
+    );
+  }
+  // hermes 0.19.0 prints its setup errors on stdout. Only its own
+  // no-credentials sentence, as stdout's first line, is part of the
+  // classified message; everything else (possibly model text) goes after
+  // UNCLASSIFIED_MARKER, unclassified and not fatal.
+  const credLine = hermesCredentialLine(outcome.stdout);
+  const err = new Error(
     `HermesAgentRunner: hermes chat failed (exit ${outcome.exitCode})` +
-      (outcome.stderrTail ? `\nstderr: ${outcome.stderrTail.slice(-500)}` : ''),
+      (credLine ? `: ${credLine}` : '') +
+      (outcome.stdout ? `${UNCLASSIFIED_MARKER}hermes stdout: ${outcome.stdout.slice(-500)}` : ''),
   );
+  if (credLine) (err as Error & { fatal?: boolean }).fatal = true;
+  return err;
 }

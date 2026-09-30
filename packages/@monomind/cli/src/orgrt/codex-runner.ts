@@ -50,7 +50,8 @@
  * live default for `--json`, not a deprecated relic).
  *
  *   - Invocation: `codex exec --json [--model X] [-c model_reasoning_effort=L]
- *                 [--cd Y] [--skip-git-repo-check] [--sandbox <mode>]
+ *                 -c features.shell_snapshot{,_v2}=false (security, see
+ *                 CODEX_SNAPSHOT_OFF_ARGS) [--cd Y] [--skip-git-repo-check] [--sandbox <mode>]
  *                 [resume <sessionId>] -- -` with the prompt on STDIN
  *     (the sandbox mode follows the role's policy.git level — cli-sandbox.ts;
  *     coder mode, `access: 'full'`, passes

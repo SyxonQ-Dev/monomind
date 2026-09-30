@@ -68,6 +68,6 @@ describe('runEndLine', () => {
 
   it('still prints a line with no recorded events', () => {
     const line = runEndLine({ name: 'x', run: 'r', wallMs: 5_400, final: { status: 'crashed' }, events: [] });
-    expect(line).toBe('org x run r ended — outcome: error (unknown error), wall time 5s, cost $0.00');
+    expect(line).toBe('org x run r ended — outcome: error (unknown error), wall time 5s, cost unknown');
   });
 });

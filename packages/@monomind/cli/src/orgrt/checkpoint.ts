@@ -25,8 +25,8 @@ export interface RoleCheckpoint {
    *  written before this existed — resume falls back to `tokensUsed` on its
    *  original (uncached) basis, so an old file still resumes. */
   tokenUsage?: TokenUsage;
-  /** Cost tracking */
-  costUsd: number;
+  /** Cost tracking; null = no reported cost (unknown, rev 28). */
+  costUsd: number | null;
   /** Last message ID for threading */
   lastMessageId?: string;
   /** #327: turns the role has finished this run, so a resumed role's

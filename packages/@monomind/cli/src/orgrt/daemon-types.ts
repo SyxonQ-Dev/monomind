@@ -56,7 +56,8 @@ export interface AgentRuntime {
   status: 'running' | 'ended' | 'crashed';
   error?: string;
   /** Token/cost tracking for this role — persisted to runtime.json */
-  metrics: { tokens: number; costUsd: number };
+  /** costUsd: null until a usage event reports a cost (unknown, rev 28). */
+  metrics: { tokens: number; costUsd: number | null };
   /** Track last message ID for threading responses */
   lastMessageId?: string;
   /** SDK session ID — set by the session layer on first response (P2-13). Enables checkpoint resume. */

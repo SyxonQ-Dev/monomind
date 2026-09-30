@@ -364,7 +364,7 @@ export const statusAction = async (ctx: CommandContext): Promise<CommandResult> 
           `  elapsed: ${elapsedStr} | events: ${summary.events} | messages: ${summary.messages} | tools: ${toolCalls}`,
         );
         log(
-          `  roles active: ${rolesUp} | tokens: ${fmtNum(summary.totalTokens)} | cost: $${summary.totalCostUsd.toFixed(2)}`,
+          `  roles active: ${rolesUp} | tokens: ${fmtNum(summary.totalTokens)} | cost: ${summary.totalCostUsd === null ? 'unknown' : `$${summary.totalCostUsd.toFixed(2)}`}`,
         );
         log(`  quiet since: ${utcTime(lastTs)} (${quietStr} ago)`);
         if (summary.crashes.length) log(output.warning(`  crashes: ${summary.crashes.join(', ')}`));

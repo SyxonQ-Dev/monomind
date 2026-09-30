@@ -109,7 +109,7 @@ Three concrete implementations are available:
 - **Primitive:** `streamText({ model, system, messages, tools, stopWhen: isStepCount(N) })` — Vercel v7.
 - **Tool delivery:** Native Vercel `tool()` calling — no fence protocol. Every `execute()` wraps `canUseTool` for policy gating (bypassing it would defeat the per-role policy engine).
 - **Session resume:** `VercelSessionStore` persists message history to `<org>/sessions/<role>-<uuid>.json` (Vercel SDK is stateless server-side; we maintain history on disk).
-- **Cost tracking:** Token-only (`cost_usd: 0`). Vercel returns token usage but no USD; pricing is vendor-specific and drifts, so we ship with zero and let token budgets enforce.
+- **Cost tracking:** Token-only (`cost_usd` unknown, reported as `null`). Vercel returns token usage but no USD; pricing is vendor-specific and drifts, so no cost is claimed and token budgets enforce.
 - **Optional deps:** All Vercel packages ship as `optionalDependencies`. Missing packages fail with a clear actionable error (`npm install <pkg>`).
 
 ### 2.5 CodexAgentRunner (ChatGPT subscription)
@@ -1098,7 +1098,7 @@ it counts. Within one process a total that dips floors at 0. Before this, a resu
 turn was billed as `max(0, small − previous) = 0`.
 
 A turn cut off before its `result` — by `org_complete`, an org stop, or a crash — still gets a
-`usage` event for the turns already metered (`subtype: "aborted"`, `cost_usd` unset, since the SDK
+`usage` event for the turns already metered (`subtype: "aborted"`, `cost_usd: null`, since the SDK
 reports cost only on `result`). A session aborted by the org's own stop reports a `session-stopped`
 status rather than `session-error`.
 
