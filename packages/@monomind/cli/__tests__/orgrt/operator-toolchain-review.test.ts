@@ -254,3 +254,102 @@ describe.runIf(authorityMaskAvailability().available)('inside the real bubblewra
     for (const p of [join(root, 'tools'), join(home, '.local/state')]) expect(existsSync(p)).toBe(true);
   });
 });
+
+describe('round 2', () => {
+  it('mise’s global config dir and direnv’s config dir are covered and created whenever the tool is in use', () => {
+    const home = scratch('tr2-cfg-');
+    mkdirSync(join(home, '.local/share/mise'), { recursive: true });
+    mkdirSync(join(home, '.local/share/direnv'), { recursive: true });
+    ensureOperatorProtectedPaths({ home, env: {} });
+    for (const d of ['.config/mise', '.config/direnv']) {
+      expect(existsSync(join(home, d)), d).toBe(true);
+      expect(operatorProtectedPaths({ home, env: {} })).toContain(join(home, d));
+    }
+    const xdg = scratch('tr2-xdg-');
+    ensureOperatorProtectedPaths({ home, env: { XDG_CONFIG_HOME: xdg } });
+    // Outside $HOME nothing is created.
+    expect(existsSync(join(xdg, 'mise'))).toBe(false);
+  });
+
+  it('an org root or cwd of $HOME excludes no PATH dir under it, and says so', () => {
+    const home = scratch('tr2-home-');
+    const tools = join(home, 'tools/bin');
+    mkdirSync(tools, { recursive: true });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(probe(home, { PATH: tools }, [home])).toContain(tools);
+    expect(probe(home, { PATH: tools }, [dirname(home)])).toContain(tools);
+    expect(operatorProtectedPaths({ home, env: { PATH: tools }, orgRoot: home, cwd: home })).toContain(tools);
+    expect(warn.mock.calls.flat().join('\n')).toMatch(/holds \$HOME/);
+  });
+
+  it.runIf(authorityMaskAvailability().available)(
+    'real mask with the org root at $HOME: ~/.monomind, deps, PATH dirs and mise’s config stay read-only',
+    () => {
+      const home = scratch('tr2-bwh-');
+      const tools = join(home, 'tools/bin');
+      mkdirSync(tools, { recursive: true });
+      mkdirSync(join(home, '.local/share/mise'), { recursive: true });
+      mkdirSync(join(home, '.monomind/deps'), { recursive: true });
+      const work = join(home, '.monomind/orgs/acme/work');
+      mkdirSync(work, { recursive: true });
+      writeFileSync(join(home, '.monomind/orgs/acme.json'), '{"name":"acme"}');
+      const env = { HOME: home, PATH: tools } as NodeJS.ProcessEnv;
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      ensureAuthorityDirs(home, env);
+      ensureOperatorProtectedPaths({ home, env, orgRoot: home });
+      const mm = join(home, '.monomind');
+      const args = authorityMaskArgs({ home, env, roots: [home], orgRoot: home, cwd: home });
+      const [cmd, argv] = maskedCommand(args, 'bash', [
+        '-c',
+        [
+          `echo x > ${mm}/newfile 2>/dev/null; echo "Q1=$?"`,
+          `echo x > ${mm}/deps/planted.js 2>/dev/null; echo "Q2=$?"`,
+          `echo x > ${tools}/evil 2>/dev/null; echo "Q3=$?"`,
+          `echo '[env]' > ${home}/.config/mise/config.toml 2>/dev/null; echo "Q4=$?"`,
+          `mv ${home}/.local ${home}/.local.x 2>/dev/null; echo "Q5=$?"`,
+          `echo ok > ${mm}/projects/p.txt; echo "MMW=$?"`,
+          `echo ok > ${home}/work.txt; echo "HW=$?"`,
+          `echo ok > ${work}/out.txt; echo "OWW=$?"`,
+          `echo forged > ${home}/.monomind/orgs/acme.json 2>/dev/null; echo "Q6=$?"`,
+        ].join('; '),
+      ]);
+      const text = spawnSync(cmd, argv, { encoding: 'utf8' }).stdout;
+      for (const k of ['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6']) expect(text, text).not.toMatch(new RegExp(`${k}=0\\b`));
+      expect(text).toMatch(/MMW=0/);
+      expect(text).toMatch(/HW=0/);
+      // The org's own work dir under ~/.monomind/orgs stays writable.
+      expect(text).toMatch(/OWW=0/);
+      expect(operatorProtectedPaths({ home, env, orgRoot: home, cwd: home })).not.toContain(join(home, '.monomind/orgs'));
+      for (const p of [join(mm, 'newfile'), join(mm, 'deps/planted.js'), join(tools, 'evil'), join(home, '.config/mise/config.toml')])
+        expect(existsSync(p), p).toBe(false);
+      expect(existsSync(join(home, '.local'))).toBe(true);
+    },
+  );
+
+  it.runIf(authorityMaskAvailability().available)(
+    'real mask: a mount point inside an org work dir is bound again after the orgs layout',
+    () => {
+      const home = scratch('tr2-wh-');
+      const root = scratch('tr2-wr-');
+      const work = join(root, '.monomind/orgs/acme/work');
+      const nvm = join(work, 'tools/nvm');
+      mkdirSync(nvm, { recursive: true });
+      const env = { HOME: home, NVM_DIR: nvm } as NodeJS.ProcessEnv;
+      ensureAuthorityDirs(home, env);
+      const args = authorityMaskArgs({ home, env, roots: [root], orgRoot: root, cwd: root });
+      const anchor = join(work, 'tools');
+      const holding = args
+        .map((a, i) => [a, args[i + 1]])
+        .filter(([f, t]) => (f === '--bind' || f === '--ro-bind') && (anchor === t || anchor.startsWith(`${t}/`)));
+      expect(holding.at(-1)).toEqual(['--bind', anchor]);
+      const [cmd, argv] = maskedCommand(args, 'bash', [
+        '-c',
+        `mv ${anchor} ${anchor}.x 2>/dev/null; echo "R=$?"; echo ok > ${work}/out.txt; echo "WW=$?"`,
+      ]);
+      const text = spawnSync(cmd, argv, { encoding: 'utf8' }).stdout;
+      expect(text, text).not.toMatch(/R=0\b/);
+      expect(text).toMatch(/WW=0/);
+      expect(existsSync(nvm)).toBe(true);
+    },
+  );
+});

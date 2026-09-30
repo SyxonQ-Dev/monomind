@@ -34,6 +34,7 @@ import {
   resetToolchainMemo,
   xdgDirs,
 } from './operator-toolchain-paths.js';
+import { realPath } from './policy-paths.js';
 
 /** `~/.monomind` entries a role's own `monomind` commands write: browser
  *  automation state, the embedding-model cache, per-project memory, update
@@ -206,9 +207,14 @@ export function operatorProtectedPaths(ctx: ProtectedCtx): string[] {
 function protectedCandidates(ctx: ProtectedCtx): string[] {
   const mmHome = monomindHome(ctx.home, ctx.env);
   const monomindEntries: string[] = [];
+  // #527 review round 2: with the org root at $HOME, ~/.monomind/orgs is the
+  // org's own orgs dir, whose work dirs its roles write; its authority files
+  // stay protected (org-authority-files.ts).
+  const ownOrgs = ctx.orgRoot ? realPath(join(ctx.orgRoot, '.monomind', 'orgs')) : undefined;
   try {
     for (const e of readdirSync(mmHome))
-      if (!ROLE_WRITABLE_MONOMIND.has(e)) monomindEntries.push(join(mmHome, e));
+      if (!ROLE_WRITABLE_MONOMIND.has(e) && realPath(join(mmHome, e)) !== ownOrgs)
+        monomindEntries.push(join(mmHome, e));
   } catch {
     /* no ~/.monomind yet */
   }

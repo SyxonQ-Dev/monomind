@@ -128,16 +128,18 @@ export function authorityMaskArgs(ctx: {
   if (ctx.orgRoot)
     for (const d of [ctx.orgRoot, join(ctx.orgRoot, '.monomind')].map(realPath))
       if (existsSync(d)) args.push('--bind', d, d);
-  // A writable bind above whose source holds one of those mount points hid
-  // it again (bwrap binds the host's tree): repeat it — before the orgs
-  // layout, whose read-only binds a later host bind would uncover, and never
-  // inside a read-only bind above.
-  const inside = (t: string, d: string) => d !== t && d.startsWith(t.endsWith(sep) ? t : t + sep);
-  const covering = bindTargets(args.slice(afterAnchors), '--bind');
-  const readOnly = bindTargets(args.slice(afterAnchors), '--ro-bind');
-  for (const d of anchors)
-    if (covering.some((t) => inside(t, d)) && !readOnly.some((t) => t === d || inside(t, d)))
-      args.push('--bind', d, d);
+  // #527 review round 2: an org root that holds ~/.monomind ($HOME itself)
+  // was just bound read-write from the host, uncovering the layout above:
+  // apply it again, deps included. The orgs layout below then opens the
+  // org's work dirs inside it again (operator-protected-paths.ts leaves that
+  // org's own orgs dir out of the ~/.monomind entries it protects).
+  const orgRootReal = ctx.orgRoot ? realPath(ctx.orgRoot) : undefined;
+  if (orgRootReal && mm.readOnly.some((d) => holds(orgRootReal, realPath(d)))) {
+    for (const d of mm.readOnly.map(realPath)) args.push('--ro-bind', d, d);
+    for (const d of mm.writable.map(realPath)) args.push('--bind', d, d);
+    if (deps && existsSync(deps)) args.push('--ro-bind', realPath(deps), realPath(deps));
+  }
+  reanchor(args, anchors, afterAnchors);
   // The orgs dir read-only (no new org definition, runfile or decision file,
   // no rename), the dirs roles work in read-write again, then the authority
   // files those still hold read-only (org-authority-files.ts).
@@ -146,6 +148,8 @@ export function authorityMaskArgs(ctx: {
   for (const d of orgs.readOnly) args.push('--ro-bind', d, d);
   for (const d of orgs.writable) args.push('--bind', d, d);
   for (const f of orgs.files) args.push('--ro-bind', f, f);
+  // …and one inside a work dir the orgs layout just bound read-write.
+  reanchor(args, anchors, afterAnchors);
   // #502 review: what the operator's own processes run or trust, and the
   // shell/git config that would undo the guard. #518's first-use deps dir
   // (utils/optional-deps.ts: code the unsandboxed daemons load) is one of
@@ -162,11 +166,26 @@ export function authorityMaskArgs(ctx: {
   return args;
 }
 
-/** Destinations of the `flag` binds in bwrap `args`. */
-function bindTargets(args: string[], flag: string): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < args.length; i++) if (args[i] === flag) out.push(args[i + 2]);
-  return out;
+const holds = (t: string, d: string) => d === t || d.startsWith(t.endsWith(sep) ? t : t + sep);
+
+/** Bind each mount-point anchor onto itself again when a read-write bind
+ *  made after it (bwrap binds the host's tree, which has no such mount)
+ *  hid it: the last bind holding the anchor is a `--bind` of an ancestor.
+ *  Not when that last bind is read-only (nothing below it can be renamed),
+ *  nor when a bind made since sits inside the anchor, which the new bind
+ *  would hide in turn. Shallowest first, so nested anchors stay. */
+function reanchor(args: string[], anchors: string[], from: number): void {
+  const binds: Array<{ flag: string; target: string }> = [];
+  for (let i = from; i < args.length; i++)
+    if (args[i] === '--bind' || args[i] === '--ro-bind')
+      binds.push({ flag: args[i], target: args[i + 2] });
+  const anchorSet = new Set(anchors);
+  const redo = anchors.filter((d) => {
+    const last = [...binds].reverse().find((b) => holds(b.target, d));
+    if (last?.flag !== '--bind' || last.target === d) return false;
+    return !binds.some((b) => b.target !== d && holds(d, b.target) && !anchorSet.has(b.target));
+  });
+  for (const d of redo.sort((a, b) => a.length - b.length)) args.push('--bind', d, d);
 }
 
 let probed: { available: boolean; reason?: string } | undefined;

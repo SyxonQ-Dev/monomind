@@ -114,7 +114,6 @@ export function versionManagerPaths(home: string, env: NodeJS.ProcessEnv): Manag
   };
   const miseData = envDir(env, 'MISE_DATA_DIR') ?? join(x.data, 'mise');
   one('MISE_DATA_DIR', [miseData]);
-  one('MISE_CONFIG_DIR', [join(x.config, 'mise')]);
   one('NVM_DIR', [join(home, '.nvm')]);
   one('VOLTA_HOME', [join(home, '.volta')]);
   one('FNM_DIR', [join(home, '.fnm'), join(x.data, 'fnm')]);
@@ -141,13 +140,21 @@ export function versionManagerPaths(home: string, env: NodeJS.ProcessEnv): Manag
     exists(miseData) ||
     onPath('mise') ||
     TOOLCHAIN_ENV.some((k) => k.startsWith('MISE_') && env[k]);
+  // #527 review round 2: mise trusts its global config dir, so a role that
+  // created `config.toml` there with `[env] _.source` would run in every
+  // mise-activated operator shell: covered (and created) whenever mise is.
+  const miseConfig = envDir(env, 'MISE_CONFIG_DIR') ?? join(x.config, 'mise');
+  add([miseConfig], miseConfig, miseUsed, true);
   const miseState = envDir(env, 'MISE_STATE_DIR') ?? join(x.state, 'mise');
   for (const d of ['trusted-configs', 'ignored-configs'])
     add([join(miseState, d)], join(miseState, d), miseUsed, true);
   add([join(home, '.mise.toml')], join(home, '.mise.toml'), miseUsed);
   add([join(home, '.tool-versions')], join(home, '.tool-versions'), false);
-  const direnvAllow = join(x.data, 'direnv', 'allow');
-  add([direnvAllow], direnvAllow, onPath('direnv') || exists(join(x.data, 'direnv')), true);
+  // direnv: its allow list, and its global config dir (`direnvrc`,
+  // `direnv.toml`), which every direnv-hooked operator shell loads.
+  const direnvUsed = onPath('direnv') || exists(join(x.data, 'direnv'));
+  for (const d of [join(x.data, 'direnv', 'allow'), join(x.config, 'direnv')])
+    add([d], d, direnvUsed, true);
   return out;
 }
 
@@ -326,7 +333,19 @@ export function toolchainPaths(probe: ToolchainProbe): string[] {
   const tmp = probe.tmp ?? tmpdir();
   const pathDirs = absPathDirs(env);
   const realPathDirs = pathDirs.map(realPath);
-  const exclude = (probe.exclude ?? []).flatMap((r) => [resolve(r), realPath(r)]);
+  // A work tree that is $HOME (or holds it) excludes nothing: every PATH dir
+  // under $HOME would count as the role's own (#527 review round 2).
+  const holdsHome = (r: string) => within(r, home) || within(realPath(r), realPath(home));
+  for (const r of probe.exclude ?? [])
+    if (holdsHome(r) && !warned.has(`home-root:${r}`)) {
+      warned.add(`home-root:${r}`);
+      console.warn(
+        `monomind: an org root or role cwd of ${r} holds $HOME: every role there can write the whole home directory except what is protected, and the directories on PATH stay protected.`,
+      );
+    }
+  const exclude = (probe.exclude ?? [])
+    .filter((r) => !holdsHome(r))
+    .flatMap((r) => [resolve(r), realPath(r)]);
   const found: string[] = [...binaryPaths(probe.execPath ?? process.execPath, home)];
   for (const d of pathDirs)
     if (!exclude.some((r) => within(r, d) || within(r, realPath(d))))
