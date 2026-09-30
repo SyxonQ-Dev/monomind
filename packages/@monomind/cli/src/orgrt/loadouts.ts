@@ -27,7 +27,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { resolveInstructionsFile } from './instructions-file.js';
+import { readVerifiedInstructions, resolveInstructionsFile } from './instructions-file.js';
 import { getSkill } from './skill-library.js';
 import type { OrgTask, TaskDag } from './task-dag.js';
 import type { OrgDef } from './types.js';
@@ -132,9 +132,13 @@ export function resolveLoadout(
     if (text) parts.push(text);
   }
   if (l.instructions_file) {
-    const file = resolveInstructionsFile(l.instructions_file, root);
-    if (file.path === undefined) throw new Error(`loadout "${name}": ${file.refused}`);
-    const text = readFileSync(file.path, 'utf-8').trim();
+    const file = readVerifiedInstructions(
+      l.instructions_file,
+      root,
+      (l as { instructions_sha256?: string }).instructions_sha256,
+    );
+    if (file.text === undefined) throw new Error(`loadout "${name}": ${file.refused}`);
+    const text = file.text.trim();
     if (text) parts.push(text);
   }
   return { name, guidance: parts.join('\n\n') };

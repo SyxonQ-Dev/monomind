@@ -32,8 +32,8 @@ import {
   type RoleFence,
 } from './fence.js';
 import { drainInbox, newMessageId, queueMessage } from './inbox.js';
-import { unconfinedRoles } from './org-sign-review.js';
-import { assertOrgDefSigned } from './org-signature.js';
+import { enforceConfinement } from './org-sign-review.js';
+import { assertOrgDefSigned, instructionsDigests, pinInstructionDigests } from './org-signature.js';
 import { expandOrgPolicyPathVars, promptVarsFor } from './prompt-vars.js';
 import * as questionOps from './questions.js';
 import { resolveRoleRunner } from './runner-resolve.js';
@@ -78,17 +78,16 @@ export async function prepareOrgStart(
   // #502: every start path (org run, serve's runfile poll and schedule,
   // resume) comes through here — refuse a definition the operator has not
   // signed, checking the very bytes that get parsed below.
-  assertOrgDefSigned(daemon.root, name, rawDef);
+  const digests = instructionsDigests(rawDef, daemon.root);
+  assertOrgDefSigned(daemon.root, name, rawDef, { digests });
   const parsedDef = OrgDefSchema.parse(rawDef);
   const bp = resolveOrgDefBlueprints(parsedDef, daemon.root);
   // {{home}} / {{org_root}} in policy paths, before any root or sandbox sees them.
   const def = expandOrgPolicyPathVars(bp.def, promptVarsFor(daemon.root));
-  // #502 review: a role with neither the SDK sandbox nor the mask can read
-  // the operator key, and so sign any org definition. Say so at every start.
-  for (const r of unconfinedRoles(def))
-    console.warn(
-      `[orgrt] org ${name}: role ${r.id} runs unconfined (${r.why}) — it can read the operator key and sign any org definition`,
-    );
+  pinInstructionDigests(def, digests);
+  // #502 review: the single enforcement point for unconfined roles (warn-only
+  // until the operator decides whether to refuse them).
+  enforceConfinement(def, name);
   const autoApproveError = approvalOps.unknownAutoApproveError(
     options?.autoApprove ?? [],
     def.roles,

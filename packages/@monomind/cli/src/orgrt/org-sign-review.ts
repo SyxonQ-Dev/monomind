@@ -9,6 +9,19 @@
 
 import { authorityMaskAvailability } from './authority-mask.js';
 import { sandboxAvailability } from './role-sandbox-restrictions.js';
+import { listSkills } from './skill-library.js';
+
+/** #502 review round 2: org skills that don't ship with monomind — from the
+ *  project's or the user's library. They decide MCP tools the daemon grants
+ *  and are not signed by content, so `org sign` and `doctor` list them. */
+export function nonBundledSkillLines(projectRoot: string): string[] {
+  return listSkills(projectRoot)
+    .filter((s) => s.origin === 'project' || s.origin === 'user')
+    .map(
+      (s) =>
+        `  ${s.name} (${s.origin}, ${s.dir})${s.tools.length ? ` · tools ${s.tools.join(', ')}` : ''}`,
+    );
+}
 
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj =>
@@ -71,6 +84,24 @@ export function unconfinedRoles(
     out.push({ id, why: `${noSdk}, and no bubblewrap mask (${mask.reason ?? 'unavailable'})` });
   }
   return out;
+}
+
+/** THE enforcement point for unconfined roles, called once per org start
+ *  (prepareOrgStart). A role that runs with neither the SDK sandbox nor the
+ *  mask can read the operator key and so sign any org definition. Whether to
+ *  refuse such roles is an open product decision (#502): today this warns;
+ *  a hard refusal is a `throw` here, decided by `unconfinedRoles` above. */
+export function enforceConfinement(
+  def: unknown,
+  org: string,
+  warn: (msg: string) => void = (m) => console.warn(m),
+): Array<{ id: string; why: string }> {
+  const loose = unconfinedRoles(def);
+  for (const r of loose)
+    warn(
+      `[orgrt] org ${org}: role ${r.id} runs unconfined (${r.why}) — it can read the operator key and sign any org definition`,
+    );
+  return loose;
 }
 
 /** The review `org sign` prints: one block per role, then the org-level

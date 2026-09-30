@@ -153,7 +153,12 @@ export function prepareClineSetup(args: AgentRunArgs, bin: string, host: ClineHo
       scoped,
     };
   }
-  const dir = host.scopedDir();
+  // #502 review: an org role gets a scoped dir of its own under its private
+  // TMPDIR. The shared ~/.monomind/cline-scoped would let a confined role
+  // rewrite the --config (and its refusal plugin) a later, unconfined cline
+  // session loads.
+  const dir =
+    env.MONOMIND_ORG_ROLE && env.TMPDIR ? join(env.TMPDIR, 'cline-scoped') : host.scopedDir();
   const dataDir = join(dir, 'data');
   const mcpPath = join(dir, 'cline_mcp_settings.json');
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });

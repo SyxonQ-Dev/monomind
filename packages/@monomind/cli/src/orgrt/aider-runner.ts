@@ -92,7 +92,13 @@ export class AiderAgentRunner implements AgentRunner {
 
   async *run(args: AgentRunArgs): AsyncIterable<AgentMessage> {
     const bin = this.opts.aiderBin || process.env.AIDER_CLI_BIN || 'aider';
-    const stateDir = this.opts.stateDir || defaultStateDir();
+    // #502 review: an org role keeps its conversations under its private
+    // TMPDIR, not in the shared ~/.monomind/aider-sessions.
+    const stateDir =
+      this.opts.stateDir ||
+      (args.env?.MONOMIND_ORG_ROLE && args.env.TMPDIR && !process.env.MONOMIND_AIDER_STATE_DIR
+        ? join(args.env.TMPDIR, 'aider-sessions')
+        : defaultStateDir());
     const shimPath = this.opts.shimPath || defaultShimPath();
     let python =
       this.opts.python === null

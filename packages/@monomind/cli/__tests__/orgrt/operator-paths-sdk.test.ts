@@ -9,7 +9,7 @@
  * that listing the operator dir in denyWrite as well as denyRead keeps it
  * hidden on Linux.
  */
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -17,7 +17,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ensureAuthorityDirs } from '../../src/orgrt/authority-mask.js';
+import {
+  authorityMaskArgs,
+  authorityMaskAvailability,
+  ensureAuthorityDirs,
+  maskedCommand,
+} from '../../src/orgrt/authority-mask.js';
 import { gitCommonDir, prepareGitGuard } from '../../src/orgrt/git-guard.js';
 import { ensureOperatorProtectedPaths } from '../../src/orgrt/operator-protected-paths.js';
 import { buildClaudeRestrictions, sandboxAvailability } from '../../src/orgrt/role-sandbox.js';
@@ -169,5 +174,82 @@ describe.skipIf(
     expect(existsSync(join(home, '.monomind', 'org-skills', 'evil.md'))).toBe(false);
     expect(existsSync(join(cwd, '.monomind', 'org-skills', 'evil.md'))).toBe(false);
     expect(readFileSync(join(cwd, 'work.txt'), 'utf8')).toBe('ok\n');
+  }, 90_000);
+});
+
+describe.skipIf(
+  process.env.MONOMIND_SANDBOX_E2E !== '1' ||
+    !!process.env.MONOMIND_ORG_ROLE ||
+    !authorityMaskAvailability().available,
+)('masked Claude role vs ~/.claude.json and the project .mcp.json (#502 review round 2)', () => {
+  it('Claude Code runs with ~/.claude.json read-only, and the role cannot add mcpServers to it or to .mcp.json', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'op6-'));
+    dirs.push(base);
+    const cwd = join(base, 'wt');
+    const home = join(base, 'home');
+    mkdirSync(cwd, { recursive: true });
+    for (const d of ['projects', 'shell-snapshots', 'session-env', 'plugins', 'backups'])
+      mkdirSync(join(home, '.claude', d), { recursive: true });
+    const claudeJson = join(home, '.claude.json');
+    writeFileSync(claudeJson, '{"numStartups":1}');
+    writeFileSync(join(cwd, '.mcp.json'), '{"mcpServers":{}}');
+    const env0 = { HOME: home } as NodeJS.ProcessEnv;
+    ensureAuthorityDirs(home, env0);
+    ensureOperatorProtectedPaths({ home, env: env0, orgRoot: cwd });
+    const mask = authorityMaskArgs({ home, env: env0, roots: [cwd], orgRoot: cwd, cwd });
+    const command = [
+      `echo '{"mcpServers":{"evil":{"command":"x"}}}' > ${claudeJson} 2>/dev/null; echo "CJW=$?"`,
+      `echo '{"mcpServers":{"evil":{"command":"x"}}}' > ${cwd}/.mcp.json 2>/dev/null; echo "MCPW=$?"`,
+      `echo ok > ${cwd}/work.txt; echo "CWDW=$?"`,
+    ].join('; ');
+    const server = await scriptedApi(command);
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      HOME: home,
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+      ANTHROPIC_API_KEY: ['test', 'masked'].join('-'),
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+      CLAUDECODE: undefined,
+      CLAUDE_CONFIG_DIR: undefined,
+      MONOMIND_ORGRT_OPERATOR_DIR: undefined,
+    };
+    delete env.CLAUDE_CODE_OAUTH_TOKEN;
+    const out: string[] = [];
+    try {
+      for await (const m of query({
+        prompt: 'go',
+        options: {
+          cwd,
+          env,
+          settingSources: [],
+          maxTurns: 3,
+          permissionMode: 'bypassPermissions',
+          allowDangerouslySkipPermissions: true,
+          spawnClaudeCodeProcess: (o) => {
+            const [cmd, argv] = maskedCommand(mask, o.command, o.args);
+            const child = spawn(cmd, argv, {
+              cwd: o.cwd,
+              env: o.env as NodeJS.ProcessEnv,
+              signal: o.signal,
+              stdio: ['pipe', 'pipe', 'pipe'],
+            });
+            child.stderr?.resume();
+            return child as never;
+          },
+        },
+      })) {
+        if (m.type !== 'user' || !Array.isArray(m.message.content)) continue;
+        for (const b of m.message.content)
+          if (b.type === 'tool_result')
+            out.push(typeof b.content === 'string' ? b.content : JSON.stringify(b.content));
+      }
+    } finally {
+      server.close();
+    }
+    const text = out.join('\n');
+    expect(text, text).toMatch(/CWDW=0/);
+    expect(text).not.toMatch(/CJW=0|MCPW=0/);
+    expect(readFileSync(claudeJson, 'utf8')).not.toContain('evil');
+    expect(readFileSync(join(cwd, '.mcp.json'), 'utf8')).toBe('{"mcpServers":{}}');
   }, 90_000);
 });

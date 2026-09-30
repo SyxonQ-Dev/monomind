@@ -4,7 +4,21 @@
  */
 import { PROJECTION_SURFACES, planProjection } from '../catalog/projection.js';
 import { catalogAudit } from '../catalog/snapshot.js';
+import { nonBundledSkillLines } from '../orgrt/org-sign-review.js';
 import type { HealthCheck } from './doctor-env-checks.js';
+
+/** `doctor -c org-skills` (#502 review): org skills from the project or user
+ *  library, which decide MCP tools the org daemon grants. Informational. */
+export async function checkOrgSkills(root: string = process.cwd()): Promise<HealthCheck> {
+  const lines = nonBundledSkillLines(root).map((l) => l.trim());
+  return {
+    name: 'Org Skills',
+    status: 'pass',
+    message: lines.length
+      ? `${lines.length} from the project or user library (not bundled): ${lines.join('; ')}`
+      : 'Only bundled org skills',
+  };
+}
 
 const NAME = 'Skill Catalog';
 

@@ -7,12 +7,16 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describeOrgAuthority, projectionDiff } from '../orgrt/org-sign-review.js';
+import {
+  describeOrgAuthority,
+  nonBundledSkillLines,
+  projectionDiff,
+} from '../orgrt/org-sign-review.js';
 import {
   lastSignedProjection,
   orgSignatureEnforced,
-  orgSignatureInput,
   roleContextMarker,
+  signedProjection,
   signOrgDef,
   verifyOrgDef,
 } from '../orgrt/org-signature.js';
@@ -36,12 +40,17 @@ function printReview(cwd: string, name: string, raw: unknown): void {
   const state = check.ok ? 'signed, unchanged' : check.reason;
   log(output.bold(`\norg ${name} (${state}):`));
   for (const line of describeOrgAuthority(raw)) log(line);
+  const extra = nonBundledSkillLines(cwd);
+  if (extra.length) {
+    log(output.bold('  Org skills from the project or user library (not bundled):'));
+    for (const line of extra) log(`  ${line}`);
+  }
   const before = lastSignedProjection(cwd, name);
   if (before === undefined) {
     log(output.dim('  (no earlier signature on this machine to compare with)'));
     return;
   }
-  const diff = projectionDiff(before, JSON.parse(JSON.stringify(orgSignatureInput(raw))));
+  const diff = projectionDiff(before, JSON.parse(JSON.stringify(signedProjection(raw, cwd))));
   log(
     output.bold(
       diff.length ? '  Changed since the last signature:' : '  No change since the last signature.',

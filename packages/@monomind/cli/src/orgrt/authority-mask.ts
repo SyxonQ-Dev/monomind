@@ -39,7 +39,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { dashboardCredentialPaths, HOME_DENY_WRITE, operatorDirOverride } from './file-roots.js';
-import { maskReadOnlyPaths } from './operator-protected-paths.js';
+import { maskReadOnlyPaths, monomindMaskLayout } from './operator-protected-paths.js';
 import { ensureOrgWorkDirs, orgsMaskLayout } from './org-authority-files.js';
 import { realPath } from './policy-paths.js';
 
@@ -95,6 +95,11 @@ export function authorityMaskArgs(ctx: {
   allowWrite?: string[];
 }): string[] {
   const args = ['--dev-bind', '/', '/'];
+  // #502 review: ~/.monomind read-only, only its role-writable entries bound
+  // back — first, so a work tree below it (binds further down) still opens.
+  const mm = monomindMaskLayout(ctx.home, ctx.env);
+  for (const d of mm.readOnly.map(realPath)) args.push('--ro-bind', d, d);
+  for (const d of mm.writable.map(realPath)) args.push('--bind', d, d);
   // #498: the mask binds only existing work dirs read-write, so create them
   // first (a `git worktree add … work/src` in a masked role needs `work/`).
   ensureOrgWorkDirs(ctx.orgRoot, ctx.fileWrite, ctx.cwd ?? ctx.orgRoot);

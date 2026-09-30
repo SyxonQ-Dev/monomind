@@ -57,6 +57,7 @@ import {
   untrustedFileReason,
 } from './access-grant-key.js';
 import { defaultOperatorDir } from './broker.js';
+import { instructionsDigest } from './instructions-file.js';
 
 /** Top-level fields left out of the signature: the goal is a prompt, and
  *  `status` is informational. */
@@ -153,9 +154,69 @@ function signedRole(role: unknown): unknown {
   return out;
 }
 
-export function computeOrgDefHash(raw: unknown): string {
+/** Digests of every `instructions_file` in the definition (roles and
+ *  loadouts), keyed `role:<id>` / `loadout:<name>` (instructions-file.ts). */
+export function instructionsDigests(raw: unknown, root: string): Record<string, string> {
+  const out = Object.create(null) as Record<string, string>;
+  const def = (raw && typeof raw === 'object' ? raw : {}) as {
+    roles?: unknown;
+    loadouts?: unknown;
+  };
+  for (const r of Array.isArray(def.roles) ? def.roles : []) {
+    const role = (r ?? {}) as { id?: unknown; instructions_file?: unknown };
+    if (typeof role.instructions_file === 'string')
+      out[`role:${String(role.id)}`] = instructionsDigest(role.instructions_file, root);
+  }
+  const loadouts = (def.loadouts && typeof def.loadouts === 'object' ? def.loadouts : {}) as Record<
+    string,
+    { instructions_file?: unknown }
+  >;
+  for (const name of Object.keys(loadouts)) {
+    const file = loadouts[name]?.instructions_file;
+    if (typeof file === 'string') out[`loadout:${name}`] = instructionsDigest(file, root);
+  }
+  return out;
+}
+
+/** Pin each role's and loadout's verified instructions digest on the
+ *  parsed definition (`instructions_sha256`), so every later session reads
+ *  the file only while its content still matches (session-prompt.ts). */
+export function pinInstructionDigests(
+  def: { roles: Array<{ id: string }>; loadouts?: Record<string, unknown> },
+  digests: Record<string, string>,
+): void {
+  for (const role of def.roles) {
+    const d = digests[`role:${role.id}`];
+    if (d) (role as { instructions_sha256?: string }).instructions_sha256 = d;
+  }
+  for (const [name, l] of Object.entries(def.loadouts ?? {})) {
+    const d = digests[`loadout:${name}`];
+    if (d && l && typeof l === 'object')
+      (l as { instructions_sha256?: string }).instructions_sha256 = d;
+  }
+}
+
+/** What is signed: the projection, plus — with the project root — the
+ *  digests of the instructions files it names. */
+export function signedProjection(
+  raw: unknown,
+  root?: string,
+  digests?: Record<string, string>,
+): unknown {
+  const projection = orgSignatureInput(raw);
+  if (root === undefined) return projection;
+  const d = digests ?? instructionsDigests(raw, root);
+  if (!Object.keys(d).length) return projection;
+  return canonical({ definition: projection, instructions: d });
+}
+
+export function computeOrgDefHash(
+  raw: unknown,
+  root?: string,
+  digests?: Record<string, string>,
+): string {
   return createHash('sha256')
-    .update(JSON.stringify(orgSignatureInput(raw)))
+    .update(JSON.stringify(signedProjection(raw, root, digests)))
     .digest('hex');
 }
 
@@ -248,7 +309,7 @@ export function verifyOrgDef(
   root: string,
   org: string,
   raw: unknown,
-  opts: { dir?: string } = {},
+  opts: { dir?: string; digests?: Record<string, string> } = {},
 ): OrgSignatureCheck {
   const dir = opts.dir ?? defaultOperatorDir();
   const fail = (reason: OrgSignatureReason, problem?: string): OrgSignatureCheck => ({
@@ -281,7 +342,7 @@ export function verifyOrgDef(
   if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
     return fail('invalid-signature', 'the HMAC does not match the operator key');
   }
-  if (rec.hash !== computeOrgDefHash(raw)) return fail('changed');
+  if (rec.hash !== computeOrgDefHash(raw, root, opts.digests)) return fail('changed');
   return { ok: true };
 }
 
@@ -290,7 +351,7 @@ export function assertOrgDefSigned(
   root: string,
   org: string,
   raw: unknown,
-  opts: { dir?: string } = {},
+  opts: { dir?: string; digests?: Record<string, string> } = {},
 ): void {
   if (!enforced) return;
   const check = verifyOrgDef(root, org, raw, opts);
@@ -322,11 +383,12 @@ export function signOrgDef(
   if (forbidden) throw new Error(orgSignatureMessage(org, 'forbidden-key', forbidden));
   const dir = opts.dir ?? defaultOperatorDir();
   const key = ensureFullAccessGrantKey(dir);
+  const digests = instructionsDigests(raw, root);
   const base = {
     v: SIGNATURE_VERSION,
     org,
     root: projectRoot(root),
-    hash: computeOrgDefHash(raw),
+    hash: computeOrgDefHash(raw, root, digests),
     at: (opts.now ?? new Date()).toISOString(),
   };
   const rec: SignatureRecord = { ...base, sig: hmac(key, base) };
@@ -337,7 +399,7 @@ export function signOrgDef(
   }
   writePrivate(
     orgProjectionPath(root, org, dir),
-    `${JSON.stringify(orgSignatureInput(raw), null, 2)}\n`,
+    `${JSON.stringify(signedProjection(raw, root, digests), null, 2)}\n`,
   );
   writePrivate(path, `${JSON.stringify(rec, null, 2)}\n`);
   return { hash: base.hash, at: base.at, path };

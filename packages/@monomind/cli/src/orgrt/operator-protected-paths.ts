@@ -44,12 +44,52 @@ export const ROLE_WRITABLE_MONOMIND = new Set([
   'update-history.json',
   'crash-reports.json',
   'pending-reports',
-  'cline-scoped',
-  'aider-sessions',
   'release-locks',
   'mcp.log',
   'mcp.pid',
 ]);
+
+/** The allowlisted entries that are directories: created before the mask
+ *  is built, so the mask can bind them writable inside a read-only
+ *  ~/.monomind. */
+const ROLE_WRITABLE_MONOMIND_DIRS = [
+  'browser-sessions',
+  'browser-reports',
+  'models',
+  'cache',
+  'neural',
+  'projects',
+  'sessions',
+  'pending-reports',
+  'release-locks',
+];
+
+/** #502 review round 2: the bubblewrap mask's layout for ~/.monomind (and
+ *  $MONOMIND_HOME): the directory itself read-only, so no new top-level
+ *  entry can be planted, and only the allowlisted entries bound writable
+ *  again — the same pattern as the orgs dir. An allowlisted FILE that does
+ *  not exist yet cannot be created inside the mask. */
+export function monomindMaskLayout(
+  home: string,
+  env: NodeJS.ProcessEnv,
+): { readOnly: string[]; writable: string[] } {
+  const roots = [...new Set([join(home, '.monomind'), monomindHome(home, env)])].filter((d) =>
+    existsSync(d),
+  );
+  const writable: string[] = [];
+  for (const root of roots) {
+    for (const d of ROLE_WRITABLE_MONOMIND_DIRS) {
+      try {
+        mkdirSync(join(root, d), { recursive: true });
+      } catch {
+        /* left read-only */
+      }
+    }
+    for (const e of ROLE_WRITABLE_MONOMIND)
+      if (existsSync(join(root, e))) writable.push(join(root, e));
+  }
+  return { readOnly: roots, writable };
+}
 
 /** Under $HOME, beyond file-roots.ts's HOME_DENY_WRITE. */
 export const HOME_OPERATOR_EXEC = [
@@ -142,6 +182,8 @@ function protectedCandidates(ctx: ProtectedCtx): string[] {
   const roots = [...new Set([ctx.orgRoot, ctx.cwd].filter((r): r is string => !!r))];
   const paths = [
     ...roots.map((r) => join(r, '.claude')),
+    // The project's MCP servers, which the operator's Claude Code starts.
+    ...roots.map((r) => join(r, '.mcp.json')),
     ...roots.map((r) => join(r, '.monomind', 'org-skills')),
     join(mmHome, 'org-skills'),
     join(mmHome, 'enable-terminal.json'),
@@ -161,9 +203,10 @@ export function maskReadOnlyPaths(ctx: {
   allowWrite?: string[];
   homeDenyWrite: string[];
 }): string[] {
-  const home = ctx.homeDenyWrite
-    .filter((p) => p !== '.claude' && p !== '.claude.json')
-    .map((p) => join(ctx.home, p));
+  // ~/.claude.json holds the operator's `mcpServers`: read-only too. Claude
+  // Code itself runs inside the mask and writes that file on its own, and
+  // copes with it being read-only (operator-paths-sdk.test.ts).
+  const home = ctx.homeDenyWrite.filter((p) => p !== '.claude').map((p) => join(ctx.home, p));
   const claude = CLAUDE_HOME_EXEC.map((p) => join(ctx.home, '.claude', p));
   return [...new Set([...home, ...claude, ...operatorProtectedPaths(ctx)])].filter((p) =>
     existsSync(p),
