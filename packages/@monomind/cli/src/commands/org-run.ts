@@ -27,6 +27,7 @@ import {
 import { type RunEndInput, runEndLine } from './org-run-end.js';
 import { checkV1Config, printCostEstimate, printDryRun } from './org-run-preview.js';
 import { ensureOrgSignedForRun } from './org-sign.js';
+import { reconcileStaleRun } from './org-stale-run.js';
 
 const log = (text: string): void => {
   console.log(text);
@@ -260,6 +261,25 @@ export const runAction = async (ctx: CommandContext): Promise<CommandResult> => 
   const serveOwner = liveServeDaemonPid(ctx.cwd);
   if (serveOwner != null)
     return handOffToServeDaemon(orgsDir, name, serveOwner, taskFlag, autoApprove);
+
+  // #573: a record left 'running' by a run that is gone is closed out here;
+  // one whose recorded process is still alive means a second process would
+  // share its runtime.json and broker lease, so refuse.
+  const prior = reconcileStaleRun(ctx.cwd, name, 'org run');
+  if (prior.outcome === 'crashed') {
+    log(
+      output.warning(
+        `org ${name}: previous run${prior.run ? ` ${prior.run}` : ''} was not running (${prior.reason}) — marked crashed`,
+      ),
+    );
+  } else if (prior.outcome === 'live' && prior.pid != null) {
+    log(
+      output.error(
+        `org ${name} is already running (pid ${prior.pid}) — stop it first with "monomind org stop ${name}"`,
+      ),
+    );
+    return { success: false, message: 'org already running' };
+  }
 
   const crossProcess = ctx.flags.crossProcess !== false;
 

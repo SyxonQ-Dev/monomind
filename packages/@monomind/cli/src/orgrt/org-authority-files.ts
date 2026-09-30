@@ -27,12 +27,14 @@ import {
 /** Files in an org dir that record a human's decisions. */
 export const DECISION_FILES = ['gates.json', 'approvals.json', 'questions.json', 'inbox.jsonl'];
 /** The other files the daemon keeps in an org dir: the resume checkpoint,
- *  the decision trace, run history and the idle deadline. */
+ *  the decision trace, run history, the idle deadline and the log of dead
+ *  runs closed out by a liveness check (#573). */
 export const ORG_STATE_FILES = [
   'runtime.json',
   'decisions.jsonl',
   'history.jsonl',
   'idle-watchdog.json',
+  'liveness.jsonl',
 ];
 /** Files in an org dir that `org serve` acts on (org-poll.ts): `run` starts
  *  the org, the others stop, pause or reload it. */

@@ -6,6 +6,7 @@
 
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { recordedPidLiveness } from '../orgrt/run-liveness.js';
 import { ORG_DIR, OrgDefSchema } from '../orgrt/types.js';
 import { output } from '../output.js';
 import type { CommandResult } from '../types.js';
@@ -225,7 +226,7 @@ export type RunLiveEvidence = 'pid' | 'daemon-heartbeat' | 'run-activity';
 export function classifyRun(
   cwd: string,
   org: string,
-  state: { status?: string; run?: string; pid?: number; closedBy?: string },
+  state: { status?: string; run?: string; pid?: number; pidStart?: string; closedBy?: string },
   now: number = Date.now(),
 ): { state: RunState; evidence?: RunLiveEvidence } {
   if (state.status === 'crashed') return { state: 'crashed' };
@@ -243,12 +244,10 @@ export function classifyRun(
     return { state: age !== null && age > RUN_ACTIVITY_WINDOW_MS ? 'idle' : 'running', evidence };
   };
   if (state.pid) {
-    try {
-      process.kill(state.pid, 0);
-      return live('pid');
-    } catch {
-      /* recorded pid is gone — fall through to the cross-checks */
-    }
+    // #573: alive AND still the process that wrote the record — a pid the
+    // kernel has handed to something else is as gone as a dead one.
+    if (recordedPidLiveness(state.pid, state.pidStart) === 'alive') return live('pid');
+    /* recorded pid is gone or reused — fall through to the cross-checks */
   } else {
     // No pid was ever recorded; there is nothing to call stale.
     return live('pid');

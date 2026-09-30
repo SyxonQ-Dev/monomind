@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { resolveRoleCostTier, validateCostTiers } from '../orgrt/cost-tier.js';
 import { readIdleStatus } from '../orgrt/idle-deadline.js';
+import { recordedPidLiveness } from '../orgrt/run-liveness.js';
 import { OrgDefSchema } from '../orgrt/types.js';
 import { hostingDaemon, writeFileAtomic } from './org-hil.mjs';
 
@@ -225,6 +226,17 @@ export function describeRoleModel(role, def) {
   };
 }
 
+/** runtime.json's status when no daemon answers for the org: a 'running'
+ *  record whose pid is gone, or now another process's, is a crashed run
+ *  (#573) — the same rule `org status` applies. */
+function recordedStatus(runtime) {
+  const status = runtime?.status ?? 'never run';
+  if (status === 'running' && typeof runtime.pid === 'number') {
+    if (recordedPidLiveness(runtime.pid, runtime.pidStart) !== 'alive') return 'crashed';
+  }
+  return status;
+}
+
 export async function runtimeView(root, org) {
   const raw = readJson(path.join(root, '.monomind', 'orgs', `${org}.json`));
   if (!raw) return null;
@@ -270,7 +282,7 @@ export async function runtimeView(root, org) {
     live: isLive,
     liveError: live?.unreachable ?? null,
     run,
-    status: isLive ? 'running' : (runtime?.status ?? 'never run'),
+    status: isLive ? 'running' : recordedStatus(runtime),
     closedBy: isLive ? null : (runtime?.closedBy ?? null),
     startedAt: digest?.startedAt ?? null,
     updated: runtime?.updated ?? null,
