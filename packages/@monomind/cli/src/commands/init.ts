@@ -46,7 +46,8 @@ export const initCommand: Command = {
     },
     {
       name: 'full',
-      description: 'Create full configuration with all components and every pack',
+      description:
+        'Create full configuration with all components, every pack and all five platforms',
       type: 'boolean',
       default: false,
     },
@@ -77,7 +78,7 @@ export const initCommand: Command = {
     {
       name: 'no-install',
       description:
-        'Skip the post-init `doctor --install` pass, which may otherwise run a global `npm install -g @anthropic-ai/claude-code`',
+        'Never offer to install the Claude Code CLI (`npm install -g @anthropic-ai/claude-code`). Without it, init asks first, and only in an interactive terminal',
       type: 'boolean',
       default: false,
     },
@@ -122,7 +123,7 @@ export const initCommand: Command = {
       name: 'target',
       short: 't',
       description:
-        'Coding system to initialize (default: all). `agents` writes only AGENTS.md (not part of all)',
+        'Coding system to initialize (default: the installed ones). `all` is all five; `agents` writes only AGENTS.md (not part of all)',
       type: 'string',
       choices: [
         'all',
@@ -137,9 +138,23 @@ export const initCommand: Command = {
       ],
     },
     {
-      name: 'platform',
-      description: 'Adapter platform id(s), comma-separated; preserves --target compatibility',
+      name: 'platforms',
+      description:
+        'Platforms to write, comma-separated (claude,antigravity,opencode,kimi,codex, or any adapter id). ' +
+        'Default: the ones installed here (CLI on PATH or ~/.<name> config), else Claude Code',
       type: 'string',
+    },
+    {
+      name: 'platform',
+      description: 'Same as --platforms (older spelling)',
+      type: 'string',
+    },
+    {
+      name: 'all-platforms',
+      description:
+        'Write all five platforms (claude, antigravity, opencode, kimi, codex), installed or not',
+      type: 'boolean',
+      default: false,
     },
     {
       name: 'enable-hooks',
@@ -236,7 +251,10 @@ export const initCommand: Command = {
     },
   ],
   examples: [
-    { command: 'monomind init', description: 'Initialize with default configuration' },
+    {
+      command: 'monomind init',
+      description: 'Initialize for the coding platforms installed on this machine',
+    },
     {
       command: 'monomind init --no-start-all',
       description: 'Initialize without auto-starting services',
@@ -250,8 +268,12 @@ export const initCommand: Command = {
     { command: 'monomind init --kimicode', description: 'Initialize only Kimi Code' },
     { command: 'monomind init --codex', description: 'Initialize only Codex' },
     {
-      command: 'monomind init --target all',
-      description: 'Initialize the five legacy coding-system targets',
+      command: 'monomind init --platforms claude,codex',
+      description: 'Initialize Claude Code and Codex, whatever is installed',
+    },
+    {
+      command: 'monomind init --all-platforms',
+      description: 'Initialize all five coding platforms (same as --target all)',
     },
     { command: 'monomind init --target codex', description: 'Initialize only Codex' },
     { command: 'monomind init wizard', description: 'Interactive setup wizard' },

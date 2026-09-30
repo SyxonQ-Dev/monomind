@@ -58,6 +58,7 @@ import {
 } from './access-grant-key.js';
 import { defaultOperatorDir } from './broker.js';
 import { instructionsDigest } from './instructions-file.js';
+import { orgSignatureEnforced } from './org-signature-enforcement.js';
 
 /** Top-level fields left out of the signature: the goal is a prompt, and
  *  `status` is informational. */
@@ -85,19 +86,7 @@ export class OrgSignatureError extends Error {
   }
 }
 
-let enforced = true;
-
-/** Test-only switch: the org runtime's own suites start hundreds of fixture
- *  orgs that have nothing to do with signing, so their vitest setup file
- *  turns enforcement off; the signature tests turn it back on. Nothing in
- *  production calls this — there is deliberately no env var or flag. */
-export function setOrgSignatureEnforcement(on: boolean): void {
-  enforced = on;
-}
-
-export function orgSignatureEnforced(): boolean {
-  return enforced;
-}
+export { orgSignatureEnforced, setOrgSignatureEnforcement } from './org-signature-enforcement.js';
 
 /** The first `__proto__` / `constructor` / `prototype` key in `value`, as a
  *  dotted path, or undefined. JSON.parse makes such a key an own property;
@@ -357,7 +346,7 @@ export function assertOrgDefSigned(
   raw: unknown,
   opts: { dir?: string; digests?: Record<string, string> } = {},
 ): void {
-  if (!enforced) return;
+  if (!orgSignatureEnforced()) return;
   const check = verifyOrgDef(root, org, raw, opts);
   if (!check.ok) throw new OrgSignatureError(check.message, check.reason);
 }

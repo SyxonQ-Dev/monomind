@@ -143,9 +143,14 @@ export function isOperatorProtected(
   p: string,
   ctx: ProtectedCtx,
   real: (x: string) => string,
+  /** How a protected path contains `p`: the caller's DENY comparison
+   *  (policy.ts passes `isWithin(…, fold.deny)`, so `.Claude/` or
+   *  `.MCP.json` are refused where the filesystem folds case). An opt-in
+   *  (a signed allowWrite) always compares exactly. */
+  insideProtected: (container: string, target: string) => boolean = within,
 ): string | undefined {
   if (optInPaths(ctx).some((a) => within(real(a), p) || within(a, p))) return undefined;
-  return protectedCandidates(ctx).find((d) => within(real(d), p) || within(d, p));
+  return protectedCandidates(ctx).find((d) => insideProtected(real(d), p) || insideProtected(d, p));
 }
 
 /** `p` with `optIn` carved out of it, for an OS layer that can only deny

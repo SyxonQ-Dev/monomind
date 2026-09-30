@@ -15,11 +15,27 @@ const answers = vi.hoisted(() => ({
 }));
 const executed = vi.hoisted(() => ({ options: [] as InitOptions[] }));
 
+const multiSelectCalls = vi.hoisted(
+  () => [] as { message: string; options: { value: string; selected?: boolean }[] }[],
+);
+
 vi.mock('../src/prompt.js', () => ({
   select: vi.fn(async () => answers.select.shift()),
-  multiSelect: vi.fn(async () => answers.multiSelect.shift()),
+  multiSelect: vi.fn(async (opts: (typeof multiSelectCalls)[number]) => {
+    multiSelectCalls.push(opts);
+    return answers.multiSelect.shift();
+  }),
   input: vi.fn(async () => '5'),
   confirm: vi.fn(async () => false),
+}));
+
+// #420: the platform step pre-selects what is installed; pin it for the test.
+vi.mock('../src/init/detect-platforms.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/init/detect-platforms.js')>()),
+  detectInstalledPlatforms: () => [
+    { id: 'claude', via: ['claude on PATH'] },
+    { id: 'codex', via: ['~/.codex'] },
+  ],
 }));
 
 vi.mock('../src/init/executor.js', () => ({
@@ -39,6 +55,7 @@ output.setVerbosity('quiet');
 
 beforeEach(() => {
   executed.options.length = 0;
+  multiSelectCalls.length = 0;
 });
 
 async function run(preset: string, multiSelects: string[][]): Promise<InitOptions> {
@@ -51,27 +68,68 @@ async function run(preset: string, multiSelects: string[][]): Promise<InitOption
 
 describe('init wizard packs (GH #411)', () => {
   it('installs core plus the packs the user picked', async () => {
-    const options = await run('default', [['orgs', 'github']]);
+    const options = await run('default', [['claude'], ['orgs', 'github']]);
     expect(options.packs).toEqual(['orgs', 'github']);
     expect(options.skills).toEqual({ core: true, all: false });
     expect(options.agents).toEqual({ core: true, all: false });
   });
 
   it('asks for packs after the Custom component choice', async () => {
-    const options = await run('custom', [['skills', 'commands'], ['extras']]);
+    const options = await run('custom', [['claude'], ['skills', 'commands'], ['extras']]);
     expect(options.components.agents).toBe(false);
     expect(options.packs).toEqual(['extras']);
   });
 
   it('Full installs every pack without asking', async () => {
-    const options = await run('full', []);
+    const options = await run('full', [['claude']]);
     expect(options.packs).toBeUndefined();
     expect(options.skills.all).toBe(true);
   });
 
   it('leaves the shared default presets untouched', async () => {
     const before = structuredClone(DEFAULT_INIT_OPTIONS);
-    await run('custom', [['skills'], ['business']]);
+    await run('custom', [['claude'], ['skills'], ['business']]);
     expect(DEFAULT_INIT_OPTIONS).toEqual(before);
+  });
+});
+
+describe('init wizard platforms (#420)', () => {
+  it('pre-selects the detected platforms and writes the chosen ones', async () => {
+    const options = await run('default', [['claude', 'codex'], []]);
+    const step = multiSelectCalls.find((c) => c.message.startsWith('Coding platforms'));
+    expect(step?.options.filter((o) => o.selected).map((o) => o.value)).toEqual([
+      'claude',
+      'codex',
+    ]);
+    expect(options.selectedPlatforms).toEqual(['claude', 'codex']);
+    expect(options.components.codex).toBe(true);
+    expect(options.components.antigravity).toBe(false);
+  });
+
+  it('turns the Claude Code files off when Claude Code is deselected', async () => {
+    const options = await run('default', [['codex'], []]);
+    expect(options.selectedPlatforms).toEqual(['codex']);
+    expect(options.components.claudeMd).toBe(false);
+    expect(options.components.settings).toBe(false);
+  });
+
+  it('asks for platforms before the component questions', async () => {
+    const options = await run('custom', [['codex'], ['claudeMd', 'skills'], []]);
+    expect(multiSelectCalls[0].message).toMatch(/^Coding platforms/);
+    expect(multiSelectCalls[1].message).toMatch(/^Select components/);
+    // Deselecting Claude Code wins over the component answers.
+    expect(options.components.claudeMd).toBe(false);
+    expect(options.components.skills).toBe(true);
+  });
+
+  it('Full pre-selects all five platforms', async () => {
+    await run('full', [['claude']]);
+    expect(multiSelectCalls[0].options.every((o) => o.selected)).toBe(true);
+    expect(multiSelectCalls[0].options).toHaveLength(5);
+  });
+
+  it('falls back to Claude Code when nothing is picked', async () => {
+    const options = await run('default', [[], []]);
+    expect(options.selectedPlatforms).toEqual(['claude']);
   });
 });

@@ -150,3 +150,37 @@ describe('minor 2: the first look says what it trusted', () => {
     expect(seen).toHaveLength(1); // once
   });
 });
+
+describe('merge with #517: operator-protected paths fold like every other deny', () => {
+  it('.Claude/, .MCP.json and ~/.MONOMIND/org-skills are refused however they are spelled', async () => {
+    const { OrgBus } = await import('../../src/orgrt/bus.js');
+    const { PolicyEngine } = await import('../../src/orgrt/policy.js');
+    const root = scratch('osr5-fold-');
+    mkdirSync(join(home, '.monomind', 'org-skills'), { recursive: true });
+    const bus = () => new OrgBus('o', 'r', scratch('osr5-bus-'));
+    const p = new PolicyEngine('dev', {} as never, bus(), root, [root, home], root);
+    for (const f of [
+      join(root, '.Claude', 'settings.json'),
+      join(root, '.MCP.json'),
+      join(root, '.mcp.JSON'),
+      join(home, '.MONOMIND', 'org-skills', 'x', 'SKILL.md'),
+    ]) {
+      expect((await p.decide('Write', { file_path: f, content: 'x' })).behavior, f).toBe('deny');
+    }
+    const plain = await p.decide('Write', { file_path: join(root, 'src', 'a.ts'), content: 'x' });
+    expect(plain.behavior).toBe('allow');
+    // A signed opt-in still opens only its own subtree, compared exactly.
+    const optIn = new PolicyEngine(
+      'dev',
+      { sandbox: { allowWrite: ['.claude/skills'] } } as never,
+      bus(),
+      root,
+      [root],
+      root,
+    );
+    const ok = await optIn.decide('Write', { file_path: join(root, '.claude/skills/a.md'), content: 'x' });
+    expect(ok.behavior).toBe('allow');
+    const no = await optIn.decide('Write', { file_path: join(root, '.CLAUDE/settings.json'), content: 'x' });
+    expect(no.behavior).toBe('deny');
+  });
+});

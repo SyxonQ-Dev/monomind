@@ -107,6 +107,10 @@ export const skillsCommand: Command = {
         codex: false,
       },
       packs: packs.packs,
+      // Mirror only into the platform trees the project already has (#420).
+      platformTrees: (['gemini', 'agents'] as const).filter((tree) =>
+        fs.existsSync(path.join(ctx.cwd, `.${tree}`)),
+      ),
       skills: {
         all: ctx.flags.all as boolean,
         core: ctx.flags.core as boolean,
