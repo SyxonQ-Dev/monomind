@@ -10,6 +10,7 @@
  *  6. __proto__ / constructor / prototype keys are refused;
  *  7. org test-loop never writes or signs anything in the project.
  */
+import { HOME_DENY_WRITE } from '../../src/orgrt/file-roots.js';
 import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
@@ -243,7 +244,9 @@ describe('4. what the operator’s own sessions run or trust', () => {
     const paths = operatorProtectedPaths({ home, env: {} });
     for (const p of ['org-skills', 'orgrt-broker']) expect(paths).toContain(join(home, '.monomind', p));
     for (const p of ['projects', 'browser-sessions', 'models']) expect(paths).not.toContain(join(home, '.monomind', p));
-    for (const p of ['.npm/_npx', '.npmrc', '.local/bin', '.config/fish', '.bashrc.d']) expect(paths).toContain(join(home, p));
+    for (const p of ['.npm/_npx', '.local/bin', '.config/fish', '.bashrc.d']) expect(paths).toContain(join(home, p));
+    // One list since #518: .npmrc, .config/npm and .monomind/deps are in HOME_DENY_WRITE.
+    for (const p of ['.npmrc', '.config/npm', '.monomind/deps']) expect(HOME_DENY_WRITE).toContain(p);
   });
 
   it.runIf(authorityMaskAvailability().available)(

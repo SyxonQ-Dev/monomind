@@ -103,6 +103,13 @@ const HOME_VARIANTS = [
   '.ss\u00adh/id_rsa', // soft hyphen
   '.s\u200bsh/id_rsa', // ZWSP
   '\ufeff.ssh/id_rsa', // BOM
+  // #518 review (B1): the first-use deps dir and npm's config fold the same.
+  '.MONOMIND/Deps/x.js',
+  '.monomind/DEPS/@anthropic-ai+claude-agent-sdk@0.3.226/package.json',
+  '.monomind/dep\u017f/x.js', // long s ſ
+  '.NPMRC',
+  '.npmrc.',
+  '.Config/NPM/npmrc',
 ];
 
 describe('#496 — deny checks fold on every filesystem, whatever the probe says', () => {

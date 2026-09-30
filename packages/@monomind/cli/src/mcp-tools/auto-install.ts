@@ -6,7 +6,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { npmCommand } from '../utils/npm-command.js';
+import { npmInvocation } from '../utils/npm-command.js';
 
 // Track which packages we've attempted to install this session
 const installAttempts = new Set<string>();
@@ -65,7 +65,7 @@ export async function autoInstallPackage(
 
     // Use spawn with array args to prevent shell injection
     const args = ['install', packageName, save ? '--save' : '--no-save'];
-    const result = spawnSync(npmCommand(), args, {
+    const result = spawnSync(...npmInvocation(args), {
       stdio: silent ? 'pipe' : ['pipe', 'pipe', 'pipe'],
       timeout,
       shell: false, // Explicitly disable shell

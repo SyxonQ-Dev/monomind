@@ -162,6 +162,39 @@ describe('4. ~/.monomind in the mask', () => {
     expect(existsSync(join(home, '.monomind', 'rates.json'))).toBe(false);
     expect(readFileSync(join(home, '.monomind', 'projects', 'p.txt'), 'utf8')).toBe('ok\n');
   });
+
+  it.runIf(authorityMaskAvailability().available)(
+    'with #518 merged: no read-write bind of ~/.monomind; no new entry, no deps write, allowlisted entries still writable',
+    () => {
+      const home = scratch('osr2-518h-');
+      const root = scratch('osr2-518r-');
+      const env = {} as NodeJS.ProcessEnv;
+      ensureAuthorityDirs(home, env);
+      const mm = join(home, '.monomind');
+      const args = authorityMaskArgs({ home, env, roots: [root], orgRoot: root, cwd: root });
+      // #518 made ~/.monomind a mount point with `--bind`; with #515 it is `--ro-bind`.
+      const binds = args.flatMap((a, i) => (a === '--bind' ? [args[i + 1]] : []));
+      expect(binds).not.toContain(mm);
+      expect(existsSync(join(mm, 'deps'))).toBe(true); // created so it can be protected
+      const [cmd, argv] = maskedCommand(args, 'bash', [
+        '-c',
+        [
+          `echo X > ${mm}/newfile`,
+          `echo X > ${mm}/deps/planted.js`,
+          `mkdir -p ${mm}/deps/evil`,
+          `echo ok > ${mm}/projects/p.txt`,
+          `echo ok > ${mm}/browser-reports/r.txt`,
+          'true',
+        ].join('; '),
+      ]);
+      spawnSync(cmd, argv);
+      expect(existsSync(join(mm, 'newfile'))).toBe(false);
+      expect(existsSync(join(mm, 'deps', 'planted.js'))).toBe(false);
+      expect(existsSync(join(mm, 'deps', 'evil'))).toBe(false);
+      expect(readFileSync(join(mm, 'projects', 'p.txt'), 'utf8')).toBe('ok\n');
+      expect(readFileSync(join(mm, 'browser-reports', 'r.txt'), 'utf8')).toBe('ok\n');
+    },
+  );
 });
 
 describe('5. mcp.pid', () => {

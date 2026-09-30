@@ -7,11 +7,12 @@
  * acceptance commands with their output, and the issue text — never the
  * thread, the doer's reasoning, prior rounds, or the attempt count.
  */
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { loadClaudeSdk } from '../../src/orgrt/agent-runner-claude.js';
 import { OrgBus } from '../../src/orgrt/bus.js';
 import { PolicyEngine } from '../../src/orgrt/policy.js';
 import { Mailbox } from '../../src/orgrt/mailbox.js';
@@ -23,6 +24,13 @@ import { OrgDefSchema } from '../../src/orgrt/types.js';
 
 const tmp = (p: string) => mkdtempSync(join(tmpdir(), p));
 const tick = (ms = 15) => new Promise((r) => setTimeout(r, ms));
+
+// The runner imports the Claude SDK on first use (#428). Load it once up front
+// so the tick-based waits below time the session logic, as they did when the
+// SDK was a static import.
+beforeAll(async () => {
+  await loadClaudeSdk();
+});
 
 describe('D6 cold scope', () => {
   it('an artifact-only role is cold regardless of the org scope', () => {

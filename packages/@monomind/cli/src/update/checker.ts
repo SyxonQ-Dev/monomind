@@ -5,7 +5,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { npmCommand } from '../utils/npm-command.js';
+import { npmInvocation } from '../utils/npm-command.js';
 
 // Inline semver shim — avoids external dependency
 const semver = {
@@ -224,7 +224,7 @@ export function getInstalledVersion(packageName: string): string | null {
 
     // Attempt 3: npm global prefix (covers `npm i -g monomind`)
     try {
-      const prefix = execFileSync(npmCommand(), ['prefix', '-g'], {
+      const prefix = execFileSync(...npmInvocation(['prefix', '-g']), {
         encoding: 'utf8',
         timeout: 3000,
       }).trim();
