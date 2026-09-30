@@ -7,7 +7,9 @@
  *
  * Candidates are the paths the watch would quarantine at its next check:
  * a protected path that was recorded missing and now exists, and a Claude
- * Code global config that was not there at the first look.
+ * Code global config that was not there at the first look. Before the first
+ * look (#548) no Claude config is a candidate: `strayClaudeConfigs` trusts
+ * every one present when it records that look.
  */
 
 import { homedir } from 'node:os';
@@ -43,9 +45,16 @@ function ctxOf(c: ApprovalCtx) {
 export function approvalCandidates(c: ApprovalCtx): string[] {
   const { root, operatorDir, home, env } = ctxOf(c);
   const baseline = [...readBaseline(root, operatorDir)].filter((p) => exists(p) && !isStubOnly(p));
-  const trusted = new Set(readConfigRecord(operatorDir)?.[home] ?? []);
-  const configs = claudeConfigCandidates(home, env).filter((p) => !trusted.has(p));
+  const recorded = readConfigRecord(operatorDir)?.[home];
+  const trusted = new Set(recorded ?? []);
+  const configs = recorded ? claudeConfigCandidates(home, env).filter((p) => !trusted.has(p)) : [];
   return [...new Set([...baseline, ...configs])].sort();
+}
+
+/** Claude configs monomind's first look will trust — empty once it is recorded. */
+export function firstLookConfigs(c: ApprovalCtx): string[] {
+  const { operatorDir, home, env } = ctxOf(c);
+  return readConfigRecord(operatorDir)?.[home] ? [] : claudeConfigCandidates(home, env).sort();
 }
 
 /** Approve exactly `paths`. Returns what was approved and what was not a

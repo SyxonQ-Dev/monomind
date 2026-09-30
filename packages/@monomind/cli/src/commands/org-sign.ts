@@ -20,7 +20,7 @@ import {
   signOrgDef,
   verifyOrgDef,
 } from '../orgrt/org-signature.js';
-import { approvalCandidates } from '../orgrt/plant-approvals.js';
+import { approvalCandidates, firstLookConfigs } from '../orgrt/plant-approvals.js';
 import { ORG_DIR, OrgDefSchema } from '../orgrt/types.js';
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
@@ -54,6 +54,9 @@ function printReview(cwd: string, name: string, raw: unknown): void {
         `  ${pending.length} protected path(s) would be quarantined as possible plants: ${pending.join(', ')} — if they are yours, approve them with \`monomind org approve-paths <path>\``,
       ),
     );
+  const firstLook = firstLookConfigs({ root: cwd });
+  if (firstLook.length)
+    log(output.dim(`  will be trusted at monomind's first look: ${firstLook.join(', ')}`));
   const before = lastSignedProjection(cwd, name);
   if (before === undefined) {
     log(output.dim('  (no earlier signature on this machine to compare with)'));

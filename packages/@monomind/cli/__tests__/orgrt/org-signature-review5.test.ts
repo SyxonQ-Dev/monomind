@@ -21,12 +21,14 @@ vi.mock('../../src/prompt.js', () => ({
 import { approvePathsAction } from '../../src/commands/org-approve-paths.js';
 import { signAction } from '../../src/commands/org-sign.js';
 import { AGENT_CONTEXT_ENV_MARKERS } from '../../src/orgrt/agent-context.js';
-import { approvalCandidates } from '../../src/orgrt/plant-approvals.js';
+import { approvalCandidates, approvePaths } from '../../src/orgrt/plant-approvals.js';
 import {
   PlantWatch,
   quarantineMessage,
+  readConfigRecord,
   strayClaudeConfigs,
   worktreeMcpPlants,
+  writeConfigRecord,
 } from '../../src/orgrt/planted-paths.js';
 import { setOrgSignatureEnforcement } from '../../src/orgrt/org-signature.js';
 import type { CommandContext } from '../../src/types.js';
@@ -182,5 +184,36 @@ describe('merge with #517: operator-protected paths fold like every other deny',
     expect(ok.behavior).toBe('allow');
     const no = await optIn.decide('Write', { file_path: join(root, '.CLAUDE/settings.json'), content: 'x' });
     expect(no.behavior).toBe('deny');
+  });
+});
+
+describe('#548: a Claude config before monomind’s first look', () => {
+  const cfg = () => join(home, '.claude', '.config.json');
+  const approval = (root: string) => ({ root, operatorDir: op, home, env: {} });
+  beforeEach(() => {
+    mkdirSync(join(home, '.claude'), { recursive: true });
+    writeFileSync(cfg(), '{"numStartups":3}');
+  });
+
+  it('no record: not a candidate, cannot be approved, and org sign says it will be trusted', async () => {
+    const root = scratch('osr5-548-');
+    expect(approvalCandidates(approval(root))).toEqual([]);
+    expect(approvePaths(approval(root), [cfg()])).toEqual({ approved: [], notCandidates: [cfg()] });
+    expect(readConfigRecord(op)).toBeUndefined();
+    mkdirSync(join(root, '.monomind', 'orgs'), { recursive: true });
+    writeFileSync(join(root, '.monomind', 'orgs', 'o.json'), JSON.stringify({ name: 'o', roles: [{ id: 'boss' }] }));
+    expect((await signAction(ctx(root, ['o'], { yes: true }))).success).toBe(true);
+    expect(logged()).not.toMatch(/would be quarantined/);
+    expect(logged()).toContain(`will be trusted at monomind's first look: ${cfg()}`);
+  });
+
+  it('a record without the file: a candidate', () => {
+    writeConfigRecord(op, { [home]: [] });
+    expect(approvalCandidates(approval(scratch('osr5-548-')))).toEqual([cfg()]);
+  });
+
+  it('a record with the file: not a candidate', () => {
+    writeConfigRecord(op, { [home]: [cfg()] });
+    expect(approvalCandidates(approval(scratch('osr5-548-')))).toEqual([]);
   });
 });
