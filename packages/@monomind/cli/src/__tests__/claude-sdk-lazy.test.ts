@@ -4,6 +4,9 @@
  * MONOMIND_NO_AUTO_INSTALL), the caller gets the helper's message, never a
  * crash or a bare ERR_MODULE_NOT_FOUND.
  */
+import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ensure = vi.fn();
@@ -44,7 +47,7 @@ describe('Claude SDK call sites load it lazily', () => {
       }
     };
     await expect(drain()).rejects.toThrow(MESSAGE);
-    expect(ensure).toHaveBeenCalledWith('@anthropic-ai/claude-agent-sdk');
+    expect(ensure).toHaveBeenCalledWith('@anthropic-ai/claude-agent-sdk', {});
   });
 
   it('constructing a runner does not load the SDK', () => {
@@ -75,4 +78,31 @@ describe('Claude SDK call sites load it lazily', () => {
     expect(r.models).toEqual([]);
     expect(r.error).toEqual({ code: 'list-failed', message: MESSAGE });
   });
+
+  it.skipIf(process.platform === 'win32')(
+    '(#522) with an installed Claude Code: installs no binary and passes it to query()',
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'mm-claude-'));
+      const exe = join(dir, 'claude');
+      writeFileSync(exe, "#!/bin/sh\necho '2.1.300 (Claude Code)'\n");
+      chmodSync(exe, 0o755);
+      vi.stubEnv('MONOMIND_CLAUDE_PATH', exe);
+      const query = vi.fn((_: { options: Record<string, unknown> }) => ({
+        supportedModels: async () => [{ value: 'haiku', displayName: 'Haiku' }],
+        interrupt: async () => {},
+      }));
+      ensure.mockResolvedValue({ query, tool: () => ({}), createSdkMcpServer: () => ({}) });
+      try {
+        const r = await listRuntimeModels('claude', { timeoutMs: 1000 });
+        expect(r.models.map((m) => m.id)).toEqual(['haiku']);
+        expect(ensure).toHaveBeenCalledWith('@anthropic-ai/claude-agent-sdk', {
+          withoutSdkBinary: true,
+        });
+        expect(query.mock.calls[0][0].options.pathToClaudeCodeExecutable).toBe(realpathSync(exe));
+      } finally {
+        vi.unstubAllEnvs();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });

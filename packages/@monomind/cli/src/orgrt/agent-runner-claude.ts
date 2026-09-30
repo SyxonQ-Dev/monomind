@@ -2,36 +2,20 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { query } from '@anthropic-ai/claude-agent-sdk';
-import { ensureOptionalDependency } from '../utils/optional-deps.js';
 import { fullAccessClaudeSpawn } from './agent-runner-claude-fullaccess.js';
 import { resolveClaudeSettingsOverrides } from './agent-runner-claude-settings.js';
 import { createSubagentTracker } from './agent-runner-claude-subagent.js';
 import type { AgentMessage, AgentRunArgs, AgentRunner } from './agent-runner-types.js';
 import { killOnAbort } from './agent-runner-types.js';
 import { maskedCommand } from './authority-mask.js';
+import { type ClaudeSdk, executableOption, loadClaudeSdk } from './claude-sdk.js';
 import { coverEveryToolCall, POLICY_HOOK_TIMEOUT_S } from './policy-hook.js';
 import { type DescendantTracker, trackDescendants } from './process-tree.js';
 import { omitAnthropicManagedKeys } from './provider.js';
 import { toolInputSchema } from './tool-fence.js';
 import { toolResultSpillHook } from './tool-spill.js';
 
-type ClaudeSdk = Pick<
-  typeof import('@anthropic-ai/claude-agent-sdk'),
-  'createSdkMcpServer' | 'query' | 'tool'
->;
-
-let claudeSdk: Promise<ClaudeSdk> | undefined;
-
-/** The Claude Agent SDK, installed into ~/.monomind/deps on first use
- *  (#428); it is not a dependency of the published package. Loaded once per
- *  process; a failure is not cached, so a later session retries. */
-export const loadClaudeSdk = (): Promise<ClaudeSdk> =>
-  (claudeSdk ??= ensureOptionalDependency<ClaudeSdk>('@anthropic-ai/claude-agent-sdk').catch(
-    (err) => {
-      claudeSdk = undefined;
-      throw err;
-    },
-  ));
+export { loadClaudeSdk } from './claude-sdk.js';
 
 /** Launch the Claude Code process inside the authority mask. Same stdio as the
  *  SDK's own spawn; stderr is drained (an unread pipe would stall the CLI once
@@ -71,7 +55,8 @@ export class ClaudeAgentRunner implements AgentRunner {
   ) {}
 
   async *run(args: AgentRunArgs): AsyncIterable<AgentMessage> {
-    const { createSdkMcpServer, query, tool } = await this.loadSdk();
+    const sdk = await this.loadSdk();
+    const { createSdkMcpServer, query, tool } = sdk;
     const queryFn = this.queryFn ?? query;
     // Wrap each OrgToolDef handler ({ text }) into the Claude SDK's
     // { content: [{ type: 'text', text }] } return shape.
@@ -178,6 +163,8 @@ export class ClaudeAgentRunner implements AgentRunner {
         ...(args.effort && args.effort !== 'off' ? { effort: args.effort } : {}),
         ...(args.effort === 'off' ? { thinking: { type: 'disabled' as const } } : {}),
         cwd: args.cwd,
+        // #522: an installed Claude Code instead of the SDK's bundled one.
+        ...executableOption(sdk),
         // The SDK's own default (`env = {...process.env}`) only applies when
         // this option is omitted entirely — passing `args.env` directly, even
         // as `{}` (the common case: most callers only set one or two
