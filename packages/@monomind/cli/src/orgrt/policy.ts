@@ -97,6 +97,9 @@ export class PolicyEngine {
   private usedUsd = 0;
   private toolContext: PolicyToolContext = {};
   private osSandboxed = false;
+  /** #550: this role's runner refuses to start an exec below the budget
+   *  floor, so a role under it is as good as out of budget. Set per session. */
+  budgetFloorGated = false;
   /** #492: real paths of the non-glob fileWrite/fileRead entries, taken from
    *  the operator's config before the role runs (and again on `org reload`). */
   private scopeSnapshots: Map<string, ScopeSnapshot>;

@@ -279,5 +279,9 @@ export interface AgentMessage {
 }
 
 export interface AgentRunner {
+  /** #550: true for runners that refuse to start a CLI exec below the
+   *  budget floor (runner-usage.ts's budgetRefusal) — a role closed that way
+   *  counts as out of budget until its cap is raised (budget-closure.ts). */
+  readonly budgetFloorGated?: boolean;
   run(args: AgentRunArgs): AsyncIterable<AgentMessage>;
 }

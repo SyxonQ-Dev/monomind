@@ -66,20 +66,29 @@ export function addUsage(target: CliUsage, add: CliUsage): void {
   target.cacheCreation += add.cacheCreation;
 }
 
-/** What `total` has beyond `already`, per quantity, never negative. */
+/** What `total` has beyond `already`, never negative. Input is compared as
+ *  the CLI's whole input (uncached + cache) and only then split, so two
+ *  reports that split the same input differently between uncached and cache
+ *  do not leave a phantom remainder in either part. */
 export function usageBeyond(total: CliUsage, already: CliUsage): CliUsage {
-  return {
-    input: Math.max(0, total.input - already.input),
+  const whole = (u: CliUsage): number => u.input + u.cacheRead + u.cacheCreation;
+  return splitCachedInput({
+    input: Math.max(0, whole(total) - whole(already)),
     output: Math.max(0, total.output - already.output),
-    cacheRead: Math.max(0, total.cacheRead - already.cacheRead),
-    cacheCreation: Math.max(0, total.cacheCreation - already.cacheCreation),
-  };
+    cached: Math.max(0, total.cacheRead - already.cacheRead),
+    cacheWrite: Math.max(0, total.cacheCreation - already.cacheCreation),
+  });
 }
 
 /** Meter for a CLI that reports a step's usage (total input, cache
  *  included) and may report the same step more than once (agy: ACTIVE, then
  *  DONE): returns each report's growth over what was already reported for
- *  that step, or undefined when there is none. */
+ *  that step, or undefined when there is none. Each step's usage must be that
+ *  step's own model call, not a running total: verified live against agy
+ *  1.2.14 (#550) — four agent_response steps reported input 12374, 12859,
+ *  13184 and 13497 and output 285, 125, 113 and 492, and result.usage was
+ *  their exact sum (51914 / 1015). A report with no step key counts on its
+ *  own (the caller gives it an ordinal). */
 export function stepMeter(): (
   step: number | string,
   raw: Parameters<typeof splitCachedInput>[0],
@@ -120,6 +129,9 @@ export const BUDGET_STOP_SUBTYPE = 'error_budget';
 /** Budget share below which a runner will not start another CLI exec. */
 export const PRE_TURN_FLOOR_FRACTION = 0.05;
 
+/** Tokens a role must have left for a floor-gated runner to start an exec. */
+export const turnFloor = (max: number): number => Math.ceil(max * PRE_TURN_FLOOR_FRACTION);
+
 /** True once the budget is spent (or the session was closed for budget). */
 export function budgetExhausted(args: Pick<AgentRunArgs, 'tokenBudget'>): boolean {
   const b = args.tokenBudget?.();
@@ -131,7 +143,7 @@ export function budgetRefusal(args: Pick<AgentRunArgs, 'tokenBudget'>): string |
   const b = args.tokenBudget?.();
   if (!b) return undefined;
   if (b.left <= 0) return 'token budget exhausted';
-  if (b.max !== undefined && b.left < Math.ceil(b.max * PRE_TURN_FLOOR_FRACTION))
+  if (b.max !== undefined && b.left < turnFloor(b.max))
     return `only ${b.left} of ${b.max} budget_tokens left, below the ${PRE_TURN_FLOOR_FRACTION * 100}% floor a CLI turn needs`;
   return undefined;
 }

@@ -21,7 +21,14 @@ import { beginFullAccessSession, endFullAccessSession } from './session-full-acc
 import { resolveModel } from './session-prompt.js';
 import { openSessionStream, sessionRunArgs } from './session-stream.js';
 import type { SessionOpts } from './session-types.js';
-import { addTo, emitUsage, resultBreakdown, totalTokens, turnBreakdown } from './session-usage.js';
+import {
+  addTo,
+  emitUsage,
+  resultBreakdown,
+  settleResultTokens,
+  totalTokens,
+  turnBreakdown,
+} from './session-usage.js';
 import { StateDetector } from './state-detector.js';
 import { linkAbort } from './task-cancel.js';
 import type { ToolResultEventData } from './types.js';
@@ -55,6 +62,7 @@ export async function runOneSession(
   // queryFn stays supported so daemon.ts / test-loop.ts need no changes.
   const runner: AgentRunner =
     opts.runner ?? (opts.queryFn ? new ClaudeAgentRunner(opts.queryFn) : defaultClaudeRunner);
+  policy.budgetFloorGated = runner.budgetFloorGated === true; // #550 (budget-closure.ts)
 
   const tools = buildOrgTools(opts);
   // M1: provider tools are listed per session start, so a hot-reloaded
@@ -333,36 +341,7 @@ export async function runOneSession(
         // cost is below. A runner that reports no modelUsage falls back to
         // the per-turn `usage` fields, which keep their old semantics.
         const resultTokens = resultBreakdown(m, tokenTotals, m.session_id ?? sessionId ?? '');
-        // Per the SDK's own type docs, a 'result' message's usage is that
-        // message's own (effectively last-turn) usage in streaming-input mode,
-        // NOT a cumulative total across every turn of the mailbox message —
-        // and that last turn was already counted above via its own 'assistant'
-        // message, specifically so overBudget could trip mid-message. Adding
-        // the result's own usage again unconditionally would double-count it.
-        // (A modelUsage-derived delta is per-session-cumulative, so the same
-        // subtraction is exactly right there too: it removes what the
-        // assistant turns of THIS message already contributed and leaves the
-        // subagent/auxiliary volume the main loop never reported.) Only make
-        // up the shortfall (never negative) so a turn whose usage somehow
-        // never reached the 'assistant' branch (e.g. a runner/test double that
-        // doesn't emit per-turn usage) still gets counted at least once.
-        const shortfall: TokenUsage = {
-          input: Math.max(0, resultTokens.input - messageTurnTokens.input),
-          output: Math.max(0, resultTokens.output - messageTurnTokens.output),
-          cacheRead: Math.max(0, resultTokens.cacheRead - messageTurnTokens.cacheRead),
-          cacheCreation: Math.max(0, resultTokens.cacheCreation - messageTurnTokens.cacheCreation),
-        };
-        if (totalTokens(shortfall) > 0) policy.addTokenUsage(shortfall);
-        // What this whole mailbox message actually added to the meter: the
-        // per-turn accounting above plus whatever the result topped up. This
-        // is what the 'usage' event reports, so a consumer summing events
-        // lands on the same number as policy.usage.
-        const messageTokens: TokenUsage = {
-          input: messageTurnTokens.input + shortfall.input,
-          output: messageTurnTokens.output + shortfall.output,
-          cacheRead: messageTurnTokens.cacheRead + shortfall.cacheRead,
-          cacheCreation: messageTurnTokens.cacheCreation + shortfall.cacheCreation,
-        };
+        const messageTokens = settleResultTokens(policy, resultTokens, messageTurnTokens);
         messageTurnTokens = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
         // Convert the SDK's cumulative total_cost_usd into a per-result
         // delta before emitting - downstream sums usage events. A new session

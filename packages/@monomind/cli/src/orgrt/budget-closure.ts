@@ -18,6 +18,7 @@ import { taskTag } from './loadouts.js';
 import { isRecoverableCloseReason } from './mailbox.js';
 import type { PolicyEngine } from './policy.js';
 import { computeReplacementBudget } from './role-slot.js';
+import { turnFloor } from './runner-usage.js';
 import type { OrgTask } from './task-dag.js';
 import type { BusEvent } from './types.js';
 
@@ -25,12 +26,16 @@ import type { BusEvent } from './types.js';
  *  run for budget_usd and budget_tokens, once per run for run_config.budget_tokens. */
 export const BUDGET_WARN_FRACTION = 0.8;
 
-/** Which of the role's own caps it has spent, or undefined when neither. */
-function exhaustedDetail(policy: PolicyEngine): string | undefined {
+/** Which of the role's own caps it has spent, or undefined when neither. A
+ *  role whose runner won't start an exec below the budget floor (#550) has
+ *  spent its token cap once it is under that floor. */
+export function exhaustedDetail(policy: PolicyEngine): string | undefined {
   if (policy.overBudgetUsd)
     return `budget_usd exhausted ($${policy.usageUsd.toFixed(2)} / $${policy.policy.maxUsd})`;
-  if (policy.overBudget)
-    return `budget_tokens exhausted (${policy.budgetedUsage} / ${policy.policy.maxTokens})`;
+  const max = policy.policy.maxTokens;
+  if (policy.overBudget) return `budget_tokens exhausted (${policy.budgetedUsage} / ${max})`;
+  if (policy.budgetFloorGated && max != null && max - policy.budgetedUsage < turnFloor(max))
+    return `budget_tokens exhausted (${policy.budgetedUsage} / ${max}: ${max - policy.budgetedUsage} left, under the ${turnFloor(max)} a codex/antigravity turn needs)`;
   return undefined;
 }
 

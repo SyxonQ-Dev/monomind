@@ -88,6 +88,7 @@ import {
 export { computeSafeChunk } from './antigravity-runner-stream.js';
 
 export class AntigravityAgentRunner implements AgentRunner {
+  readonly budgetFloorGated = true; // #550
   constructor(private agyBin?: string) {}
 
   async *run(args: AgentRunArgs): AsyncIterable<AgentMessage> {

@@ -1096,8 +1096,10 @@ spend 7-35 times a role's budget and exhaust the org-wide ceiling for every othe
 Neither CLI reports usage while a model call runs, so the budget is checked at coarser points than on
 the Claude runtime:
 
-- **antigravity** reports usage per completed step. Each step is metered as it completes, and the
-  exec is killed at the step that exhausts the role's budget.
+- **antigravity** reports usage per completed step, each step's usage being that step's own model
+  call (checked live against agy 1.2.14: the steps of a four-call exec summed exactly to its
+  `result.usage`). Each step is metered as it completes, and the exec is killed at the step that
+  exhausts the role's budget.
 - **codex** (`codex exec --json`) reports usage only when the exec ends, and an exec is a whole agent
   run. Each exec is metered when it ends, and no further tool round is started once the budget is
   spent. An exec that has started runs to its end, so a role can still overshoot its budget by one
@@ -1105,11 +1107,15 @@ the Claude runtime:
 - Neither runner starts an exec when the role has less than 5% of its token cap left, or when its
   session was closed for budget (its own cap, `budget_usd`, or the org-wide ceiling). The role is
   then closed for budget (`budget-exhausted` status event, `error_budget` usage subtype) instead of
-  counted as a failed turn.
+  counted as a failed turn. Under the floor such a role counts as out of budget: the coordinator's
+  notice and the held tasks give its numbers, and `org reload` reopens it only once its token cap
+  leaves more than the floor.
 - Neither CLI reports a cost, so `cost_usd` is `null` and `budget_usd` never binds on these roles.
   Use `budget_tokens` for them.
 - The org-wide ceiling is checked on each `usage` event, which these roles emit once per mailbox
   message, so it can still be passed by the message in flight when it is reached.
+- A checkpoint written before this fix holds the old, inflated usage for these roles, and resuming
+  from it restores that. Start the run fresh, or raise the role's `budget_tokens` to cover it.
 
 #### Cancelled tasks
 

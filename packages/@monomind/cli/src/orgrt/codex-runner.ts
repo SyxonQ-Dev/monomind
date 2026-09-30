@@ -165,6 +165,7 @@ import {
 export type { CodexStreamEvent } from './codex-runner-types.js';
 
 export class CodexAgentRunner implements AgentRunner {
+  readonly budgetFloorGated = true; // #550
   constructor(private codexBin?: string) {}
 
   async *run(args: AgentRunArgs): AsyncIterable<AgentMessage> {

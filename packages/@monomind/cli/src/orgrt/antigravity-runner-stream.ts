@@ -288,17 +288,16 @@ export async function* streamTurn(
     ];
   };
 
-  // #550: a step's usage (live: an agent_response DONE step carries
-  // { input_tokens, output_tokens, cache_read_tokens, total_tokens }) is
-  // that step's own model call, reported once per step_index, after the
-  // step's own events.
+  // #550: a step's usage is that step's own model call (runner-usage.ts's
+  // stepMeter), reported once per step_index after the step's own events.
   const stepGrowth = stepMeter();
+  let unindexed = 0; // a report without a step_index counts on its own
   const withUsage = (ev: AgyEvent): AgyStreamEvent[] => {
     const events = handleEvent(ev);
     const u = ev.event === 'step_update' ? ev.step_update?.usage : undefined;
     const used =
       u &&
-      stepGrowth(ev.step_update?.step_index ?? 'x', {
+      stepGrowth(ev.step_update?.step_index ?? `unindexed-${++unindexed}`, {
         input: u.input_tokens,
         output: u.output_tokens,
         cached: u.cache_read_tokens,

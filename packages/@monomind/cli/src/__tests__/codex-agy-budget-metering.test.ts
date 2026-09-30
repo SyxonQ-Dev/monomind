@@ -16,7 +16,11 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentMessage, AgentRunner } from '../orgrt/agent-runner.js';
 import { AntigravityAgentRunner } from '../orgrt/antigravity-runner.js';
-import { orgBudgetedUsage } from '../orgrt/budget-closure.js';
+import {
+  exhaustedDetail,
+  orgBudgetedUsage,
+  reopenBudgetClosedRoles,
+} from '../orgrt/budget-closure.js';
 import { OrgBus } from '../orgrt/bus.js';
 import { CodexAgentRunner } from '../orgrt/codex-runner.js';
 import type { RunningOrg } from '../orgrt/daemon.js';
@@ -28,6 +32,7 @@ import {
   budgetRefusal,
   splitCachedInput,
   stepMeter,
+  usageBeyond,
 } from '../orgrt/runner-usage.js';
 import { runAgentSession } from '../orgrt/session.js';
 import type { OrgRole } from '../orgrt/types.js';
@@ -56,7 +61,8 @@ function mockChild(lines: string[], opts: { hold?: boolean } = {}): cp.ChildProc
     child.killed = true;
     child.signalCode = 'SIGTERM';
     release();
-    setTimeout(() => child.emit('close', null), 1);
+    // A finished child's normal close comes from the timer below.
+    if (opts.hold) setTimeout(() => child.emit('close', null), 1);
     return true;
   });
   if (!opts.hold)
@@ -94,6 +100,7 @@ const ROLE = { id: 'designer', title: 'D', type: 'specialist', reports_to: 'boss
 let tmp: string;
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(cp.spawn).mockReset(); // drop unused mockReturnValueOnce children
   tmp = mkdtempSync(join(tmpdir(), 'budget-550-'));
 });
 afterEach(() => rmSync(tmp, { recursive: true, force: true }));
@@ -102,17 +109,19 @@ afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 async function session(
   runner: AgentRunner,
   policy: PolicyEngine,
-  prompts: string[] = ['go'],
+  mailbox = new Mailbox(),
+  closeFirst = true,
 ): Promise<any[]> {
   const bus = new OrgBus('o', 'run-1', join(tmp, `run-${Math.random()}`));
   const events: any[] = [];
   bus.subscribe((e) => events.push(e));
-  const mailbox = new Mailbox();
-  for (const p of prompts) mailbox.push(p);
+  mailbox.push('go');
   const wrapped: AgentRunner = {
+    budgetFloorGated: runner.budgetFloorGated,
     run(args) {
-      // Ends runAgentSession after this pass; the queue still drains.
-      mailbox.close();
+      // Ends runAgentSession after this pass; the queue still drains. A
+      // budget test leaves it open: the budget close must end the session.
+      if (closeFirst) mailbox.close();
       return runner.run(args);
     },
   };
@@ -171,6 +180,25 @@ describe('splitCachedInput / stepMeter', () => {
     expect(meter(1, { input: 100, output: 1, cached: 40 })).toBeUndefined();
     expect(meter(1, { input: 150, output: 3, cached: 40 })?.input).toBe(50);
     expect(meter(2, { input: 10 })?.input).toBe(10);
+  });
+
+  it('does not double-count input that two reports split differently into cache', () => {
+    // Same 1000 input tokens: steps said 900 cached, the result 800.
+    const steps = splitCachedInput({ input: 1000, cached: 900 });
+    const result = splitCachedInput({ input: 1000, output: 5, cached: 800 });
+    expect(usageBeyond(result, steps)).toEqual({
+      input: 0,
+      output: 5,
+      cacheRead: 0,
+      cacheCreation: 0,
+    });
+    // Real growth still splits into uncached and cache.
+    expect(usageBeyond(splitCachedInput({ input: 1500, cached: 1200 }), steps)).toEqual({
+      input: 200,
+      output: 0,
+      cacheRead: 300,
+      cacheCreation: 0,
+    });
   });
 });
 
@@ -340,7 +368,9 @@ describe('stopping overspend within a turn', () => {
     );
     vi.mocked(cp.spawn).mockReturnValue(child);
     const policy = newPolicy(10_000);
-    const events = await session(new AntigravityAgentRunner('agy'), policy);
+    const mailbox = new Mailbox();
+    const events = await session(new AntigravityAgentRunner('agy'), policy, mailbox, false);
+    expect(mailbox.closeReason).toBe('token-budget');
 
     expect(child.kill).toHaveBeenCalledWith('SIGTERM');
     const chat = events.filter((e) => e.type === 'chat').map((e) => e.msg);
@@ -359,8 +389,10 @@ describe('stopping overspend within a turn', () => {
       .mockReturnValueOnce(mockChild(codexTurn(fence, { input_tokens: 20_000, output_tokens: 10 })))
       .mockReturnValueOnce(mockChild(codexTurn('second', { input_tokens: 1, output_tokens: 1 })));
     const policy = newPolicy(10_000);
-    const events = await session(new CodexAgentRunner('codex'), policy);
+    const mailbox = new Mailbox();
+    const events = await session(new CodexAgentRunner('codex'), policy, mailbox, false);
 
+    expect(mailbox.closeReason).toBe('token-budget');
     expect(cp.spawn).toHaveBeenCalledTimes(1);
     expect(policy.budgetedUsage).toBe(20_010);
     expect(events.filter((e) => e.type === 'usage').map((e) => e.data.subtype)).toEqual([
@@ -372,9 +404,16 @@ describe('stopping overspend within a turn', () => {
   it('codex: refuses to start an exec below the 5% floor and closes the role', async () => {
     const policy = newPolicy(100_000);
     policy.setTokenUsage({ input: 96_000, output: 0, cacheRead: 0, cacheCreation: 0 });
-    const events = await session(new CodexAgentRunner('codex'), policy);
+    const mailbox = new Mailbox();
+    const events = await session(new CodexAgentRunner('codex'), policy, mailbox, false);
 
     expect(cp.spawn).not.toHaveBeenCalled();
+    expect(mailbox.closeReason).toBe('token-budget');
+    // Not over its cap, but out of budget for this runtime (budget-closure.ts).
+    expect(policy.overBudget).toBe(false);
+    expect(exhaustedDetail(policy)).toBe(
+      'budget_tokens exhausted (96000 / 100000: 4000 left, under the 5000 a codex/antigravity turn needs)',
+    );
     expect(policy.budgetedUsage).toBe(96_000);
     const chat = events.filter((e) => e.type === 'chat').map((e) => e.msg);
     expect(chat.join('\n')).toMatch(/below the 5% floor/);
@@ -398,5 +437,133 @@ describe('stopping overspend within a turn', () => {
     for await (const m of new AntigravityAgentRunner('agy').run(args)) out.push(m);
     expect(cp.spawn).not.toHaveBeenCalled();
     expect(out.at(-1)).toMatchObject({ type: 'result', subtype: BUDGET_STOP_SUBTYPE });
+  });
+});
+
+// Captured live from agy 1.2.14 (#550 review): one exec, four model calls
+// with three view_file tool steps between them (text/tool fields trimmed).
+// result.usage is the exact sum of the steps' usage, so a step's usage is its
+// own model call, not a running total.
+const LIVE_AGY_MULTI_STEP = [
+  agyStep(1, 'DONE', 'reading a', {
+    input_tokens: 12374,
+    output_tokens: 285,
+    thinking_tokens: 224,
+    cache_read_tokens: 0,
+    total_tokens: 12659,
+  }),
+  agyStep(3, 'DONE', 'reading b', {
+    input_tokens: 12859,
+    output_tokens: 125,
+    thinking_tokens: 64,
+    cache_read_tokens: 0,
+    total_tokens: 12984,
+  }),
+  agyStep(5, 'DONE', 'reading c', {
+    input_tokens: 13184,
+    output_tokens: 113,
+    thinking_tokens: 52,
+    cache_read_tokens: 0,
+    total_tokens: 13297,
+  }),
+  agyStep(7, 'ACTIVE', ''),
+  agyStep(7, 'DONE', 'alpha-beta-gamma', {
+    input_tokens: 13497,
+    output_tokens: 492,
+    thinking_tokens: 487,
+    cache_read_tokens: 0,
+    total_tokens: 13989,
+  }),
+  agyResult({
+    input_tokens: 51914,
+    output_tokens: 1015,
+    thinking_tokens: 827,
+    cache_read_tokens: 0,
+    total_tokens: 52929,
+  }),
+];
+
+describe('antigravity per-step usage semantics', () => {
+  it('meters a live multi-step exec at exactly its result.usage', async () => {
+    vi.mocked(cp.spawn).mockReturnValue(mockChild(LIVE_AGY_MULTI_STEP));
+    const policy = newPolicy();
+    const events = await session(new AntigravityAgentRunner('agy'), policy);
+    expect(policy.tokenUsage).toEqual({
+      input: 51914,
+      output: 1015,
+      cacheRead: 0,
+      cacheCreation: 0,
+    });
+    const usage = events.filter((e) => e.type === 'usage');
+    expect(usage.map((e) => [e.data.tokens_in, e.data.tokens_out])).toEqual([[51914, 1015]]);
+  });
+
+  it('counts a step reported ACTIVE and then DONE once', async () => {
+    const u = { input_tokens: 1000, output_tokens: 10, cache_read_tokens: 400 };
+    vi.mocked(cp.spawn).mockReturnValue(
+      mockChild([
+        agyStep(1, 'ACTIVE', 'par', u),
+        agyStep(1, 'DONE', 'partial', u),
+        agyResult({ input_tokens: 1000, output_tokens: 10, cache_read_tokens: 400 }),
+      ]),
+    );
+    const out: AgentMessage[] = [];
+    const run = new AntigravityAgentRunner('agy').run({
+      tools: [],
+      prompt: (async function* () {
+        yield 'go';
+      })(),
+      systemPrompt: '',
+      cwd: tmp,
+      env: {},
+      maxTurns: 5,
+    });
+    for await (const m of run) out.push(m);
+    const metered = out.filter((m) => m.type === 'assistant' && m.text === undefined);
+    expect(metered).toHaveLength(1);
+    expect(metered[0]).toMatchObject({ input_tokens: 600, cache_read_input_tokens: 400 });
+    expect(out.at(-1)).toMatchObject({
+      type: 'result',
+      input_tokens: 600,
+      output_tokens: 10,
+      cache_read_input_tokens: 400,
+    });
+  });
+});
+
+describe('a role closed by the budget floor (#550)', () => {
+  const floorClosed = (gated: boolean): { policy: PolicyEngine; mailbox: Mailbox } => {
+    const policy = newPolicy(100_000);
+    policy.budgetFloorGated = gated;
+    policy.setTokenUsage({ input: 96_000, output: 0, cacheRead: 0, cacheCreation: 0 });
+    const mailbox = new Mailbox();
+    mailbox.close('token-budget');
+    return { policy, mailbox };
+  };
+
+  it('counts as exhausted only on a floor-gated runtime, and not once raised', () => {
+    expect(exhaustedDetail(floorClosed(false).policy)).toBeUndefined();
+    const { policy } = floorClosed(true);
+    expect(exhaustedDetail(policy)).toMatch(/96000 \/ 100000: 4000 left/);
+    policy.setBudgetCaps({ maxTokens: 200_000 });
+    expect(exhaustedDetail(policy)).toBeUndefined();
+  });
+
+  it('is not reopened by a reload that leaves it under the floor', () => {
+    const { policy, mailbox } = floorClosed(true);
+    const spawnRole = vi.fn();
+    const emitted: any[] = [];
+    const running = {
+      def: { roles: [ROLE], run_config: {} },
+      agents: new Map([[ROLE.id, { policy, mailbox }]]),
+      roleSlots: new Map(),
+      budgetClosed: new Set([ROLE.id]),
+      spawnRole,
+      bus: { emit: (e: unknown) => emitted.push(e) },
+    } as unknown as RunningOrg;
+    expect(reopenBudgetClosedRoles({} as never, 'o', running)).toEqual([]);
+    expect(spawnRole).not.toHaveBeenCalled();
+    expect(running.budgetClosed?.has(ROLE.id)).toBe(true);
+    expect(emitted.some((e) => e.reason === 'role-budget-reopened')).toBe(false);
   });
 });
