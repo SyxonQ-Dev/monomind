@@ -278,7 +278,7 @@ describe('AntigravityAgentRunner', () => {
     // is what still needs the full accumulated text, and that is what
     // computeSafeChunk's own withholding logic (tested separately above)
     // exists to preserve incrementally rather than by buffering everything.
-    const assistantMsgs = messages.filter((m) => m.type === 'assistant');
+    const assistantMsgs = messages.filter((m) => m.type === 'assistant' && m.text !== undefined);
     expect(assistantMsgs.map((m) => m.text)).toEqual(['Hello', ' world']);
     expect(assistantMsgs.map((m) => m.text).join('')).toBe('Hello world');
   });
@@ -335,7 +335,7 @@ describe('AntigravityAgentRunner', () => {
     const messages: any[] = [];
     for await (const m of gen) messages.push(m);
 
-    const assistantMsgs = messages.filter((m) => m.type === 'assistant');
+    const assistantMsgs = messages.filter((m) => m.type === 'assistant' && m.text !== undefined);
     expect(assistantMsgs.map((m) => m.text)).toEqual(['Hello world']);
   });
 
@@ -375,7 +375,8 @@ describe('AntigravityAgentRunner', () => {
     for await (const m of gen) messages.push(m);
 
     const resultMsg = messages.find((m) => m.type === 'result');
-    expect(resultMsg.input_tokens).toBe(1500);
+    expect(resultMsg.input_tokens).toBe(1300); // #550: cache_read_tokens split out
+    expect(resultMsg.cache_read_input_tokens).toBe(200);
     expect(resultMsg.output_tokens).toBe(320);
   });
 
@@ -520,7 +521,7 @@ describe('AntigravityAgentRunner', () => {
     const messages: any[] = [];
     for await (const m of gen) messages.push(m);
 
-    const assistantMsg = messages.find((m) => m.type === 'assistant');
+    const assistantMsg = messages.find((m) => m.type === 'assistant' && m.text !== undefined);
     expect(assistantMsg).toBeDefined();
     expect(assistantMsg.text).toBe('Final response text');
   });
@@ -625,10 +626,13 @@ describe('AntigravityAgentRunner', () => {
     const messages: any[] = [];
     for await (const m of gen) messages.push(m);
 
-    const assistantMsg = messages.find((m) => m.type === 'assistant');
+    const assistantMsg = messages.find((m) => m.type === 'assistant' && m.text !== undefined);
     expect(assistantMsg?.text).toBe('PING_OK');
+    // #550: cache_read_tokens (8141) is part of input_tokens (total_tokens =
+    // input + output) and is clamped to it, so the whole prompt was cached.
     const resultMsg = messages.find((m) => m.type === 'result');
-    expect(resultMsg.input_tokens).toBe(8132);
+    expect(resultMsg.input_tokens).toBe(0);
+    expect(resultMsg.cache_read_input_tokens).toBe(8132);
     expect(resultMsg.output_tokens).toBe(35);
   });
 });
@@ -745,14 +749,18 @@ describe('AntigravityAgentRunner streaming', () => {
     expect(toolMsgs.some((m) => m.text === 'read_file')).toBe(true);
 
     // Assistant text flushes at DONE boundaries, fence-stripped.
-    const texts = messages.filter((m) => m.type === 'assistant').map((m) => m.text);
+    const texts = messages
+      .filter((m) => m.type === 'assistant' && m.text !== undefined)
+      .map((m) => m.text);
     expect(texts).toEqual(['working on it', 'all done']);
 
     // THE regression guard: the first assistant text must arrive well BEFORE
     // the subprocess exits (the mock sleeps 500ms after the first DONE before
     // printing the final lines). Under the old buffered design every message
     // arrived at process exit.
-    const firstAssistantIdx = messages.findIndex((m) => m.type === 'assistant');
+    const firstAssistantIdx = messages.findIndex(
+      (m) => m.type === 'assistant' && m.text !== undefined,
+    );
     expect(end - times[firstAssistantIdx]).toBeGreaterThanOrEqual(350);
 
     // The synthesized result carries the captured conversation id + usage.
@@ -790,7 +798,9 @@ describe('AntigravityAgentRunner streaming', () => {
     // 'Hello' and ' world' each stream as their own increment (as soon as
     // their ACTIVE delta arrives); the DONE step's repeat of the full text
     // must not add a THIRD, duplicate message on top of those two.
-    const texts = messages.filter((m) => m.type === 'assistant').map((m) => m.text);
+    const texts = messages
+      .filter((m) => m.type === 'assistant' && m.text !== undefined)
+      .map((m) => m.text);
     expect(texts).toEqual(['Hello', ' world']);
     expect(texts.join('')).toBe('Hello world');
   });
@@ -818,7 +828,9 @@ describe('AntigravityAgentRunner streaming', () => {
     const messages: any[] = [];
     for await (const m of runner.run(makeRunArgs())) messages.push(m); // no extras — session.ts's shape
 
-    const texts = messages.filter((m) => m.type === 'assistant').map((m) => m.text);
+    const texts = messages
+      .filter((m) => m.type === 'assistant' && m.text !== undefined)
+      .map((m) => m.text);
     expect(texts).toEqual(['Hello world']);
   });
 
@@ -893,7 +905,9 @@ describe('AntigravityAgentRunner streaming', () => {
     // The OrgToolDef handler ran in-process with the fence's arguments…
     expect(handled).toEqual(['hi']);
     // …and both turns' prose was yielded, fence-stripped.
-    const texts = messages.filter((m) => m.type === 'assistant').map((m) => m.text);
+    const texts = messages
+      .filter((m) => m.type === 'assistant' && m.text !== undefined)
+      .map((m) => m.text);
     expect(texts).toContain('Sending now.');
     expect(texts).toContain('final answer');
     expect(texts.every((t) => !t?.includes('tool_call'))).toBe(true);

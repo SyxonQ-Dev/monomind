@@ -1,6 +1,7 @@
 // packages/@monomind/cli/src/orgrt/antigravity-runner-types.ts
 // Split out of antigravity-runner.ts (file-size sweep) — agy wire-shape types.
 import type { AgentMessage } from './agent-runner.js';
+import type { CliUsage } from './runner-usage.js';
 
 // Wire shape (verified against agy 0.35.0 stream-json output): each line is
 // { "event": "init" | "step_update" | "result", ...payload nested under a
@@ -63,10 +64,13 @@ export interface AgyEvent {
  *   - 'native':    agy's own tool steps (step_type 'tool' with tool_info) as
  *     rich tool_use/tool_result messages (kimicode-runner-tools.ts), paired
  *     by step_index.
+ *   - 'usage':     #550 — what one completed step added to the turn's usage,
+ *     cached input split out (runner-usage.ts).
  *   - 'meta':      any other event that only carries a conversation id.
  */
 export interface AgyStreamEvent {
-  kind: 'assistant' | 'tool' | 'native' | 'meta';
+  kind: 'assistant' | 'tool' | 'native' | 'usage' | 'meta';
+  usage?: CliUsage;
   text?: string;
   rawText?: string;
   toolName?: string;
@@ -79,7 +83,10 @@ export interface TurnOutcome {
   exitCode: number;
   stderrTail: string;
   timedOut: boolean;
+  /** Total input, cached part included (#550). */
   inputTokens: number;
   outputTokens: number;
+  /** #550: result.usage.cache_read_tokens — part of inputTokens. */
+  cachedInputTokens?: number;
   error?: string;
 }

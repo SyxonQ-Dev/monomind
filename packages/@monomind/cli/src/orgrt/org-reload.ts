@@ -117,9 +117,12 @@ export function reloadOrgDef(
     if (!existingRoleIds.has(role.id)) {
       running.def.roles.push(role);
       // M2: an endpoint role never gets a session — nothing to lazy-spawn.
+      // #552: while the org-wide budget ceiling is spent, set it aside with
+      // the other unspawned roles — a reload that raises it makes it pending.
       if (!isEndpointRole(role)) {
-        if (!running.pendingRoles) running.pendingRoles = new Map();
-        running.pendingRoles.set(role.id, role);
+        if (running.orgBudgetClosed)
+          (running.orgBudgetPendingRoles ??= new Map()).set(role.id, role);
+        else (running.pendingRoles ??= new Map()).set(role.id, role);
       }
       newRoles.push(role.id);
     }
