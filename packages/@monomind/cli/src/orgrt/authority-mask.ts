@@ -37,7 +37,8 @@
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { protectableDepsRoot } from '../utils/optional-deps.js';
 import { dashboardCredentialPaths, operatorDirOverride } from './file-roots.js';
 import { ensureOrgWorkDirs, orgsMaskLayout } from './org-authority-files.js';
 import { realPath } from './policy-paths.js';
@@ -108,6 +109,15 @@ export function authorityMaskArgs(ctx: {
   for (const d of orgs.readOnly) args.push('--ro-bind', d, d);
   for (const d of orgs.writable) args.push('--bind', d, d);
   for (const f of orgs.files) args.push('--ro-bind', f, f);
+  // #518 review (B1): the first-use deps dir (utils/optional-deps.ts) holds
+  // code the unsandboxed daemons load, so it is read-only, and its parent a
+  // mount point so it cannot be renamed aside and replaced. After the org
+  // binds, in case one of those is an ancestor.
+  const made = protectableDepsRoot(ctx.env, ctx.home);
+  if (made) {
+    const deps = realPath(made);
+    args.push('--bind', dirname(deps), dirname(deps), '--ro-bind', deps, deps);
+  }
   // Last, so that no bind above can uncover them.
   for (const d of hidden) if (existsSync(d)) args.push('--tmpfs', d);
   for (const f of dashboardCredentialPaths(ctx.roots)) args.push('--ro-bind', '/dev/null', f);

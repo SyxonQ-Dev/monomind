@@ -1,10 +1,17 @@
+import { setChromeFallback } from '@monoes/monobrowse';
 import browseBase, { disconnectSession } from '@monoes/monobrowse/cli/commands';
+import { ensureManagedChrome } from '../browser/managed-chrome.js';
 import type { Command } from '../types.js';
 import { browseActionCommand } from './browse-action.js';
 import { browsePlatformCommand } from './browse-platform.js';
 import { browseWorkflowCommand } from './browse-workflow.js';
 
 const REPLACED = new Set(['workflow', 'action', 'platform']);
+
+// #428: monomind no longer installs a Chrome up front. An installed Chrome,
+// Chromium or Edge is always used first; without one, the first browse
+// command that launches a browser downloads Chrome into ~/.monomind/deps.
+setChromeFallback(() => ensureManagedChrome());
 
 // @monoes/monobrowse permits commands that return void after writing output,
 // whereas Monomind's dispatcher requires CommandResult | undefined. Keep that

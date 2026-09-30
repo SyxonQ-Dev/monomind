@@ -5,10 +5,11 @@
  * built with ITS task's loadout, and a retry resumes under the identical
  * prompt.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { loadClaudeSdk } from '../../src/orgrt/agent-runner-claude.js';
 import { OrgBus } from '../../src/orgrt/bus.js';
 import { DISPATCH_COALESCE_MS, dispatchReadyTasks } from '../../src/orgrt/decisions.js';
 import { Mailbox } from '../../src/orgrt/mailbox.js';
@@ -19,6 +20,13 @@ import { TaskDag } from '../../src/orgrt/task-dag.js';
 import { OrgDefSchema } from '../../src/orgrt/types.js';
 
 const tick = (ms = 15) => new Promise((r) => setTimeout(r, ms));
+
+// The runner imports the Claude SDK on first use (#428). Load it once up front
+// so the tick-based waits below time the session logic, as they did when the
+// SDK was a static import.
+beforeAll(async () => {
+  await loadClaudeSdk();
+});
 
 function promptText(options: any): string {
   const sp = options?.systemPrompt;
