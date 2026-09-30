@@ -2,12 +2,25 @@
  * Catalog lifecycle state: `.monomind/catalog/state.json`.
  *
  * Reading never creates anything; every write goes through
- * `mutateCatalogState`, which holds `.monomind/locks/catalog.lock` (exclusive
+ * `mutateCatalogState`, which holds `.monomind/catalog/.lock` (exclusive
  * create, fails safe on a stale lock) and validates the whole state before an
  * atomic write. `transition` is pure: it returns a new state.
+ *
+ * #581: the lock lives inside the operator-protected catalog dir, so an org
+ * role cannot create it and block the operator. The old
+ * `.monomind/locks/catalog.lock` is no longer consulted: a leftover one (or
+ * one a role planted) is ignored and left where it is.
  */
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmdirSync,
+  unlinkSync,
+} from 'node:fs';
+import { dirname, join } from 'node:path';
 import { writeJsonFileAtomic } from '../utils/json-file.js';
 import { catalogDir, verifyEntry } from './digest.js';
 import {
@@ -25,7 +38,7 @@ export class CatalogStateError extends Error {
 }
 
 export const statePath = (root: string): string => join(catalogDir(root), 'state.json');
-export const lockPath = (root: string): string => join(root, '.monomind', 'locks', 'catalog.lock');
+export const lockPath = (root: string): string => join(catalogDir(root), '.lock');
 
 /** Lifecycle moves the catalog commands may make. Restaging changed content is `stage`'s own path. */
 export const TRANSITIONS: Record<CatalogStatus, readonly CatalogStatus[]> = {
@@ -61,7 +74,9 @@ export function mutateCatalogState(
   fn: (state: CatalogState) => CatalogState,
 ): CatalogState {
   const lock = lockPath(root);
-  mkdirSync(join(root, '.monomind', 'locks'), { recursive: true });
+  // The topmost directory this created, if any: removed again when it ends
+  // up empty, so a refused mutation leaves no catalog dir behind.
+  const created = mkdirSync(catalogDir(root), { recursive: true });
   let fd: number;
   try {
     fd = openSync(lock, 'wx');
@@ -77,6 +92,19 @@ export function mutateCatalogState(
     return next;
   } finally {
     unlinkSync(lock);
+    if (created) removeEmptyUpTo(catalogDir(root), created);
+  }
+}
+
+/** rmdir `dir` and then its parents while they are empty, stopping after `top`. */
+function removeEmptyUpTo(dir: string, top: string): void {
+  for (let d = dir; ; d = dirname(d)) {
+    try {
+      rmdirSync(d);
+    } catch {
+      return;
+    }
+    if (d === top) return;
   }
 }
 

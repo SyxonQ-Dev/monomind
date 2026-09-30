@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 import { packagesDir, verifyEntry } from '../../src/catalog/digest.js';
 import { activate, approve, disable, release } from '../../src/catalog/lifecycle.js';
 import { type FenceLoader, stage } from '../../src/catalog/stage.js';
-import { loadCatalogState } from '../../src/catalog/state.js';
+import { loadCatalogState, lockPath } from '../../src/catalog/state.js';
 import { writeEntry } from './fixtures.js';
 
 const MIT =
@@ -119,6 +119,13 @@ describe('stage', () => {
     expect(storeListing(root)).toEqual([]);
   });
 
+  it('a package refused at inspection in a project with no .monomind/ leaves none behind (#581)', async () => {
+    const root = newRoot();
+    const repo = gitRepo({ LICENSE: MIT, 'skills/x/SKILL.md': '---\nname: x\n---\n\nNo description.\n' });
+    await expect(stage(root, repo, { actor: 't', fence: clean })).rejects.toThrow(/refused/);
+    expect(existsSync(join(root, '.monomind'))).toBe(false);
+  });
+
   it('stages a blueprint-only repo and rejects a blueprint with a forbidden key before copying', async () => {
     const root = newRoot();
     const good = gitRepo({
@@ -157,8 +164,7 @@ describe('stage', () => {
     await stage(root, repo, { actor: 't', fence: clean });
     const before = storeListing(root);
     writeFileSync(join(repo, 'skills/a/SKILL.md'), skillMd('a', ' Changed.'));
-    mkdirSync(join(root, '.monomind', 'locks'), { recursive: true });
-    writeFileSync(join(root, '.monomind', 'locks', 'catalog.lock'), '');
+    writeFileSync(lockPath(root), '');
     await expect(stage(root, repo, { actor: 't', fence: clean })).rejects.toThrow(/locked/);
     expect(storeListing(root)).toEqual(before);
   });
