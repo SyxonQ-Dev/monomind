@@ -218,7 +218,8 @@ export async function deliver(
         });
         return `ERROR: could not queue message for ${toQualified} (disk full or permissions)`;
       }
-      return `queued for ${toQualified} (role starting — waiting for resources)`;
+      const slot = targetOrg.deferredSpawns?.get(targetRole)?.gate === 'concurrency';
+      return `queued for ${toQualified} (role starting — waiting for ${slot ? 'a concurrency slot' : 'resources'})`;
     }
     src?.bus.emit({
       type: 'audit',

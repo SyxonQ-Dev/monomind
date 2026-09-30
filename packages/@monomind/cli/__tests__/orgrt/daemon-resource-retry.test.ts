@@ -47,6 +47,7 @@ vi.mock('../../src/utils/resource-governor.js', () => ({
 }));
 
 const { OrgDaemon } = await import('../../src/orgrt/daemon.js');
+const { dagCreateTask } = await import('../../src/orgrt/decisions.js');
 
 function fixture(root: string, name: string): void {
   mkdirSync(join(root, '.monomind/orgs'), { recursive: true });
@@ -179,6 +180,35 @@ describe('OrgDaemon — deferred role spawn under resource pressure', () => {
     const events = running.busEvents().filter((e) => e.type === 'xorg' && e.to === 'alpha:coder');
     expect(events.some((e) => e.subject === 'task1')).toBe(true);
     expect(events.some((e) => e.subject === 'task2')).toBe(true);
+
+    await d.stopAll();
+  }, 20_000);
+
+  it('#557 review: a role deferred under resource pressure stays a known assignee and gets its tasks once it spawns', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'daemon-deferred-task-'));
+    fixture(root, 'alpha');
+
+    ok = false;
+    const d = new OrgDaemon(root, { queryFn: echoQuery as any, forward: false });
+    const running = await d.startOrg('alpha');
+    const receipt = await d.deliver('alpha', 'boss', 'coder', 'task1', 'first message');
+    expect(receipt).toMatch(/waiting for resources/);
+    expect(running.deferredSpawns?.get('coder')?.gate).toBe('resources');
+
+    // Tasks for it wait — not "does not resolve" on every dispatch pass.
+    const t1 = JSON.parse(dagCreateTask(d, 'alpha', 'boss', 'build it', 'coder', []));
+    dagCreateTask(d, 'alpha', 'boss', 'and this', 'coder', []);
+    expect(running.busEvents().filter((e) => e.reason === 'dispatch-assignee-unresolved')).toEqual([]);
+    expect(running.taskDag!.get(t1.id)?.status).toBe('ready');
+    const waiting = running.busEvents().filter(
+      (e) => e.data?.taskId === t1.id && e.reason === 'resource-pressure',
+    );
+    expect(waiting).toHaveLength(1);
+
+    ok = true;
+    expect(await waitUntil(() => running.agents.has('coder'))).toBe(true);
+    // The deferred spawn dispatches its ready tasks without another pass.
+    expect(await waitUntil(() => running.taskDag!.get(t1.id)?.status === 'running')).toBe(true);
 
     await d.stopAll();
   }, 20_000);

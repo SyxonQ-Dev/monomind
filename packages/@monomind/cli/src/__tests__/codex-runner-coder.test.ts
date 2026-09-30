@@ -168,11 +168,18 @@ describe('CodexAgentRunner coder mode: tool events', () => {
     expect(ends[2].exit_code).toBeUndefined();
 
     // Assistant text and the synthesized result are unchanged.
-    expect(msgs.filter((m) => m.type === 'assistant').map((m) => m.text)).toEqual([
+    expect(
+      msgs.filter((m) => m.type === 'assistant' && m.text !== undefined).map((m) => m.text),
+    ).toEqual([
       'I’ll run the requested probe command, then make both file edits using patches.',
       'done',
     ]);
-    expect(msgs.at(-1)).toMatchObject({ type: 'result', input_tokens: 55766, output_tokens: 228 });
+    expect(msgs.at(-1)).toMatchObject({
+      type: 'result',
+      input_tokens: 55766 - 46080, // #550: cached input split out
+      cache_read_input_tokens: 46080,
+      output_tokens: 228,
+    });
   });
 
   it('feeds ToolActivityTracker full start/end pairs with kind and exit_code, no stray starts', async () => {

@@ -391,9 +391,10 @@ export async function receiveRemote(
         error: `could not queue message for ${toOrg}:${toRole} (disk full or permissions)`,
       };
     }
+    const slot = org.deferredSpawns?.get(toRole)?.gate === 'concurrency';
     return {
       ok: true,
-      receipt: `queued for ${toOrg}:${toRole} (role starting — waiting for resources)`,
+      receipt: `queued for ${toOrg}:${toRole} (role starting — waiting for ${slot ? 'a concurrency slot' : 'resources'})`,
     };
   }
   const agent = org.agents.get(toRole);

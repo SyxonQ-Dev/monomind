@@ -3,7 +3,8 @@
 import type { AgentMessage } from './agent-runner.js';
 import type { OrgBus } from './bus.js';
 import type { CumulativeMeter } from './cumulative-meter.js';
-import type { TokenUsage } from './policy.js';
+import { isRecoverableCloseReason, type Mailbox } from './mailbox.js';
+import type { PolicyEngine, TokenUsage } from './policy.js';
 
 /** ADR-O001 D1 — token-metering helpers.
  *
@@ -81,4 +82,53 @@ export function emitUsage(
       cache_creation: t.cacheCreation,
     },
   });
+}
+
+/** The 'result' message's side of a mailbox message's token accounting.
+ *
+ *  Per the SDK's own type docs, a 'result' message's usage is that message's
+ *  own (effectively last-turn) usage in streaming-input mode, NOT a
+ *  cumulative total across every turn of the mailbox message — and that last
+ *  turn was already counted via its own 'assistant' message (`turns`),
+ *  specifically so overBudget could trip mid-message. Adding the result's own
+ *  usage again unconditionally would double-count it. (A modelUsage-derived
+ *  delta is per-session-cumulative, so the same subtraction is exactly right
+ *  there too: it removes what the assistant turns of THIS message already
+ *  contributed and leaves the subagent/auxiliary volume the main loop never
+ *  reported.) Only the shortfall (never negative) is added to the meter, so a
+ *  turn whose usage never reached the 'assistant' branch (e.g. a runner/test
+ *  double that doesn't emit per-turn usage) still gets counted once.
+ *
+ *  Returns what the whole mailbox message added to the meter — the per-turn
+ *  accounting plus the top-up — which is what the 'usage' event reports, so a
+ *  consumer summing events lands on the same number as policy.usage. */
+export function settleResultTokens(
+  policy: PolicyEngine,
+  result: TokenUsage,
+  turns: TokenUsage,
+): TokenUsage {
+  const shortfall: TokenUsage = {
+    input: Math.max(0, result.input - turns.input),
+    output: Math.max(0, result.output - turns.output),
+    cacheRead: Math.max(0, result.cacheRead - turns.cacheRead),
+    cacheCreation: Math.max(0, result.cacheCreation - turns.cacheCreation),
+  };
+  if (totalTokens(shortfall) > 0) policy.addTokenUsage(shortfall);
+  const message = { ...turns };
+  addTo(message, shortfall);
+  return message;
+}
+
+/** #550: AgentRunArgs.tokenBudget for a session — what the role may still
+ *  spend on the budgeted basis. 0 once its mailbox was closed for budget
+ *  (its own cap, budget_usd, or the org-wide ceiling, which closes every
+ *  mailbox without touching the role's own meter). */
+export function sessionTokenBudget(
+  policy: PolicyEngine,
+  mailbox: Mailbox,
+): { left: number; max?: number } | undefined {
+  if (mailbox.isClosed && isRecoverableCloseReason(mailbox.closeReason)) return { left: 0 };
+  const max = policy.policy.maxTokens;
+  if (max == null) return undefined;
+  return { left: Math.max(0, max - policy.budgetedUsage), max };
 }

@@ -280,7 +280,7 @@ describe('CodexAgentRunner', () => {
     const messages: any[] = [];
     for await (const m of gen) messages.push(m);
 
-    const assistantMsg = messages.find((m) => m.type === 'assistant');
+    const assistantMsg = messages.find((m) => m.type === 'assistant' && m.text !== undefined);
     expect(assistantMsg).toBeDefined();
     expect(assistantMsg.text).toBe('Hello world!');
   });
@@ -327,8 +327,10 @@ describe('CodexAgentRunner', () => {
     const messages: any[] = [];
     for await (const m of gen) messages.push(m);
 
+    // #550: input_tokens counts the cached part; it moves to cache_read.
     const resultMsg = messages.find((m) => m.type === 'result');
-    expect(resultMsg.input_tokens).toBe(24763);
+    expect(resultMsg.input_tokens).toBe(24763 - 24448);
+    expect(resultMsg.cache_read_input_tokens).toBe(24448);
     expect(resultMsg.output_tokens).toBe(122);
   });
 
@@ -574,7 +576,7 @@ describe('CodexAgentRunner — CURRENT item-based wire format (live-verified aga
     const messages: any[] = [];
     for await (const m of gen) messages.push(m);
 
-    const assistantMsg = messages.find((m) => m.type === 'assistant');
+    const assistantMsg = messages.find((m) => m.type === 'assistant' && m.text !== undefined);
     expect(assistantMsg).toBeDefined();
     expect(assistantMsg.text).toBe('pong');
   });
@@ -643,7 +645,9 @@ describe('CodexAgentRunner — CURRENT item-based wire format (live-verified aga
     // Exactly the two agent_message items, in order — the command_execution
     // item.started/item.completed pair in between must not synthesize a
     // third assistant message from its own command/aggregated_output fields.
-    const assistantTexts = messages.filter((m) => m.type === 'assistant').map((m) => m.text);
+    const assistantTexts = messages
+      .filter((m) => m.type === 'assistant' && m.text !== undefined)
+      .map((m) => m.text);
     expect(assistantTexts).toEqual([
       'I’ll run that shell command now.',
       '```text\nhello-from-codex-shell\n```',
@@ -687,7 +691,8 @@ describe('CodexAgentRunner — CURRENT item-based wire format (live-verified aga
     for await (const m of gen) messages.push(m);
 
     const resultMsg = messages.find((m) => m.type === 'result');
-    expect(resultMsg.input_tokens).toBe(13112);
+    expect(resultMsg.input_tokens).toBe(13112 - 12032); // #550: cached split out
+    expect(resultMsg.cache_read_input_tokens).toBe(12032);
     expect(resultMsg.output_tokens).toBe(5);
   });
 
@@ -853,14 +858,18 @@ describe('CodexAgentRunner streaming (#204)', () => {
     const toolMsgs = messages.filter((m) => m.type === 'tool_use');
     expect(toolMsgs.some((m) => m.text === 'ls -la')).toBe(true);
 
-    const texts = messages.filter((m) => m.type === 'assistant').map((m) => m.text);
+    const texts = messages
+      .filter((m) => m.type === 'assistant' && m.text !== undefined)
+      .map((m) => m.text);
     expect(texts).toEqual(['all done']);
 
     // THE regression guard: the assistant text must arrive well BEFORE the
     // subprocess exits (the mock sleeps 500ms after the tool call before
     // printing the final agent_message). Under the old buffered design
     // every message arrived at process exit.
-    const firstAssistantIdx = messages.findIndex((m) => m.type === 'assistant');
+    const firstAssistantIdx = messages.findIndex(
+      (m) => m.type === 'assistant' && m.text !== undefined,
+    );
     expect(end - times[firstAssistantIdx]).toBeGreaterThanOrEqual(150);
 
     // The synthesized result carries the captured thread id + usage.
@@ -926,7 +935,9 @@ describe('CodexAgentRunner streaming (#204)', () => {
     // The OrgToolDef handler ran in-process with the fence's arguments…
     expect(handled).toEqual(['hi']);
     // …and both turns' prose was yielded, fence-stripped.
-    const texts = messages.filter((m) => m.type === 'assistant').map((m) => m.text);
+    const texts = messages
+      .filter((m) => m.type === 'assistant' && m.text !== undefined)
+      .map((m) => m.text);
     expect(texts).toContain('Sending now.');
     expect(texts).toContain('final answer');
     expect(texts.every((t) => !t?.includes('tool_call'))).toBe(true);

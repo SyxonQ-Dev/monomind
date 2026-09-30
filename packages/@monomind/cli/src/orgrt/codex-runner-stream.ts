@@ -16,7 +16,12 @@ import { killOnAbort } from './agent-runner.js';
 import { maskedCommand } from './authority-mask.js';
 import { codexSandboxArgs, codexSandboxModeArgs, roleGitLevel } from './cli-sandbox.js';
 import { CodexToolItems, codexEffortArgs } from './codex-runner-tools.js';
-import type { CodexEvent, CodexStreamEvent, TurnOutcome } from './codex-runner-types.js';
+import type {
+  CodexEvent,
+  CodexStreamEvent,
+  CodexTokenUsage,
+  TurnOutcome,
+} from './codex-runner-types.js';
 import { classifyStderr } from './kimicode-runner.js';
 import { spawnRunnerProcess } from './process-group-spawn.js';
 import { omitAnthropicManagedKeys } from './provider.js';
@@ -262,6 +267,13 @@ export async function* streamTurn(
     const one = handleOne(ev);
     return one ? [one] : [];
   };
+  // #550: input_tokens INCLUDES the cached part here; the runner splits it.
+  const recordUsage = (u: CodexTokenUsage): void => {
+    outcome.inputTokens = u.input_tokens ?? 0;
+    outcome.outputTokens = u.output_tokens ?? 0;
+    outcome.cachedInputTokens = u.cached_input_tokens ?? 0;
+    outcome.cacheWriteInputTokens = u.cache_write_input_tokens ?? 0;
+  };
   const handleOne = (ev: CodexEvent): CodexStreamEvent | null => {
     if (
       (ev.type === 'session_configured' || ev.type === 'thread.started') &&
@@ -298,16 +310,14 @@ export async function* streamTurn(
       // LEGACY: last_token_usage is per-TURN; total_token_usage is
       // cumulative for the whole session — using the latter here would
       // over-report on every turn after the first.
-      outcome.inputTokens = ev.info.last_token_usage.input_tokens ?? 0;
-      outcome.outputTokens = ev.info.last_token_usage.output_tokens ?? 0;
+      recordUsage(ev.info.last_token_usage);
       return null;
     }
     if (ev.type === 'turn.completed' && ev.usage) {
       // CURRENT: turn.completed.usage — observed to stay roughly flat
       // across resumed turns rather than accumulate, i.e. per-turn like
       // legacy's last_token_usage (see file header).
-      outcome.inputTokens = ev.usage.input_tokens ?? 0;
-      outcome.outputTokens = ev.usage.output_tokens ?? 0;
+      recordUsage(ev.usage);
       return null;
     }
     if (ev.type === 'task_complete') {
