@@ -1,4 +1,4 @@
-# Agent Exec Protocol — v1 (rev 26)
+# Agent Exec Protocol — v1 (rev 27)
 
 - **Status**: Implemented (Phase 0 of the mono-agent delegation plan — see
   `mono-agent:docs/plans/local-agent-monomind-delegation.md`)
@@ -6,6 +6,10 @@
   the Coder mode threat model, the `--access full` guardrails (root refusal, no transitive
   escalation, env hygiene, audit log), what callers own, and residual risks (issue #360).
 - **Revision history**:
+  - rev 27 (2026-09-30): **a missing API key is `auth`** (issue #532) — no new capability. §3.4's
+    `auth` also covers a credential that was never set: an error whose message says "missing API
+    key" or "no API key found/configured" (pi, and the pi-rpc runner's own up-front check) is
+    now `error {code:"auth", fatal:true}` on every runtime; it was `runner-error`. Additive only.
   - rev 26 (2026-09-29): **more `--sandbox` modes, and `--sandbox-fallback`** (issue #482) — new
     capabilities `agent-exec-sandbox-restricted` and `agent-exec-sandbox-fallback`. Without
     `--sandbox` nothing changes: every runtime's argv and `start` are as in rev 25. **New mode
@@ -664,7 +668,7 @@ $ monomind agent exec --runtime codex --prompt "summarize ./README"
 
 | `code` | `fatal` | Meaning / caller action |
 |---|---|---|
-| `auth` | true | Runtime not logged in / key invalid — surface the runtime's login command; do not retry |
+| `auth` | true | Runtime not logged in / key missing or invalid (rev 27: "missing API key", "no API key found") — surface the runtime's login command; do not retry |
 | `quota` | true | Quota, credits, billing or a daily cap exhausted — do not retry. Before rev 20 this also covered transient rate limits |
 | `rate-limited` | true | rev 20. A transient provider rate limit (429) that `agent exec` already retried (up to 3 attempts, rev 20 entry) or could not retry safely; the message says which. Try again later or pick another model |
 | `missing-binary` | true | Agent CLI not installed (exit 2; see `agent scan`) |
