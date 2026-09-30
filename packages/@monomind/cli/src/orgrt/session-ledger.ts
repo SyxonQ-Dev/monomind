@@ -121,12 +121,23 @@ export class SessionLedger {
     }
   }
 
-  /** Which session to resume for this key, or why none can be. */
-  resumeFor(q: RecordKey & { cwd: string; promptHash: string }): {
+  /** Which session to resume for this key, or why none can be.
+   *  `legacyRuntime`: the runtime an older build filed this key under (#562);
+   *  a record found only there is moved to `q.runtime` and used. */
+  resumeFor(q: RecordKey & { cwd: string; promptHash: string; legacyRuntime?: string }): {
     sessionId?: string;
     reason: SessionStartReason;
   } {
-    const r = this.records.get(keyOf(q));
+    let r = this.records.get(keyOf(q));
+    if (!r && q.legacyRuntime !== undefined) {
+      const legacy = { role: q.role, runtime: q.legacyRuntime, taskKey: q.taskKey };
+      const old = this.records.get(keyOf(legacy));
+      if (old) {
+        this.records.delete(keyOf(legacy));
+        r = { ...old, runtime: q.runtime };
+        this.set(r);
+      }
+    }
     if (!r) return { reason: 'fresh-no-record' };
     // SDK sessions are stored per working directory; resuming from another
     // cwd either fails or silently finds nothing.

@@ -142,7 +142,25 @@ export function resolveRoleRunner(
   orgProviderKind?: ProviderKind,
   roleProvider?: ProviderConfig,
 ): AgentRunner | undefined {
-  const explicit = roleRuntime ?? orgRuntime;
-  if (explicit) return resolveRunner(explicit, undefined, roleProvider);
-  return resolveRunner(undefined, roleProviderKind ?? orgProviderKind, roleProvider);
+  return resolveRunner(
+    resolveRoleRuntime(roleRuntime, orgRuntime, roleProviderKind, orgProviderKind),
+    undefined,
+    roleProvider,
+  );
+}
+
+/** The runtime resolveRoleRunner selects for a role, undefined for the
+ *  default Claude path. What the session ledger and its audit key on (#562). */
+export function resolveRoleRuntime(
+  roleRuntime?: RuntimeKind,
+  orgRuntime?: RuntimeKind,
+  roleProviderKind?: ProviderKind,
+  orgProviderKind?: ProviderKind,
+): RuntimeKind | undefined {
+  return (
+    roleRuntime ??
+    orgRuntime ??
+    autoRuntimeFromProvider(roleProviderKind ?? orgProviderKind) ??
+    (process.env.MONOMIND_RUNTIME as RuntimeKind | undefined)
+  );
 }
