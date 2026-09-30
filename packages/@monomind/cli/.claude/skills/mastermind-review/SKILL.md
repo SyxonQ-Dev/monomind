@@ -1,6 +1,6 @@
 ---
 name: mastermind-review
-description: "Review code, content, strategy or security, or \"review this session/worktree\"; --tillend loops find-fix-verify until a round finds nothing. Spawns specialist reviewers."
+description: "Review code, content, strategy or security, or \"full review of this session\" / \"review this worktree\"; --tillend loops find-fix-verify until clean. Spawns specialist reviewers."
 type: domain-skill
 default_mode: auto
 ---

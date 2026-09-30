@@ -17,7 +17,8 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { copyAgents, copyCommands, copySkills } from '../src/init/copy-assets.js';
 import { readInitManifest, recordPacks } from '../src/init/init-manifest.js';
-import { addPacks, installedPacks, removePacks } from '../src/init/pack-install.js';
+import { finalizeGuard } from '../src/init/file-guard.js';
+import { addPacks, installedPacks, packsOnDisk, removePacks } from '../src/init/pack-install.js';
 import { CORE_PACK, OPTIONAL_PACKS, PACK_NAMES, parsePackList } from '../src/init/packs.js';
 import { resolveInitOptions } from '../src/init/resolve-options.js';
 import {
@@ -28,6 +29,8 @@ import {
   type InitResult,
 } from '../src/init/types.js';
 import { executeUpgradeWithMissing } from '../src/init/upgrade.js';
+import { writeKimiTree } from '../src/init/write-kimicode.js';
+import { writeOpencodeTree } from '../src/init/write-opencode.js';
 import type { CommandContext } from '../src/types.js';
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -187,5 +190,73 @@ describe('packs add / remove', () => {
     expect(exists('.claude/commands/mastermind/do.md')).toBe(true);
     expect(result.kept).toEqual(['.claude/commands/mastermind/sales.md']);
     expect(installedPacks(target)).toEqual([]);
+  });
+
+  it('add and remove keep the Kimi Code and OpenCode trees in step', async () => {
+    const opts = options(DEFAULT_INIT_OPTIONS);
+    const result = await copyAll(opts);
+    writeKimiTree(target, opts, result);
+    writeOpencodeTree(target, opts, result);
+    finalizeGuard(result);
+    const mirrors = () =>
+      ['.kimi-code', '.opencode'].flatMap((d) =>
+        fs
+          .readdirSync(path.join(target, d), { recursive: true, encoding: 'utf8' })
+          .filter((f) => fs.statSync(path.join(target, d, f)).isFile())
+          .map((f) => `${d}/${f}`),
+      );
+    const before = mirrors().sort();
+    await addPacks(target, ['business', 'orgs'], source);
+    const added = mirrors().filter((f) => !before.includes(f));
+    expect(added.some((f) => f.startsWith('.kimi-code/agents/'))).toBe(true);
+    expect(added.some((f) => f.startsWith('.kimi-code/skills/mastermind-runorg/'))).toBe(true);
+    expect(added.some((f) => f.startsWith('.opencode/agent/'))).toBe(true);
+    expect(added.some((f) => f.startsWith('.opencode/command/'))).toBe(true);
+    expect(added.some((f) => f.startsWith('.opencode/skills/mastermind-runorg/'))).toBe(true);
+    removePacks(target, ['business', 'orgs']);
+    expect(mirrors().sort()).toEqual(before);
+  });
+
+  it('remove leaves symlinks and paths outside the project alone', async () => {
+    await copyAll(options(DEFAULT_INIT_OPTIONS));
+    await addPacks(target, ['business'], source);
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-packs-out-'));
+    try {
+      const victim = path.join(outside, 'keep.md');
+      fs.writeFileSync(victim, 'mine');
+      const link = path.join(target, '.claude', 'commands', 'mastermind', 'ops.md');
+      fs.rmSync(link);
+      fs.symlinkSync(victim, link);
+      const result = removePacks(target, ['business']);
+      expect(result.kept).toContain('.claude/commands/mastermind/ops.md');
+      expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+      expect(fs.readFileSync(victim, 'utf8')).toBe('mine');
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('which packs a project has', () => {
+  it('an install from before packs counts a pack only when init put its files there', async () => {
+    await copyAll(options(DEFAULT_INIT_OPTIONS));
+    const manifest = path.join(target, '.monomind', 'init-manifest.json');
+    fs.rmSync(manifest);
+    // A user's own file at a pack path is not the pack.
+    const own = path.join(target, '.claude', 'commands', 'mastermind', 'sales.md');
+    fs.writeFileSync(own, '---\ndescription: my sales notes\n---\n');
+    expect(installedPacks(target)).toEqual([]);
+    // The shipped file is.
+    fs.copyFileSync(path.join(source, '.claude', 'commands', 'mastermind', 'sales.md'), own);
+    expect(installedPacks(target)).toEqual(['business']);
+  });
+
+  it('init records only packs whose files it really copied', async () => {
+    await copyAll(options(DEFAULT_INIT_OPTIONS, ['specialists']));
+    const kinds = { skills: true, commands: true, agents: false };
+    expect(packsOnDisk(target, ['specialists'], kinds)).toEqual([]);
+    expect(packsOnDisk(target, ['specialists'], { ...kinds, agents: true })).toEqual([
+      'specialists',
+    ]);
   });
 });

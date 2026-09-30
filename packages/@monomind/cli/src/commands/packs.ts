@@ -5,7 +5,7 @@
 
 import * as path from 'node:path';
 import { formatKeptFiles } from '../init/file-guard.js';
-import { LISTING_BUDGET_CHARS, packListingChars } from '../init/listing-size.js';
+import { LISTING_BUDGET_CHARS, measureListing, packListingChars } from '../init/listing-size.js';
 import { addPacks, installedPacks, removePacks } from '../init/pack-install.js';
 import { OPTIONAL_PACKS, PACKS, parsePackList } from '../init/packs.js';
 import { findSourceDir } from '../init/shared.js';
@@ -84,6 +84,12 @@ async function handleAdd(ctx: CommandContext): Promise<CommandResult> {
   output.printSuccess(
     `Added ${parsed.packs.join(', ')}: ${skillsCount} skills, ${commandsCount} commands, ${agentsCount} agents`,
   );
+  const listing = measureListing(path.join(ctx.cwd, '.claude')).skillsAndCommandsChars;
+  if (listing > LISTING_BUDGET_CHARS) {
+    output.printWarning(
+      `Skills and commands now take ${listing} chars of Claude Code's listing, over the ~${LISTING_BUDGET_CHARS} it shows before dropping descriptions. \`monomind packs remove <pack>\` to trim.`,
+    );
+  }
   return { success: true, data: result };
 }
 

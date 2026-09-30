@@ -119,6 +119,56 @@ export async function writeOpencodeFiles(
   writeOpencodeTree(targetDir, options, result);
 }
 
+/** The opencode files a `.claude/` tree converts to: agent files, command
+ *  files and skill directories, each mapped to its content. Pure. */
+export interface OpencodeConvertedTree {
+  agents: Map<string, string>;
+  commands: Map<string, string>;
+  skills: Map<string, string>;
+}
+
+export function convertClaudeTreeToOpencode(claudeDir: string): OpencodeConvertedTree {
+  const tree: OpencodeConvertedTree = { agents: new Map(), commands: new Map(), skills: new Map() };
+  const srcAgents = path.join(claudeDir, 'agents');
+  if (fs.existsSync(srcAgents)) {
+    for (const rel of walkMdFiles(srcAgents)) {
+      if (!isLikelyUserFile(rel)) continue; // skip READMEs etc.
+      const fallback = path.basename(rel, '.md');
+      const converted = convertAgentMd(
+        fs.readFileSync(path.join(srcAgents, rel), 'utf-8'),
+        fallback,
+      );
+      const file = `${extractFmName(converted) || fallback}.md`;
+      if (!tree.agents.has(file)) tree.agents.set(file, converted);
+    }
+  }
+  const srcCommands = path.join(claudeDir, 'commands');
+  if (fs.existsSync(srcCommands)) {
+    for (const rel of walkMdFiles(srcCommands)) {
+      if (!isConvertibleCommand(rel)) continue;
+      const segs = rel.split(path.sep);
+      const category = segs.length > 1 ? segs[0] : 'monomind';
+      const fileBase = path.basename(rel, '.md');
+      const src = fs.readFileSync(path.join(srcCommands, rel), 'utf-8');
+      tree.commands.set(
+        opencodeCommandFilename(category, fileBase),
+        convertCommandMd(src, category, fileBase),
+      );
+    }
+  }
+  const srcSkills = path.join(claudeDir, 'skills');
+  if (fs.existsSync(srcSkills)) {
+    for (const rel of walkMdFiles(srcSkills)) {
+      // rel looks like "<skillName>/SKILL.md"
+      const segs = rel.split(path.sep);
+      if (segs.length < 2 || segs[segs.length - 1] !== 'SKILL.md') continue;
+      const src = fs.readFileSync(path.join(srcSkills, rel), 'utf-8');
+      tree.skills.set(segs[0], convertSkillMd(src, segs[0]));
+    }
+  }
+  return tree;
+}
+
 /**
  * Convert the project's `.claude/{agents,commands,skills}` into
  * `.opencode/{agent,command,skills}` and sweep skills a previous run generated
@@ -137,75 +187,52 @@ export function writeOpencodeTree(
   // dir (not the package source) means only the user's selected subset is
   // converted, and we never re-implement the MAP filtering logic.
   const claudeDir = path.join(targetDir, '.claude');
+  const tree = convertClaudeTreeToOpencode(claudeDir);
   let agentCount = 0,
     commandCount = 0,
     skillCount = 0;
-  const seenAgents = new Set<string>();
 
   // Agents → .opencode/agent/<name>.md (flattened, deduped by name)
-  const srcAgents = path.join(claudeDir, 'agents');
-  if (fs.existsSync(srcAgents)) {
-    const destAgents = path.join(targetDir, '.opencode', 'agent');
-    if (isSafeConversionTarget(destAgents, claudeDir, result, '.opencode/agent', 'agents')) {
-      for (const rel of walkMdFiles(srcAgents)) {
-        const abs = path.join(srcAgents, rel);
-        if (!isLikelyUserFile(rel)) continue; // skip READMEs etc.
-        const src = fs.readFileSync(abs, 'utf-8');
-        const fallback = path.basename(rel, '.md');
-        const converted = convertAgentMd(src, fallback);
-        const name = extractFmName(converted) || fallback;
-        if (seenAgents.has(name)) continue;
-        seenAgents.add(name);
-        fs.mkdirSync(destAgents, { recursive: true });
-        atomicWriteFile(path.join(destAgents, `${name}.md`), converted);
-        guard.record(path.join(destAgents, `${name}.md`));
-        agentCount++;
-      }
+  const destAgents = path.join(targetDir, '.opencode', 'agent');
+  if (
+    tree.agents.size > 0 &&
+    isSafeConversionTarget(destAgents, claudeDir, result, '.opencode/agent', 'agents')
+  ) {
+    fs.mkdirSync(destAgents, { recursive: true });
+    for (const [file, content] of tree.agents) {
+      atomicWriteFile(path.join(destAgents, file), content);
+      guard.record(path.join(destAgents, file));
+      agentCount++;
     }
   }
 
   // Commands → .opencode/command/<category>-<name>.md (namespace preserved)
-  const srcCommands = path.join(claudeDir, 'commands');
-  if (fs.existsSync(srcCommands)) {
-    const destCommands = path.join(targetDir, '.opencode', 'command');
-    if (isSafeConversionTarget(destCommands, claudeDir, result, '.opencode/command', 'commands')) {
-      for (const rel of walkMdFiles(srcCommands)) {
-        const abs = path.join(srcCommands, rel);
-        if (!isConvertibleCommand(rel)) continue;
-        const segs = rel.split(path.sep);
-        const category = segs.length > 1 ? segs[0] : 'monomind';
-        const fileBase = path.basename(rel, '.md');
-        const src = fs.readFileSync(abs, 'utf-8');
-        const converted = convertCommandMd(src, category, fileBase);
-        fs.mkdirSync(destCommands, { recursive: true });
-        const dest = path.join(destCommands, opencodeCommandFilename(category, fileBase));
-        atomicWriteFile(dest, converted);
-        guard.record(dest);
-        commandCount++;
-      }
+  const destCommands = path.join(targetDir, '.opencode', 'command');
+  if (
+    tree.commands.size > 0 &&
+    isSafeConversionTarget(destCommands, claudeDir, result, '.opencode/command', 'commands')
+  ) {
+    fs.mkdirSync(destCommands, { recursive: true });
+    for (const [file, content] of tree.commands) {
+      atomicWriteFile(path.join(destCommands, file), content);
+      guard.record(path.join(destCommands, file));
+      commandCount++;
     }
   }
 
   // Skills → .opencode/skills/<name>/SKILL.md (same shape)
-  const srcSkills = path.join(claudeDir, 'skills');
   const destSkillsRoot = path.join(targetDir, '.opencode', 'skills');
   const writtenOpencodeSkills = new Set<string>();
-  if (fs.existsSync(srcSkills)) {
-    if (isSafeConversionTarget(destSkillsRoot, claudeDir, result, '.opencode/skills', 'skills')) {
-      for (const rel of walkMdFiles(srcSkills)) {
-        // rel looks like "<skillName>/SKILL.md"
-        const segs = rel.split(path.sep);
-        if (segs.length < 2 || segs[segs.length - 1] !== 'SKILL.md') continue;
-        const skillName = segs[0];
-        const abs = path.join(srcSkills, rel);
-        const src = fs.readFileSync(abs, 'utf-8');
-        const converted = convertSkillMd(src, skillName);
-        const destDir = path.join(destSkillsRoot, skillName);
-        fs.mkdirSync(destDir, { recursive: true });
-        atomicWriteFile(path.join(destDir, 'SKILL.md'), converted);
-        writtenOpencodeSkills.add(skillName);
-        skillCount++;
-      }
+  if (
+    fs.existsSync(path.join(claudeDir, 'skills')) &&
+    isSafeConversionTarget(destSkillsRoot, claudeDir, result, '.opencode/skills', 'skills')
+  ) {
+    for (const [skillName, content] of tree.skills) {
+      const destDir = path.join(destSkillsRoot, skillName);
+      fs.mkdirSync(destDir, { recursive: true });
+      atomicWriteFile(path.join(destDir, 'SKILL.md'), content);
+      writtenOpencodeSkills.add(skillName);
+      skillCount++;
     }
   }
 

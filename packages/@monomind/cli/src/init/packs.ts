@@ -92,6 +92,7 @@ export const CORE_PACK: AssetPack = {
     'core',
     'architecture',
     'design',
+    'schemas', // JSON output schemas, no agents
     'engineering/engineering-security-engineer.md',
     'engineering/engineering-frontend-developer.md',
     'engineering/engineering-software-architect.md',

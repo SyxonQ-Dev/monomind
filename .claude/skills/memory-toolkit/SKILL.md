@@ -1,6 +1,6 @@
 ---
 name: memory-toolkit
-description: "Save and search cross-session knowledge (patterns, fixes, decisions) in monomind's local memory. Use for \"remember this\", \"search memory\", \"solved this before?\"."
+description: "Save and search cross-session knowledge in monomind's local memory. Use for \"remember this\", \"store in memory\", \"search memory\", \"recall past decisions\", \"solved this before?\"."
 ---
 
 # Memory Toolkit

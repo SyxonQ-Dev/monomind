@@ -12,7 +12,8 @@
  *   - `x/SKILL.md` skill paths             → an installed skill
  *   - a non-core agent's name, quoted, backticked or as a `:-Name}` default
  * A reference to something in an opt-in pack is allowed only on a line that
- * says which pack to add: `monomind packs add <that pack>`.
+ * says which pack to add: `monomind packs add <that pack>`. Names no pack
+ * ships at all are left to scripts/lint-agent-refs.mjs.
  */
 
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
