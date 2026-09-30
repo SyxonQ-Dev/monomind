@@ -88,9 +88,9 @@ export function unconfinedRoles(
 
 /** THE enforcement point for unconfined roles, called once per org start
  *  (prepareOrgStart). A role that runs with neither the SDK sandbox nor the
- *  mask can read the operator key and so sign any org definition. Whether to
- *  refuse such roles is an open product decision (#502): today this warns;
- *  a hard refusal is a `throw` here, decided by `unconfinedRoles` above. */
+ *  mask can read the operator key and so sign any org definition. Such roles
+ *  are allowed by decision (#502): the operator is warned, naming each role
+ *  and why it runs without an OS sandbox, and the run continues. */
 export function enforceConfinement(
   def: unknown,
   org: string,
@@ -99,7 +99,7 @@ export function enforceConfinement(
   const loose = unconfinedRoles(def);
   for (const r of loose)
     warn(
-      `[orgrt] org ${org}: role ${r.id} runs unconfined (${r.why}) — it can read the operator key and sign any org definition`,
+      `[orgrt] org ${org}: role ${r.id} runs unconfined (${r.why}) — it runs without an OS sandbox, so it can read the operator key and sign any org definition. Allowed; to confine it, use the claude runtime below policy.git push with the sandbox on, or install bubblewrap (Linux)`,
     );
   return loose;
 }

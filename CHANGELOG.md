@@ -90,7 +90,7 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
   - **`org test-loop` runs its fixture orgs in a throwaway directory**, not in the project, and removes their signatures.
 
-  - **Residual:** a role that can read the operator-credential directory can sign, as it can already forge a full-access grant: an active full-access role, or a role that runs with neither the SDK sandbox nor the bubblewrap mask. Whether to refuse such roles is still open; `org sign` and every org start name them.
+  - **Residual:** a role that can read the operator-credential directory can sign, as it can already forge a full-access grant: an active full-access role, or a role that runs with neither the SDK sandbox nor the bubblewrap mask. **Such roles are allowed, by decision:** refusing them would stop orgs that need one (a push-level releaser, codex on macOS, any role on a host without bubblewrap), so signing protects every other role and these run with a warning instead. `org sign` and every org start name each unconfined role and why it runs without an OS sandbox (for example `policy.git push, and no bubblewrap mask`). To confine one, run it on the claude runtime below `policy.git: push` with the sandbox on, or install bubblewrap (Linux).
 
 ## [2.20.0] — 2026-09-29
 

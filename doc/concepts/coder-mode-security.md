@@ -371,15 +371,17 @@ uses them must read `sandbox_applied` (and `native_sandbox`) rather than assume 
 These are known, accepted trade-offs of "full access by design" (§1) — listed explicitly so they
 are never mistaken for oversights:
 
-- **Unconfined org roles can sign org definitions (#502, open decision)**: a role that runs with
+- **Unconfined org roles can sign org definitions (#502, allowed by decision)**: a role that runs with
   neither the SDK sandbox nor the bubblewrap authority mask can read the operator key in
   `~/.monomind/orgrt-operator/`, and with it sign any org definition and forge any full-access
   grant. That is an active full-access role; a `policy.git: push` role or one with
   `policy.sandbox.mode: 'off'` on a host without bubblewrap; a CLI runtime other than claude
   there (codex on macOS, for example); and any role when bubblewrap is missing or cannot start.
-  Whether to refuse to start such roles is not decided yet. Until then `monomind org sign` lists
-  them in its review ("can read the operator key and sign anything") and every org start prints
-  the same warning.
+  Such roles are allowed, not refused: operator-signed definitions protect every other role, and
+  an org that needs an unconfined role (a push-level releaser, codex on macOS) keeps working.
+  `monomind org sign` lists each one in its review with the reason it runs without an OS sandbox,
+  and every org start prints the same warning. To confine a role, run it on the claude runtime
+  below `policy.git: push` with `policy.sandbox.mode` not `'off'`, or install bubblewrap (Linux).
 
 - **`WebFetch`/`WebSearch` under `--access full`**: a fetched page can contain instructions the
   model may act on with a real, unrestricted shell — identical to interactive Claude Code with
