@@ -2,9 +2,112 @@
  * Doctor — skill catalog check (`doctor -c catalog`). Re-hashes every entry
  * through `catalogAudit` and dry-plans both projection surfaces; never writes.
  */
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { PROJECTION_SURFACES, planProjection } from '../catalog/projection.js';
 import { catalogAudit } from '../catalog/snapshot.js';
+import { nonBundledSkillLines } from '../orgrt/org-sign-review.js';
+import {
+  quarantine,
+  quarantineMessage,
+  strayClaudeConfigs,
+  untrackedWorktreeMcp,
+} from '../orgrt/planted-paths.js';
 import type { HealthCheck } from './doctor-env-checks.js';
+
+/** `doctor -c org-skills` (#502 review): org skills from the project or user
+ *  library, which decide MCP tools the org daemon grants. Informational. */
+export async function checkOrgSkills(
+  root: string = process.cwd(),
+  readOnly = false,
+): Promise<HealthCheck[]> {
+  const lines = nonBundledSkillLines(root).map((l) => l.trim());
+  return [
+    checkStrayClaudeConfig(root, readOnly),
+    {
+      name: 'Org Skills',
+      status: 'pass',
+      message: lines.length
+        ? `${lines.length} from the project or user library (not bundled): ${lines.join('; ')}`
+        : 'Only bundled org skills',
+    },
+    checkMcpjsonApprovals(root),
+  ];
+}
+
+/** #502 review round 4: a Claude Code global config other than the current
+ *  one (above all `~/.claude/.config.json`, which Claude Code prefers when it
+ *  exists) or an untracked `.mcp.json` in an org work tree is quarantined on
+ *  every doctor run — reported only under --read-only. */
+export function checkStrayClaudeConfig(root: string, readOnly: boolean): HealthCheck {
+  const NAME = 'Planted Claude Config';
+  const found = [
+    ...strayClaudeConfigs(homedir(), process.env, undefined, { readOnly }),
+    ...untrackedWorktreeMcp(root),
+  ];
+  if (!found.length) return { name: NAME, status: 'pass', message: 'None' };
+  if (readOnly)
+    return {
+      name: NAME,
+      status: 'warn',
+      message: `Found ${found.join(', ')}: Claude Code would load it (a role may have planted it)`,
+      fix: 'Run monomind doctor without --read-only to quarantine it',
+    };
+  const findings = quarantine(found, root);
+  return {
+    name: NAME,
+    status: 'warn',
+    message: quarantineMessage(undefined, findings).replace(/\n/g, ' '),
+  };
+}
+
+/** #502 review round 3: settings that approve `.mcp.json` servers by name
+ *  (`enabledMcpjsonServers`, `enableAllProjectMcpServers`) start whatever a
+ *  `.mcp.json` of that name says, unprompted. That is only as safe as the
+ *  `.mcp.json` itself: warn when it is missing, untracked or modified —
+ *  anything that can write the project (an org role) could drop one in. */
+export function checkMcpjsonApprovals(root: string): HealthCheck {
+  const NAME = 'Project MCP Approvals';
+  const approved: string[] = [];
+  for (const f of ['settings.json', 'settings.local.json']) {
+    try {
+      const s = JSON.parse(readFileSync(join(root, '.claude', f), 'utf8')) as {
+        enabledMcpjsonServers?: unknown;
+        enableAllProjectMcpServers?: unknown;
+      };
+      if (Array.isArray(s.enabledMcpjsonServers))
+        approved.push(...s.enabledMcpjsonServers.map(String));
+      if (s.enableAllProjectMcpServers === true) approved.push('(all)');
+    } catch {
+      /* no such settings file */
+    }
+  }
+  if (!approved.length)
+    return { name: NAME, status: 'pass', message: 'No .mcp.json servers approved by name' };
+  const git = (args: string[]) =>
+    spawnSync('git', ['-C', root, ...args], { stdio: 'ignore' }).status;
+  const state = !existsSync(join(root, '.mcp.json'))
+    ? 'missing'
+    : git(['ls-files', '--error-unmatch', '.mcp.json']) !== 0
+      ? 'untracked'
+      : git(['diff', '--quiet', 'HEAD', '--', '.mcp.json']) !== 0
+        ? 'modified from what git has'
+        : undefined;
+  if (!state)
+    return {
+      name: NAME,
+      status: 'pass',
+      message: `Approves ${approved.join(', ')}; .mcp.json is tracked and unchanged`,
+    };
+  return {
+    name: NAME,
+    status: 'warn',
+    message: `.claude settings approve .mcp.json server(s) ${approved.join(', ')} by name, but .mcp.json is ${state}: a .mcp.json that anything able to write this project drops in (an org role, for one) starts unprompted in your next Claude Code session here`,
+    fix: 'Keep .mcp.json tracked and unchanged (review `git diff .mcp.json`), or remove the approval from .claude/settings*.json',
+  };
+}
 
 const NAME = 'Skill Catalog';
 

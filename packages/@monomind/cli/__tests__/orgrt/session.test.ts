@@ -586,14 +586,15 @@ describe('resolveRoleExtraGuidance', () => {
     const { writeFileSync, mkdtempSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
-    const path = join(mkdtempSync(join(tmpdir(), 'instr-')), 'notes.md');
+    const project = mkdtempSync(join(tmpdir(), 'instr-'));
+    const path = join(project, 'notes.md');
     writeFileSync(path, 'Follow the client\'s custom style guide.');
 
-    const both = resolveRoleExtraGuidance({ id: 'x', skills: ['coder'], instructions_file: path } as any);
+    const both = resolveRoleExtraGuidance({ id: 'x', skills: ['coder'], instructions_file: path } as any, project);
     expect(both).toContain('Best Practices');
     expect(both).toContain('Follow the client');
 
-    const customOnly = resolveRoleExtraGuidance({ id: 'x', instructions_file: path } as any);
+    const customOnly = resolveRoleExtraGuidance({ id: 'x', instructions_file: 'notes.md' } as any, project);
     expect(customOnly).toContain('Follow the client');
     expect(customOnly).not.toContain('Best Practices');
   });

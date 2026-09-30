@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { computeAccessAckHash } from '../orgrt/access-ack.js';
 import { ensureFullAccessGrantKey, signAccessAck } from '../orgrt/access-grant-key.js';
 import { detectAgentContextMarker } from '../orgrt/agent-context.js';
+import { roleContextMarker, signOrgDef, verifyOrgDef } from '../orgrt/org-signature.js';
 import { runnerSpec } from '../orgrt/runner-registry.js';
 import { ORG_DIR, OrgDefSchema } from '../orgrt/types.js';
 import { output } from '../output.js';
@@ -38,6 +39,23 @@ interface RawOrgDef {
 
 function loadRaw(path: string): RawOrgDef {
   return JSON.parse(readFileSync(path, 'utf8')) as RawOrgDef;
+}
+
+/** #502: a policy edit invalidates the org's operator signature. Re-sign
+ *  when the definition verified before this edit (so the edit is the only
+ *  change being approved) and this is not a role's own process; otherwise
+ *  tell the operator to review and sign it. */
+function resignAfterEdit(cwd: string, name: string, path: string, wasSigned: boolean): void {
+  if (wasSigned && !roleContextMarker()) {
+    signOrgDef(cwd, name, loadRaw(path));
+    log(output.info(`  Org "${name}" re-signed with this change.`));
+    return;
+  }
+  log(
+    output.warning(
+      `  Org "${name}" is not signed for this change — review it, then run \`monomind org sign ${name}\` as the operator.`,
+    ),
+  );
 }
 
 export const setAccessAction = async (ctx: CommandContext): Promise<CommandResult> => {
@@ -76,6 +94,9 @@ export const setAccessAction = async (ctx: CommandContext): Promise<CommandResul
     return { success: false, message: 'org not found' };
   }
   const raw = loadRaw(path);
+  // #502: checked before any edit — only a definition the operator had
+  // already signed gets re-signed with this one change.
+  const wasSigned = verifyOrgDef(ctx.cwd, name, raw).ok;
   const rawRole = raw.roles?.find((r) => r.id === roleId);
   if (!rawRole) {
     log(output.error(`Role "${roleId}" not found in org "${name}"`));
@@ -88,6 +109,7 @@ export const setAccessAction = async (ctx: CommandContext): Promise<CommandResul
       delete rawRole.policy.access_ack;
     }
     writeFileSync(path, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+    resignAfterEdit(ctx.cwd, name, path, wasSigned);
     log(output.success(`Role "${roleId}" in org "${name}" is now scoped (default policy).`));
     log(output.info(`Run \`monomind org reload ${name}\` for a live org to pick this up.`));
     return { success: true, message: 'role downgraded to scoped' };
@@ -145,6 +167,7 @@ export const setAccessAction = async (ctx: CommandContext): Promise<CommandResul
   rawRole.policy.access = 'full';
   rawRole.policy.access_ack = { by, at, hash, sig };
   writeFileSync(path, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+  resignAfterEdit(ctx.cwd, name, path, wasSigned);
   log(output.success(`Role "${roleId}" in org "${name}" granted full access.`));
   log(
     output.info(

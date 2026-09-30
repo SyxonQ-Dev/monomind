@@ -26,6 +26,7 @@ import {
 } from './org-poll.js';
 import { type RunEndInput, runEndLine } from './org-run-end.js';
 import { checkV1Config, printCostEstimate, printDryRun } from './org-run-preview.js';
+import { ensureOrgSignedForRun } from './org-sign.js';
 
 const log = (text: string): void => {
   console.log(text);
@@ -249,6 +250,10 @@ export const runAction = async (ctx: CommandContext): Promise<CommandResult> => 
   if ('success' in resolved) return resolved;
   const { name, taskFlag, autoApprove, orgsDir } = resolved;
   if (ctx.flags.dryRun === true) return printDryRun(ctx.cwd, orgsDir, name, taskFlag);
+  // #502: before a serve handoff too — the daemon would refuse an unsigned
+  // org, but this process would already have reported the start as acknowledged.
+  const unsigned = await ensureOrgSignedForRun(ctx, name);
+  if (unsigned) return unsigned;
   // A live `org serve` daemon already owns this project's orgs. Starting our
   // own here would put two processes on one runtime.json and one broker lease,
   // so hand the request to the daemon via its runfile instead of racing it.

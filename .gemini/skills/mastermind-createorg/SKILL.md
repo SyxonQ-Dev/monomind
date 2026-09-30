@@ -298,7 +298,18 @@ if [ -n "$missing_model" ]; then
   echo "ERROR: roles without an explicit adapter_config.model: ${missing_model} — set the latest model for their runtime (Step 2.4) and re-save."
   exit 1
 fi
+
+# Review for signing (#502): the runtime refuses to start or reload an org
+# definition the operator has not signed. Without a terminal this prints the
+# full review (each role's runtime, access level, tools, skills,
+# instructions_file and sandbox, the org's prechecks, and any role that would
+# run unconfined) and signs nothing. It exits non-zero by design.
+npx -y monomind@latest org sign "$org_name" || true
 ```
+
+Show the user that review verbatim, then tell them to sign the org themselves in their own terminal after reading it: `monomind org sign <org_name>`. Do not sign it for them (never pass `--yes`): the signature is the operator's approval of what the roles may do.
+
+After any later edit to a role's `policy`, `skills`, `instructions_file`, the roles, runtimes, `schedule` or `run_config`, the org must be signed again (`monomind org sign <org_name>`) before `org run`, `org reload` or `org serve` will use the change.
 
 ---
 
