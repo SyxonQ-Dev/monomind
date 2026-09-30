@@ -78,6 +78,8 @@ export const ORG_ROLE_ENV_KEYS = [
   'MONOMIND_AIDER',
   'MONOMIND_HOOK_QUIET',
   'MONOMIND_GRAPH_GATE',
+  'MONOMIND_GIT_LEVEL',
+  'MONOMIND_EXEC_TREE',
 ] as const;
 
 const KEYS = [

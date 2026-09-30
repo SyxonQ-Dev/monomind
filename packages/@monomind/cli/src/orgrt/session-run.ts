@@ -13,7 +13,7 @@ import { buildOrgTools } from './org-tools.js';
 import type { TokenUsage } from './policy.js';
 import { summarizeToolOutput } from './policy.js';
 import { resolveRoleProvider } from './provider.js';
-import { ensureRoleDeps, roleDepsFailure } from './role-deps.js';
+import { ensureRoleDeps, roleDepsFailure, roleDepsInstalled, waitRoleDeps } from './role-deps.js';
 import { resolveRoleGitEnforcement, roleAuthorityMask } from './role-sandbox.js';
 import { BUDGET_STOP_SUBTYPE } from './runner-usage.js'; // #550: a runner's budget stop
 import { type FaultRestarts, ProcessFaultError } from './sandbox-fault.js';
@@ -148,9 +148,17 @@ export async function runOneSession(
     // deny rules for Claude. Throws (session fails) when the role requires
     // the sandbox and it can't start.
     // #559: the role cannot write ~/.monomind/deps, so the host installs what
-    // it may need there first. Nothing to install: no await, no yield.
+    // it may need there first. Nothing to install: no await, no yield. An
+    // org stop or a slow install does not hold the session start.
     let deps = (opts.ensureRoleDeps ?? ensureRoleDeps)(runtimeKey);
-    if (deps instanceof Promise) deps = await deps;
+    if (deps instanceof Promise) deps = await waitRoleDeps(deps, abort.signal);
+    if (deps.status === 'installed')
+      bus.emit({
+        type: 'audit',
+        from: role.id,
+        reason: 'role-deps-installed',
+        msg: roleDepsInstalled(),
+      });
     if (deps.status === 'failed')
       bus.emit({
         type: 'audit',

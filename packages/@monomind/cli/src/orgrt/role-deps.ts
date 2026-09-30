@@ -44,36 +44,86 @@ export const defaultRoleDepsProbe = (env: NodeJS.ProcessEnv = process.env): Role
   install: () => loadClaudeSdk(),
 });
 
-let installed: Promise<RoleDepsResult> | undefined;
+/** How long a failed install is reported without retrying: every session
+ *  start would otherwise spawn npm again (offline, each waits out the fetch
+ *  timeout), and a role can cause session starts. */
+export const ROLE_DEPS_RETRY_MS = 10 * 60_000;
+/** The longest a session start waits for an install; the install goes on in
+ *  the background and the next session start finds it. */
+export const ROLE_DEPS_WAIT_MS = 5 * 60_000;
+
+/** Per-process install state. Tests pass a fresh one. */
+export interface RoleDepsState {
+  done?: RoleDepsResult;
+  inFlight?: Promise<RoleDepsResult>;
+  failed?: { at: number; result: RoleDepsResult };
+  now: () => number;
+}
+export const newRoleDepsState = (now: () => number = Date.now): RoleDepsState => ({ now });
+const processState = newRoleDepsState();
 
 /** Makes sure the SDK a role running `runtime` may need is installed. Never
  *  throws: a failure is returned, and the role then fails with the
- *  operator's command. Synchronous when there is nothing to install, so a
- *  session start does not yield for it. `probe` is for tests. */
+ *  operator's command. Synchronous when there is nothing to install, or once
+ *  it is installed, so a session start does not yield for it. One install at
+ *  a time per process; after a failure the same failure is returned for
+ *  ROLE_DEPS_RETRY_MS. `probe` and `state` are for tests. */
 export function ensureRoleDeps(
   runtime: string,
-  probe?: RoleDepsProbe,
+  probe: RoleDepsProbe = defaultRoleDepsProbe(),
+  state: RoleDepsState = processState,
 ): RoleDepsResult | Promise<RoleDepsResult> {
-  const p = probe ?? defaultRoleDepsProbe();
-  if (roleContextMarker(p.env)) return { status: 'in-role' };
-  if (runtime !== 'claude' && !p.claudeOnPath()) return { status: 'not-needed' };
-  if (p.sdkPresent()) return { status: 'present' };
-  const attempt = async (): Promise<RoleDepsResult> => {
+  if (roleContextMarker(probe.env)) return { status: 'in-role' };
+  if (runtime !== 'claude' && !probe.claudeOnPath()) return { status: 'not-needed' };
+  if (state.done) return state.done;
+  if (probe.sdkPresent()) return { status: 'present' };
+  if (state.failed && state.now() - state.failed.at < ROLE_DEPS_RETRY_MS)
+    return state.failed.result;
+  state.inFlight ??= (async (): Promise<RoleDepsResult> => {
+    let r: RoleDepsResult;
     try {
-      await p.install();
-      return { status: 'installed' };
+      await probe.install();
+      r = { status: 'installed' };
+      state.done = { status: 'present' };
+      state.failed = undefined;
     } catch (err) {
-      return { status: 'failed', error: err instanceof Error ? err.message : String(err) };
+      r = { status: 'failed', error: err instanceof Error ? err.message : String(err) };
+      state.failed = { at: state.now(), result: r };
     }
-  };
-  if (probe) return attempt();
-  // One install per process; a failure is not kept, so a later spawn retries.
-  installed ??= attempt().then((r) => {
-    if (r.status === 'failed') installed = undefined;
+    state.inFlight = undefined;
     return r;
-  });
-  return installed;
+  })();
+  return state.inFlight;
 }
+
+/** Waits for `pending` until the session is aborted or `ms` pass; the
+ *  install itself is not cancelled. */
+export async function waitRoleDeps(
+  pending: Promise<RoleDepsResult>,
+  signal: AbortSignal,
+  ms: number = ROLE_DEPS_WAIT_MS,
+): Promise<RoleDepsResult> {
+  let timer: NodeJS.Timeout | undefined;
+  let onAbort: (() => void) | undefined;
+  const cut = new Promise<RoleDepsResult>((resolve) => {
+    const stop = (why: string) => resolve({ status: 'failed', error: why });
+    timer = setTimeout(() => stop(`still installing after ${ms / 1000}s`), ms);
+    timer.unref?.();
+    onAbort = () => stop('the session was stopped while installing');
+    if (signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([pending, cut]);
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+  }
+}
+
+/** The audit line for an install the host just did. */
+export const roleDepsInstalled = (): string =>
+  `installed ${SDK}@${OPTIONAL_DEPENDENCIES[SDK].version} into the monomind deps dir before starting the role`;
 
 /** The audit line for a failed install. */
 export const roleDepsFailure = (error: string): string =>

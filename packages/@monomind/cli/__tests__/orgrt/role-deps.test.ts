@@ -13,7 +13,13 @@ import { depsCommand } from '../../src/commands/deps.js';
 import { OrgBus } from '../../src/orgrt/bus.js';
 import { Mailbox } from '../../src/orgrt/mailbox.js';
 import { PolicyEngine } from '../../src/orgrt/policy.js';
-import { ensureRoleDeps, type RoleDepsProbe } from '../../src/orgrt/role-deps.js';
+import {
+  ensureRoleDeps,
+  newRoleDepsState,
+  ROLE_DEPS_RETRY_MS,
+  type RoleDepsProbe,
+  waitRoleDeps,
+} from '../../src/orgrt/role-deps.js';
 import { runAgentSession, type SessionOpts } from '../../src/orgrt/session.js';
 import { OrgDefSchema } from '../../src/orgrt/types.js';
 import type { CommandContext } from '../../src/types.js';
@@ -48,31 +54,31 @@ function probe(over: Partial<RoleDepsProbe> = {}): RoleDepsProbe & { installs: n
 describe('ensureRoleDeps (host side)', () => {
   it('installs the SDK for a claude-runtime role when it is missing', async () => {
     const p = probe();
-    expect(await ensureRoleDeps('claude', p)).toEqual({ status: 'installed' });
+    expect(await ensureRoleDeps('claude', p, newRoleDepsState())).toEqual({ status: 'installed' });
     expect(p.installs).toBe(1);
   });
 
   it('installs it for any role when the claude runtime is available (agent exec may use it)', async () => {
     const p = probe({ claudeOnPath: () => true });
-    expect(await ensureRoleDeps('codex', p)).toEqual({ status: 'installed' });
+    expect(await ensureRoleDeps('codex', p, newRoleDepsState())).toEqual({ status: 'installed' });
     expect(p.installs).toBe(1);
   });
 
   it('does nothing when the SDK is already present', async () => {
     const p = probe({ sdkPresent: () => true });
-    expect(await ensureRoleDeps('claude', p)).toEqual({ status: 'present' });
+    expect(await ensureRoleDeps('claude', p, newRoleDepsState())).toEqual({ status: 'present' });
     expect(p.installs).toBe(0);
   });
 
   it('does nothing for a non-claude role on a host without the claude runtime', async () => {
     const p = probe();
-    expect(await ensureRoleDeps('hermes', p)).toEqual({ status: 'not-needed' });
+    expect(await ensureRoleDeps('hermes', p, newRoleDepsState())).toEqual({ status: 'not-needed' });
     expect(p.installs).toBe(0);
   });
 
   it('never installs from inside a role, where the deps dir is read-only', async () => {
     const p = probe({ env: { MONOMIND_ORG_ROLE: 'builder' } });
-    expect(await ensureRoleDeps('claude', p)).toEqual({ status: 'in-role' });
+    expect(await ensureRoleDeps('claude', p, newRoleDepsState())).toEqual({ status: 'in-role' });
     expect(p.installs).toBe(0);
   });
 
@@ -82,9 +88,64 @@ describe('ensureRoleDeps (host side)', () => {
         throw new Error('npm exited 1: ETIMEDOUT');
       },
     });
-    const r = await ensureRoleDeps('claude', p);
+    const r = await ensureRoleDeps('claude', p, newRoleDepsState());
     expect(r).toMatchObject({ status: 'failed' });
     expect(r.status === 'failed' && r.error).toContain('ETIMEDOUT');
+  });
+
+  it('does not rerun a failed install at every session start, and retries later', async () => {
+    let t = 0;
+    const state = newRoleDepsState(() => t);
+    const p = probe({
+      install: async () => {
+        p.installs++;
+        throw new Error('offline');
+      },
+    });
+    expect(await ensureRoleDeps('claude', p, state)).toMatchObject({ status: 'failed' });
+    t += ROLE_DEPS_RETRY_MS - 1;
+    expect(ensureRoleDeps('claude', p, state)).toMatchObject({ status: 'failed' });
+    expect(p.installs).toBe(1);
+    t += 1;
+    expect(await ensureRoleDeps('claude', p, state)).toMatchObject({ status: 'failed' });
+    expect(p.installs).toBe(2);
+  });
+
+  it('shares one install between concurrent session starts, then answers synchronously', async () => {
+    const state = newRoleDepsState();
+    const p = probe();
+    const [a, b] = await Promise.all([
+      ensureRoleDeps('claude', p, state),
+      ensureRoleDeps('claude', p, state),
+    ]);
+    expect(a).toEqual({ status: 'installed' });
+    expect(b).toEqual({ status: 'installed' });
+    expect(p.installs).toBe(1);
+    expect(ensureRoleDeps('claude', p, state)).toEqual({ status: 'present' });
+  });
+});
+
+describe('waitRoleDeps', () => {
+  const never = new Promise<never>(() => {});
+
+  it('stops waiting when the session is aborted', async () => {
+    const ac = new AbortController();
+    const r = waitRoleDeps(never, ac.signal, 60_000);
+    ac.abort();
+    expect(await r).toMatchObject({ status: 'failed', error: expect.stringContaining('stopped') });
+  });
+
+  it('stops waiting after the timeout', async () => {
+    const r = await waitRoleDeps(never, new AbortController().signal, 5);
+    expect(r).toMatchObject({ status: 'failed', error: expect.stringContaining('still installing') });
+  });
+
+  it('returns the install result when it comes first', async () => {
+    const r = waitRoleDeps(
+      Promise.resolve({ status: 'installed' as const }),
+      new AbortController().signal,
+    );
+    expect(await r).toEqual({ status: 'installed' });
   });
 });
 
