@@ -40,6 +40,8 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ### Fixed
 
+- **`org sign` and `org approve-paths` no longer list the live `~/.claude/.config.json` as a possible plant before monomind's first look** ([#548](https://github.com/monoes/monomind/issues/548)). With no first-look record for the home directory, the Claude Code global configs are not approval candidates, since the first look trusts every one present. `org sign` prints them on a dim line instead: "will be trusted at monomind's first look: …".
+
 - **Codex home and cost follow-ups from the #537 review** ([#540](https://github.com/monoes/monomind/issues/540)). When `~/.codex` or `$CODEX_HOME` is a symlink (dotfile managers), the codex runner now resolves it and makes the real directory 0700 when the current user owns it, so its logs are no longer world-readable. It tightens each directory through an `O_NOFOLLOW | O_DIRECTORY` file descriptor with `fchmod` instead of `lstat` + `chmod` (the old calls remain the fallback where Node lacks those flags). `org costs` keeps a live $0 role cost as 0 instead of reporting it as unknown, and the `mastermind-budgets` skill marks the org spend as a lower bound when some roles report no cost.
 
 - **npm calls work on Windows again** ([#521](https://github.com/monoes/monomind/issues/521)). Node refuses to spawn `npm.cmd` without a shell (EINVAL since 18.20.2 / 20.12.2), so the first-use installer, MCP auto-install, `security cve` and the update checker and installer failed on Windows. They now run npm's `npm-cli.js` with Node (found through `npm_execpath` or next to `node.exe`), still without a shell.
