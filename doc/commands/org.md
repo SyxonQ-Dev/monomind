@@ -797,11 +797,23 @@ With `--format json` it prints one document:
 | `invalid` | The file is not valid JSON or not a valid org definition |
 | `not-found` | There is no `.monomind/orgs/<org>.json` |
 
-`signedAt` is the time of the verified signature (`signed` and `changed` only). `message` is the
-same text `run` and `reload` print, on every state but `signed`. The exit code is 0 when every
-org checked is `signed`, 1 otherwise, and 2 when an org is `not-found` or on a usage error (no
-org name, an invalid name, or a bad `--project`; with `--format json` the error is printed as
+`signedAt` is the time of the verified signature (`signed` and `changed` only). `message` is
+present on every state but `signed`. For the signature states (`changed`, `unsigned`,
+`invalid-signature`, `forbidden-key`) it is the same text `run` and `reload` print; `not-found`
+(`org not found: <org>`) and `invalid` (unreadable JSON, or "invalid definition — run
+`monomind org validate <org>`") have their own wording. The exit code is 0 when every org checked
+is `signed`, 1 otherwise, and 2 when an org is `not-found` or on a usage error (no org name, an
+invalid name, or a bad `--project`; with `--format json` the error is printed as
 `{"error":"…"}`).
+
+`--all --check` in a project with no org definitions is not a pass: it prints `{"orgs":[]}` with
+`--format json` (nothing on stdout otherwise), a `no org definitions in …` note on stderr, and
+exits 2.
+
+Inside a role's sandbox the operator directory is hidden or unreadable, so `--check` there sees
+no usable signature or key and reports `unsigned` or `invalid-signature` for an org the operator
+did sign. It never reports `signed` for an org that does not verify, so a caller can trust a
+`signed`; for a definitive answer, run the check outside the role.
 
 **`--project`:** the signature binds the project's real path, so signing with
 `--project <dir>` (also through a symlink) makes the same signature as running `org sign` inside

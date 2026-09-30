@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -36,19 +37,27 @@ import type { CommandContext } from '../types.js';
 let root: string;
 let opDir: string;
 let elsewhere: string;
+let temps: string[] = [];
+const tempDir = (prefix: string): string => {
+  const d = mkdtempSync(join(tmpdir(), prefix));
+  temps.push(d);
+  return d;
+};
 beforeEach(() => {
   setOrgSignatureEnforcement(true);
   for (const k of AGENT_CONTEXT_ENV_MARKERS) vi.stubEnv(k, undefined);
-  opDir = join(mkdtempSync(join(tmpdir(), 'osk-op-')), 'operator');
+  opDir = join(tempDir('osk-op-'), 'operator');
   vi.stubEnv('MONOMIND_ORGRT_OPERATOR_DIR', opDir);
-  root = mkdtempSync(join(tmpdir(), 'osk-root-'));
-  elsewhere = mkdtempSync(join(tmpdir(), 'osk-cwd-'));
+  root = tempDir('osk-root-');
+  elsewhere = tempDir('osk-cwd-');
   vi.spyOn(console, 'log').mockImplementation(() => {});
 });
 afterEach(() => {
   setOrgSignatureEnforcement(false);
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
+  for (const d of temps) rmSync(d, { recursive: true, force: true });
+  temps = [];
 });
 
 const def = (git = 'read') => ({
@@ -172,6 +181,17 @@ describe('org sign --check', () => {
       fresh: 'unsigned',
       good: 'signed',
     });
+  });
+
+  it('--check --all with no orgs is not a pass: {"orgs":[]} and exit 2', async () => {
+    const r = await signAction(ctx([], { check: true, all: true, format: 'json' }));
+    expect(r).toMatchObject({ success: false, exitCode: 2 });
+    expect(r.message).toMatch(/no org definitions/);
+    expect(lastJson()).toEqual({ orgs: [] });
+    mkdirSync(join(root, ORG_DIR), { recursive: true });
+    const text = await signAction(ctx([], { check: true, all: true }));
+    expect(text).toMatchObject({ success: false, exitCode: 2 });
+    expect(lines()).toEqual(['{"orgs":[]}']); // text mode prints nothing on stdout
   });
 
   it('--check --all exits 0 when every org is signed and unchanged', async () => {

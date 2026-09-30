@@ -74,7 +74,8 @@ function usageError(json: boolean, message: string): CommandResult {
 }
 
 /** `org sign --check`: 0 when every org checked is signed and unchanged,
- *  1 otherwise, 2 for an org that is not there or a usage error. */
+ *  1 otherwise, 2 for an org that is not there, `--all` with no orgs, or a
+ *  usage error. */
 export function checkAction(ctx: CommandContext): CommandResult {
   const json = ctx.flags.format === 'json';
   const where = resolveSignRoot(ctx);
@@ -84,6 +85,11 @@ export function checkAction(ctx: CommandContext): CommandResult {
   if (ctx.flags.all === true) {
     const dir = join(root, ORG_DIR);
     names = existsSync(dir) ? listOrgConfigFiles(dir).map((f) => f.replace(/\.json$/, '')) : [];
+    // Nothing checked is not "all signed": a caller must not read it as a pass.
+    if (!names.length) {
+      if (json) console.log(JSON.stringify({ orgs: [] }));
+      return { success: false, message: `no org definitions in ${dir}`, exitCode: 2 };
+    }
   } else {
     const name = ctx.args[0];
     if (!name) return usageError(json, 'org name required (or --all)');
