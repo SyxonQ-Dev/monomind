@@ -64,6 +64,8 @@ export const reportAction = async (ctx: CommandContext, name: string): Promise<C
       xorg_messages: s.xorgMessages,
       total_tokens: s.totalTokens,
       total_cost_usd: s.totalCostUsd,
+      // false: some usage carried no cost, so total_cost_usd is a lower bound.
+      cost_complete: s.costComplete,
       outcome: s.outcome,
       blocker: s.blocker,
       blocker_detail: s.blockerDetail,
@@ -171,10 +173,10 @@ export const reportAction = async (ctx: CommandContext, name: string): Promise<C
 
   // Per-role cost breakdown (--by-role flag)
   if (ctx.flags['by-role'] === true) {
-    const byRole = new Map<string, { cost: number; tokens: number; messages: number }>();
+    const byRole = new Map<string, { cost: number | null; tokens: number; messages: number }>();
     for (const [roleId, roleStats] of Object.entries(s.roles)) {
-      const acc = byRole.get(roleId) ?? { cost: 0, tokens: 0, messages: 0 };
-      acc.cost += roleStats.costUsd ?? 0;
+      const acc = byRole.get(roleId) ?? { cost: null, tokens: 0, messages: 0 };
+      if (roleStats.costUsd !== null) acc.cost = (acc.cost ?? 0) + roleStats.costUsd;
       acc.tokens += roleStats.tokens;
       acc.messages += roleStats.messagesSent;
       byRole.set(roleId, acc);
@@ -186,7 +188,7 @@ export const reportAction = async (ctx: CommandContext, name: string): Promise<C
     for (const [roleId, data] of byRole) {
       log(
         output.info(
-          `│ ${roleId.padEnd(16)} │ ${(data.cost.toFixed(4)).padStart(9)} │ ${String(data.tokens).padStart(10)} │ ${String(data.messages).padStart(9)} │`,
+          `│ ${roleId.padEnd(16)} │ ${fmtUsd(data.cost).padStart(9)} │ ${String(data.tokens).padStart(10)} │ ${String(data.messages).padStart(9)} │`,
         ),
       );
     }
@@ -267,6 +269,11 @@ export const reportAction = async (ctx: CommandContext, name: string): Promise<C
   return { success: true };
 };
 
+/** A cost cell: `unknown` when the runtime reported no cost (never $0). */
+function fmtUsd(usd: number | null): string {
+  return usd === null ? 'unknown' : usd.toFixed(4);
+}
+
 /** `org costs <name> [--run id]` — show per-role cost tracking from runtime.json */
 export const costsAction = async (ctx: CommandContext, name: string): Promise<CommandResult> => {
   const run = resolveRun(ctx.cwd, name, ctx.flags.run);
@@ -286,7 +293,7 @@ export const costsAction = async (ctx: CommandContext, name: string): Promise<Co
     | {
         status?: string;
         run?: string;
-        roleMetrics?: Record<string, { tokens: number; costUsd: number }>;
+        roleMetrics?: Record<string, { tokens: number; costUsd: number | null }>;
       }
     | undefined;
   try {
@@ -313,7 +320,11 @@ export const costsAction = async (ctx: CommandContext, name: string): Promise<Co
   if (!orgJson(ctx)) log(output.info(`Per-role cost breakdown for ${name} / ${run}:`));
 
   // Combine data from runtime.json (live metrics) and summary (historical)
-  const roleData = new Map<string, { tokens: number; costUsd: number; messages: number }>();
+  // costUsd null = the role's runtime reported no cost (unknown, not $0).
+  const roleData = new Map<
+    string,
+    { tokens: number; costUsd: number | null; costComplete: boolean; messages: number }
+  >();
   // M2: endpoint roles are automations — no row in the cost table.
   const endpointIds = endpointRoleIds(ctx.cwd, name);
 
@@ -323,7 +334,10 @@ export const costsAction = async (ctx: CommandContext, name: string): Promise<Co
       if (endpointIds.has(roleId)) continue;
       roleData.set(roleId, {
         tokens: metrics.tokens,
-        costUsd: metrics.costUsd,
+        // Older runtime state stored an unknown cost as 0; only a positive
+        // figure is known here without the run's own usage events.
+        costUsd: metrics.costUsd || null,
+        costComplete: metrics.costUsd !== null && metrics.costUsd !== undefined,
         messages: 0,
       });
     }
@@ -333,17 +347,25 @@ export const costsAction = async (ctx: CommandContext, name: string): Promise<Co
   if (summary?.roles) {
     for (const [roleId, roleStats] of Object.entries(summary.roles)) {
       if (endpointIds.has(roleId)) continue;
-      const existing = roleData.get(roleId) ?? { tokens: 0, costUsd: 0, messages: 0 };
+      const existing = roleData.get(roleId);
       roleData.set(roleId, {
-        tokens: existing.tokens || roleStats.tokens,
-        costUsd: existing.costUsd || roleStats.costUsd,
+        tokens: existing?.tokens || roleStats.tokens,
+        // The run's own usage events say whether a cost was reported at all;
+        // the live metric only fills in a figure they lack.
+        costUsd: roleStats.costUsd ?? existing?.costUsd ?? null,
+        costComplete: roleStats.costComplete,
         messages: roleStats.messagesSent,
       });
     }
   }
 
   if (orgJson(ctx)) {
-    const items: Array<{ role: string; tokens: number; cost_usd: number; messages: number }> = [];
+    const items: Array<{
+      role: string;
+      tokens: number;
+      cost_usd: number | null;
+      messages: number;
+    }> = [];
     for (const [roleId, data] of roleData) {
       items.push({
         role: roleId,
@@ -352,14 +374,18 @@ export const costsAction = async (ctx: CommandContext, name: string): Promise<Co
         messages: data.messages,
       });
     }
-    const totals = items.reduce(
-      (acc, i) => ({
-        tokens: acc.tokens + i.tokens,
-        cost_usd: acc.cost_usd + i.cost_usd,
-        messages: acc.messages + i.messages,
-      }),
-      { tokens: 0, cost_usd: 0, messages: 0 },
-    );
+    const totals = {
+      ...items.reduce<{ tokens: number; cost_usd: number | null; messages: number }>(
+        (acc, i) => ({
+          tokens: acc.tokens + i.tokens,
+          cost_usd: i.cost_usd === null ? acc.cost_usd : (acc.cost_usd ?? 0) + i.cost_usd,
+          messages: acc.messages + i.messages,
+        }),
+        { tokens: 0, cost_usd: null, messages: 0 },
+      ),
+      // false: some role's cost is unknown, so cost_usd is a lower bound.
+      cost_complete: [...roleData.values()].every((d) => d.costComplete && d.costUsd !== null),
+    };
     return printOrgJson({ v: 1, org: name, run, items, totals });
   }
 
@@ -372,17 +398,17 @@ export const costsAction = async (ctx: CommandContext, name: string): Promise<Co
   log(output.info('│ Role             │ Cost ($)  │ Tokens     │ Messages │'));
   log(output.info('├──────────────────┼───────────┼────────────┼───────────┤'));
 
-  let totalCost = 0;
+  let totalCost: number | null = null;
   let totalTokens = 0;
   let totalMessages = 0;
 
   for (const [roleId, data] of roleData) {
     log(
       output.info(
-        `│ ${roleId.padEnd(16)} │ ${(data.costUsd.toFixed(4)).padStart(9)} │ ${String(data.tokens).padStart(10)} │ ${String(data.messages).padStart(9)} │`,
+        `│ ${roleId.padEnd(16)} │ ${fmtUsd(data.costUsd).padStart(9)} │ ${String(data.tokens).padStart(10)} │ ${String(data.messages).padStart(9)} │`,
       ),
     );
-    totalCost += data.costUsd;
+    if (data.costUsd !== null) totalCost = (totalCost ?? 0) + data.costUsd;
     totalTokens += data.tokens;
     totalMessages += data.messages;
   }
@@ -390,7 +416,7 @@ export const costsAction = async (ctx: CommandContext, name: string): Promise<Co
   log(output.info('├──────────────────┼───────────┼────────────┼───────────┤'));
   log(
     output.info(
-      `│ ${('TOTAL').padEnd(16)} │ ${(totalCost.toFixed(4)).padStart(9)} │ ${String(totalTokens).padStart(10)} │ ${String(totalMessages).padStart(9)} │`,
+      `│ ${('TOTAL').padEnd(16)} │ ${fmtUsd(totalCost).padStart(9)} │ ${String(totalTokens).padStart(10)} │ ${String(totalMessages).padStart(9)} │`,
     ),
   );
   log(output.info('└──────────────────┴───────────┴────────────┴───────────┘'));

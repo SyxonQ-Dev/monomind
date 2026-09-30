@@ -39,6 +39,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { protectableDepsRoot } from '../utils/optional-deps.js';
+import { protectedClaudeBinary } from './claude-sdk.js';
 import { dashboardCredentialPaths, HOME_DENY_WRITE, operatorDirOverride } from './file-roots.js';
 import {
   maskReadOnlyPaths,
@@ -111,8 +112,15 @@ export function authorityMaskArgs(ctx: {
   // A directory bound read-only below is a mount point already, and must not
   // get a read-write bind at all (~/.monomind).
   const roBound = new Set([...mm.readOnly, ...roPaths].map(realPath));
-  const anchors = [...new Set(operatorMountPoints(ctx).map(realPath))].filter(
-    (d) => !roBound.has(d),
+  // #522: the directories above an operator-chosen Claude Code
+  // (MONOMIND_CLAUDE_PATH, which the daemons run unsandboxed) join them; the
+  // binary itself is one of the protected read-only paths. None inside
+  // ~/.monomind: a read-only mount point already, which a writable bind
+  // there would reopen.
+  const mmRoots = mm.readOnly.map(realPath);
+  const claudeDirs = protectedClaudeBinary(ctx.env, ctx.home)?.dirs ?? [];
+  const anchors = [...new Set([...operatorMountPoints(ctx), ...claudeDirs].map(realPath))].filter(
+    (d) => !roBound.has(d) && !mmRoots.some((r) => holds(r, d)),
   );
   for (const d of anchors) args.push('--bind', d, d);
   const afterAnchors = args.length;

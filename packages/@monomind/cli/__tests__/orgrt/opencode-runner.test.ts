@@ -199,6 +199,32 @@ describe('OpencodeAgentRunner', () => {
     expect(sessionPromptAsyncMock.mock.calls[0][0].path).toEqual({ id: 'session_fresh' });
   });
 
+  // #537 m3: a reported $0 (a free model) is a known 0, not an unknown cost.
+  for (const [label, cost, expected] of [
+    ['a reported 0 stays 0', 0, 0],
+    ['a reported cost is kept', 0.25, 0.25],
+    ['no reported cost is undefined (unknown)', undefined, undefined],
+  ] as const) {
+    it(`result cost_usd: ${label}`, async () => {
+      sessionCreateMock.mockResolvedValue({ data: { id: 's_cost' } });
+      const es = makeEventStream();
+      eventSubscribeMock.mockResolvedValue({ stream: es.stream });
+      sessionPromptAsyncMock.mockImplementation(async () => {
+        const mid = uid('msg');
+        es.push(assistantMessageCreated('s_cost', mid));
+        es.push(textPartUpdated('s_cost', mid, uid('prt'), 'hi'));
+        const done = assistantMessageCompleted('s_cost', mid, { input: 1, output: 1 });
+        const info = done.properties.info as { cost?: number };
+        if (cost === undefined) delete info.cost;
+        else info.cost = cost;
+        es.push(done);
+      });
+      const msgs = await collect(new OpencodeAgentRunner(), makeArgs());
+      const result = msgs.find((m) => m.type === 'result');
+      expect(result?.cost_usd).toBe(expected);
+    });
+  }
+
   it('resumes an existing session via session.get instead of creating a new one', async () => {
     sessionGetMock.mockResolvedValue({ data: { id: 'session_resumed' } });
     const es = makeEventStream();

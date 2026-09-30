@@ -61,10 +61,11 @@ async function runDefend(ctx: CommandContext): Promise<CommandResult> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let createMonoDefence: (config?: Record<string, unknown>) => any;
   try {
-    const aidefence = await import('monofence-ai');
+    const { loadMonoFenceModule } = await import('../mcp-tools/security-tools-core.js');
+    const aidefence = await loadMonoFenceModule();
     createMonoDefence = aidefence.createMonoDefence;
-  } catch {
-    output.printError('MonoFence package not installed. Run: npm install monofence-ai');
+  } catch (err) {
+    output.printError((err as Error).message);
     return { success: false, message: 'MonoFence not available' };
   }
 

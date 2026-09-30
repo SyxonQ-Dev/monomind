@@ -95,14 +95,16 @@ export function isOkReply(reply: string | null | undefined): boolean {
   return /^ok\p{P}*$/iu.test((reply ?? '').trim());
 }
 
-/** Runtime-reported cost, else a pricing-table estimate from the token counts. */
+/** Runtime-reported cost, else a pricing-table estimate from the token
+ *  counts, else null — an unknown cost is never reported as $0. A reported
+ *  0 with tokens spent is treated as "could not price" (grok, pi), not free. */
 export function resolveCost(
   model: string | undefined,
-  reportedUsd: number,
+  reportedUsd: number | null,
   inputTokens: number,
   outputTokens: number,
 ): { cost_usd: number | null; cost_estimated: boolean } {
-  if (reportedUsd > 0 || inputTokens + outputTokens === 0) {
+  if (reportedUsd !== null && (reportedUsd > 0 || inputTokens + outputTokens === 0)) {
     return { cost_usd: reportedUsd, cost_estimated: false };
   }
   const price = model ? getModelPrice(model) : null;
@@ -115,7 +117,8 @@ interface Collected {
   texts: string[];
   inTokens: number;
   outTokens: number;
-  usd: number;
+  /** null until a usage event reports a cost (unknown is not $0). */
+  usd: number | null;
   result: { text?: string; is_error?: boolean } | null;
   error: { code: string; message: string } | null;
   nativeSandbox: NativeSandbox | null;
@@ -131,7 +134,7 @@ function collector(now: () => number): {
     texts: [],
     inTokens: 0,
     outTokens: 0,
-    usd: 0,
+    usd: null,
     result: null,
     error: null,
     nativeSandbox: null,
@@ -147,7 +150,9 @@ function collector(now: () => number): {
     } else if (ev.type === 'usage') {
       state.inTokens += Number(ev.input_tokens ?? 0);
       state.outTokens += Number(ev.output_tokens ?? 0);
-      state.usd += Number(ev.cost_usd ?? 0);
+      if (typeof ev.cost_usd === 'number' && Number.isFinite(ev.cost_usd)) {
+        state.usd = (state.usd ?? 0) + ev.cost_usd;
+      }
     } else if (ev.type === 'result') {
       state.result = ev as Collected['result'];
     } else if (ev.type === 'error' && !state.error) {
@@ -246,7 +251,10 @@ export async function runAgentTest(opts: AgentTestOptions): Promise<AgentTestRes
     latency_ms,
     input_tokens: state.inTokens,
     output_tokens: state.outTokens,
-    ...resolveCost(opts.model, state.usd, state.inTokens, state.outTokens),
+    // No `start` event: the turn never ran, so it cost nothing (a known $0).
+    ...(state.nativeSandbox === null
+      ? { cost_usd: 0, cost_estimated: false }
+      : resolveCost(opts.model, state.usd, state.inTokens, state.outTokens)),
     runtime_version: await versionPromise,
     native_sandbox: state.nativeSandbox,
     sandbox_applied: state.sandboxApplied,

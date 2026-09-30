@@ -14,6 +14,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -252,6 +253,44 @@ describe.runIf(authorityMaskAvailability().available)('inside the real bubblewra
       expect(existsSync(p), p).toBe(false);
     expect(realpathSync(join(shells, '1_a'))).toBe(install);
     for (const p of [join(root, 'tools'), join(home, '.local/state')]) expect(existsSync(p)).toBe(true);
+  });
+});
+
+describe.runIf(authorityMaskAvailability().available)('with #530: MONOMIND_CLAUDE_PATH in the combined mask', () => {
+  it('a role cannot overwrite the chosen Claude Code, rename the dirs above it, or add to ~/.monomind', () => {
+    const home = scratch('tr3-cl-');
+    const root = scratch('tr3-clr-');
+    const versions = join(home, '.local/share/claude/versions');
+    const claude = join(versions, '2.1.300');
+    exe(claude);
+    const env = { HOME: home, MONOMIND_CLAUDE_PATH: claude } as NodeJS.ProcessEnv;
+    ensureAuthorityDirs(home, env);
+    ensureOperatorProtectedPaths({ home, env, orgRoot: root });
+    const args = authorityMaskArgs({ home, env, roots: [root], orgRoot: root, cwd: root });
+    // One read-only bind of the binary, and every directory above it a mount point.
+    expect(args.filter((a, i) => a === '--ro-bind' && args[i + 1] === claude)).toHaveLength(1);
+    expect(operatorProtectedPaths({ home, env, orgRoot: root }).filter((p) => p === claude)).toHaveLength(1);
+    const mm = join(home, '.monomind');
+    const [cmd, argv] = maskedCommand(args, 'bash', [
+      '-c',
+      [
+        `echo "RUN=$(${claude})"`,
+        `echo EVIL > ${claude} 2>/dev/null; echo "C1=$?"`,
+        `mv ${versions} ${versions}.x 2>/dev/null; echo "C2=$?"`,
+        `mv ${home}/.local/share/claude ${home}/.local/share/claude.x 2>/dev/null; echo "C3=$?"`,
+        `mv ${home}/.local/share ${home}/.local/share.x 2>/dev/null; echo "C4=$?"`,
+        `echo x > ${mm}/newfile 2>/dev/null; echo "C5=$?"`,
+        `echo ok > ${root}/work.txt; echo "CWDW=$?"`,
+      ].join('; '),
+    ]);
+    const text = spawnSync(cmd, argv, { encoding: 'utf8' }).stdout;
+    expect(text, text).toMatch(/RUN=REAL/);
+    for (const k of ['C1', 'C2', 'C3', 'C4', 'C5']) expect(text, text).not.toMatch(new RegExp(`${k}=0\\b`));
+    expect(text).toMatch(/CWDW=0/);
+    expect(readFileSync(claude, 'utf8')).toContain('echo REAL');
+    for (const p of [versions, join(home, '.local/share/claude'), join(home, '.local/share')])
+      expect(existsSync(p), p).toBe(true);
+    expect(existsSync(join(mm, 'newfile'))).toBe(false);
   });
 });
 

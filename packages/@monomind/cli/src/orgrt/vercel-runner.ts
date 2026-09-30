@@ -12,8 +12,9 @@
  *      VercelSessionStore and reload on resume.
  *   2. Tool policy: every tool's execute() wraps args.canUseTool — bypassing
  *      it would defeat the per-role policy engine (denyTools, file scope, etc.)
- *   3. Cost: Vercel returns token usage but no USD; we yield cost_usd: 0
- *      (documented). Token budgets still enforce via policy.ts.
+ *   3. Cost: Vercel returns token usage but no USD; the result carries no
+ *      cost_usd (unknown, reported as null — never 0). Token budgets still
+ *      enforce via policy.ts.
  *   4. Mailbox consumption: Vercel's streamText takes a single prompt, not an
  *      async iterable. We loop over args.prompt, running one streamText per
  *      mailbox message and accumulating into messages[].
@@ -153,8 +154,8 @@ export class VercelAgentRunner implements AgentRunner {
         // be undefined and budgets would silently never enforce.
         const usage = await result.usage;
 
-        // Yield token usage; cost_usd: 0 (Vercel returns no USD; documented —
-        // token budgets still enforce via policy.ts). `result.usage` resolves
+        // Yield token usage; no cost_usd (Vercel returns no USD, so the cost
+        // is unknown, not 0 — token budgets still enforce via policy.ts). `result.usage` resolves
         // to `totalUsage`, whose fields are `inputTokens`/`outputTokens` — not
         // `totalInputTokens`/`totalOutputTokens` (that prefix doesn't exist on
         // this object and silently zeroed every vercel-routed role's usage).
@@ -164,7 +165,6 @@ export class VercelAgentRunner implements AgentRunner {
           subtype: 'success',
           input_tokens: usage?.inputTokens ?? 0,
           output_tokens: usage?.outputTokens ?? 0,
-          cost_usd: 0,
           is_error: false,
         };
       }

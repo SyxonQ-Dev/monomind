@@ -10,6 +10,8 @@
  * `npm install --package-lock-only --legacy-peer-deps --ignore-scripts`, and
  * paste package-lock.json below. optional-deps.test.ts checks the pins match.
  */
+import type { OptionalDependencyName } from './optional-deps.js';
+
 export const OPTIONAL_DEPENDENCY_LOCKS = {
   '@anthropic-ai/claude-agent-sdk': {
     name: 'monomind-optional-dependency',
@@ -401,4 +403,27 @@ export const OPTIONAL_DEPENDENCY_LOCKS = {
       },
     },
   },
-} as const;
+  'monofence-ai': {
+    name: 'monomind-optional-dependency',
+    lockfileVersion: 3,
+    requires: true,
+    packages: {
+      '': {
+        name: 'monomind-optional-dependency',
+        dependencies: {
+          'monofence-ai': '1.0.7',
+        },
+      },
+      'node_modules/monofence-ai': {
+        version: '1.0.7',
+        resolved: 'https://registry.npmjs.org/monofence-ai/-/monofence-ai-1.0.7.tgz',
+        integrity:
+          'sha512-hFDDmO6G5Z0NwzcjUUdmZXywFc32lX2dUTkeIKZKrUBVB7YJargHAeSnIrNLBzgzoqs63wdjXmXuTyQV63V6lw==',
+        license: 'Apache-2.0',
+        engines: {
+          node: '>=22.12.0',
+        },
+      },
+    },
+  },
+} as const satisfies Record<OptionalDependencyName, unknown>;

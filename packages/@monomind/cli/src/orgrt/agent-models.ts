@@ -16,7 +16,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { ensureOptionalDependency } from '../utils/optional-deps.js';
+import { loadClaudeSdk } from './claude-sdk.js';
 import { DSH_MODELS } from './dsh-runner-models.js';
 import { locateBinary, resolveBinary, runnerSpec } from './runner-registry.js';
 
@@ -25,6 +25,14 @@ export interface AgentModel {
   id: string;
   /** The concrete model an alias (`default`, `opus`) resolves to today. */
   resolved_id?: string;
+  /** On the canonical entry: every id that resolves to this same model,
+   *  this entry's own `id` first (claude `default` and `opus`). Omitted when
+   *  only one id does. */
+  aliases?: string[];
+  /** On a duplicate: the canonical entry's `id` (the first entry for the
+   *  same resolved model). A caller that tests every model skips these; a
+   *  lookup by id still finds them. */
+  alias_of?: string;
   label: string;
   description?: string;
   /** The runtime's own default choice. */
@@ -57,7 +65,7 @@ interface SdkModelInfo {
 }
 
 export function parseClaudeModels(list: SdkModelInfo[]): AgentModel[] {
-  return list
+  const models = list
     .filter((m) => typeof m.value === 'string' && m.value)
     .map((m) => ({
       id: m.value as string,
@@ -67,6 +75,29 @@ export function parseClaudeModels(list: SdkModelInfo[]): AgentModel[] {
       ...(m.value === 'default' ? { default: true } : {}),
       ...(m.supportedEffortLevels?.length ? { effort_levels: m.supportedEffortLevels } : {}),
     }));
+  return markAliases(models);
+}
+
+/**
+ * Marks aliases of the same concrete model (claude `default` and `opus` both
+ * → claude-opus-5-5), which would otherwise be tested and billed twice.
+ * Every entry is kept, so a lookup by id (`opus`) still works: the first
+ * entry per resolved model is canonical and lists every id in `aliases`; each
+ * later one gets `alias_of: <canonical id>`.
+ */
+export function markAliases(models: AgentModel[]): AgentModel[] {
+  const canonical = new Map<string, AgentModel>();
+  return models.map((m) => {
+    const key = m.resolved_id ?? m.id;
+    const first = canonical.get(key);
+    if (!first) {
+      const kept = { ...m };
+      canonical.set(key, kept);
+      return kept;
+    }
+    first.aliases = [...(first.aliases ?? [first.id]), m.id];
+    return { ...m, alias_of: first.id };
+  });
 }
 
 export function parseCodexModels(stdout: string): AgentModel[] {
@@ -148,9 +179,7 @@ const runCli: CliRunner = (bin, args, timeoutMs) =>
  *  prompt is ever sent (the prompt iterable never yields). */
 const listClaudeViaSdk: ClaudeLister = async (timeoutMs) => {
   // Installed on first use (#428); a failure lands in listRuntimeModels' catch.
-  const { query } = await ensureOptionalDependency<typeof import('@anthropic-ai/claude-agent-sdk')>(
-    '@anthropic-ai/claude-agent-sdk',
-  );
+  const { query } = await loadClaudeSdk();
   const abortController = new AbortController();
   async function* never(): AsyncGenerator<never> {
     await new Promise<void>((resolve) =>

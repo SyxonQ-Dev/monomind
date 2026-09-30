@@ -231,7 +231,7 @@ export async function respawnRole(
     // against the org-wide budget_tokens ceiling (ADR-O001 D1), so the two
     // terms must share a basis.
     tokens: slot.retiredUsage.tokens + oldRuntime.policy.budgetedUsage,
-    costUsd: slot.retiredUsage.costUsd + oldRuntime.metrics.costUsd,
+    costUsd: slot.retiredUsage.costUsd + (oldRuntime.metrics.costUsd ?? 0),
   };
 
   // Step 10: spawn generation N+1 (generation already bumped in step 6).

@@ -27,6 +27,7 @@
 
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
+import { protectedClaudeBinary } from './claude-sdk.js';
 import {
   ensureToolchainDirs,
   mountPointAncestors,
@@ -233,6 +234,10 @@ function protectedCandidates(ctx: ProtectedCtx): string[] {
     ...operatorToolchainPaths(ctx.home, ctx.env, roots).filter(
       (t) => !roots.some((r) => within(t, r)),
     ),
+    // #522: the MONOMIND_CLAUDE_PATH binary (its real path), which the
+    // daemons run unsandboxed. The mask and the SDK sandbox also pin the
+    // directories above it (claude-sdk.ts's protectedClaudeBinary().dirs).
+    ...[protectedClaudeBinary(ctx.env, ctx.home)?.file].filter((f): f is string => !!f),
   ];
   return [...new Set(paths)];
 }

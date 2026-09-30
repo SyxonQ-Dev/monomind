@@ -1030,6 +1030,50 @@ describe('agent exec: cancellation & limits', () => {
   });
 });
 
+// ─── unknown cost is null, never 0 (rev 28, agent-exec-cost-null) ──────────
+
+describe('agent exec: unknown cost (rev 28)', () => {
+  it('a runner that reports no cost gives usage and result cost_usd null', async () => {
+    const h = makeHarness();
+    const code = await run(
+      h,
+      scriptedRunner([
+        { type: 'assistant', session_id: 's1', text: 'hi' },
+        { type: 'result', session_id: 's1', subtype: 'success', input_tokens: 9, output_tokens: 2 },
+      ]),
+    );
+    expect(code).toBe(0);
+    expect(byType(h, 'usage')[0]).toMatchObject({ input_tokens: 9, cost_usd: null });
+    expect(byType(h, 'result')[0]).toMatchObject({ input_tokens: 9, cost_usd: null });
+  });
+
+  it('an unknown cost never trips --budget-usd', async () => {
+    const h = makeHarness({ budgetUsd: 0 });
+    const code = await run(
+      h,
+      scriptedRunner([{ type: 'result', session_id: 's1', subtype: 'success', input_tokens: 5 }]),
+    );
+    expect(code).toBe(0);
+    expect(byType(h, 'error')).toHaveLength(0);
+    expect(byType(h, 'result')[0]).toMatchObject({ cost_usd: null });
+  });
+
+  it('a round without cost after a costed round keeps the known total', async () => {
+    const h = makeHarness();
+    await run(
+      h,
+      scriptedRunner([
+        { type: 'result', session_id: 's1', subtype: 'success', input_tokens: 10, cost_usd: 0.2 },
+        { type: 'result', session_id: 's1', subtype: 'success', input_tokens: 15 },
+      ]),
+    );
+    const usage = byType(h, 'usage');
+    expect(usage[0]).toMatchObject({ cost_usd: 0.2 });
+    expect(usage[1]).toMatchObject({ input_tokens: 5, cost_usd: null });
+    expect(byType(h, 'result')[0]).toMatchObject({ cost_usd: 0.2 });
+  });
+});
+
 // ─── coder mode: --settings (#356) ─────────────────────────────────────────
 
 describe('agent exec: --settings (#356)', () => {

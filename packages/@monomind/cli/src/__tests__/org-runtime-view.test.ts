@@ -219,6 +219,43 @@ describe('runtimeView — org not running', () => {
     expect((await rt.runtimeView(root, ORG)).budget.used).toBeNull();
   });
 
+  it('#537: a role with no reported cost has cost_usd null (unknown), and the totals too', async () => {
+    bus([
+      {
+        ts: 1,
+        type: 'usage',
+        from: 'dev',
+        data: { tokens: 10, tokens_in: 8, tokens_out: 2, cost_usd: null },
+      },
+      { ts: 2, type: 'usage', from: 'dev', data: { tokens: 5, tokens_in: 4, tokens_out: 1 } },
+    ]);
+    const v = await rt.runtimeView(root, ORG);
+    expect(v.roles.find((r: any) => r.id === 'dev').usage.cost_usd).toBeNull();
+    expect(v.roles.find((r: any) => r.id === 'lead').usage.cost_usd).toBeNull();
+    expect(v.totals.cost_usd).toBeNull();
+    expect(v.totals.tokens).toBe(15);
+  });
+
+  it('#537: known costs sum; an unknown one adds nothing', async () => {
+    bus([
+      {
+        ts: 1,
+        type: 'usage',
+        from: 'dev',
+        data: { tokens: 1, tokens_in: 1, tokens_out: 0, cost_usd: 0.5 },
+      },
+      {
+        ts: 2,
+        type: 'usage',
+        from: 'lead',
+        data: { tokens: 1, tokens_in: 1, tokens_out: 0, cost_usd: null },
+      },
+    ]);
+    const v = await rt.runtimeView(root, ORG);
+    expect(v.totals.cost_usd).toBe(0.5);
+    expect(v.roles.find((r: any) => r.id === 'lead').usage.cost_usd).toBeNull();
+  });
+
   it('lists the runtime failures it emits as status events, and session crashes', async () => {
     bus([
       { ts: 1, type: 'status', from: 'dev', reason: 'budget-exhausted', msg: 'role budget' },

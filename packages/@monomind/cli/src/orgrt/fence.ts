@@ -61,7 +61,8 @@ export function mergeFenceConfigs(...configs: (FenceConfig | undefined | null)[]
 
 export async function createFenceForRole(config: FenceConfig): Promise<FenceInstance | null> {
   try {
-    const mod = (await import('monofence-ai')) as {
+    const { loadMonoFenceModule } = await import('../mcp-tools/security-tools-core.js');
+    const mod = (await loadMonoFenceModule()) as {
       createMonoDefence: (cfg: Record<string, unknown>) => FenceInstance;
     };
     const allowlistRules = (config.allowlist ?? []).map((r) => ({

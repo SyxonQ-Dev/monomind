@@ -65,7 +65,7 @@ test, not just this page, if you need the full reasoning.
 | Crash report | `api.github.com/repos/<repo>/issues` | **Only after you explicitly consent** — a non-interactive crash (CI, agents, most real runs) never asks and only saves the report locally until you've answered | Decline the one-time prompt, or set `MONOMIND_CRASH_REPORTING=off` up front |
 | monoes.me connect | `https://monoes.me` | Only when you explicitly connect a community account via `monomind ui` → Connect (nothing is sent before you do) — and once connected, this is an **ongoing channel, not a one-shot handshake**: every MCP message for that session is forwarded to `monoes.me/api/mcp`, and org definitions are uploaded on publish | Never connect, or Disconnect in `monomind ui` |
 | Embedding/reranker model download | HuggingFace CDN (`huggingface.co`), via the `@huggingface/transformers` package or a direct fetch of the reranker classifier head | First `monomind doc ingest`/index that needs it, an explicit `monomind download-embeddings`, or the reranker head's first use | Stay offline — search degrades to keyword matching |
-| Heavy dependencies installed on first use | Your npm registry (`registry.npmjs.org` by default), and `storage.googleapis.com/chrome-for-testing-public` for Chrome | The first Claude org role, `agent exec --runtime claude` or `agent models --runtime claude` installs `@anthropic-ai/claude-agent-sdk` (about 300 MB with its Claude binary). The first `monomind browse` command, or `design detect` of a URL, on a machine with **no** Chrome, Chromium or Edge installs `@puppeteer/browsers` (about 2 MB) and downloads Chrome (about 400 MB). Each happens once, into `~/.monomind/deps` (`$MONOMIND_HOME/deps`), with a notice on stderr; see [Install-time downloads](#install-time-downloads) | `MONOMIND_NO_AUTO_INSTALL=1`: nothing is installed, and the error prints the command that does the same install by hand |
+| Heavy dependencies installed on first use | Your npm registry (`registry.npmjs.org` by default), and `storage.googleapis.com/chrome-for-testing-public` for Chrome | The first Claude org role, `agent exec --runtime claude` or `agent models --runtime claude` installs `@anthropic-ai/claude-agent-sdk` (about 300 MB with its Claude binary, about 4 MB without it when a usable Claude Code is installed; see [An installed Claude Code](#an-installed-claude-code)). The first `monomind browse` command, or `design detect` of a URL, on a machine with **no** Chrome, Chromium or Edge installs `@puppeteer/browsers` (about 2 MB) and downloads Chrome (about 400 MB). Each happens once, into `~/.monomind/deps` (`$MONOMIND_HOME/deps`), with a notice on stderr; see [Install-time downloads](#install-time-downloads) | `MONOMIND_NO_AUTO_INSTALL=1`: nothing is installed, and the error prints the command that does the same install by hand |
 | sql.js WASM binary | `sql.js.org` | Only if the memory backend falls back to the sql.js driver **and** the WASM file bundled with the package can't be resolved locally | Ensure the bundled WASM resolves (the normal case); there is no separate flag |
 | Dashboard / Monograph HTML graph visualization | `fonts.googleapis.com`, `unpkg.com` (vis-network **and** the React/Babel UMD builds), `cdnjs.cloudflare.com` (sigma.js, graphology), `cdn.jsdelivr.net` (gsap, used by the dashboard's own pages and by the graphology/sigma fallback build) | Opening the dashboard via `monomind ui`, or a graph view via the `monograph_visualize`/`monograph_serve` MCP tools — these hosts are contacted by **your browser**, loading `<script>`/`<link>` tags monomind's server put in the page it served you | Don't open the dashboard or a graph view; there is no bundled-assets flag yet |
 | `/mastermind:understand` semantic analysis | `api.anthropic.com` (`packages/@monomind/cli/scripts/understand-analyze.mjs`) | Only when the script is run directly with `ANTHROPIC_API_KEY` set and without `--no-llm` — the documented `/mastermind:understand` slash command always invokes it with `--no-llm` itself, so the *documented* path never calls out | Pass `--no-llm` yourself if invoking the script directly, or don't set `ANTHROPIC_API_KEY` in that shell |
@@ -114,7 +114,7 @@ needs one installs it the first time it runs, once per machine:
 
 | What | Installed when | Size |
 |---|---|---|
-| `@anthropic-ai/claude-agent-sdk`, pinned to the version monomind is tested with, and the native Claude binary it brings as a per-platform package | The first Claude org role, `agent exec --runtime claude` or `agent models --runtime claude` | about 300 MB |
+| `@anthropic-ai/claude-agent-sdk`, pinned to the version monomind is tested with, and the native Claude binary it brings as a per-platform package | The first Claude org role, `agent exec --runtime claude` or `agent models --runtime claude` | about 300 MB; about 4 MB, without the binary, when an [installed Claude Code](#an-installed-claude-code) is used |
 | `@puppeteer/browsers` (the downloader puppeteer itself uses), then Chrome for Testing | The first `monomind browse` command that launches a browser, or `design detect` of a URL, **only if** no Chrome, Chromium or Edge is installed. An installed browser is always used first | about 2 MB, then about 400 MB of Chrome |
 
 Where and how:
@@ -159,6 +159,64 @@ npm install --prefix '/home/you/.monomind/deps/@anthropic-ai+claude-agent-sdk@0.
 ```
 
 To remove them, delete `~/.monomind/deps`.
+
+#### An installed Claude Code
+
+The Claude runtime runs a Claude Code that is already installed instead of
+the copy bundled with the SDK, when it finds a usable one
+([#522](https://github.com/monoes/monomind/issues/522)). The SDK is then
+installed with `--omit=optional`: its JavaScript package only (about 4 MB),
+still from the shipped lockfile. If that Claude Code later goes away, the
+next run installs the full SDK over it. If it goes away while a process is
+using it (an update pruned that version), that process's next Claude turn
+fails with a message saying so, and the turn after that looks again.
+
+monomind looks, in order, at `$MONOMIND_CLAUDE_PATH`, `claude` on `PATH`,
+`~/.local/bin/claude` and `~/.claude/local/claude`, and uses the first one
+that passes these checks:
+
+- Its real path (symlinks resolved) is what runs.
+- The real path must be named `claude` (`claude.exe`) or be the native
+  installer's `versions/<x.y.z>`, and must not be a script (starting with
+  `#!`): Claude Code 2.1.226 and later is a native binary, and a script
+  would run whatever `PATH` finds. A shim that resolves to another program
+  (mise's resolves to `mise`) is never run.
+- Found on its own, it must be a system install: not under `$HOME`, a temp
+  directory or the current directory, and the file and every directory
+  above it owned by root and not writable by group or others. Org roles
+  run as your user, and the bubblewrap mask leaves writable everything
+  your user can write, so a binary your user owns could be replaced by a
+  role and then run by the org daemon outside every sandbox. This rules
+  out per-user installs such as the native installer's
+  `~/.local/share/claude`, mise, nvm or Homebrew (see
+  [#527](https://github.com/monoes/monomind/issues/527)). When monomind
+  runs as root (a container), roles are root too and ownership proves
+  nothing, so nothing is picked up on its own; set `MONOMIND_CLAUDE_PATH`.
+  On Windows there are no uids to check, so nothing is picked up on its
+  own there either.
+- `MONOMIND_CLAUDE_PATH` is your explicit choice and is not held to the
+  location rule: the file only has to be owned by you or root and not
+  writable by group or others. On Windows even that is not checked (file
+  ACLs are not inspected), so point it only at a file that org roles
+  cannot write. When it is not a system install, monomind warns on stderr
+  that org roles could replace it, and keeps it read-only for them: its
+  real path is denied to the file tools and in the Claude sandbox, and
+  read-only in the bubblewrap mask, where every directory between `$HOME`
+  (or `/`) and the file is also pinned so none can be renamed aside. A
+  role that runs with neither the sandbox nor the mask (sandbox off, or
+  no bubblewrap, e.g. on macOS) is not held back, and on macOS the
+  sandbox denies writes to the file but not renaming a directory above
+  it. If the path fails a check, monomind says why on stderr and uses the
+  SDK's bundled binary; it does not try the other locations.
+  `MONOMIND_CLAUDE_PATH=bundled` always uses the bundled binary.
+- Then `claude --version` runs once per process, with no shell and a
+  5-second timeout. It must print `x.y.z (Claude Code)`, and the version
+  must be 2.x and at least the Claude Code release the pinned SDK bundles
+  (2.1.226 for SDK 0.3.226): the SDK passes that release's flags and
+  control messages, which older CLIs reject.
+
+When a Claude Code was found but not used, the install notice says which
+and why.
 
 `monomind design detect` of a URL uses the downloaded Chrome through the
 monodesign detector. The monodesign skill's own scripts, run on their own,
