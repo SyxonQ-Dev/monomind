@@ -20,7 +20,7 @@ import {
   runtimeDir,
 } from './file-roots.js';
 import { type GitGuard, gitLocalRemotePaths } from './git-guard.js';
-import { operatorProtectedPaths } from './operator-protected-paths.js';
+import { operatorMountPoints, operatorProtectedPaths } from './operator-protected-paths.js';
 import { gitGuardDirs, orgsMountPoints } from './org-authority-files.js';
 import { ORG_DISALLOWED_HARNESS_TOOLS } from './org-harness-tools.js';
 import { expandDenyWrite, underAnyRoot } from './sandbox-deny-write.js';
@@ -266,6 +266,15 @@ export function buildClaudeRestrictions(
         // denied here, and new files in it stay possible (authority-mask.ts).
         ...orgsMountPoints(ctx.orgRoot).filter((d) => underAnyRoot(d, allowWrite)),
         ...(deps ? [dirname(deps)] : []).filter((d) => underAnyRoot(d, allowWrite)),
+        // #527: the directories on the way to the operator-protected paths
+        // (`~/.local/share` above mise…), so none can be renamed aside.
+        ...operatorMountPoints({
+          home,
+          env,
+          orgRoot: ctx.orgRoot,
+          cwd: ctx.cwd,
+          allowWrite: cfg?.allowWrite,
+        }).filter((d) => underAnyRoot(d, allowWrite)),
         ...claudeAnchors.filter((d) => underAnyRoot(d, allowWrite)),
       ]),
       denyWrite: existing(expanded.denyWrite),

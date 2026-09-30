@@ -1,6 +1,7 @@
 // packages/@monomind/cli/src/orgrt/session-stream.ts
 // Extracted from session-run.ts — opening one role session's runner stream:
 // the AgentRunner.run() arguments and the silent-first-pull guard.
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ResolvedAccess } from './access-grant.js';
 import { fullAccessCanUseTool } from './agent-exec-access.js';
@@ -13,6 +14,7 @@ import {
 } from './bash-timeout.js';
 import type { resolveRoleCostTier } from './cost-tier.js';
 import type { StreamOptions } from './mailbox.js';
+import { toolchainRoleEnv } from './operator-toolchain-paths.js';
 import { resolveProviderEnv, type resolveRoleProvider } from './provider.js';
 import type { resolveRoleGitEnforcement, roleAuthorityMask } from './role-sandbox.js';
 import { roleTmpEnv } from './role-tmpdir.js';
@@ -76,6 +78,10 @@ export function sessionRunArgs(
       // #480: the session's private TMPDIR. Right after the inherited env so
       // any overlay below that sets TMPDIR itself keeps its explicit value.
       ...roleTmpEnv(opts.roleTmpdir),
+      // #527: the pnpm home is read-only to roles, and pnpm keeps its store
+      // there by default: a role's store goes beside it, and pnpm does not
+      // self-install into it.
+      ...toolchainRoleEnv(homedir(), process.env),
       // D8: how a NON-Claude provider expresses the tier's effort level.
       // Empty for Claude (handled natively by ClaudeAgentRunner) and for a
       // provider that declares no mechanism — which simply ignores effort.

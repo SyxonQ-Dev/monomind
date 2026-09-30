@@ -11,10 +11,16 @@
  *     writes while a role uses it (ROLE_WRITABLE_MONOMIND);
  *   - `<project>/.monomind/org-skills/` (the project skill library);
  *   - `~/.npm/_npx` (what `npx -y monomind …` runs), `~/.npmrc`,
- *     `~/.local/bin`, and shell startup files beyond HOME_DENY_WRITE.
+ *     `~/.local/bin`, and shell startup files beyond HOME_DENY_WRITE;
+ *   - #527: the node, npm, claude and monomind installs the operator's
+ *     processes run, the version-manager roots they live in, the directories
+ *     on PATH, mise's trust store and direnv's allow list
+ *     (operator-toolchain-paths.ts), and toolchain config files.
  *
  * Enforced three ways: the SDK sandbox's `denyWrite`, read-only binds in the
- * bubblewrap authority mask, and the file tools' deny pass (policy.ts). An
+ * bubblewrap authority mask, and the file tools' deny pass (policy.ts). The
+ * directories on the way to them are mount points in both OS layers
+ * (operatorMountPoints), so none can be renamed aside and replaced. An
  * explicit, signed `policy.sandbox.allowWrite` entry at or inside one of
  * these paths is the opt-out for an org that really must write it.
  */
@@ -22,6 +28,14 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { protectedClaudeBinary } from './claude-sdk.js';
+import {
+  ensureToolchainDirs,
+  mountPointAncestors,
+  operatorToolchainPaths,
+  resetToolchainMemo,
+  xdgDirs,
+} from './operator-toolchain-paths.js';
+import { realPath } from './policy-paths.js';
 
 /** `~/.monomind` entries a role's own `monomind` commands write: browser
  *  automation state, the embedding-model cache, per-project memory, update
@@ -101,7 +115,18 @@ export const HOME_OPERATOR_EXEC = [
   '.config/fish',
   '.bashrc.d',
   '.zshrc.d',
+  // #527 review M3: config the operator's toolchain commands load and act
+  // on (install hooks, env files, default global packages). The XDG ones
+  // are added in protectedCandidates.
+  '.bunfig.toml',
+  '.cargo/env',
+  '.cargo/config.toml',
+  '.yarnrc.yml',
+  '.default-npm-packages',
 ];
+
+/** Under $XDG_CONFIG_HOME (default ~/.config), like HOME_OPERATOR_EXEC. */
+export const XDG_CONFIG_OPERATOR_EXEC = ['pnpm/rc', 'go/env'];
 
 /** Inside ~/.claude, the entries Claude Code executes or obeys. Used by the
  *  bubblewrap mask, which also wraps Claude Code itself and so cannot make
@@ -183,9 +208,14 @@ export function operatorProtectedPaths(ctx: ProtectedCtx): string[] {
 function protectedCandidates(ctx: ProtectedCtx): string[] {
   const mmHome = monomindHome(ctx.home, ctx.env);
   const monomindEntries: string[] = [];
+  // #527 review round 2: with the org root at $HOME, ~/.monomind/orgs is the
+  // org's own orgs dir, whose work dirs its roles write; its authority files
+  // stay protected (org-authority-files.ts).
+  const ownOrgs = ctx.orgRoot ? realPath(join(ctx.orgRoot, '.monomind', 'orgs')) : undefined;
   try {
     for (const e of readdirSync(mmHome))
-      if (!ROLE_WRITABLE_MONOMIND.has(e)) monomindEntries.push(join(mmHome, e));
+      if (!ROLE_WRITABLE_MONOMIND.has(e) && realPath(join(mmHome, e)) !== ownOrgs)
+        monomindEntries.push(join(mmHome, e));
   } catch {
     /* no ~/.monomind yet */
   }
@@ -199,12 +229,28 @@ function protectedCandidates(ctx: ProtectedCtx): string[] {
     join(mmHome, 'enable-terminal.json'),
     ...monomindEntries,
     ...HOME_OPERATOR_EXEC.map((p) => join(ctx.home, p)),
+    ...XDG_CONFIG_OPERATOR_EXEC.map((p) => join(xdgDirs(ctx.home, ctx.env).config, p)),
+    // #527: never one that holds the role's own work tree.
+    ...operatorToolchainPaths(ctx.home, ctx.env, roots).filter(
+      (t) => !roots.some((r) => within(t, r)),
+    ),
     // #522: the MONOMIND_CLAUDE_PATH binary (its real path), which the
     // daemons run unsandboxed. The mask and the SDK sandbox also pin the
     // directories above it (claude-sdk.ts's protectedClaudeBinary().dirs).
     ...[protectedClaudeBinary(ctx.env, ctx.home)?.file].filter((f): f is string => !!f),
   ];
   return [...new Set(paths)];
+}
+
+/** #527: the directories on the way to each protected path that a role could
+ *  rename aside (operator-toolchain-paths.ts's mountPointAncestors). The SDK
+ *  sandbox lists them in allowWrite and the mask binds them onto themselves:
+ *  either way a mount point, which cannot be renamed. */
+export function operatorMountPoints(ctx: ProtectedCtx): string[] {
+  return mountPointAncestors(operatorProtectedPaths(ctx), {
+    home: ctx.home,
+    roots: [ctx.orgRoot, ctx.cwd].filter((r): r is string => !!r),
+  });
 }
 
 /** Paths the bubblewrap mask binds read-only: the protected paths plus the
@@ -253,4 +299,8 @@ export function ensureOperatorProtectedPaths(ctx: {
   } catch {
     /* exists (the operator's own choice) or unwritable */
   }
+  // #527: the toolchain list is recomputed for every org and session start,
+  // after the directories it expects are created.
+  ensureToolchainDirs(ctx.home, ctx.env);
+  resetToolchainMemo();
 }

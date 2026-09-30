@@ -150,7 +150,14 @@ describe('the MONOMIND_CLAUDE_PATH binary is write-denied to roles', () => {
     const { home, file, env, dirs } = claudeHome();
     const root = scratch('dp-root-');
     const args = authorityMaskArgs({ home, env, roots: [root], orgRoot: root });
-    expect(args.slice(3, 3 + 3 * dirs.length)).toEqual(dirs.flatMap((d) => ['--bind', d, d]));
+    // Among the mount-point anchors (#527), which all come before any
+    // read-only bind.
+    const firstRo = args.indexOf('--ro-bind');
+    for (const d of dirs) {
+      const i = args.findIndex((a, j) => a === '--bind' && args[j + 1] === d && args[j + 2] === d);
+      expect(i, d).toBeGreaterThan(0);
+      expect(i, d).toBeLessThan(firstRo);
+    }
     const at = args.indexOf(file);
     expect(args.slice(at - 1, at + 2)).toEqual(['--ro-bind', file, file]);
     // With the other read-only binds: after the org binds, before the tmpfs.
