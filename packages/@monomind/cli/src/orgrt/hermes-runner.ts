@@ -60,6 +60,8 @@
  *     `--query=` keeps a prompt that starts with `-` from being read as a
  *     flag. The prompt is one argv element, so it is capped below Linux's
  *     128 KiB per-argument limit with a clear error (HERMES_MAX_QUERY_ARG_BYTES).
+ *     It is also visible to other local users in `ps` and /proc/<pid>/cmdline
+ *     while the turn runs; 0.19.0 has no private channel for it.
  *   - builds whose help lists `--query-file` (the installer build this
  *     header was first verified against) get the file-based form below,
  *     since there `-q` without `--oneshot` seeds an interactive session.
@@ -119,6 +121,7 @@ import { execFile, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { UNCLASSIFIED_MARKER } from './agent-exec-errors.js';
 import {
   type AgentMessage,
   type AgentRunArgs,
@@ -191,34 +194,61 @@ interface TurnOutcome {
   sessionId?: string;
 }
 
+/** Run `hermes chat --help`: its help text (stdout + stderr) and whether
+ *  the run was clean (exit 0 with output) and so safe to cache. */
+function probeChatHelp(
+  bin: string,
+  args: AgentRunArgs,
+  timeoutMs: number,
+): Promise<{ help: string; clean: boolean }> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      bin,
+      ['chat', '--help'],
+      {
+        cwd: args.cwd,
+        env: { ...omitAnthropicManagedKeys(process.env), ...args.env },
+        timeout: timeoutMs,
+        killSignal: 'SIGKILL',
+        signal: args.signal,
+      },
+      (err, stdout, stderr) => {
+        // A missing binary rethrows (ENOENT → install hint); an abort ends the run.
+        if ((err as NodeJS.ErrnoException | null)?.code === 'ENOENT') return reject(err);
+        if (args.signal?.aborted) {
+          return reject(
+            new Error('HermesAgentRunner: aborted by the caller during the hermes --help probe'),
+          );
+        }
+        const help = `${stdout ?? ''}${stderr ?? ''}`;
+        resolve({ help, clean: !err && help.trim() !== '' });
+      },
+    );
+  });
+}
+
 export class HermesAgentRunner implements AgentRunner {
-  private queryMode: Promise<HermesQueryMode> | undefined;
+  /** Set only from a clean `--help` probe; a failed one is retried next run. */
+  private queryMode: HermesQueryMode | undefined;
 
-  constructor(private hermesBin?: string) {}
+  constructor(
+    private hermesBin?: string,
+    private opts: { helpProbeTimeoutMs?: number } = {},
+  ) {}
 
-  /** Run `hermes chat --help` once per runner to pick the query mode. */
-  private detectQueryMode(bin: string, args: AgentRunArgs): Promise<HermesQueryMode> {
-    this.queryMode ??= new Promise<HermesQueryMode>((resolve, reject) => {
-      execFile(
-        bin,
-        ['chat', '--help'],
-        {
-          cwd: args.cwd,
-          env: { ...omitAnthropicManagedKeys(process.env), ...args.env },
-          timeout: HELP_PROBE_TIMEOUT_MS,
-        },
-        (err, stdout) => {
-          const help = String(stdout ?? '');
-          // A missing binary is not a verdict: rethrow (ENOENT → install
-          // hint below) and probe again next run.
-          if (err && !help) {
-            this.queryMode = undefined;
-            reject(err);
-          } else resolve(hermesQueryMode(help));
-        },
-      );
-    });
-    return this.queryMode;
+  /** Pick the query mode from `hermes chat --help`, cached per runner once a
+   *  probe succeeds. A timed-out, failed or empty probe falls back to
+   *  `--query=` for this run only (0.19.0's form) and is not cached. */
+  private async detectQueryMode(bin: string, args: AgentRunArgs): Promise<HermesQueryMode> {
+    if (this.queryMode) return this.queryMode;
+    const probe = await probeChatHelp(
+      bin,
+      args,
+      this.opts.helpProbeTimeoutMs ?? HELP_PROBE_TIMEOUT_MS,
+    );
+    const mode = hermesQueryMode(probe.help);
+    if (probe.clean) this.queryMode = mode;
+    return mode;
   }
 
   async *run(args: AgentRunArgs): AsyncIterable<AgentMessage> {
@@ -414,6 +444,10 @@ export class HermesAgentRunner implements AgentRunner {
   }
 }
 
+/** hermes's own "no credentials" wording (0.19.0, printed on stdout). */
+const HERMES_NO_CREDENTIALS_RE =
+  /no inference provider configured|isn't configured yet|no api keys or providers found/i;
+
 /** Build the actionable error for a failed hermes turn. Same shape as
  *  codex-runner.ts's turnError. */
 function turnError(outcome: TurnOutcome, round: number): Error {
@@ -432,13 +466,24 @@ function turnError(outcome: TurnOutcome, round: number): Error {
     (err as Error & { fatal?: boolean }).fatal = true;
     return err;
   }
-  return new Error(
+  if (outcome.stderrTail) {
+    return new Error(
+      `HermesAgentRunner: hermes chat failed (exit ${outcome.exitCode})` +
+        `\nstderr: ${outcome.stderrTail.slice(-500)}`,
+    );
+  }
+  // hermes 0.19.0 prints its setup errors on stdout. Only its own
+  // no-credentials line is part of the classified message; the rest of
+  // stdout (possibly model text) goes after UNCLASSIFIED_MARKER.
+  const credLine = outcome.stdout
+    .split('\n')
+    .find((l) => HERMES_NO_CREDENTIALS_RE.test(l))
+    ?.trim();
+  const err = new Error(
     `HermesAgentRunner: hermes chat failed (exit ${outcome.exitCode})` +
-      (outcome.stderrTail
-        ? `\nstderr: ${outcome.stderrTail.slice(-500)}`
-        : // hermes 0.19.0 prints its "isn't configured yet" setup error on stdout.
-          outcome.stdout
-          ? `\noutput: ${outcome.stdout.slice(-500)}`
-          : ''),
+      (credLine ? `: ${credLine}` : '') +
+      (outcome.stdout ? `${UNCLASSIFIED_MARKER}hermes stdout: ${outcome.stdout.slice(-500)}` : ''),
   );
+  if (credLine) (err as Error & { fatal?: boolean }).fatal = true;
+  return err;
 }

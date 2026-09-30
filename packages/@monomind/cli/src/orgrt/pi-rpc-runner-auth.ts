@@ -8,19 +8,21 @@
  * HOME). The runner used to ignore every `response`, so the turn sat on the
  * 10-minute silence watchdog instead of failing.
  *
- * Two checks, both ending in the same "missing API key: set X" error:
- *   - Up front, before spawning: the model names a built-in provider
- *     (`openai/gpt-5`), its key variable is not in the spawn env, and pi
- *     has no stored credential or custom provider of that name.
+ * Two checks:
+ *   - Up front, before spawning, when a model is set: `pi auth check --model
+ *     <m> --json` (pi 0.87.1, ~0.3s). pi resolves the provider itself
+ *     (`deepseek/deepseek-chat-v3.1` routes to openrouter), so extensions,
+ *     auth.json and gateways all count. Only `status:"not_ready"` fails the
+ *     run; any other answer, an error, a timeout or a pi without the
+ *     command skips the check — the rejected-prompt path below still fails
+ *     in about a second.
  *   - From pi itself: a rejected `prompt` response, or stderr, whose text
- *     is pi's own "No API key found" / "Use /login" wording.
+ *     is pi's own "No API key found" wording.
  */
-import * as fs from 'node:fs';
-import { join } from 'node:path';
+import { execFile } from 'node:child_process';
 
 /** Built-in pi providers with one API-key variable (pi 0.87.1's own table,
- *  docs/providers.md). Cloud providers with ambient credentials are left
- *  out: an unset variable does not mean they have no credential. */
+ *  docs/providers.md) — used only to name the variable in the error. */
 export const PI_PROVIDER_KEY_ENV: Readonly<Record<string, string>> = {
   anthropic: 'ANTHROPIC_API_KEY',
   'ant-ling': 'ANT_LING_API_KEY',
@@ -41,63 +43,78 @@ export const PI_PROVIDER_KEY_ENV: Readonly<Record<string, string>> = {
   minimax: 'MINIMAX_API_KEY',
 };
 
-/** Other variables pi accepts in place of the primary one. */
-const ALTERNATE_KEY_ENV: Readonly<Record<string, readonly string[]>> = {
-  anthropic: ['ANTHROPIC_OAUTH_TOKEN', 'ANTHROPIC_AUTH_TOKEN'],
-};
+/** pi's wording for a credential that was never set (seen live). A bare
+ *  "Use /login" is not enough: pi also says it for an expired login. */
+const PI_NO_KEY_RE = /\bno api key (?:found|configured)\b/i;
 
-/** pi's wording for "no credential" (seen live, and in agent-error-classify.ts). */
-const PI_NO_KEY_RE = /\bno api key (?:found|configured)\b|\buse \/login\b/i;
+const AUTH_CHECK_TIMEOUT_MS = 10_000;
 
-type Env = Record<string, string | undefined>;
-
-/** True when `file` parses and `pick` finds the provider in it; a file that
- *  exists but does not parse counts as present — the check cannot tell. */
-function mentionsProvider(file: string, pick: (json: Record<string, unknown>) => unknown): boolean {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(file, 'utf8');
-  } catch {
-    return false;
-  }
-  try {
-    return pick(JSON.parse(raw) as Record<string, unknown>) !== undefined;
-  } catch {
-    return true;
-  }
+/** pi's `auth check --json` answer (only the fields the runner reads). */
+interface PiAuthCheck {
+  status?: string;
+  provider?: string;
+  reason?: string;
 }
 
-/** A credential or custom provider pi would find without the variable. */
-function hasStoredCredential(provider: string, env: Env, cwd: string): boolean {
-  const agentDir =
-    env.PI_CODING_AGENT_DIR || (env.HOME ? join(env.HOME, '.pi', 'agent') : undefined);
-  const providers = (j: Record<string, unknown>) =>
-    (j.providers as Record<string, unknown> | undefined)?.[provider];
-  if (agentDir) {
-    if (mentionsProvider(join(agentDir, 'auth.json'), (j) => j[provider])) return true;
-    if (mentionsProvider(join(agentDir, 'models.json'), providers)) return true;
-  }
-  return mentionsProvider(join(cwd, '.pi', 'models.json'), providers);
+/** Run `pi auth check --model <m> --json`; undefined when it cannot tell. */
+function runAuthCheck(
+  bin: string,
+  model: string,
+  opts: { env: Record<string, string>; cwd: string; signal?: AbortSignal },
+): Promise<PiAuthCheck | undefined> {
+  return new Promise((resolve) => {
+    try {
+      execFile(
+        bin,
+        ['auth', 'check', '--model', model, '--json'],
+        { env: opts.env, cwd: opts.cwd, timeout: AUTH_CHECK_TIMEOUT_MS, signal: opts.signal },
+        // not_ready exits 1, so read stdout whatever the exit code.
+        (_err, stdout) => {
+          const line =
+            String(stdout ?? '')
+              .trim()
+              .split('\n')
+              .pop() ?? '';
+          try {
+            const json = JSON.parse(line) as PiAuthCheck;
+            resolve(json && typeof json === 'object' ? json : undefined);
+          } catch {
+            resolve(undefined);
+          }
+        },
+      );
+    } catch {
+      resolve(undefined);
+    }
+  });
 }
 
 /**
- * The key variable a run is missing, or undefined when it has one (or the
- * check cannot tell: no model, no provider prefix, a provider not in
- * PI_PROVIDER_KEY_ENV, or a stored credential).
+ * The fatal error for a model pi says it has no usable credential for, or
+ * undefined when pi is ready or the check could not tell (see header).
  */
-export function missingPiApiKey(
+export async function piAuthPrecheck(
+  bin: string,
   model: string | undefined,
-  env: Env,
-  cwd: string,
-): { provider: string; keyEnv: string } | undefined {
-  const slash = model?.indexOf('/') ?? -1;
-  if (!model || slash <= 0) return undefined;
-  const provider = model.slice(0, slash);
-  const keyEnv = PI_PROVIDER_KEY_ENV[provider];
-  if (!keyEnv) return undefined;
-  if ([keyEnv, ...(ALTERNATE_KEY_ENV[provider] ?? [])].some((k) => env[k])) return undefined;
-  if (hasStoredCredential(provider, env, cwd)) return undefined;
-  return { provider, keyEnv };
+  opts: { env: Record<string, string>; cwd: string; signal?: AbortSignal },
+): Promise<Error | undefined> {
+  if (!model) return undefined;
+  const check = await runAuthCheck(bin, model, opts);
+  if (check?.status !== 'not_ready') return undefined;
+  const provider = check.provider;
+  const keyEnv = provider ? PI_PROVIDER_KEY_ENV[provider] : undefined;
+  if (check.reason === 'credentials_not_configured') {
+    return missingApiKeyError(
+      { provider, keyEnv },
+      `pi auth check: ${provider ?? model} not_ready (credentials_not_configured)`,
+    );
+  }
+  const err = new Error(
+    `PiRpcAgentRunner: pi is not ready for provider ${provider ?? model} (${check.reason ?? 'not_ready'}): ` +
+      `not logged in or the login expired. Run \`pi\` then /login${keyEnv ? `, or set ${keyEnv}` : ''}.`,
+  );
+  (err as Error & { fatal?: boolean }).fatal = true;
+  return err;
 }
 
 /** The fatal "missing API key: set X" error. `piText` is pi's own message. */
@@ -110,9 +127,7 @@ export function missingApiKeyError(
     : "set the provider's API key variable";
   const err = new Error(
     `PiRpcAgentRunner: missing API key: ${what}, or run \`pi\` then /login.` +
-      (piText
-        ? ` pi: ${piText.trim().split('\n')[0].slice(0, 300)}`
-        : ' (no API key found in the environment or pi auth.json)'),
+      (piText ? ` pi: ${piText.trim().split('\n')[0].slice(0, 300)}` : ''),
   );
   (err as Error & { fatal?: boolean }).fatal = true;
   return err;

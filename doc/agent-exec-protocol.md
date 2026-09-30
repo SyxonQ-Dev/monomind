@@ -8,8 +8,15 @@
 - **Revision history**:
   - rev 27 (2026-09-30): **a missing API key is `auth`** (issue #532) — no new capability. §3.4's
     `auth` also covers a credential that was never set: an error whose message says "missing API
-    key" or "no API key found/configured" (pi, and the pi-rpc runner's own up-front check) is
-    now `error {code:"auth", fatal:true}` on every runtime; it was `runner-error`. Additive only.
+    key", "no API key found/configured" (pi, and the pi-rpc runner's `pi auth check` pre-check)
+    or "no inference provider configured" / "no API keys or providers found" (hermes) is now
+    `error {code:"auth", fatal:true}` on every runtime; it was `runner-error`. Text a runner
+    attaches but did not write itself (a CLI's stdout, the model's final words — hermes, cline)
+    follows a `[output below is not classified]` line in `message` and never decides the code.
+    Additive only. Also (issue #531): with hermes 0.19.0, which has no `--query-file`, the hermes
+    runner passes the whole prompt on the command line (`hermes chat --query=<prompt>`), so
+    while a turn runs other local users can read it in `ps` or `/proc/<pid>/cmdline`; builds
+    with `--query-file` still get it in a private temp file.
   - rev 26 (2026-09-29): **more `--sandbox` modes, and `--sandbox-fallback`** (issue #482) — new
     capabilities `agent-exec-sandbox-restricted` and `agent-exec-sandbox-fallback`. Without
     `--sandbox` nothing changes: every runtime's argv and `start` are as in rev 25. **New mode
@@ -668,7 +675,7 @@ $ monomind agent exec --runtime codex --prompt "summarize ./README"
 
 | `code` | `fatal` | Meaning / caller action |
 |---|---|---|
-| `auth` | true | Runtime not logged in / key missing or invalid (rev 27: "missing API key", "no API key found") — surface the runtime's login command; do not retry |
+| `auth` | true | Runtime not logged in / key missing or invalid (rev 27: "missing API key", "no API key found", hermes "no inference provider configured") — surface the runtime's login command; do not retry |
 | `quota` | true | Quota, credits, billing or a daily cap exhausted — do not retry. Before rev 20 this also covered transient rate limits |
 | `rate-limited` | true | rev 20. A transient provider rate limit (429) that `agent exec` already retried (up to 3 attempts, rev 20 entry) or could not retry safely; the message says which. Try again later or pick another model |
 | `missing-binary` | true | Agent CLI not installed (exit 2; see `agent scan`) |
