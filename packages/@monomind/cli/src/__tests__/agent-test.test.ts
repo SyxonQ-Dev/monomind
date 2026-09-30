@@ -366,6 +366,29 @@ describe('cost', () => {
   it('zero tokens = zero cost, not estimated', () => {
     expect(resolveCost('gpt-5', 0, 0, 0)).toEqual({ cost_usd: 0, cost_estimated: false });
   });
+
+  it('rev 28: no reported cost is null, never 0, unless a price estimates it', () => {
+    expect(resolveCost(undefined, null, 0, 0)).toEqual({ cost_usd: null, cost_estimated: false });
+    expect(resolveCost('mystery-model', null, 5, 1)).toEqual({
+      cost_usd: null,
+      cost_estimated: false,
+    });
+    expect(resolveCost('gpt-5', null, 0, 0)).toEqual({ cost_usd: 0, cost_estimated: true });
+  });
+
+  it('rev 28: a runtime without cost and an unpriced model reports cost_usd null', async () => {
+    const r = await run('hermes', mockRunner(okTurn('ok', { input_tokens: 0, output_tokens: 0 })));
+    expect(r.status).toBe('ok');
+    expect(r.cost_usd).toBeNull();
+    expect(r.cost_estimated).toBe(false);
+  });
+
+  it('rev 28: a turn that never started costs a known 0', async () => {
+    const r = await run('pi', mockRunner([]), { sandbox: 'workspace-write' });
+    expect(r.native_sandbox).toBeNull();
+    expect(r.error?.code).toBe('unsupported');
+    expect(r.cost_usd).toBe(0);
+  });
 });
 
 describe('helpers', () => {

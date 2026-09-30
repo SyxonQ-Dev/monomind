@@ -41,7 +41,12 @@ describe('runAgentSession: stale checkpoint-resume session falls back to fresh (
       resumeSessionId: 'stale-session-from-checkpoint',
     });
 
-    await new Promise(r => setTimeout(r, 20));
+    // Close once the fresh retry has started, not after a fixed 20ms: session
+    // start does real work (sandbox and authority setup, #502's plant watch)
+    // that can outlast a fixed sleep under load, and a close that lands
+    // before the resume failure is handled reads as a stop, not a retry.
+    for (let t = Date.now(); callCount < 2 && Date.now() - t < 5000; )
+      await new Promise(r => setTimeout(r, 10));
     mailbox.close();
     await donePromise;
 

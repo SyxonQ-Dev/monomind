@@ -1,9 +1,11 @@
 // packages/@monomind/cli/src/orgrt/test-loop.ts
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { OrgBus } from './bus.js';
 import { OrgDaemon } from './daemon.js';
 import { queueMessage } from './inbox.js';
+import { orgSignaturePath, signOrgDef } from './org-signature.js';
 import { PolicyEngine } from './policy.js';
 import { startOrgServer } from './server.js';
 import { type BusEvent, ORG_DIR, RolePolicySchema } from './types.js';
@@ -290,6 +292,10 @@ function writeFixtures(root: string): void {
       roles: [{ id: 'boss', title: 'Boss', type: 'boss', reports_to: null }],
     }),
   );
+  // #502: the loop starts these orgs itself, and it wrote them — sign them.
+  for (const name of ['alpha', 'partner']) {
+    signOrgDef(root, name, JSON.parse(readFileSync(join(dir, `${name}.json`), 'utf8')));
+  }
 }
 
 async function waitFor(pred: () => boolean, ms = 5000): Promise<boolean> {
@@ -325,6 +331,19 @@ export async function runTestLoop(
     }
   }
 
+  // #502 review: the fixture orgs (and the signatures they need) live in a
+  // throwaway root, never in the project the command runs in.
+  const loopRoot = mkdtempSync(join(tmpdir(), 'monomind-test-loop-'));
+  const signatures = dirname(orgSignaturePath(loopRoot, 'alpha'));
+  try {
+    return await fixtureLoop(loopRoot, times);
+  } finally {
+    rmSync(loopRoot, { recursive: true, force: true });
+    rmSync(signatures, { recursive: true, force: true });
+  }
+}
+
+async function fixtureLoop(root: string, times: number): Promise<LoopReport> {
   writeFixtures(root);
   const iterations: IterationResult[] = [];
 

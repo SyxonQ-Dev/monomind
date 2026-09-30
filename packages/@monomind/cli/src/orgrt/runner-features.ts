@@ -125,6 +125,6 @@ export const RUNNER_FEATURES: Record<RuntimeKind, RunnerFeatures> = {
   // maxTurns emulated (step_start count + process-group kill). No USD cost.
   // dsh reads AGENTS.md natively: init target `agents`.
   dsh: { resume: true, effort: true, maxTurns: true, reportsCost: false, initTarget: 'agents' },
-  // hermes reports cost_usd: 0 — not a real figure.
+  // hermes reports no cost (result.cost_usd is null).
   hermes: { resume: false, effort: false, maxTurns: false, reportsCost: false, initTarget: null },
 };

@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   listRuntimeModels,
+  markAliases,
   parseAgyModels,
   parseClaudeModels,
   parseCodexModels,
@@ -31,6 +32,49 @@ describe('agent models parsers', () => {
         effort_levels: ['low', 'high'],
       },
       { id: 'claude-fable-5-1', label: 'Fable 5.1' },
+    ]);
+  });
+
+  it('claude: every entry is kept; opus is marked alias_of default (mono-agent looks up by id)', () => {
+    const models = parseClaudeModels([
+      { value: 'default', resolvedModel: 'claude-opus-5-5', displayName: 'Default (recommended)' },
+      { value: 'sonnet', resolvedModel: 'claude-sonnet-5', displayName: 'Sonnet' },
+      { value: 'opus', resolvedModel: 'claude-opus-5-5', displayName: 'Opus' },
+    ]);
+    expect(models).toEqual([
+      {
+        id: 'default',
+        resolved_id: 'claude-opus-5-5',
+        aliases: ['default', 'opus'],
+        label: 'Default (recommended)',
+        default: true,
+      },
+      { id: 'sonnet', resolved_id: 'claude-sonnet-5', label: 'Sonnet' },
+      { id: 'opus', resolved_id: 'claude-opus-5-5', label: 'Opus', alias_of: 'default' },
+    ]);
+    // A lookup by id (mono-agent's `m.ID == "opus"`) still finds opus.
+    expect(models.find((m) => m.id === 'opus')?.resolved_id).toBe('claude-opus-5-5');
+    // A caller testing each model once skips alias_of entries.
+    expect(models.filter((m) => !m.alias_of).map((m) => m.id)).toEqual(['default', 'sonnet']);
+  });
+
+  it('markAliases: an explicit id and a later alias of it; the alias keeps its own fields', () => {
+    expect(
+      markAliases([
+        { id: 'claude-opus-5-5', label: 'Opus 5.5' },
+        { id: 'default', resolved_id: 'claude-opus-5-5', label: 'Default', default: true },
+        { id: 'haiku', resolved_id: 'claude-haiku-5', label: 'Haiku' },
+      ]),
+    ).toEqual([
+      { id: 'claude-opus-5-5', label: 'Opus 5.5', aliases: ['claude-opus-5-5', 'default'] },
+      {
+        id: 'default',
+        resolved_id: 'claude-opus-5-5',
+        label: 'Default',
+        default: true,
+        alias_of: 'claude-opus-5-5',
+      },
+      { id: 'haiku', resolved_id: 'claude-haiku-5', label: 'Haiku' },
     ]);
   });
 

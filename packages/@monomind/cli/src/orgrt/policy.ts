@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { OrgBus } from './bus.js';
 import { fileToolDenied, isDashboardCredential } from './file-roots.js';
+import { isOperatorProtected } from './operator-protected-paths.js';
 import { isAuthorityFile } from './org-authority-files.js';
 import { checkGitPolicy } from './policy-git.js';
 import {
@@ -449,6 +450,24 @@ export class PolicyEngine {
       )
     )
       return `path ${p} is org authority state (an org definition, a human's decisions, or runtime state under .monomind/orgs/) — no role may write it, regardless of scope, root, or allowWrite; only the operator and the org daemon do`;
+    // #502 review: what the operator's own processes run or trust (the org
+    // root's .claude/, the skill libraries, ~/.monomind, npx's cache, …).
+    if (WRITE_TOOLS.has(tool)) {
+      const ctx = {
+        home: homedir(),
+        env: process.env,
+        orgRoot: this.orgRoot,
+        cwd: this.cwd,
+        allowWrite: this.policy.sandbox?.allowWrite,
+      };
+      // #517: through deny folding, like every other deny here.
+      const denyWithin = (c: string, t: string) => isWithin(c, t, fold.deny);
+      const protectedHit =
+        isOperatorProtected(real, ctx, realPath, denyWithin) ??
+        isOperatorProtected(resolve(this.cwd, p), ctx, realPath, denyWithin);
+      if (protectedHit)
+        return `path ${p} is inside ${protectedHit}, which the operator's own sessions run or trust — no role may write it unless policy.sandbox.allowWrite names it (a signed change)`;
+    }
     if (isDashboardCredential(real, fold.deny))
       return `path ${p} is a dashboard credential, which no role may touch regardless of scope, root, or allowWrite`;
     if (!grantedByAbsoluteScope && !globs.some((g) => !isAbsolute(g) && inScope(g)))

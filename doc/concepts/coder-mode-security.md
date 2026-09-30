@@ -132,6 +132,20 @@ documented case)'`. No new seam was found that needed a new test for this issue:
 does not touch env construction at all (`args.access` and `args.envAuthoritative` are independent
 fields), so the existing coverage already exercises the exact code path a full-access turn runs.
 
+**codex shell snapshots** (#535). codex's `shell_snapshot` feature is enabled by default (stable)
+in codex 0.156.1, and `codex exec` — what the codex runner runs — creates
+`$CODEX_HOME/shell_snapshots/`. A snapshot holds the user's shell environment, so every API key
+and token in the environment above, and is created with the process umask (0644 under the usual
+022; codex restricts `auth.json` and `history.jsonl` to 0600 but not these). The codex runner, in
+every access mode, passes `-c features.shell_snapshot=false -c features.shell_snapshot_v2=false`
+(codex's own feature flags), so no snapshot is written. Before each spawn, `restrictCodexHome` in
+[`orgrt/codex-runner-stream.ts`](../../packages/@monomind/cli/src/orgrt/codex-runner-stream.ts)
+makes `$CODEX_HOME` (default `~/.codex`) and its `sessions/` and `shell_snapshots/` 0700 when the
+current user owns them: a 0700 directory hides its files whatever their modes. The process umask is
+not changed, so the agent's workspace files keep their usual modes. monomind sets no `CODEX_HOME`
+and never copies codex's auth. Snapshots already on disk stay there: delete
+`~/.codex/shell_snapshots/*.sh` and rotate the keys they contain.
+
 ### 2.4 Audit trail
 
 Every `tool_activity` event (§3.2 of the protocol doc) is the caller's own live audit log — the
@@ -358,14 +372,30 @@ uses them must read `sandbox_applied` (and `native_sandbox`) rather than assume 
   in the same org definition file, so that file, the decision files and the daemon's state under
   `.monomind/orgs/` are authority files. On the Claude runtime, no scoped role may write them with
   a file tool, whatever its scope (#498). Other runtimes' own file tools, like Bash, are held back
-  only by the OS layer, and the SDK sandbox still lets Bash create a *new* org definition there.
-  The list and these limits are in [`org-runtime.md`](org-runtime.md), "Authority files". An
-  active full-access role runs with no policy gate and can still write them.
+  only by the OS layer. Writing a definition is not enough, though: the operator signs the whole
+  authority part of every org definition with `monomind org sign` (#502), under the same key as
+  `access_ack`, and `org run`, `org serve` (runfile poll and schedule), `org reload` and resume
+  refuse a definition whose signature does not verify. The list, these limits and the signing
+  model are in [`org-runtime.md`](org-runtime.md), "Authority files" and "Operator-signed
+  definitions". An active full-access role runs with no policy gate and can still write them, and
+  like any role that can read the operator-credential directory, it can sign.
 
 ## 4. Residual risks (accepted, not mitigated further by this issue)
 
 These are known, accepted trade-offs of "full access by design" (§1) — listed explicitly so they
 are never mistaken for oversights:
+
+- **Unconfined org roles can sign org definitions (#502, allowed by decision)**: a role that runs with
+  neither the SDK sandbox nor the bubblewrap authority mask can read the operator key in
+  `~/.monomind/orgrt-operator/`, and with it sign any org definition and forge any full-access
+  grant. That is an active full-access role; a `policy.git: push` role or one with
+  `policy.sandbox.mode: 'off'` on a host without bubblewrap; a CLI runtime other than claude
+  there (codex on macOS, for example); and any role when bubblewrap is missing or cannot start.
+  Such roles are allowed, not refused: operator-signed definitions protect every other role, and
+  an org that needs an unconfined role (a push-level releaser, codex on macOS) keeps working.
+  `monomind org sign` lists each one in its review with the reason it runs without an OS sandbox,
+  and every org start prints the same warning. To confine a role, run it on the claude runtime
+  below `policy.git: push` with `policy.sandbox.mode` not `'off'`, or install bubblewrap (Linux).
 
 - **`WebFetch`/`WebSearch` under `--access full`**: a fetched page can contain instructions the
   model may act on with a real, unrestricted shell — identical to interactive Claude Code with

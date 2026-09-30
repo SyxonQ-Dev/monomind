@@ -112,7 +112,7 @@ describe('Batch 2 Priority 1 - Per-role cost tracking', () => {
     });
 
     const bossRuntime = running.agents.get('boss');
-    expect(bossRuntime?.metrics.costUsd).toBe(0); // Should not crash, just skip invalid
+    expect(bossRuntime?.metrics.costUsd).toBeNull(); // Should not crash; an invalid cost is unknown, not $0 (rev 28)
 
     await d.stopAll();
   }, 10_000);

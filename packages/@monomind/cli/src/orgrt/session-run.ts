@@ -8,6 +8,7 @@ import { ensureAuthorityDirs } from './authority-mask.js';
 import { resolveRoleCostTier } from './cost-tier.js';
 import type { CumulativeMeter } from './cumulative-meter.js';
 import type { StreamOptions } from './mailbox.js';
+import { ensureOperatorProtectedPaths } from './operator-protected-paths.js';
 import { buildOrgTools } from './org-tools.js';
 import type { TokenUsage } from './policy.js';
 import { summarizeToolOutput } from './policy.js';
@@ -138,6 +139,8 @@ export async function runOneSession(
     // the sandbox and it can't start.
     // Before the sandbox is built: it can only mask directories that exist.
     ensureAuthorityDirs(homedir(), process.env);
+    // #502 review: and the operator-protected paths a role must not plant.
+    ensureOperatorProtectedPaths({ home: homedir(), env: process.env, orgRoot: opts.orgRoot });
     // #365: an ACTIVE full-access role gets none of policy.git's layers —
     // "removes the remaining PolicyEngine checks too" — so it never calls
     // resolveRoleGitEnforcement/roleAuthorityMask at all, regardless of its
@@ -185,6 +188,7 @@ export async function runOneSession(
             cwd,
             orgRoot: opts.orgRoot,
             fileWrite: role.policy?.fileWrite,
+            allowWrite: role.policy?.sandbox?.allowWrite,
           });
     const stream = runner.run(
       sessionRunArgs(opts, {

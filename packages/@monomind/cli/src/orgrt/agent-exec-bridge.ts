@@ -141,19 +141,28 @@ export class StdioToolBridge {
 // ─── usage accounting (cumulative→delta, session.ts parity) ────────────────
 
 export class UsageTracker {
-  private cumulative = new Map<string, { in: number; out: number; usd: number }>();
-  delta(m: AgentMessage): { in: number; out: number; usd: number } {
+  private cumulative = new Map<string, { in: number; out: number; usd: number | null }>();
+  /** Running sum of every delta; `usd` stays null until a cost is reported. */
+  readonly total: { in: number; out: number; usd: number | null } = { in: 0, out: 0, usd: null };
+  /** `usd` is null when the runner reported no cost (unknown, never $0):
+   *  a missing or non-finite `cost_usd` stays null instead of becoming 0. */
+  delta(m: AgentMessage): { in: number; out: number; usd: number | null } {
     const key = m.session_id ?? '';
-    const prev = this.cumulative.get(key) ?? { in: 0, out: 0, usd: 0 };
-    const cur = { in: m.input_tokens ?? 0, out: m.output_tokens ?? 0, usd: m.cost_usd ?? 0 };
+    const prev = this.cumulative.get(key) ?? { in: 0, out: 0, usd: null };
+    const usd = typeof m.cost_usd === 'number' && Number.isFinite(m.cost_usd) ? m.cost_usd : null;
+    const cur = { in: m.input_tokens ?? 0, out: m.output_tokens ?? 0, usd };
     // Runners that report per-turn (not cumulative) usage would produce
     // negatives under naive differencing; treat decreasing totals as fresh.
     const d = {
       in: Math.max(0, cur.in - prev.in),
       out: Math.max(0, cur.out - prev.out),
-      usd: Math.max(0, cur.usd - prev.usd),
+      usd: usd === null ? null : Math.max(0, usd - (prev.usd ?? 0)),
     };
-    this.cumulative.set(key, cur);
+    // An unknown cost keeps the last known cumulative figure as the base.
+    this.cumulative.set(key, { ...cur, usd: usd ?? prev.usd });
+    this.total.in += d.in;
+    this.total.out += d.out;
+    if (d.usd !== null) this.total.usd = (this.total.usd ?? 0) + d.usd;
     return d;
   }
 }

@@ -26,9 +26,21 @@
 
 import * as cp from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { CodexAgentRunner } from '../orgrt/codex-runner.js';
+import { codexHomeDir, restrictCodexHome } from '../orgrt/codex-runner-stream.js';
 
 vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
@@ -159,7 +171,7 @@ describe('CodexAgentRunner', () => {
     }
   });
 
-  it('no --effort: no -c flag', async () => {
+  it('no --effort: no model_reasoning_effort flag', async () => {
     vi.mocked(cp.spawn).mockReturnValue(
       makeMockChild([
         JSON.stringify({ type: 'session_configured', session_id: 't1', thread_id: 't1' }),
@@ -177,7 +189,41 @@ describe('CodexAgentRunner', () => {
     })) {
       /* consume */
     }
-    expect(vi.mocked(cp.spawn).mock.calls[0][1]).not.toContain('-c');
+    const argv = vi.mocked(cp.spawn).mock.calls[0][1] as string[];
+    expect(argv.some((x) => x.startsWith('model_reasoning_effort'))).toBe(false);
+  });
+
+  // Security: codex's shell snapshot dumps the whole environment (API keys
+  // included) to $CODEX_HOME/shell_snapshots, 0644 under umask 022.
+  it('security: disables codex shell snapshots on every spawn', async () => {
+    vi.mocked(cp.spawn).mockReturnValue(
+      makeMockChild([
+        JSON.stringify({ type: 'session_configured', session_id: 't1', thread_id: 't1' }),
+      ]),
+    );
+    for await (const _m of runner.run({
+      tools: [],
+      prompt: (async function* () {
+        yield 'hello';
+      })(),
+      systemPrompt: '',
+      cwd: '/tmp',
+      env: {},
+      maxTurns: 5,
+      resume: 'thread-9',
+    })) {
+      /* consume */
+    }
+    const argv = vi.mocked(cp.spawn).mock.calls[0][1] as string[];
+    const flags = argv.slice(0, argv.indexOf('resume'));
+    expect(flags).toEqual(
+      expect.arrayContaining([
+        '-c',
+        'features.shell_snapshot=false',
+        'features.shell_snapshot_v2=false',
+      ]),
+    );
+    expect(argv.indexOf('features.shell_snapshot=false')).toBeLessThan(argv.indexOf('resume'));
   });
 
   it('captures session id from session_configured event', async () => {
@@ -1186,4 +1232,84 @@ describe('CodexAgentRunner sandbox mapping (#263)', () => {
     expect(sandboxOf(argv)).toBe('danger-full-access');
     expect(argv).not.toContain('sandbox_workspace_write.network_access=true');
   });
+});
+
+describe('restrictCodexHome (#535)', () => {
+  const posix = process.platform !== 'win32';
+  let root: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'codex-home-537-'));
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+  const mode = (p: string) => statSync(p).mode & 0o777;
+
+  it.skipIf(!posix)('makes CODEX_HOME, sessions/ and shell_snapshots/ 0700', () => {
+    const home = join(root, '.codex');
+    for (const d of [home, join(home, 'sessions'), join(home, 'shell_snapshots')]) {
+      mkdirSync(d, { recursive: true });
+      chmodSync(d, 0o755);
+    }
+    writeFileSync(join(home, 'shell_snapshots', 'x.sh'), 'export K=1\n', { mode: 0o644 });
+    expect(restrictCodexHome(home)).toHaveLength(3);
+    expect(mode(home)).toBe(0o700);
+    expect(mode(join(home, 'sessions'))).toBe(0o700);
+    expect(mode(join(home, 'shell_snapshots'))).toBe(0o700);
+    // Files inside are hidden by the dir, not rewritten.
+    expect(mode(join(home, 'shell_snapshots', 'x.sh'))).toBe(0o644);
+  });
+
+  it.skipIf(!posix)('leaves missing dirs and symlinks alone', () => {
+    const real = join(root, 'real');
+    mkdirSync(real);
+    chmodSync(real, 0o755);
+    const link = join(root, 'link');
+    symlinkSync(real, link);
+    expect(restrictCodexHome(link)).toEqual([]);
+    expect(mode(real)).toBe(0o755);
+    expect(restrictCodexHome(join(root, 'absent'))).toEqual([]);
+  });
+
+  it('codexHomeDir: CODEX_HOME wins, else HOME/.codex', () => {
+    expect(codexHomeDir({ CODEX_HOME: '/c', HOME: '/h' })).toBe('/c');
+    expect(codexHomeDir({ HOME: '/h' })).toBe(join('/h', '.codex'));
+  });
+
+  it.skipIf(!posix)(
+    'a codex turn tightens the child CODEX_HOME and leaves the process umask alone',
+    async () => {
+      const home = join(root, 'ch');
+      mkdirSync(home);
+      chmodSync(home, 0o755);
+      const umask = vi.spyOn(process, 'umask');
+      vi.mocked(cp.spawn).mockReturnValue(
+        makeMockChild([
+          JSON.stringify({ type: 'session_configured', session_id: 't1', thread_id: 't1' }),
+        ]),
+      );
+      for await (const _m of new CodexAgentRunner().run({
+        tools: [],
+        prompt: (async function* () {
+          yield 'hello';
+        })(),
+        systemPrompt: '',
+        cwd: root,
+        env: { CODEX_HOME: home },
+        maxTurns: 5,
+      })) {
+        /* consume */
+      }
+      expect(mode(home)).toBe(0o700);
+      // Workspace files keep the caller's umask: nothing sets it.
+      expect(umask.mock.calls.filter((c) => c.length > 0 && c[0] !== undefined)).toEqual([]);
+      const argv = vi.mocked(cp.spawn).mock.calls[0][1] as string[];
+      expect(argv).toEqual(
+        expect.arrayContaining([
+          'features.shell_snapshot=false',
+          'features.shell_snapshot_v2=false',
+        ]),
+      );
+    },
+  );
 });

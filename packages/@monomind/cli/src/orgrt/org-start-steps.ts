@@ -2,6 +2,7 @@
 // Extracted from daemon.ts — the self-contained steps of startOrg: preflight
 // (definition, run id, workspace, validation), per-role fences, and the
 // broker registration + offline-inbox drain that ends it.
+
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -32,6 +33,9 @@ import {
   type RoleFence,
 } from './fence.js';
 import { drainInbox, newMessageId, queueMessage } from './inbox.js';
+import { enforceConfinement } from './org-sign-review.js';
+import { assertOrgDefSigned, instructionsDigests, pinInstructionDigests } from './org-signature.js';
+import { firstLookAudit, plantNotifier, plantWatchFor } from './planted-paths.js';
 import { expandOrgPolicyPathVars, promptVarsFor } from './prompt-vars.js';
 import * as questionOps from './questions.js';
 import { resolveRoleRunner } from './runner-resolve.js';
@@ -72,10 +76,32 @@ export async function prepareOrgStart(
     /* best-effort: not a git repo, git missing, or a wedged hook */
   }
   const defPath = join(daemon.root, ORG_DIR, `${name}.json`);
-  const parsedDef = OrgDefSchema.parse(JSON.parse(readFileSync(defPath, 'utf8')));
+  const rawDef: unknown = JSON.parse(readFileSync(defPath, 'utf8'));
+  // #502: every start path (org run, serve's runfile poll and schedule,
+  // resume) comes through here — refuse a definition the operator has not
+  // signed, checking the very bytes that get parsed below.
+  const digests = instructionsDigests(rawDef, daemon.root);
+  assertOrgDefSigned(daemon.root, name, rawDef, { digests });
+  const parsedDef = OrgDefSchema.parse(rawDef);
   const bp = resolveOrgDefBlueprints(parsedDef, daemon.root);
   // {{home}} / {{org_root}} in policy paths, before any root or sandbox sees them.
   const def = expandOrgPolicyPathVars(bp.def, promptVarsFor(daemon.root));
+  pinInstructionDigests(def, digests);
+  // #502 review: the single enforcement point for unconfined roles (warn-only
+  // until the operator decides whether to refuse them).
+  enforceConfinement(def, name);
+  // #502 review round 4: quarantine whatever a role planted, including
+  // during a run that crashed or was killed, before anything starts.
+  const notifier = () => ({
+    bus: daemon.orgs.get(name)?.bus,
+    askHuman: (r: string, q: string, b?: boolean) => daemon.askHuman(name, r, q, b),
+    def,
+  });
+  const plantWatch = plantWatchFor(daemon.root, name, plantNotifier(name, notifier));
+  plantWatch.onFirstLook = firstLookAudit(notifier);
+  await plantWatch
+    .check()
+    .catch((err) => console.warn(`[orgrt] org ${name}: planted-path check failed: ${err}`));
   const autoApproveError = approvalOps.unknownAutoApproveError(
     options?.autoApprove ?? [],
     def.roles,
