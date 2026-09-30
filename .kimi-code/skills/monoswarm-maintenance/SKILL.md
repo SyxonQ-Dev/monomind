@@ -1,10 +1,12 @@
 ---
 name: monoswarm-maintenance
-description: Maintenance swarm strategy — sequential coordinated system maintenance for dependency updates, security audits, and documentation
+description: Deprecated, removed in 2.21.0 — Maintenance swarm strategy — sequential coordinated system maintenance for dependency updates, security audits, and documentation
 type: flow
 ---
 
 # Maintenance Swarm Strategy
+
+> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.21.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
 
 System maintenance and updates through coordinated agents.
 

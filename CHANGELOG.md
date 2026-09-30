@@ -4,6 +4,17 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ## [Unreleased]
 
+### Deprecated
+
+- **`monoswarm` and `autopilot` are deprecated and will be removed in 2.21.0, the next minor release** ([#418](https://github.com/monoes/monomind/issues/418)). Both record state and start no agents. Use Claude Code's Task tool or `monomind org run` instead. Nothing is removed in this release:
+  - Every `monoswarm` and `autopilot` subcommand prints a one-line deprecation notice on stderr. `-Q` drops it. The notice never goes to stdout, so the subcommands that emit JSON (`--format json` / `--json`) keep it clean.
+  - `monomind start` and `monomind start stop` record and terminate a monoswarm state file, so they print the same notice. `start` no longer suggests `monoswarm status`, and its progress lines say it records state and starts no agents. When monoswarm is removed in 2.21.0, `start` stops recording monoswarm state and `start stop` stops marking it terminated.
+  - The 13 `monoswarm_*` and 8 `autopilot_*` MCP tools start their descriptions with `DEPRECATED (removed in 2.21.0; use the Task tool or 'monomind org run'):` and carry the full notice in a `deprecated` field on every result. The autopilot tool descriptions no longer claim to re-engage agents or report learning metrics.
+  - `monoswarm status` counts `idle` agent records as idle, not active.
+  - `monoswarm init --format json` printed its progress lines and table on stdout ahead of the JSON. It now prints only the result document there.
+  - Honest wording: `monoswarm scale` reports roster entries recorded or removed (it said "Spawned N agent(s)"), `monoswarm stop` says it marks the state terminated (in its prompt, its output and the bare `monoswarm` help), and `autopilot status` shows `Tasks: 0/0 (n/a)` with no tasks instead of `100%`. `autopilot_status` and `autopilot_progress` return `percent: 0` for zero tasks.
+  - The generated CLAUDE.md (full/security/performance templates), `.monomind/CAPABILITIES.md`, the main `--help` examples, the guidance catalog and quick reference, and the shipped monoswarm skill, commands and agents that tell models to initialize a monoswarm now say it is deprecated and point to the Task tool or `org run`. Section headings are unchanged, so upgrades of existing CLAUDE.md files are unaffected.
+
 ### Removed
 
 - **`monomind.memory.learningBridge`, `memoryGraph` and `agentScopes` config keys.** `init` wrote them to `.claude/settings.json` and `.monomind/config.yaml` (with `confidenceDecayRate`, `accessBoostAmount`, `consolidationThreshold` and `defaultScope`), `init upgrade` added them, and the wizard asked "Record agent memory scopes (project/local/user) in the config?", but no code, helper or hook read any of them. `init` and `init upgrade` no longer write them, the wizard no longer asks, and `CAPABILITIES.md` drops the "Memory Scopes (ADR-049)" section. Existing configs that carry the keys still load, and `init upgrade` keeps them as they are. `monomind.neural.enabled` is unchanged: the SessionStart hook reads it.

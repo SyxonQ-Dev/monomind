@@ -97,14 +97,14 @@ export async function printMainHelp(
     'Local SQLite memory with on-device embeddings (HNSW ANN index above 100,000 entries)',
     'Monograph codebase knowledge graph (tree-sitter + SQLite)',
     'Org runtime daemon with per-role policy gates (monomind org run)',
-    "Monoswarm topology, roster and vote state for your assistant's subagents",
+    'Monoswarm topology, roster and vote state (deprecated; removed in the next minor release)',
     'Keyword routing + route-outcome measurement',
   ]);
   output.writeln();
 
   output.writeln(output.bold('EXAMPLES:'));
   output.writeln(`  ${name} agent spawn -t coder              # Spawn a coder agent`);
-  output.writeln(`  ${name} monoswarm init --v1-mode          # Initialize monoswarm`);
+  output.writeln(`  ${name} org run <org> --task "..."      # Run an agent org`);
   output.writeln(`  ${name} memory search -q "auth patterns"  # Semantic search`);
   output.writeln(`  ${name} mcp start                         # Start MCP server`);
   output.writeln();

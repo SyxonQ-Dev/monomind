@@ -11,6 +11,7 @@ import { memoryCommand } from '../commands/memory.js';
 import { monoswarmCommand } from '../commands/monoswarm.js';
 import { sessionCommand } from '../commands/session.js';
 import { taskCommand } from '../commands/task.js';
+import { MONOSWARM_AUTOPILOT_REMOVAL_VERSION } from '../deprecations.js';
 import { mcpAddHint } from '../platform-adapters/renderers/mcp.js';
 import {
   detectOptionalPackages,
@@ -33,7 +34,7 @@ export function cliCommandsTable(): string {
 |---------|-------------|-------------|
 | \`init\` | ${subcommandCount(initCommand)} | Project initialization |
 | \`agent\` | ${subcommandCount(agentCommand)} | Agent lifecycle management |
-| \`monoswarm\` | ${subcommandCount(monoswarmCommand)} | Multi-agent coordination |
+| \`monoswarm\` | ${subcommandCount(monoswarmCommand)} | Deprecated — records state, starts no agents; removed in ${MONOSWARM_AUTOPILOT_REMOVAL_VERSION} |
 | \`memory\` | ${subcommandCount(memoryCommand)} | SQLite memory with ANN search |
 | \`task\` | ${subcommandCount(taskCommand)} | Task creation and lifecycle |
 | \`session\` | ${subcommandCount(sessionCommand)} | Session state management |
@@ -48,7 +49,7 @@ export function cliCommandsTable(): string {
 \`\`\`bash
 npx monomind init wizard
 npx monomind agent spawn -t coder --name my-coder
-npx monomind monoswarm init --v1-mode
+npx monomind org run <org>   # run an agent org (monoswarm is deprecated)
 npx monomind memory search --query "authentication patterns"
 npx monomind doctor --fix
 \`\`\``;
@@ -262,7 +263,7 @@ npx monomind doctor --fix
 ## Claude Code vs CLI Tools
 
 - Claude Code's Task tool handles ALL execution: agents, file ops, code generation, git
-- CLI tools handle coordination via Bash: monoswarm init, memory, hooks, routing
+- CLI tools handle coordination via Bash: memory, hooks, routing (\`monoswarm\` is deprecated and removed in ${MONOSWARM_AUTOPILOT_REMOVAL_VERSION})
 - NEVER use CLI tools as a substitute for Task tool agents
 
 ## Support

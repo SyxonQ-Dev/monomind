@@ -49,7 +49,7 @@ export const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
   monoswarm: {
     name: 'Monoswarm Coordination',
     description:
-      'Multi-agent coordination and vote arbitration: topology/roster bookkeeping in a JSON state file, threshold-based voting (majority/supermajority/unanimous/threshold).',
+      "Deprecated (removed in the next minor release; use Claude Code's Task tool or `monomind org run`). Topology/roster bookkeeping in a JSON state file and threshold-based voting (majority/supermajority/unanimous/threshold); starts no agents.",
     tools: [
       'monoswarm_init',
       'monoswarm_status',
@@ -68,7 +68,7 @@ export const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
     ],
     skills: ['monoswarm'],
     whenToUse:
-      'When a task requires multiple agents working together (3+ files, features, refactoring), or agents need to vote on a decision.',
+      "Don't start new work with it — it is deprecated. For multiple agents working together, spawn them with Claude Code's Task tool or run an org with `monomind org run`.",
   },
   'memory-knowledge': {
     name: 'Memory & Knowledge',
