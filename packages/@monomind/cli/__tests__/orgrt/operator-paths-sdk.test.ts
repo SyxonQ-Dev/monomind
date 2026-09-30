@@ -10,7 +10,15 @@
  * hidden on Linux.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -251,5 +259,95 @@ describe.skipIf(
     expect(text).not.toMatch(/CJW=0|MCPW=0/);
     expect(readFileSync(claudeJson, 'utf8')).not.toContain('evil');
     expect(readFileSync(join(cwd, '.mcp.json'), 'utf8')).toBe('{"mcpServers":{}}');
+  }, 90_000);
+});
+
+describe.skipIf(
+  process.env.MONOMIND_SANDBOX_E2E !== '1' ||
+    !!process.env.MONOMIND_ORG_ROLE ||
+    process.platform !== 'linux' ||
+    !sandboxAvailability().available,
+)('SDK-sandboxed role vs the operator toolchains under $HOME (#527)', () => {
+  it('runs node and the toolchain, cannot overwrite them or rename their parents aside', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'op7-'));
+    dirs.push(base);
+    const cwd = join(base, 'wt');
+    const home = join(base, 'home');
+    spawnSync('git', ['init', '-q', cwd]);
+    for (const d of ['projects', 'shell-snapshots', 'session-env', 'plugins', 'backups'])
+      mkdirSync(join(home, '.claude', d), { recursive: true });
+    const share = join(home, '.local', 'share');
+    const node = join(share, 'mise', 'installs', 'node', '22.12.0', 'bin', 'node');
+    mkdirSync(join(node, '..'), { recursive: true });
+    writeFileSync(node, '#!/bin/sh\necho REAL\n');
+    chmodSync(node, 0o755);
+    const nvm = join(home, '.nvm');
+    mkdirSync(join(nvm, 'versions'), { recursive: true });
+    const env0 = { HOME: home } as NodeJS.ProcessEnv;
+    ensureAuthorityDirs(home, env0);
+    ensureOperatorProtectedPaths({ home, env: env0, orgRoot: cwd });
+    const guard = prepareGitGuard({
+      level: 'commit',
+      stateDir: join(base, 'guard'),
+      excludeSandboxPlaceholders: true,
+      protectedGitDirs: [gitCommonDir(cwd) as string],
+    });
+    const { sandbox } = buildClaudeRestrictions(
+      guard as NonNullable<typeof guard>,
+      undefined,
+      { cwd, orgRoot: cwd, home, tmp: base, env: env0 },
+      true,
+    );
+    const command = [
+      `echo "RUN=$(${node})"`,
+      `echo "NODE=$(${JSON.stringify(process.execPath)} -e 'process.stdout.write("ok")')"`,
+      `echo EVIL > ${node} 2>/dev/null; echo "W1=$?"`,
+      `echo EVIL > ${nvm}/versions/planted 2>/dev/null; echo "W2=$?"`,
+      `mv ${share} ${share}.x 2>/dev/null; echo "R1=$?"`,
+      `mv ${home}/.local ${home}/.local.x 2>/dev/null; echo "R2=$?"`,
+      `echo ok > ${cwd}/work.txt; echo "CWDW=$?"`,
+    ].join('; ');
+    const server = await scriptedApi(command);
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      HOME: home,
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+      ANTHROPIC_API_KEY: ['test', 'toolchain'].join('-'),
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+      CLAUDECODE: undefined,
+      CLAUDE_CONFIG_DIR: undefined,
+      MONOMIND_ORGRT_OPERATOR_DIR: undefined,
+    };
+    delete env.CLAUDE_CODE_OAUTH_TOKEN;
+    const out: string[] = [];
+    try {
+      for await (const m of query({
+        prompt: 'go',
+        options: {
+          cwd,
+          env,
+          settingSources: [],
+          maxTurns: 3,
+          permissionMode: 'bypassPermissions',
+          allowDangerouslySkipPermissions: true,
+          sandbox: sandbox as never,
+        },
+      })) {
+        if (m.type !== 'user' || !Array.isArray(m.message.content)) continue;
+        for (const b of m.message.content)
+          if (b.type === 'tool_result')
+            out.push(typeof b.content === 'string' ? b.content : JSON.stringify(b.content));
+      }
+    } finally {
+      server.close();
+    }
+    const text = out.join('\n');
+    expect(text, text).toMatch(/CWDW=0/);
+    expect(text).toMatch(/RUN=REAL/);
+    expect(text).toMatch(/NODE=ok/);
+    for (const k of ['W1', 'W2', 'R1', 'R2']) expect(text).not.toMatch(new RegExp(`${k}=0\\b`));
+    expect(readFileSync(node, 'utf8')).toContain('echo REAL');
+    expect(existsSync(join(nvm, 'versions', 'planted'))).toBe(false);
+    expect(existsSync(share)).toBe(true);
   }, 90_000);
 });

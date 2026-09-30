@@ -11,16 +11,22 @@
  *     writes while a role uses it (ROLE_WRITABLE_MONOMIND);
  *   - `<project>/.monomind/org-skills/` (the project skill library);
  *   - `~/.npm/_npx` (what `npx -y monomind …` runs), `~/.npmrc`,
- *     `~/.local/bin`, and shell startup files beyond HOME_DENY_WRITE.
+ *     `~/.local/bin`, and shell startup files beyond HOME_DENY_WRITE;
+ *   - #527: the node, npm, claude and monomind installs the operator's
+ *     processes run, and the version-manager roots they live in
+ *     (operator-toolchain-paths.ts).
  *
  * Enforced three ways: the SDK sandbox's `denyWrite`, read-only binds in the
- * bubblewrap authority mask, and the file tools' deny pass (policy.ts). An
+ * bubblewrap authority mask, and the file tools' deny pass (policy.ts). The
+ * directories on the way to them are mount points in both OS layers
+ * (operatorMountPoints), so none can be renamed aside and replaced. An
  * explicit, signed `policy.sandbox.allowWrite` entry at or inside one of
  * these paths is the opt-out for an org that really must write it.
  */
 
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
+import { mountPointAncestors, operatorToolchainPaths } from './operator-toolchain-paths.js';
 
 /** `~/.monomind` entries a role's own `monomind` commands write: browser
  *  automation state, the embedding-model cache, per-project memory, update
@@ -197,8 +203,21 @@ function protectedCandidates(ctx: ProtectedCtx): string[] {
     join(mmHome, 'enable-terminal.json'),
     ...monomindEntries,
     ...HOME_OPERATOR_EXEC.map((p) => join(ctx.home, p)),
+    // #527: never one that holds the role's own work tree.
+    ...operatorToolchainPaths(ctx.home, ctx.env).filter((t) => !roots.some((r) => within(t, r))),
   ];
   return [...new Set(paths)];
+}
+
+/** #527: the directories on the way to each protected path that a role could
+ *  rename aside (operator-toolchain-paths.ts's mountPointAncestors). The SDK
+ *  sandbox lists them in allowWrite and the mask binds them onto themselves:
+ *  either way a mount point, which cannot be renamed. */
+export function operatorMountPoints(ctx: ProtectedCtx): string[] {
+  return mountPointAncestors(operatorProtectedPaths(ctx), {
+    home: ctx.home,
+    roots: [ctx.orgRoot, ctx.cwd].filter((r): r is string => !!r),
+  });
 }
 
 /** Paths the bubblewrap mask binds read-only: the protected paths plus the

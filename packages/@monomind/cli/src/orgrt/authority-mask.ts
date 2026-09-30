@@ -37,9 +37,13 @@
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { dashboardCredentialPaths, HOME_DENY_WRITE, operatorDirOverride } from './file-roots.js';
-import { maskReadOnlyPaths, monomindMaskLayout } from './operator-protected-paths.js';
+import {
+  maskReadOnlyPaths,
+  monomindMaskLayout,
+  operatorMountPoints,
+} from './operator-protected-paths.js';
 import { ensureOrgWorkDirs, orgsMaskLayout } from './org-authority-files.js';
 import { realPath } from './policy-paths.js';
 
@@ -95,6 +99,13 @@ export function authorityMaskArgs(ctx: {
   allowWrite?: string[];
 }): string[] {
   const args = ['--dev-bind', '/', '/'];
+  // #527: the directories on the way to what the operator's processes run
+  // (`~/.local`, `~/.local/share`, …) bound onto themselves, so none can be
+  // renamed aside and a new toolchain planted in its place. First, so the
+  // binds below nest inside these mount points instead of covering them.
+  const anchors = [...new Set(operatorMountPoints(ctx).map(realPath))];
+  for (const d of anchors) args.push('--bind', d, d);
+  const afterAnchors = args.length;
   // #502 review: ~/.monomind read-only, only its role-writable entries bound
   // back — first, so a work tree below it (binds further down) still opens.
   const mm = monomindMaskLayout(ctx.home, ctx.env);
@@ -116,14 +127,29 @@ export function authorityMaskArgs(ctx: {
   for (const d of orgs.readOnly) args.push('--ro-bind', d, d);
   for (const d of orgs.writable) args.push('--bind', d, d);
   for (const f of orgs.files) args.push('--ro-bind', f, f);
+  // A writable bind above whose source holds one of those mount points hid
+  // it again (bwrap binds the host's tree): repeat it.
+  const covering = bindTargets(args.slice(afterAnchors), '--bind');
+  for (const d of anchors)
+    if (covering.some((t) => d !== t && d.startsWith(t.endsWith(sep) ? t : t + sep)))
+      args.push('--bind', d, d);
   // #502 review: what the operator's own processes run or trust, and the
   // shell/git config that would undo the guard.
-  for (const p of maskReadOnlyPaths({ ...ctx, homeDenyWrite: HOME_DENY_WRITE }).map(realPath))
+  for (const p of new Set(
+    maskReadOnlyPaths({ ...ctx, homeDenyWrite: HOME_DENY_WRITE }).map(realPath),
+  ))
     args.push('--ro-bind', p, p);
   // Last, so that no bind above can uncover them.
   for (const d of hidden) if (existsSync(d)) args.push('--tmpfs', d);
   for (const f of dashboardCredentialPaths(ctx.roots)) args.push('--ro-bind', '/dev/null', f);
   return args;
+}
+
+/** Destinations of the `flag` binds in bwrap `args`. */
+function bindTargets(args: string[], flag: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) if (args[i] === flag) out.push(args[i + 2]);
+  return out;
 }
 
 let probed: { available: boolean; reason?: string } | undefined;
