@@ -7,7 +7,7 @@
  * the right key when it is.
  */
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OrgBus } from '../../src/orgrt/bus.js';
@@ -17,7 +17,12 @@ import { runAgentSession } from '../../src/orgrt/session.js';
 import { SessionLedger } from '../../src/orgrt/session-ledger.js';
 import { resolveRoleRuntime } from '../../src/orgrt/runner-resolve.js';
 
-const dir = () => mkdtempSync(join(tmpdir(), 'rtkey-562-'));
+const made: string[] = [];
+const dir = () => {
+  const d = mkdtempSync(join(tmpdir(), 'rtkey-562-'));
+  made.push(d);
+  return d;
+};
 /** The ledger's persisted records, reduced to their key and session id. */
 const records = (file: string) =>
   (JSON.parse(readFileSync(file, 'utf8')).records as any[]).map(({ role, runtime, taskKey, sessionId }) => ({
@@ -41,6 +46,7 @@ beforeEach(() => {
   delete process.env.MONOMIND_RUNTIME;
 });
 afterEach(() => {
+  for (const d of made.splice(0)) rmSync(d, { recursive: true, force: true });
   if (savedRuntimeEnv === undefined) delete process.env.MONOMIND_RUNTIME;
   else process.env.MONOMIND_RUNTIME = savedRuntimeEnv;
 });

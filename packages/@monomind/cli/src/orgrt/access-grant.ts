@@ -14,6 +14,7 @@ import { computeAccessAckHash } from './access-ack.js';
 import { readFullAccessGrantKey, verifyAccessAckSignature } from './access-grant-key.js';
 import { fullAccessTaintFindings } from './access-taint.js';
 import { runnerSpec } from './runner-registry.js';
+import { effectiveRoleRuntime } from './runner-specs.js';
 import type { OrgDef, OrgRole } from './types.js';
 
 export type AccessState = 'active' | 'suspended' | 'unattended-blocked';
@@ -56,7 +57,9 @@ export function resolveRoleAccess(
   const declared = (role.policy?.access ?? 'scoped') as 'scoped' | 'full';
   if (declared !== 'full') return { access: 'scoped', declared: 'scoped' };
 
-  const runtimeId = opts.runtimeId ?? role.runtime ?? def.runtime ?? 'claude';
+  // #567: the runner that hosts the role, provider.kind included.
+  const runtimeId =
+    opts.runtimeId ?? effectiveRoleRuntime(role.runtime, def.runtime, role.provider?.kind);
   const spec = runnerSpec(runtimeId);
   if (!spec?.supportsFullAccess) {
     return {

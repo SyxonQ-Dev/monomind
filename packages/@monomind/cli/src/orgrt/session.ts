@@ -7,8 +7,7 @@ import { Mailbox } from './mailbox.js';
 import { beginPlantWatch } from './planted-paths.js';
 import type { TokenUsage } from './policy.js';
 import { createRoleTmpdir, removeRoleTmpdir, roleTmpBase } from './role-tmpdir.js';
-import { resolveRoleRuntime } from './runner-resolve.js';
-import { BASE_SPECS } from './runner-specs.js';
+import { effectiveRoleRuntime } from './runner-resolve.js';
 import { FaultRestarts, ProcessFaultError } from './sandbox-fault.js';
 import type { SessionStartReason } from './session-ledger.js';
 import {
@@ -149,12 +148,11 @@ async function runAgentSessionLoop(opts: SessionOpts, tmp: SessionTmpdirs): Prom
   // resolves it (a provider.kind of vercel-api-key runs on 'vercel').
   const configuredRuntime = opts.role.runtime ?? opts.def?.runtime;
   // An unknown or empty MONOMIND_RUNTIME selects no runner, so Claude hosts it.
-  const resolvedRuntime = resolveRoleRuntime(
+  const runtimeKey = effectiveRoleRuntime(
     opts.role.runtime,
     opts.def?.runtime,
     opts.role.provider?.kind,
   );
-  const runtimeKey = BASE_SPECS.find((s) => s.id === resolvedRuntime)?.id ?? 'claude';
   // Older builds filed such a role's records under 'claude'; such a record
   // holds this same runner's session, so it is still resumed (the ledger only
   // moves records those builds wrote). A role that set its runtime was never

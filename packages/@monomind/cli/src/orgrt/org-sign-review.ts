@@ -9,6 +9,7 @@
 
 import { authorityMaskAvailability } from './authority-mask.js';
 import { sandboxAvailability } from './role-sandbox-restrictions.js';
+import { effectiveRoleRuntime } from './runner-specs.js';
 import { listSkills } from './skill-library.js';
 
 /** #502 review round 2: org skills that don't ship with monomind — from the
@@ -62,7 +63,8 @@ export function unconfinedRoles(
   for (const r of Array.isArray(def.roles) ? def.roles : []) {
     const role = obj(r);
     const policy = obj(role.policy);
-    const runtime = String(role.runtime ?? def.runtime ?? 'claude');
+    // #567: the runner that hosts it, provider.kind included.
+    const runtime = effectiveRoleRuntime(role.runtime, def.runtime, obj(role.provider).kind);
     const id = String(role.id);
     if (policy.access === 'full') {
       out.push({ id, why: 'policy.access full (no sandbox, no mask)' });
@@ -113,7 +115,7 @@ export function describeOrgAuthority(raw: unknown): string[] {
     const role = obj(r);
     const policy = obj(role.policy);
     const head = [
-      `runtime ${String(role.runtime ?? def.runtime ?? 'claude')}`,
+      `runtime ${effectiveRoleRuntime(role.runtime, def.runtime, obj(role.provider).kind)}`,
       `git ${String(policy.git ?? 'read')}`,
       `access ${String(policy.access ?? 'scoped')}`,
     ];
