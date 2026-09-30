@@ -5,6 +5,12 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { writeJsonFileAtomic } from '../utils/json-file.js';
+import {
+  type ApprovalWaitResult,
+  notifyApprovalWaiters,
+  registerApprovalWait,
+  resolverLabel,
+} from './approval-waiters.js';
 import type { OrgDaemon } from './daemon.js';
 import { summarizeToolInput } from './policy.js';
 import { ORG_DIR } from './types.js';
@@ -142,13 +148,37 @@ export function clearApprovalsForFreshStart(daemon: OrgDaemon, org: string): voi
  *
  *  R5: serialized per-org via withApprovalLock() — concurrent checkApproval and
  *  setApproval calls previously raced on this.approvals + approvals.json. */
-export function checkApproval(
+export async function checkApproval(
   daemon: OrgDaemon,
   org: string,
   role: string,
   rawAction: string,
   input: Record<string, unknown> = {},
 ): Promise<boolean | null> {
+  return (await checkApprovalEntry(daemon, org, role, rawAction, input)).approved;
+}
+
+/** #553: when a request stays pending, whether (and how long) the call waits
+ *  for its resolution — asked with the normalized action, inside the lock. */
+export type ApprovalWaitPlan = (
+  action: string,
+) => { timeoutMs: number; stillLive: () => boolean } | undefined;
+
+/** #553: checkApproval plus the queued entry it matched or created. With
+ *  `planWait`, a still-pending request gets its waiter registered here,
+ *  inside the approvals lock, so setApproval cannot resolve it unseen. */
+export function checkApprovalEntry(
+  daemon: OrgDaemon,
+  org: string,
+  role: string,
+  rawAction: string,
+  input: Record<string, unknown> = {},
+  planWait?: ApprovalWaitPlan,
+): Promise<{
+  approved: boolean | null;
+  entry?: ApprovalEntry;
+  wait?: Promise<ApprovalWaitResult>;
+}> {
   const action = normalizeToolAction(rawAction);
   const fingerprint = fingerprintAction(action, input);
   return withApprovalLock(daemon, org, async () => {
@@ -158,15 +188,16 @@ export function checkApproval(
     );
 
     // If already approved/denied, return that decision
-    if (existing && existing.approved !== null) return existing.approved;
+    if (existing && existing.approved !== null)
+      return { approved: existing.approved, entry: existing };
 
     // A role's policy.autoApproveTools can name specific sensitive actions it's
     // pre-trusted for, skipping the human-approval pause entirely for those.
     const roleDef = daemon.orgs.get(org)?.def.roles.find((r) => r.id === role);
-    if (roleDef?.policy?.autoApproveTools?.includes(action)) return true;
+    if (roleDef?.policy?.autoApproveTools?.includes(action)) return { approved: true };
     // #345: `org run --auto-approve <tools>` pre-approves the named actions for
     // every role, for this run only.
-    if (daemon.runAutoApprove?.get(org)?.includes(action)) return true;
+    if (daemon.runAutoApprove?.get(org)?.includes(action)) return { approved: true };
 
     // Require human approval for sensitive actions: the built-in list plus the
     // role's own policy.approvalTools (bare names, e.g. a provider tool
@@ -209,10 +240,12 @@ export function checkApproval(
           input: entry.input ?? summary,
         },
       });
-      return null; // Pending human approval
+      const plan = planWait?.(action);
+      const wait = plan ? registerApprovalWait(entry, plan.timeoutMs, plan.stillLive) : undefined;
+      return { approved: null, entry, wait }; // Pending approval
     }
 
-    return true; // Auto-approved for non-sensitive actions
+    return { approved: true }; // Auto-approved for non-sensitive actions
   });
 }
 
@@ -325,17 +358,31 @@ export async function setApproval(
     const approvalsPath = join(daemon.root, ORG_DIR, org, 'approvals.json');
     writeJsonFileAtomic(approvalsPath, { approvals: pending });
 
+    // #553: a call waiting inline on a request gets the verdict directly (it
+    // runs or is refused now), so the role must not also be told to repeat
+    // it — that would run it twice.
+    const notWaiting = items.filter((item) => !notifyApprovalWaiters(item, approved));
+
     // Notify the waiting agent via its mailbox
     const running = daemon.orgs.get(org);
     const agent = running?.agents.get(role);
-    if (agent && !agent.mailbox.isClosed) {
+    if (agent && !agent.mailbox.isClosed && notWaiting.length) {
       // #492: the `[approval] <action>: APPROVED|DENIED` prefix is unchanged;
       // the rest tells the role what the verdict means for its next step.
+      // #553: it names who resolved it, and when some of the resolved calls
+      // were waiting (and so already ran or were refused), which ones this
+      // message is about.
+      const who = resolverLabel(resolver);
+      const only =
+        notWaiting.length < items.length
+          ? ` This is only about: ${notWaiting.map((i) => JSON.stringify(i.input ?? {}).slice(0, 200)).join('; ')}. The call that was waiting for this decision already got it — do not repeat that one.`
+          : '';
       agent.mailbox.push(
         `[approval] ${action}: ${approved ? 'APPROVED' : 'DENIED'} — ` +
           (approved
-            ? `a human approved your pending ${action} call(s); repeat the identical call now and it will run.`
-            : `a human refused your pending ${action} call(s); do not retry them — choose another approach. Your task queue is not stuck.`),
+            ? `${who} approved your pending ${action} call(s); repeat the identical call now and it will run.`
+            : `${who} refused your pending ${action} call(s); do not retry them — choose another approach. Your task queue is not stuck.`) +
+          only,
       );
     }
 

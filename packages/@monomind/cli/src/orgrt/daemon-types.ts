@@ -89,6 +89,16 @@ export interface RunningOrg {
   busEvents: () => BusEvent[];
   /** Roles not yet spawned — spawned lazily on first message. */
   pendingRoles?: Map<string, OrgRole>;
+  /** #551: roles taken out of pendingRoles whose lazy spawn waits — for a
+   *  run_config.max_concurrent_agents slot or for host resources
+   *  (scheduler-integration.ts, one retry loop per role). Still a known
+   *  assignee: its tasks wait here instead of reading as unresolved, and
+   *  messages to it are queued. `noted` holds the task ids already audited as
+   *  waiting. */
+  deferredSpawns?: Map<
+    string,
+    { role: OrgRole; gate: 'concurrency' | 'resources'; noted: Set<string> }
+  >;
   /** Spawn a pending role on demand — or, with a checkpoint, resume one
    *  (budget-closure.ts reopens a budget-closed role this way). */
   spawnRole?: (role: OrgRole, roleCheckpoint?: RoleCheckpoint) => void;
@@ -202,6 +212,11 @@ export interface DaemonOpts {
   /** Override the whole-org restart backoff after the boss terminally crashes (tests only;
    *  default [10000,30000]ms). */
   bossRestartBackoffMs?: number[];
+  /** Override how often a max_concurrent_agents-deferred spawn re-checks for a
+   *  free slot, and how many checks before it gives up (tests only; default
+   *  5000ms × 180). */
+  concurrencyDeferPollMs?: number;
+  concurrencyDeferMaxAttempts?: number;
   /** Override the silent-session abort timeout passed to every role session (tests only;
    *  default 4 minutes, see session.ts). */
   silentSessionMs?: number;

@@ -1,16 +1,53 @@
 // packages/@monomind/cli/src/orgrt/session-gate.ts
 // Extracted from session.ts — the canUseTool gate every role session runs behind.
+import type { ApprovalVerdict } from './approval-decider.js';
+import { resolverLabel } from './approval-waiters.js';
 import type { RoleFence } from './fence.js';
 import { scanInput } from './fence.js';
 import type { Decision, PolicyEngine } from './policy.js';
 import type { SessionOpts } from './session-types.js';
 import type { DecisionKind } from './types.js';
 
+/** #553: a beforeTool result as a verdict; a bare boolean/null is human-owned. */
+function asVerdict(result: boolean | null | ApprovalVerdict): ApprovalVerdict {
+  return typeof result === 'object' && result !== null
+    ? result
+    : { approved: result, owner: 'human' };
+}
+
+/** #553: what the gate does with a beforeTool result — run the call, or
+ *  deny it with the message and decision kind that fit who owns it. */
+export function approvalGateOutcome(
+  toolName: string,
+  result: boolean | null | ApprovalVerdict,
+): { allow: true } | { allow: false; message: string; kind: DecisionKind } {
+  const v = asVerdict(result);
+  if (v.approved === true) return { allow: true };
+  if (v.approved === false)
+    return { allow: false, message: approvalDeniedMessage(toolName, v), kind: 'approval-denied' };
+  return { allow: false, message: approvalPendingMessage(toolName, v), kind: 'approval-pending' };
+}
+
 /** #492: the tool result a role sees while ONE call waits for a human's
  *  approve/deny. Roles read the old one-liner as "the task queue is stuck";
  *  this says what is waiting and what to do meanwhile. Keeps the leading
- *  "pending human approval" phrase the old text had. */
-export function approvalPendingMessage(toolName: string): string {
+ *  "pending human approval" phrase the old text had.
+ *  #553: a request the org's autonomy routes away from a person, which the
+ *  call already waited on, says so. It may still have escalated to a person
+ *  (decider failure, a cap, an `escalate` verdict), so it names neither. */
+export function approvalPendingMessage(toolName: string, verdict?: ApprovalVerdict): string {
+  if (verdict?.owner === 'decider') {
+    const why = verdict.cancelled
+      ? 'the org or this role is stopping'
+      : `no decision within ${Math.round((verdict.waitedMs ?? 0) / 1000)}s`;
+    return (
+      `Tool "${toolName}" waited for the org's autonomy (${verdict.decider ?? 'decider'}) to decide this one ${toolName} call, but ${why}. ` +
+      `The request stays queued: a decider or a human will resolve it, and an [approval] message follows. ` +
+      `Only this call is held; your task queue is not stuck and your other tools still work. ` +
+      `Meanwhile, continue with other work that does not need this call, and do not retry this identical call while it is pending. ` +
+      `If the [approval] message says it was approved, repeat the identical call and it will run; if it was denied, choose another approach.`
+    );
+  }
   return (
     `Tool "${toolName}" is pending human approval — this one ${toolName} call is waiting for a human to approve or deny it via 'monomind org approve/deny'. ` +
     `Only this call is held; your task queue is not stuck and your other tools still work. ` +
@@ -21,9 +58,11 @@ export function approvalPendingMessage(toolName: string): string {
 
 /** #492: the tool result after a human denied ONE call. The identical call
  *  stays denied (checkApproval keys decisions on the call's fingerprint). */
-export function approvalDeniedMessage(toolName: string): string {
+export function approvalDeniedMessage(toolName: string, verdict?: ApprovalVerdict): string {
+  // #553: named from who actually resolved it (a rule, a decider, a person).
+  const who = resolverLabel(verdict?.resolvedBy);
   return (
-    `Tool "${toolName}" was denied by guardrail approval — a human refused this one ${toolName} call. ` +
+    `Tool "${toolName}" was denied by guardrail approval — ${who} refused this one ${toolName} call. ` +
     `Your task queue is not stuck and your other tools still work. ` +
     `Do not retry the identical call (it stays denied); ` +
     (toolName === 'org_send'
@@ -104,23 +143,12 @@ export function gatedCanUseTool(
       return decision;
     }
     if (!beforeTool) return decision;
-    const approved = await beforeTool(roleId, toolName, input);
-    if (approved === false) {
-      const denied: Decision = {
-        behavior: 'deny',
-        message: approvalDeniedMessage(toolName),
-      };
-      onDeny?.(toolName, input, denied, 'approval-denied');
-      return denied;
-    }
-    if (approved === null) {
-      const pending: Decision = {
-        behavior: 'deny',
-        message: approvalPendingMessage(toolName),
-      };
-      onDeny?.(toolName, input, pending, 'approval-pending');
-      return pending;
-    }
-    return decision;
+    // #553: for a decider-owned request beforeTool waits (bounded) for the
+    // decider's verdict, so an approval there lets this call run now.
+    const outcome = approvalGateOutcome(toolName, await beforeTool(roleId, toolName, input));
+    if (outcome.allow) return decision;
+    const denied: Decision = { behavior: 'deny', message: outcome.message };
+    onDeny?.(toolName, input, denied, outcome.kind);
+    return denied;
   };
 }

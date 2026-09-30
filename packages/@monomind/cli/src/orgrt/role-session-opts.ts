@@ -166,7 +166,7 @@ export function buildRoleSessionOpts(
       return { threshold: cb.failure_threshold ?? 5, state: { failures: 0, tripped: false } };
     })(),
     beforeTool: (r: string, toolName: string, input: Record<string, unknown>) =>
-      daemon.checkApproval(name, r, toolName, input),
+      daemon.awaitApproval(name, r, toolName, input),
     fence: running.fences?.get(role.id),
     // ORG-1: gatedCanUseTool denials are a natural decision point — record them so
     // `org decisions` shows real traces instead of always reporting none.

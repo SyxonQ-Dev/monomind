@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import type { OrgToolDef } from './agent-runner.js';
 import type { TaskEvidence } from './completion-gate.js';
-import { approvalDeniedMessage, approvalPendingMessage } from './session-gate.js';
+import { approvalGateOutcome } from './session-gate.js';
 import { resolveSessionScope } from './session-ledger.js';
 import type { SessionOpts } from './session-types.js';
 import { skillTools } from './skill-tools.js';
@@ -357,9 +357,11 @@ export function buildOrgTools(opts: SessionOpts): OrgToolDef[] {
     schema: { to: z.string(), subject: z.string(), message: z.string() },
     handler: async (args) => {
       if (opts.beforeTool) {
-        const approved = await opts.beforeTool(role.id, 'org_send', args);
-        if (approved === false) return text(approvalDeniedMessage('org_send'));
-        if (approved === null) return text(approvalPendingMessage('org_send'));
+        const outcome = approvalGateOutcome(
+          'org_send',
+          await opts.beforeTool(role.id, 'org_send', args),
+        );
+        if (!outcome.allow) return text(outcome.message);
       }
       const receipt = await deliver(
         role.id,
