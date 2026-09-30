@@ -13,8 +13,9 @@ import { buildOrgTools } from './org-tools.js';
 import type { TokenUsage } from './policy.js';
 import { summarizeToolOutput } from './policy.js';
 import { resolveRoleProvider } from './provider.js';
-import { ensureRoleDeps, roleDepsFailure, roleDepsInstalled, waitRoleDeps } from './role-deps.js';
+import { ensureRoleDeps, roleDepsAudit, waitRoleDeps } from './role-deps.js';
 import { resolveRoleGitEnforcement, roleAuthorityMask } from './role-sandbox.js';
+import { effectiveRoleRuntime } from './runner-resolve.js';
 import { BUDGET_STOP_SUBTYPE } from './runner-usage.js'; // #550: a runner's budget stop
 import { type FaultRestarts, ProcessFaultError } from './sandbox-fault.js';
 import { sandboxStubPaths, sandboxStubs } from './sandbox-stubs.js';
@@ -150,22 +151,11 @@ export async function runOneSession(
     // #559: the role cannot write ~/.monomind/deps, so the host installs what
     // it may need there first. Nothing to install: no await, no yield. An
     // org stop or a slow install does not hold the session start.
-    let deps = (opts.ensureRoleDeps ?? ensureRoleDeps)(runtimeKey);
+    const depsRuntime = effectiveRoleRuntime(role.runtime, opts.def?.runtime, role.provider?.kind);
+    let deps = (opts.ensureRoleDeps ?? ensureRoleDeps)(depsRuntime);
     if (deps instanceof Promise) deps = await waitRoleDeps(deps, abort.signal);
-    if (deps.status === 'installed')
-      bus.emit({
-        type: 'audit',
-        from: role.id,
-        reason: 'role-deps-installed',
-        msg: roleDepsInstalled(),
-      });
-    if (deps.status === 'failed')
-      bus.emit({
-        type: 'audit',
-        from: role.id,
-        reason: 'role-deps-missing',
-        msg: roleDepsFailure(deps.error),
-      });
+    const depsAudit = roleDepsAudit(deps);
+    if (depsAudit) bus.emit({ type: 'audit', from: role.id, ...depsAudit });
     // Before the sandbox is built: it can only mask directories that exist.
     ensureAuthorityDirs(homedir(), process.env);
     // #502 review: and the operator-protected paths a role must not plant.

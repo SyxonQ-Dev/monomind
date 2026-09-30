@@ -135,6 +135,9 @@ export interface EnsureOptions {
   withoutSdkBinary?: boolean;
   /** Appended to the install notice. */
   note?: string;
+  /** The operator asked for this install (`monomind deps install`), so
+   *  MONOMIND_NO_AUTO_INSTALL does not stop it. */
+  requested?: boolean;
 }
 
 /** Flags for the printed manual command (plain `npm install`, no lockfile). */
@@ -279,14 +282,15 @@ export function isInstalled(
  *  checked when it loads. */
 export function optionalDependencyPresent(
   name: OptionalDependencyName,
-  opts: Pick<EnsureOptions, 'env' | 'resolveOwn' | 'host'> = {},
+  opts: Pick<EnsureOptions, 'env' | 'resolveOwn' | 'host' | 'withoutSdkBinary'> = {},
 ): boolean {
   try {
     if (ownEntry(name, opts.resolveOwn ?? defaultResolveOwn)) return true;
   } catch {
     // not resolvable from here: the deps dir decides
   }
-  return isInstalled(name, dependencyDir(name, opts.env ?? process.env), opts.host ?? thisHost());
+  const dir = dependencyDir(name, opts.env ?? process.env);
+  return isInstalled(name, dir, opts.host ?? thisHost(), !!opts.withoutSdkBinary);
 }
 
 /** The errno code when this process cannot write the deps root (an org
@@ -509,7 +513,7 @@ export async function ensureOptionalDependency<T = unknown>(
   };
   if (isInstalled(name, dir, host, noBinary)) return load();
 
-  if (autoInstallDisabled(env)) {
+  if (autoInstallDisabled(env) && !opts.requested) {
     throw new OptionalDependencyError(
       `${spec.feature} needs ${name}@${spec.version} (${size}), which is not installed, ` +
         `and ${NO_AUTO_INSTALL_ENV} is set, so monomind will not install it. Install it with:\n` +

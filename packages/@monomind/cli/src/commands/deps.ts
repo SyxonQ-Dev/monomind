@@ -26,7 +26,8 @@ const installCommand: Command = {
       return { success: false, exitCode: 1 };
     }
     try {
-      await loadClaudeSdk();
+      // An explicit request: MONOMIND_NO_AUTO_INSTALL only stops automatic installs.
+      await loadClaudeSdk(undefined, { requested: true });
     } catch (e) {
       output.printError(e instanceof Error ? e.message : String(e));
       return { success: false, exitCode: 1 };

@@ -10,16 +10,21 @@
  * sandbox, so it installs the SDK here, through the same hash-pinned
  * installer (utils/optional-deps.ts), before it spawns the role.
  *
- * Which roles need it: a claude-runtime role always does. Any role with a
- * shell can run `agent exec --runtime claude`, which cannot be told from its
- * definition, so the SDK is also installed whenever the claude runtime is
- * available on this host. Inside a role nothing is installed; a missing SDK
- * fails there at once with the operator's command (`monomind deps install`).
+ * Which roles get it: those whose effective runtime (runner-resolve.ts's
+ * effectiveRoleRuntime, the resolution runner selection uses) is claude. A
+ * role on another runtime that runs `agent exec --runtime claude` is not
+ * worth a 300 MB download for every codex-only org: inside a role nothing is
+ * installed, and a missing SDK fails there at once with the operator's
+ * command (`monomind deps install`). MONOMIND_NO_AUTO_INSTALL turns the host
+ * install off (offline or no-network hosts).
  */
-import { OPTIONAL_DEPENDENCIES, optionalDependencyPresent } from '../utils/optional-deps.js';
+import {
+  autoInstallDisabled,
+  OPTIONAL_DEPENDENCIES,
+  optionalDependencyPresent,
+} from '../utils/optional-deps.js';
 import { loadClaudeSdk } from './claude-sdk.js';
 import { roleContextMarker } from './org-signature.js';
-import { locateBinary } from './runner-registry.js';
 
 const SDK = '@anthropic-ai/claude-agent-sdk';
 
@@ -27,20 +32,19 @@ export interface RoleDepsProbe {
   env: NodeJS.ProcessEnv;
   /** The pinned SDK loads without an install. */
   sdkPresent: () => boolean;
-  /** A `claude` binary is on PATH, so the claude runtime is available. */
-  claudeOnPath: () => boolean;
   /** Installs and verifies the pinned SDK. */
   install: () => Promise<unknown>;
 }
 
 export type RoleDepsResult =
-  | { status: 'present' | 'installed' | 'not-needed' | 'in-role' }
+  | { status: 'present' | 'installed' | 'not-needed' | 'in-role' | 'disabled' }
   | { status: 'failed'; error: string };
 
 export const defaultRoleDepsProbe = (env: NodeJS.ProcessEnv = process.env): RoleDepsProbe => ({
   env,
-  sdkPresent: () => optionalDependencyPresent(SDK, { env }),
-  claudeOnPath: () => locateBinary('claude', env) !== null,
+  // An SDK installed without its binary (#522, an installed Claude Code runs
+  // instead) is present too.
+  sdkPresent: () => optionalDependencyPresent(SDK, { env, withoutSdkBinary: true }),
   install: () => loadClaudeSdk(),
 });
 
@@ -74,9 +78,10 @@ export function ensureRoleDeps(
   state: RoleDepsState = processState,
 ): RoleDepsResult | Promise<RoleDepsResult> {
   if (roleContextMarker(probe.env)) return { status: 'in-role' };
-  if (runtime !== 'claude' && !probe.claudeOnPath()) return { status: 'not-needed' };
+  if (runtime !== 'claude') return { status: 'not-needed' };
   if (state.done) return state.done;
   if (probe.sdkPresent()) return { status: 'present' };
+  if (autoInstallDisabled(probe.env)) return { status: 'disabled' };
   if (state.failed && state.now() - state.failed.at < ROLE_DEPS_RETRY_MS)
     return state.failed.result;
   state.inFlight ??= (async (): Promise<RoleDepsResult> => {
@@ -130,3 +135,10 @@ export const roleDepsFailure = (error: string): string =>
   `could not install ${SDK}@${OPTIONAL_DEPENDENCIES[SDK].version} before starting the role, ` +
   `so \`agent exec --runtime claude\` will fail inside it until the operator runs ` +
   `\`monomind deps install\`: ${error}`;
+
+/** The audit event for a session start's install result, if it needs one. */
+export function roleDepsAudit(r: RoleDepsResult): { reason: string; msg: string } | undefined {
+  if (r.status === 'installed') return { reason: 'role-deps-installed', msg: roleDepsInstalled() };
+  if (r.status === 'failed') return { reason: 'role-deps-missing', msg: roleDepsFailure(r.error) };
+  return undefined;
+}

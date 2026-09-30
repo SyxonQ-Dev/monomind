@@ -13,6 +13,7 @@ import { depsCommand } from '../../src/commands/deps.js';
 import { OrgBus } from '../../src/orgrt/bus.js';
 import { Mailbox } from '../../src/orgrt/mailbox.js';
 import { PolicyEngine } from '../../src/orgrt/policy.js';
+import { effectiveRoleRuntime } from '../../src/orgrt/runner-resolve.js';
 import {
   ensureRoleDeps,
   newRoleDepsState,
@@ -24,10 +25,12 @@ import { runAgentSession, type SessionOpts } from '../../src/orgrt/session.js';
 import { OrgDefSchema } from '../../src/orgrt/types.js';
 import type { CommandContext } from '../../src/types.js';
 import {
+  dependencyDir,
   depsRoot,
   ensureOptionalDependency,
   manualInstallCommand,
   OptionalDependencyError,
+  optionalDependencyPresent,
 } from '../../src/utils/optional-deps.js';
 import {
   FAKE_PINS,
@@ -35,13 +38,19 @@ import {
   HOST,
   notFound,
   SDK,
+  writeFakeSdk,
 } from '../../src/__tests__/fixtures/optional-deps-fixture.js';
+
+const loadClaudeSdk = vi.hoisted(() => vi.fn(async (..._a: unknown[]) => ({})));
+vi.mock('../../src/orgrt/claude-sdk.js', async (orig) => ({
+  ...(await orig<typeof import('../../src/orgrt/claude-sdk.js')>()),
+  loadClaudeSdk,
+}));
 
 function probe(over: Partial<RoleDepsProbe> = {}): RoleDepsProbe & { installs: number } {
   const p = {
     env: {} as NodeJS.ProcessEnv,
     sdkPresent: () => false,
-    claudeOnPath: () => false,
     installs: 0,
     install: async () => {
       p.installs++;
@@ -58,21 +67,21 @@ describe('ensureRoleDeps (host side)', () => {
     expect(p.installs).toBe(1);
   });
 
-  it('installs it for any role when the claude runtime is available (agent exec may use it)', async () => {
-    const p = probe({ claudeOnPath: () => true });
-    expect(await ensureRoleDeps('codex', p, newRoleDepsState())).toEqual({ status: 'installed' });
-    expect(p.installs).toBe(1);
+  it('does not download the SDK for a role that runs another runtime', async () => {
+    const p = probe();
+    expect(await ensureRoleDeps('codex', p, newRoleDepsState())).toEqual({ status: 'not-needed' });
+    expect(p.installs).toBe(0);
+  });
+
+  it('installs nothing when MONOMIND_NO_AUTO_INSTALL is set (offline hosts)', async () => {
+    const p = probe({ env: { MONOMIND_NO_AUTO_INSTALL: '1' } });
+    expect(await ensureRoleDeps('claude', p, newRoleDepsState())).toEqual({ status: 'disabled' });
+    expect(p.installs).toBe(0);
   });
 
   it('does nothing when the SDK is already present', async () => {
     const p = probe({ sdkPresent: () => true });
     expect(await ensureRoleDeps('claude', p, newRoleDepsState())).toEqual({ status: 'present' });
-    expect(p.installs).toBe(0);
-  });
-
-  it('does nothing for a non-claude role on a host without the claude runtime', async () => {
-    const p = probe();
-    expect(await ensureRoleDeps('hermes', p, newRoleDepsState())).toEqual({ status: 'not-needed' });
     expect(p.installs).toBe(0);
   });
 
@@ -122,6 +131,40 @@ describe('ensureRoleDeps (host side)', () => {
     expect(b).toEqual({ status: 'installed' });
     expect(p.installs).toBe(1);
     expect(ensureRoleDeps('claude', p, state)).toEqual({ status: 'present' });
+  });
+});
+
+describe('effectiveRoleRuntime (the runtime runner selection picks)', () => {
+  it('follows role runtime > org runtime > provider kind > MONOMIND_RUNTIME > claude', () => {
+    expect(effectiveRoleRuntime('claude', 'codex', 'codex', undefined, { MONOMIND_RUNTIME: 'pi' })).toBe(
+      'claude',
+    );
+    expect(effectiveRoleRuntime(undefined, 'codex', undefined, undefined, {})).toBe('codex');
+    expect(effectiveRoleRuntime(undefined, undefined, 'codex', undefined, { MONOMIND_RUNTIME: 'pi' })).toBe(
+      'codex',
+    );
+    expect(effectiveRoleRuntime(undefined, undefined, 'subscription', undefined, { MONOMIND_RUNTIME: 'pi' })).toBe(
+      'pi',
+    );
+    expect(effectiveRoleRuntime(undefined, undefined, undefined, undefined, {})).toBe('claude');
+  });
+
+  it('is claude when MONOMIND_RUNTIME names no runner (the default path runs)', () => {
+    expect(effectiveRoleRuntime(undefined, undefined, undefined, undefined, { MONOMIND_RUNTIME: 'nope' })).toBe(
+      'claude',
+    );
+  });
+});
+
+describe('optionalDependencyPresent', () => {
+  it('accepts the SDK installed without its bundled binary when asked to', () => {
+    const home = mkdtempSync(join(tmpdir(), 'mm-present-'));
+    const env = { MONOMIND_HOME: home };
+    writeFakeSdk(dependencyDir(SDK, env), 'light', { platform: false });
+    const o = { env, resolveOwn: notFound, host: HOST };
+    expect(optionalDependencyPresent(SDK, o)).toBe(false);
+    expect(optionalDependencyPresent(SDK, { ...o, withoutSdkBinary: true })).toBe(true);
+    rmSync(home, { recursive: true, force: true });
   });
 });
 
@@ -187,6 +230,34 @@ describe('runOneSession', () => {
     expect(order).toContain('spawn');
     expect(order.indexOf('ensure:codex')).toBeLessThan(order.indexOf('spawn'));
   });
+
+  it('passes the runtime runner selection resolves, provider kind included', async () => {
+    const runtimes: string[] = [];
+    const def = OrgDefSchema.parse({
+      name: 'x',
+      roles: [{ id: 'worker', provider: { kind: 'codex' } }],
+    });
+    const bus = new OrgBus('x', 'run-1', mkdtempSync(join(tmpdir(), 'role-deps-')));
+    const mailbox = new Mailbox();
+    mailbox.close();
+    const opts = {
+      org: 'x',
+      role: def.roles[0],
+      bus,
+      policy: new PolicyEngine('worker', {}, bus, '/tmp'),
+      mailbox,
+      cwd: '/tmp',
+      def,
+      deliver: async () => 'ok',
+      runner: { run: async function* () {} },
+      ensureRoleDeps: (runtime: string) => {
+        runtimes.push(runtime);
+        return { status: 'not-needed' as const };
+      },
+    } as unknown as SessionOpts;
+    await runAgentSession(opts).catch(() => {});
+    expect(runtimes[0]).toBe('codex');
+  });
 });
 
 describe('in a role, a missing SDK fails fast (#559)', () => {
@@ -226,6 +297,33 @@ describe('in a role, a missing SDK fails fast (#559)', () => {
 });
 
 describe('monomind deps install', () => {
+  it('is an explicit request: installs even with MONOMIND_NO_AUTO_INSTALL set', async () => {
+    const install = depsCommand.subcommands?.find((c) => c.name === 'install');
+    const saved = process.env.MONOMIND_NO_AUTO_INSTALL;
+    process.env.MONOMIND_NO_AUTO_INSTALL = '1';
+    loadClaudeSdk.mockClear();
+    try {
+      const r = await install!.action!({ args: [], flags: {} } as unknown as CommandContext);
+      expect(r).toMatchObject({ success: true });
+      expect(loadClaudeSdk).toHaveBeenCalledWith(undefined, { requested: true });
+    } finally {
+      if (saved === undefined) delete process.env.MONOMIND_NO_AUTO_INSTALL;
+      else process.env.MONOMIND_NO_AUTO_INSTALL = saved;
+    }
+  });
+
+  it('a requested install is not blocked by MONOMIND_NO_AUTO_INSTALL', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'mm-requested-'));
+    const env = { MONOMIND_HOME: home, MONOMIND_NO_AUTO_INSTALL: '1' };
+    const npm = fakeNpm('requested');
+    const o = { env, resolveOwn: notFound, log: vi.fn(), host: HOST, pins: FAKE_PINS, runNpm: npm.run };
+    await expect(ensureOptionalDependency(SDK, o)).rejects.toThrow(/MONOMIND_NO_AUTO_INSTALL/);
+    const mod = await ensureOptionalDependency<{ marker: string }>(SDK, { ...o, requested: true });
+    expect(mod.marker).toBe('requested');
+    expect(npm.calls).toHaveLength(1);
+    rmSync(home, { recursive: true, force: true });
+  });
+
   it('refuses to run inside an org role', async () => {
     const install = depsCommand.subcommands?.find((c) => c.name === 'install');
     const saved = process.env.MONOMIND_ORG_ROLE;

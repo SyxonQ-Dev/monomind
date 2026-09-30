@@ -45,7 +45,7 @@
 | `ui` | Start the Monomind Neural Control Room (web UI dashboard). Alias: `dashboard`. | 1 — open. `monomind dashboard open` logs a browser in to the running dashboard with a **one-time login link**; since 2.15.0 the dashboard's pages and human-decision routes require that login, so a bare `http://localhost:4242` visit is no longer enough. `--print` emits the link instead of opening a browser, for use over SSH. |
 | `events` | Stream events from the running dashboard to stdout as JSONL (pipe into `jq` to filter) | 0 — flat command, flags only |
 | `download-embeddings` | Download the semantic-routing embedding model (opt-in, ~88 MB) | 0 — flat command, flags only |
-| `deps` | Install the pinned Claude Agent SDK into `~/.monomind/deps`, for the operator to run outside any org role, where that directory is read-only (#559) | 1 — install |
+| `deps` | Install the pinned Claude Agent SDK into `~/.monomind/deps`, for the operator to run outside any org role, where that directory is read-only (#559). Runs even with `MONOMIND_NO_AUTO_INSTALL` set, which only turns off automatic installs | 1 — install |
 | `report-crash` | File a GitHub issue for a crash (internal; used by panic handlers) | – |
 | `crash-reporting` | Configure crash reporting | 3 — enable, disable, status |
 

@@ -16,6 +16,7 @@ import { PiRpcAgentRunner } from './pi-rpc-runner.js';
 import { PiAgentRunner } from './pi-runner.js';
 import { QwenRpcAgentRunner } from './qwen-rpc-runner.js';
 import { QwenAgentRunner } from './qwen-runner.js';
+import { BASE_SPECS } from './runner-specs.js';
 import type { ProviderConfig } from './types.js';
 import { VercelAgentRunner } from './vercel-runner.js';
 
@@ -128,6 +129,25 @@ export function resolveRunner(
   if (selected === 'aider') return new AiderAgentRunner();
   if (selected === 'dsh') return new DshAgentRunner();
   return undefined;
+}
+
+/** #559 review: the runtime resolveRoleRunner selects for a role, by the same
+ *  precedence: role runtime > org runtime > provider kind > MONOMIND_RUNTIME.
+ *  'claude' when it falls through to the default path, including a runtime
+ *  that names no runner. */
+export function effectiveRoleRuntime(
+  roleRuntime?: string,
+  orgRuntime?: string,
+  roleProviderKind?: ProviderKind,
+  orgProviderKind?: ProviderKind,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const selected =
+    roleRuntime ??
+    orgRuntime ??
+    autoRuntimeFromProvider(roleProviderKind ?? orgProviderKind) ??
+    env.MONOMIND_RUNTIME;
+  return selected && BASE_SPECS.some((s) => s.id === selected) ? selected : 'claude';
 }
 
 /** Per-session variant: a role's own `runtime` field wins over the org-level
