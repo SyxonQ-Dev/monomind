@@ -244,7 +244,12 @@ describe('7. skills listing and the confinement enforcement point', () => {
       'o',
       (m) => warnings.push(m),
     );
-    expect(loose.map((r) => r.id)).toEqual(['full']);
-    expect(warnings[0]).toMatch(/role full runs unconfined .* can read the operator key/);
+    // Whether `boss` is confined depends on this host's sandbox/bubblewrap
+    // (unconfinedRoles is tested with injected availability elsewhere); a
+    // full-access role is unconfined everywhere.
+    expect(loose.map((r) => r.id)).toContain('full');
+    expect(warnings.find((w) => w.includes('role full '))).toMatch(
+      /role full runs unconfined .* can read the operator key/,
+    );
   });
 });

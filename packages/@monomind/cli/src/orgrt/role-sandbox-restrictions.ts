@@ -11,6 +11,7 @@ import {
   GIT_GUARD_DIR,
   ORG_STATE_FILES,
 } from './authority-mask.js';
+import { protectedClaudeBinary } from './claude-sdk.js';
 import {
   DAEMON_SOCKETS,
   dashboardCredentialPaths,
@@ -19,10 +20,10 @@ import {
   runtimeDir,
 } from './file-roots.js';
 import { type GitGuard, gitLocalRemotePaths } from './git-guard.js';
-import { operatorProtectedPaths } from './operator-protected-paths.js';
+import { operatorMountPoints, operatorProtectedPaths } from './operator-protected-paths.js';
 import { gitGuardDirs, orgsMountPoints } from './org-authority-files.js';
 import { ORG_DISALLOWED_HARNESS_TOOLS } from './org-harness-tools.js';
-import { expandDenyWrite, renameGuardDirs, underAnyRoot } from './sandbox-deny-write.js';
+import { expandDenyWrite, underAnyRoot } from './sandbox-deny-write.js';
 
 export interface RoleSandboxPolicy {
   mode?: 'auto' | 'required' | 'off';
@@ -221,17 +222,15 @@ export function buildClaudeRestrictions(
 
   const allowWrite = uniq([ctx.cwd, ctx.orgRoot, home, tmp, ...(cfg?.allowWrite ?? [])]);
   // #518 review (B1): the deps dir must exist to be denied (only existing
-  // paths are passed below on Linux). #526: the monomind homes, and every
-  // directory above them in a writable directory, become mount points, so
-  // none can be renamed aside to plant a new deps dir — a custom
-  // MONOMIND_HOME deep in the cwd included. On macOS the SDK's seatbelt
-  // already denies unlinking every ancestor of a denied path.
+  // paths are passed below on Linux), and its parent becomes a mount point so
+  // the role cannot rename ~/.monomind aside and plant a new deps dir; the
+  // directories above a custom MONOMIND_HOME are among #527's
+  // operatorMountPoints. On macOS the SDK's seatbelt already denies
+  // unlinking every ancestor of a denied path (#526).
   const deps = protectableDepsRoot(env, home);
-  const renameGuards = uniq(
-    [deps && dirname(deps), join(home, '.monomind')]
-      .filter((d): d is string => !!d && existsSync(d))
-      .flatMap((d) => renameGuardDirs(d, (parent) => underAnyRoot(parent, allowWrite))),
-  );
+  // #522: an operator-chosen Claude Code the daemons run: its file is in
+  // operatorPaths; the directories above it become mount points (below).
+  const claudeAnchors = protectedClaudeBinary(env, home)?.dirs ?? [];
   const platform = ctx.platform ?? process.platform;
   // Stubs first: with all of the cwd's in place, bwrap creates nothing there.
   const missingStubs = platform === 'linux' ? ctx.holdStubs?.(allowWrite) : undefined;
@@ -280,13 +279,23 @@ export function buildClaudeRestrictions(
     filesystem: {
       allowWrite: uniq([
         ...allowWrite,
-        ...renameGuards,
         ...expanded.mountPoints.filter((d) => underAnyRoot(d, allowWrite)),
         // #498: mount points, so the orgs tree cannot be renamed aside.
         // The SDK binds denyWrite after allowWrite, so a writable dir below a
         // denied one would stay read-only: the orgs dir itself cannot be
         // denied here, and new files in it stay possible (authority-mask.ts).
         ...orgsMountPoints(ctx.orgRoot).filter((d) => underAnyRoot(d, allowWrite)),
+        ...(deps ? [dirname(deps)] : []).filter((d) => underAnyRoot(d, allowWrite)),
+        // #527: the directories on the way to the operator-protected paths
+        // (`~/.local/share` above mise…), so none can be renamed aside.
+        ...operatorMountPoints({
+          home,
+          env,
+          orgRoot: ctx.orgRoot,
+          cwd: ctx.cwd,
+          allowWrite: cfg?.allowWrite,
+        }).filter((d) => underAnyRoot(d, allowWrite)),
+        ...claudeAnchors.filter((d) => underAnyRoot(d, allowWrite)),
       ]),
       denyWrite:
         platform === 'darwin'

@@ -50,7 +50,11 @@ export const modelsCommand: Command = {
       ],
       data: result.models.map((m) => ({
         id: m.default ? `${m.id} (default)` : m.id,
-        label: m.resolved_id ? `${m.label} → ${m.resolved_id}` : m.label,
+        label: m.alias_of
+          ? `${m.label} (alias of ${m.alias_of})`
+          : m.resolved_id
+            ? `${m.label} → ${m.resolved_id}`
+            : m.label,
         effort: m.effort_levels?.join(',') ?? '—',
       })),
     });

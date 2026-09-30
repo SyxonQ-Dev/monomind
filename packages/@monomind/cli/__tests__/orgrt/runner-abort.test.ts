@@ -230,11 +230,13 @@ describe('AgentRunArgs.signal — ClaudeAgentRunner forwards it to the SDK abort
     const fakeQuery = ({ options }: any) =>
       (async function* () {
         sdkSignal = options.abortController?.signal;
-        // A real SDK stream ends (or throws) once its controller aborts,
-        // including one aborted before the query started (an abort during
-        // the first SDK load, which hashes the Claude binary).
+        // A real SDK stream ends (or throws) once its controller aborts —
+        // including one that was already aborted when query() was called:
+        // on a slow runner the 20ms abort lands before run() gets here
+        // (loading the SDK comes first), and an 'abort' listener added
+        // after the fact never fires.
         await new Promise<void>((resolve) => {
-          if (sdkSignal?.aborted) resolve();
+          if (sdkSignal?.aborted) return resolve();
           sdkSignal?.addEventListener('abort', () => resolve(), { once: true });
         });
       })();

@@ -26,6 +26,15 @@ const TRACKER = join(__dirname, '..', '..', '.claude', 'helpers', 'token-tracker
 let home: string;
 let projects: string;
 
+// quickSummary()/quickSummaryData() refresh a stale or missing cache by
+// spawning a REAL detached child (_spawnQuickRefresh) that writes into `home`
+// with no handle to await. Left live, it raced afterEach's rmSync (#541:
+// ENOTEMPTY). The tracker resolves child_process.spawn at call time, so stub it
+// for every test and record what would have been spawned instead.
+const childProcess = require_('node:child_process');
+const realSpawn = childProcess.spawn;
+let spawnedArgs: string[][];
+
 /** Writes a transcript with `n` assistant turns, back-dated to `mtime`. */
 function writeTranscript(dir: string, name: string, n: number, mtime: Date) {
   mkdirSync(dir, { recursive: true });
@@ -69,19 +78,18 @@ beforeEach(() => {
   projects = join(home, 'projects');
   mkdirSync(projects, { recursive: true });
   process.env.CLAUDE_CONFIG_DIR = home;
+  spawnedArgs = [];
+  childProcess.spawn = (_cmd: string, args: string[]) => {
+    spawnedArgs.push(args);
+    return { unref() {} };
+  };
 });
 
 afterEach(() => {
+  childProcess.spawn = realSpawn;
   delete process.env.CLAUDE_CONFIG_DIR;
-  // quickSummary() (tested below) spawns a REAL detached child process to
-  // refresh the cache out of band (by design — see _spawnQuickRefresh in
-  // token-tracker.cjs) and never gives the caller a handle to await it. If
-  // that child is still writing into `home` when this runs, a plain rmSync
-  // can throw ENOTEMPTY — force:true only swallows ENOENT, not a concurrent
-  // writer. maxRetries/retryDelay is Node's own documented answer to exactly
-  // this race (rm retries on ENOTEMPTY/EBUSY/etc.); it does nothing to the
-  // default single-attempt behavior when the dir was already empty.
-  rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  // Belt and braces: retry on ENOTEMPTY/EBUSY should anything still be writing.
+  rmSync(home, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 });
 
 const cachePath = () => join(home, '.monomind-token-summary.json');
@@ -120,6 +128,8 @@ describe('quickSummary is cache-first and never blocks (#42)', () => {
 
     // Stale beats blank; the refresh happens out of band.
     expect(tracker.quickSummary()).toMatch(/^\[TOKEN_USAGE\]/);
+    expect(spawnedArgs).toHaveLength(1);
+    expect(spawnedArgs[0][1]).toBe('refresh-summary');
   });
 
   it('survives a corrupt cache file', () => {

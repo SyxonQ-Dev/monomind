@@ -89,7 +89,8 @@ describe('runToolRound', () => {
 const FAKE_HERMES = `#!/usr/bin/env node
 const fs = require('fs');
 const argv = process.argv.slice(2);
-const prompt = fs.readFileSync(argv[argv.indexOf('--query-file') + 1], 'utf8');
+if (argv.includes('--help')) process.exit(0);
+const prompt = argv.find((a) => a.startsWith('--query=')).slice(8);
 fs.appendFileSync(process.env.FAKE_HERMES_LOG, JSON.stringify(prompt) + '\\n');
 console.log('\`\`\`tool_call\\n{"name":"org_echo","arguments":{"text":"x"}}\\n\`\`\`');
 `;

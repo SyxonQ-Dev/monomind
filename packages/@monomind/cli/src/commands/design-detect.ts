@@ -133,8 +133,8 @@ const detectSubcommand: Command = {
       name: 'target',
       short: 't',
       type: 'string',
-      description: 'File or directory to scan',
-      default: '.',
+      // No default: a parser default would shadow the positional target (#520).
+      description: 'File, directory or URL to scan (default: the positional target, else .)',
     },
     {
       name: 'json',
@@ -197,8 +197,8 @@ const fixSubcommand: Command = {
       name: 'target',
       short: 't',
       type: 'string',
-      description: 'File or directory to fix',
-      default: '.',
+      // No default: a parser default would shadow the positional target (#520).
+      description: 'File or directory to fix (default: the positional target, else .)',
     },
     {
       name: 'dry-run',

@@ -38,7 +38,6 @@ import {
   HOME_DENY_WRITE_STUB_FILES,
 } from '../../src/orgrt/operator-protected-paths.js';
 import { buildClaudeRestrictions } from '../../src/orgrt/role-sandbox.js';
-import { renameGuardDirs } from '../../src/orgrt/sandbox-deny-write.js';
 
 const dirs: string[] = [];
 const scratch = (p: string) => {
@@ -189,25 +188,13 @@ describe('(2) missing HOME_DENY_WRITE entries are stubbed before a role starts',
 });
 
 describe('(3) a custom MONOMIND_HOME cannot be renamed aside through an ancestor', () => {
-  it('renameGuardDirs lists the ancestors whose parent is writable, top down', () => {
-    const base = scratch('dh-base-');
-    const mm = join(base, 'a', 'b', 'mm');
-    mkdirSync(mm, { recursive: true });
-    const inBase = (p: string) => p === base || p.startsWith(`${base}/`);
-    expect(renameGuardDirs(mm, inBase)).toEqual([
-      join(base, 'a'),
-      join(base, 'a', 'b'),
-      mm,
-    ]);
-  });
-
   it('the SDK sandbox makes each one a mount point (allowWrite), and nothing outside the writable roots', () => {
     const home = scratch('dh-home-');
     const base = scratch('dh-base-');
     const mm = join(base, 'repo', 'x', 'mm');
     mkdirSync(mm, { recursive: true });
     const fs = restrictions({ home, base, env: { MONOMIND_HOME: mm } }).filesystem;
-    for (const d of [join(base, 'repo'), join(base, 'repo', 'x'), mm])
+    for (const d of [join(base, 'repo', 'x'), mm])
       expect(fs.allowWrite, d).toContain(d);
     expect(fs.denyWrite).toContain(join(mm, 'deps'));
     expect(fs.allowWrite.some((d) => d === '/' || d === '/home')).toBe(false);
@@ -254,6 +241,29 @@ describe.runIf(authorityMaskAvailability().available)('inside the real mask', ()
     expect(out).not.toMatch(/RENAMED|PLANTED/);
     expect(existsSync(join(base, 'a-aside'))).toBe(false);
     expect(readdirSync(join(mm, 'deps'))).toEqual([]);
+  });
+
+  it('(3) a custom MONOMIND_HOME inside the org root stays read-only (#538 re-applies it)', () => {
+    const home = scratch('dh-home-');
+    const root = scratch('dh-root-');
+    const mm = join(root, 'tools', 'mm');
+    mkdirSync(mm, { recursive: true });
+    const env = { MONOMIND_HOME: mm };
+    const [cmd, argv] = maskedCommand(
+      authorityMaskArgs({ home, env, roots: [root], orgRoot: root, cwd: root }),
+      'bash',
+      [
+        '-c',
+        `touch ${mm}/planted 2>/dev/null && echo PLANTED; ` +
+          `mkdir ${mm}/deps/x 2>/dev/null && echo DEPS; ` +
+          `mv ${root}/tools ${root}/tools-aside 2>/dev/null && echo MOVED; ` +
+          `touch ${root}/ok && echo ROOTW; true`,
+      ],
+    );
+    const out = spawnSync(cmd, argv, { encoding: 'utf8' }).stdout;
+    expect(out).toContain('ROOTW');
+    expect(out).not.toMatch(/PLANTED|DEPS|MOVED/);
+    expect(existsSync(join(mm, 'planted'))).toBe(false);
   });
 
   it('(2) a role can write none of the stubbed npm and shell config', () => {

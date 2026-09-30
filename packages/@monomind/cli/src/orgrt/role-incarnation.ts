@@ -163,7 +163,7 @@ export function spawnRoleIncarnation(
     policy,
     status: restoredRoleStatus(roleCheckpoint),
     done: Promise.resolve(),
-    metrics: { tokens: roleCheckpoint?.tokensUsed ?? 0, costUsd: roleCheckpoint?.costUsd ?? 0 },
+    metrics: { tokens: roleCheckpoint?.tokensUsed ?? 0, costUsd: roleCheckpoint?.costUsd ?? null },
     lastMessageId: roleCheckpoint?.lastMessageId,
     error: roleCheckpoint?.error,
     sessionId: roleCheckpoint?.sessionId,

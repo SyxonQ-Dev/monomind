@@ -11,6 +11,7 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -127,6 +128,30 @@ describe('the pins stay in step with the pinned versions and lockfiles', () => {
     if (found) expect(await sha256File(found.bin)).toBe(pins?.binaries?.[found.pkg]?.sha256);
   });
 
+  it('pins monofence-ai at its version, every .js file of the copy this checkout resolves', async () => {
+    const mf = OPTIONAL_DEPENDENCY_CODE_PINS['monofence-ai'];
+    expect(mf?.version).toBe(OPTIONAL_DEPENDENCIES['monofence-ai'].version);
+    const lockPkgs = OPTIONAL_DEPENDENCY_LOCKS['monofence-ai'].packages as Record<
+      string,
+      { version?: string }
+    >;
+    expect(lockPkgs['node_modules/monofence-ai'].version).toBe(mf?.version);
+    // The workspace copy is built from the published source; a change to it
+    // needs a version bump and new pins, or monomind refuses to load it.
+    const pkgDir = join(realpathSync(new URL('../../node_modules/monofence-ai', import.meta.url)));
+    const pinned = [mf?.entry, ...(mf?.modules ?? [])].map((f) => f?.file);
+    const onDisk: string[] = [];
+    const walk = (d: string, rel: string): void => {
+      for (const e of readdirSync(d, { withFileTypes: true }))
+        if (e.isDirectory()) walk(join(d, e.name), `${rel}${e.name}/`);
+        else if (e.name.endsWith('.js')) onDisk.push(`${rel}${e.name}`);
+    };
+    walk(join(pkgDir, 'dist'), 'dist/');
+    expect(pinned.sort()).toEqual(onDisk.sort());
+    for (const f of [mf?.entry, ...(mf?.modules ?? [])])
+      expect(await sha256File(join(pkgDir, f?.file as string)), f?.file).toBe(f?.sha256);
+  });
+
   it('pins every optional dependency or lists it as unpinned, with a reason', () => {
     for (const name of Object.keys(OPTIONAL_DEPENDENCIES)) {
       const pinned = !!OPTIONAL_DEPENDENCY_CODE_PINS[name];
@@ -190,6 +215,21 @@ describe('a same-user plant fails the pins', () => {
     );
     await expect(ensureOptionalDependency(SDK, opts({ pins: FAKE_PINS }))).rejects.toThrow(
       /package\.json points to .*evil\.mjs/,
+    );
+  });
+
+  it('refuses a package whose other module files were changed', async () => {
+    const pkgDir = dirname(writeFakeSdk(join(home, 'mod'), 'x'));
+    writeFileSync(join(pkgDir, 'lib.js'), 'export const x = 1;\n');
+    const pins = {
+      ...FAKE_PINS[SDK],
+      modules: [{ file: 'lib.js', sha256: await sha256File(join(pkgDir, 'lib.js')) }],
+    };
+    const where = { entry: join(pkgDir, 'sdk.mjs'), pkgDir, remove: pkgDir };
+    await verifyPinnedCode(SDK, pins, where, HOST, fail);
+    writeFileSync(join(pkgDir, 'lib.js'), 'export const x = "planted";\n');
+    await expect(verifyPinnedCode(SDK, pins, where, HOST, fail)).rejects.toThrow(
+      /lib\.js has SHA-256/,
     );
   });
 

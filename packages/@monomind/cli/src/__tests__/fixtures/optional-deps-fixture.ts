@@ -57,14 +57,15 @@ export function writeFakeSdk(
 }
 
 /** A stand-in for npm: records its calls and "installs" the fake SDK into
- *  the prefix it was given. */
+ *  the prefix it was given, without the platform package under
+ *  `--omit=optional`. */
 export function fakeNpm(marker: string, delayMs = 0) {
   const calls: Array<{ args: string[]; cwd: string }> = [];
   const run: NpmRunner = async (args, cwd) => {
     calls.push({ args, cwd });
     if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
     const prefix = args.find((a) => a.startsWith('--prefix='))?.slice('--prefix='.length) as string;
-    writeFakeSdk(prefix, marker);
+    writeFakeSdk(prefix, marker, { platform: !args.includes('--omit=optional') });
   };
   return { run, calls };
 }

@@ -141,6 +141,68 @@ describe('ensureOptionalDependency', () => {
     expect(npm.calls).toHaveLength(1);
   });
 
+  describe('(#522) with an installed Claude Code (withoutSdkBinary)', () => {
+    const platformDir = (prefix: string) =>
+      join(prefix, 'node_modules', '@anthropic-ai', 'claude-agent-sdk-linux-x64');
+
+    it('installs the SDK with --omit=optional, and without the platform package', async () => {
+      const npm = fakeNpm('js-only');
+      const mod = await ensureOptionalDependency<{ marker: string }>(SDK, {
+        ...base(),
+        runNpm: npm.run,
+        withoutSdkBinary: true,
+      });
+      expect(mod.marker).toBe('js-only');
+      expect(npm.calls[0].args).toContain('--omit=optional');
+      expect(npm.calls[0].args[0]).toBe('ci'); // still the shipped lockfile
+      expect(existsSync(platformDir(dependencyDir(SDK, env)))).toBe(false);
+      expect(log.mock.calls[0][0]).toMatch(/about 4 MB without its bundled Claude binary/);
+    });
+
+    it('accepts an existing install that lacks the platform package', async () => {
+      mkdirSync(depsRoot(env), { recursive: true, mode: 0o700 });
+      writeFakeSdk(dependencyDir(SDK, env), 'js-only', { platform: false });
+      const npm = fakeNpm('unused');
+      const mod = await ensureOptionalDependency<{ marker: string }>(SDK, {
+        ...base(),
+        runNpm: npm.run,
+        withoutSdkBinary: true,
+      });
+      expect(mod.marker).toBe('js-only');
+      expect(npm.calls).toHaveLength(0);
+    });
+
+    it('without it, replaces a JS-only install with the full one', async () => {
+      mkdirSync(depsRoot(env), { recursive: true, mode: 0o700 });
+      writeFakeSdk(dependencyDir(SDK, env), 'js-only', { platform: false });
+      const npm = fakeNpm('full');
+      const mod = await ensureOptionalDependency<{ marker: string }>(SDK, {
+        ...base(),
+        runNpm: npm.run,
+      });
+      expect(mod.marker).toBe('full');
+      expect(npm.calls[0].args).not.toContain('--omit=optional');
+      expect(existsSync(platformDir(dependencyDir(SDK, env)))).toBe(true);
+    });
+
+    it('prints the manual command with --omit=optional, and appends the note', async () => {
+      const err = (await ensureOptionalDependency(SDK, {
+        ...base(),
+        env: { ...env, MONOMIND_NO_AUTO_INSTALL: '1' },
+        withoutSdkBinary: true,
+      }).catch((e: unknown) => e)) as Error;
+      expect(err.message).toContain(manualInstallCommand(SDK, env, true));
+      expect(manualInstallCommand(SDK, env, true)).toContain('--omit=optional');
+      expect(manualInstallCommand(SDK, env)).not.toContain('--omit=optional');
+      await ensureOptionalDependency(SDK, {
+        ...base(),
+        runNpm: fakeNpm('x').run,
+        note: 'Set MONOMIND_CLAUDE_PATH.',
+      });
+      expect(log.mock.calls[0][0]).toMatch(/instead\)\.\.\. Set MONOMIND_CLAUDE_PATH\.$/);
+    });
+  });
+
   it('with MONOMIND_NO_AUTO_INSTALL set, installs nothing and prints the single-quoted command', async () => {
     const npm = fakeNpm('unused');
     const err = (await ensureOptionalDependency(SDK, {

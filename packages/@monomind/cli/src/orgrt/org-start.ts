@@ -174,9 +174,11 @@ async function startOrgInner(
     if (e.type === 'usage' && e.from && e.data) {
       const runtime = running.agents.get(e.from);
       if (runtime) {
-        const cost = Number((e.data as { cost_usd?: number }).cost_usd ?? 0);
-        if (Number.isFinite(cost)) {
-          runtime.metrics.costUsd += cost;
+        // A null/missing cost is unknown, not $0: metrics.costUsd stays null
+        // until a real cost arrives (rev 28).
+        const cost = (e.data as { cost_usd?: number | null }).cost_usd;
+        if (typeof cost === 'number' && Number.isFinite(cost)) {
+          runtime.metrics.costUsd = (runtime.metrics.costUsd ?? 0) + cost;
         }
       }
     }

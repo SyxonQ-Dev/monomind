@@ -72,7 +72,8 @@ export function emitUsage(
     from,
     data: {
       tokens: totalTokens(t),
-      cost_usd: costUsd,
+      // null, not omitted, when the runtime reported no cost (unknown ≠ $0).
+      cost_usd: costUsd ?? null,
       subtype,
       tokens_in: t.input,
       tokens_out: t.output,

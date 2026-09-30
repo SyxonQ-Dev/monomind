@@ -265,7 +265,8 @@ export class OpencodeAgentRunner implements AgentRunner {
         let nextPrompt = text;
         let turnInputTokens = 0;
         let turnOutputTokens = 0;
-        let turnCost = 0;
+        // undefined until a message reports a cost: a reported 0 stays 0.
+        let turnCost: number | undefined;
 
         // Tool-call loop: keep driving the same session until a turn produces
         // no tool_call fences (or the round cap hits).
@@ -327,7 +328,7 @@ export class OpencodeAgentRunner implements AgentRunner {
                 turnInputTokens +=
                   (tokens.input ?? 0) + (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0);
                 turnOutputTokens += tokens.output ?? 0;
-                turnCost += typeof info.cost === 'number' ? info.cost : 0;
+                if (typeof info.cost === 'number') turnCost = (turnCost ?? 0) + info.cost;
                 // A native-tool step continues in a new message; anything
                 // else means this round's response is fully generated.
                 if (info.finish !== 'tool-calls') break;
@@ -475,7 +476,7 @@ export class OpencodeAgentRunner implements AgentRunner {
           subtype: 'success',
           input_tokens: turnInputTokens,
           output_tokens: turnOutputTokens,
-          cost_usd: turnCost || undefined,
+          cost_usd: turnCost,
         };
       }
     } finally {

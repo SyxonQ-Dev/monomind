@@ -10,6 +10,8 @@
  * `npm install --package-lock-only --legacy-peer-deps --ignore-scripts`, and
  * paste package-lock.json below. optional-deps.test.ts checks the pins match.
  */
+import type { OptionalDependencyName } from './optional-deps.js';
+
 export const OPTIONAL_DEPENDENCY_LOCKS = {
   '@anthropic-ai/claude-agent-sdk': {
     name: 'monomind-optional-dependency',
@@ -401,7 +403,30 @@ export const OPTIONAL_DEPENDENCY_LOCKS = {
       },
     },
   },
-} as const;
+  'monofence-ai': {
+    name: 'monomind-optional-dependency',
+    lockfileVersion: 3,
+    requires: true,
+    packages: {
+      '': {
+        name: 'monomind-optional-dependency',
+        dependencies: {
+          'monofence-ai': '1.0.7',
+        },
+      },
+      'node_modules/monofence-ai': {
+        version: '1.0.7',
+        resolved: 'https://registry.npmjs.org/monofence-ai/-/monofence-ai-1.0.7.tgz',
+        integrity:
+          'sha512-hFDDmO6G5Z0NwzcjUUdmZXywFc32lX2dUTkeIKZKrUBVB7YJargHAeSnIrNLBzgzoqs63wdjXmXuTyQV63V6lw==',
+        license: 'Apache-2.0',
+        engines: {
+          node: '>=22.12.0',
+        },
+      },
+    },
+  },
+} as const satisfies Record<OptionalDependencyName, unknown>;
 
 /** SHA-256 of one file inside an installed package. */
 export interface PinnedFile {
@@ -416,6 +441,8 @@ export interface CodePins {
   version: string;
   /** The file ensureOptionalDependency() imports. */
   entry: PinnedFile;
+  /** Every other file of the package the entry can load (relative imports). */
+  modules?: PinnedFile[];
   /** Native binaries the package spawns, by the platform package that
    *  carries each one. */
   binaries?: Record<string, PinnedFile>;
@@ -428,7 +455,8 @@ export interface CodePins {
  * a foreign or group-writable tree from monomind's own, but not a tree
  * planted by this same user; a planted file fails here. sdk.mjs is one
  * bundle that imports only Node built-ins, so it and the platform binary
- * are all the SDK runs. What is not pinned is listed, with the reason, in
+ * are all the SDK runs. monofence-ai has no dependencies: its entry and
+ * the 15 other dist/*.js files it can import are all it runs. What is not pinned is listed, with the reason, in
  * OPTIONAL_DEPENDENCIES_UNPINNED.
  *
  * Regenerate together with the lockfile, from the registry tarballs it
@@ -437,6 +465,8 @@ export interface CodePins {
  *   echo "sha512-$(openssl dgst -sha512 -binary <tgz> | base64 -w0)"  # must equal its "integrity"
  *   tar -xOzf <tgz> package/sdk.mjs | sha256sum   # the SDK's entry
  *   tar -xOzf <tgz> package/claude | sha256sum    # package/claude.exe for win32-*
+ * and for monofence-ai, each dist/*.js file of its tarball:
+ *   tar -xzf <tgz> && (cd package && find dist -name '*.js' | xargs sha256sum)
  * optional-deps-pins.test.ts checks these stay in step with the pins in
  * optional-deps.ts and with the lockfile above.
  */
@@ -481,6 +511,75 @@ export const OPTIONAL_DEPENDENCY_CODE_PINS: Partial<Record<string, CodePins>> = 
         sha256: 'cec4e772e8237357554a8a5a86f821db9081e9fb05499bc4e5fd14b73f48708c',
       },
     },
+  },
+  'monofence-ai': {
+    version: '1.0.7',
+    entry: {
+      file: 'dist/index.js',
+      sha256: '9d70a9308b912e568f3de2114c5842f734d7bc7cff3b1fec12471b80ddf51a3b',
+    },
+    modules: [
+      {
+        file: 'dist/consensus.js',
+        sha256: 'a9f1a6518d3450bc3c2ebf86d506c4368eb39444dd804d866dd37c20c729d8c0',
+      },
+      {
+        file: 'dist/domain/entities/index.js',
+        sha256: 'ed485c74b616f0b06cdaeb16346e8bb1bbe4f1cc51e62ee3621e4caa6435efe6',
+      },
+      {
+        file: 'dist/domain/entities/threat.js',
+        sha256: 'ed3c2667487e4ecb0c6fdb667b1b08197627375cc472489bd43aaf99ca9335cc',
+      },
+      {
+        file: 'dist/domain/services/allowlist.js',
+        sha256: '8d8336b301a2bfaef3b152a44b73e5449841c2c43e7d4b5eb7675bea6b516671',
+      },
+      {
+        file: 'dist/domain/services/context-tracker.js',
+        sha256: '071f2fb9ae00b55f2e3ec7b4e7981b18fdb9e378a92473b5b35252ea49f2d8e3',
+      },
+      {
+        file: 'dist/domain/services/evasion-detector.js',
+        sha256: '857c8189dac99e4bbe9699319dd166478105c79170123dd8274b8e775787273a',
+      },
+      {
+        file: 'dist/domain/services/index.js',
+        sha256: '3e2bdb4c3a7cc0aa7a8fa9f0319bfa7f92d2f87f87f696fc1d2f92b6a325f597',
+      },
+      {
+        file: 'dist/domain/services/output-scanner.js',
+        sha256: 'eae307ae6df634c74a66859fc8d806afb7a0f9d00ac41dbbe1011cf59fd661ae',
+      },
+      {
+        file: 'dist/domain/services/threat-detection-service.js',
+        sha256: 'cdd3dd10e6ababd13853e488479a48e6ba1d0cee8886edd3cdcff5ef3a593135',
+      },
+      {
+        file: 'dist/domain/services/threat-learning-inmemory-store.js',
+        sha256: '0c19f2bf5f26cfbddeb9acaecf2493c76d799e8723cc590ed8c3c4c576e297e1',
+      },
+      {
+        file: 'dist/domain/services/threat-learning-service.js',
+        sha256: '9c95a61f6ea061234816f42350e8756e11f314993ed79a3f6b0902fb630e2885',
+      },
+      {
+        file: 'dist/domain/services/threat-patterns.js',
+        sha256: '6d270b5fc1be3cc3dea23160279698396dc46175610da5c6ebe3826993f977ec',
+      },
+      {
+        file: 'dist/facade.js',
+        sha256: '7f7fdbcc06f0a3410ad3169ae4f7c62ced3e491f54898f0a61aa48291d48e653',
+      },
+      {
+        file: 'dist/hooks/security-hook.js',
+        sha256: '91211476d372801b4b4e205097e11b4822d56bd11769ea8f3f5858ed1b7f86ce',
+      },
+      {
+        file: 'dist/singleton.js',
+        sha256: '4a39cc92ec0d087ccef7f07ecd86989734e18399fbbb1511354ae31d00b8f805',
+      },
+    ],
   },
 };
 

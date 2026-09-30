@@ -35,6 +35,7 @@
  * and everything it runs.
  */
 
+import { UNCLASSIFIED_MARKER } from './agent-exec-errors.js';
 import type { AgentMessage, AgentRunArgs, AgentRunner } from './agent-runner.js';
 import { streamAcpTurn } from './cline-runner-acp.js';
 import { defaultClineHost, prepareClineSetup } from './cline-runner-host.js';
@@ -96,7 +97,10 @@ export function clineTurnFailure(o: ClineTurnOutcome, resumed: boolean): Error |
     (o.finishReason ? `cline stopped: ${o.finishReason}` : `cline exited ${o.exitCode}`);
   const message =
     `ClineAgentRunner: ${detail}` +
-    (o.stderrTail && !o.errorMessage ? `\nstderr: ${o.stderrTail.slice(-500)}` : '');
+    (o.stderrTail && !o.errorMessage ? `\nstderr: ${o.stderrTail.slice(-500)}` : '') +
+    (o.resultText && !o.errorMessage
+      ? `${UNCLASSIFIED_MARKER}cline final text: ${o.resultText.slice(-500)}`
+      : '');
   return classifyStderr(`${detail}\n${o.stderrTail}`).fatal ? fatal(message) : new Error(message);
 }
 

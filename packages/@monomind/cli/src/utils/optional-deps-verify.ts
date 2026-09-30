@@ -187,6 +187,7 @@ export async function verifyPinnedCode(
   if (realOrSelf(entry) !== realOrSelf(expected))
     refuse(`its package.json points to ${entry}, not ${expected}`);
   await assertHash(expected, pins.entry, refuse);
+  for (const m of pins.modules ?? []) await assertHash(join(pkgDir, m.file), m, refuse);
   if (!pins.binaries || where.checkBinary === false) return;
   const bin = resolveClaudeBinary(expected, host);
   if (!bin) refuse(`no Claude binary for ${host.platform}-${host.arch} resolves from ${pkgDir}`);

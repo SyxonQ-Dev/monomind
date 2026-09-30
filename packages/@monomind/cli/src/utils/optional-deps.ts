@@ -15,6 +15,10 @@
  *      MONOMIND_NO_AUTO_INSTALL is set, in which case it throws with the exact
  *      command that does the same install by hand.
  *
+ * When a usable Claude Code is installed (orgrt/claude-sdk.ts, #522), the
+ * SDK is installed with `--omit=optional`: its JS package only, without the
+ * platform package that carries the native binary.
+ *
  * Safety:
  *   - Only the packages in OPTIONAL_DEPENDENCIES can be installed, each at
  *     the exact version pinned there; nothing from input reaches npm.
@@ -88,6 +92,11 @@ export const OPTIONAL_DEPENDENCIES = {
     size: 'about 2 MB',
     feature: 'The Chrome download for `monomind browse`',
   },
+  'monofence-ai': {
+    version: '1.0.7',
+    size: 'under 1 MB',
+    feature: 'MonoFence (the monofence_* MCP tools, `security defend`, org role fences)',
+  },
 } as const satisfies Record<string, OptionalDependencySpec>;
 
 export type OptionalDependencyName = keyof typeof OPTIONAL_DEPENDENCIES;
@@ -115,6 +124,12 @@ export interface EnsureOptions {
   host?: Host;
   /** The hashes loaded code must match (#526); tests replace them. */
   pins?: Partial<Record<string, CodePins>>;
+  /** #522: an installed Claude Code runs instead of the SDK's bundled
+   *  binary, so the SDK is installed without its platform package
+   *  (`--omit=optional`), and an install that lacks it counts as installed. */
+  withoutSdkBinary?: boolean;
+  /** Appended to the install notice. */
+  note?: string;
 }
 
 /** Flags for the printed manual command (plain `npm install`, no lockfile). */
@@ -187,10 +202,20 @@ export function dependencyDir(name: OptionalDependencyName, env: Env = process.e
 export const shellQuote = (s: string): string => `'${s.replaceAll("'", `'\\''`)}'`;
 
 /** The command that performs the same install by hand. */
-export function manualInstallCommand(name: OptionalDependencyName, env: Env = process.env): string {
+export function manualInstallCommand(
+  name: OptionalDependencyName,
+  env: Env = process.env,
+  withoutSdkBinary = false,
+): string {
   const { version } = OPTIONAL_DEPENDENCIES[name];
-  return `npm install --prefix ${shellQuote(dependencyDir(name, env))} ${NPM_MANUAL_FLAGS.join(' ')} ${name}@${version}`;
+  const flags = [...NPM_MANUAL_FLAGS, ...omitFlags(name, withoutSdkBinary)];
+  return `npm install --prefix ${shellQuote(dependencyDir(name, env))} ${flags.join(' ')} ${name}@${version}`;
 }
+
+/** `--omit=optional` skips the SDK's platform packages (the native binary);
+ *  the shipped lockfile still pins and checks everything else. */
+const omitFlags = (name: OptionalDependencyName, withoutSdkBinary: boolean): string[] =>
+  withoutSdkBinary && name === '@anthropic-ai/claude-agent-sdk' ? ['--omit=optional'] : [];
 
 function readVersion(pkgJson: string): string | undefined {
   try {
@@ -233,10 +258,15 @@ export function isInstalled(
   name: OptionalDependencyName,
   dir: string,
   host: Host = thisHost(),
+  withoutSdkBinary = false,
 ): boolean {
   const pj = join(dir, 'node_modules', name, 'package.json');
   if (readVersion(pj) !== OPTIONAL_DEPENDENCIES[name].version) return false;
-  return name !== '@anthropic-ai/claude-agent-sdk' || hasSdkPlatformPackage(dir, host);
+  return (
+    name !== '@anthropic-ai/claude-agent-sdk' ||
+    withoutSdkBinary ||
+    hasSdkPlatformPackage(dir, host)
+  );
 }
 
 /** Why `p` may not be trusted as monomind's own file, or undefined. */
@@ -354,7 +384,50 @@ const refuseLoad = (message: string): never => {
   throw new OptionalDependencyError(message);
 };
 
-const defaultResolveOwn = (name: string): string => createRequire(import.meta.url).resolve(name);
+/** The "import" entry of a package's exports (or its main), relative to it. */
+function esmEntry(pkg: { exports?: unknown; main?: string }): string | undefined {
+  let target = pkg.exports;
+  if (target && typeof target === 'object' && Object.keys(target).some((k) => k.startsWith('.'))) {
+    target = (target as Record<string, unknown>)['.'];
+  }
+  while (target && typeof target === 'object' && !Array.isArray(target)) {
+    const c = target as Record<string, unknown>;
+    target = c.import ?? c.node ?? c.default;
+  }
+  if (typeof target === 'string') return target;
+  return pkg.exports === undefined ? (pkg.main ?? 'index.js') : undefined;
+}
+
+/**
+ * Resolves `name` from `from` as `import` would. require.resolve covers
+ * packages with a require (or default) condition; an ESM-only package such
+ * as monofence-ai, whose exports have only an "import" condition, throws
+ * ERR_PACKAGE_PATH_NOT_EXPORTED there, so its entry is read from the
+ * package.json on the same node_modules lookup path.
+ */
+function resolveEntry(name: string, from: string): string {
+  const req = createRequire(from);
+  try {
+    return req.resolve(name);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED') throw err;
+    for (const base of req.resolve.paths(name) ?? []) {
+      const pkgDir = join(base, name);
+      let pkg: { exports?: unknown; main?: string };
+      try {
+        pkg = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'));
+      } catch {
+        continue;
+      }
+      const entry = esmEntry(pkg);
+      if (entry) return join(pkgDir, entry);
+      break;
+    }
+    throw err;
+  }
+}
+
+const defaultResolveOwn = (name: string): string => resolveEntry(name, import.meta.url);
 
 /**
  * Loads one of OPTIONAL_DEPENDENCIES, installing it into monomind's deps
@@ -371,6 +444,8 @@ export async function ensureOptionalDependency<T = unknown>(
   const log = opts.log ?? defaultLog;
   const host = opts.host ?? thisHost();
   const spec: OptionalDependencySpec = OPTIONAL_DEPENDENCIES[name];
+  const noBinary = !!opts.withoutSdkBinary && name === '@anthropic-ai/claude-agent-sdk';
+  const size = noBinary ? 'about 4 MB without its bundled Claude binary' : spec.size;
 
   const pins = (opts.pins ?? OPTIONAL_DEPENDENCY_CODE_PINS)[name];
 
@@ -378,7 +453,10 @@ export async function ensureOptionalDependency<T = unknown>(
   // the same pins as one in the deps dir.
   const own = ownEntry(name, opts.resolveOwn ?? defaultResolveOwn);
   if (own) {
-    if (pins) await verifyPinnedCode(name, pins, { ...own, remove: own.pkgDir }, host, refuseLoad);
+    if (pins) {
+      const where = { ...own, remove: own.pkgDir, checkBinary: !noBinary };
+      await verifyPinnedCode(name, pins, where, host, refuseLoad);
+    }
     return (await importFile(own.entry)) as T;
   }
 
@@ -389,26 +467,27 @@ export async function ensureOptionalDependency<T = unknown>(
       refuseLoad(`Refusing to load code from ${root}: ${why}.`),
     );
     assertTrustedTree(root, dir);
-    const entry = createRequire(join(dir, 'package.json')).resolve(name);
+    const entry = resolveEntry(name, join(dir, 'package.json'));
     if (pins) {
       const pkgDir = join(dir, 'node_modules', name);
-      await verifyPinnedCode(name, pins, { entry, pkgDir, remove: dir }, host, refuseLoad);
+      const where = { entry, pkgDir, remove: dir, checkBinary: !noBinary };
+      await verifyPinnedCode(name, pins, where, host, refuseLoad);
     }
     return (await importFile(entry)) as T;
   };
-  if (isInstalled(name, dir, host)) return load();
+  if (isInstalled(name, dir, host, noBinary)) return load();
 
   if (autoInstallDisabled(env)) {
     throw new OptionalDependencyError(
-      `${spec.feature} needs ${name}@${spec.version} (${spec.size}), which is not installed, ` +
+      `${spec.feature} needs ${name}@${spec.version} (${size}), which is not installed, ` +
         `and ${NO_AUTO_INSTALL_ENV} is set, so monomind will not install it. Install it with:\n` +
-        `  ${manualInstallCommand(name, env)}`,
+        `  ${manualInstallCommand(name, env, noBinary)}`,
     );
   }
 
   log(
-    `${spec.feature} needs ${name}@${spec.version} (${spec.size}). Installing it once into ${dir} ` +
-      `(set ${NO_AUTO_INSTALL_ENV}=1 to install by hand instead)...`,
+    `${spec.feature} needs ${name}@${spec.version} (${size}). Installing it once into ${dir} ` +
+      `(set ${NO_AUTO_INSTALL_ENV}=1 to install by hand instead)...${opts.note ? ` ${opts.note}` : ''}`,
   );
   const runNpm = opts.runNpm ?? defaultRunNpm;
   try {
@@ -416,27 +495,33 @@ export async function ensureOptionalDependency<T = unknown>(
     assertTrustedTree(root, root);
     await installOnce(
       dir,
-      (d) => isInstalled(name, d, host),
+      (d) => isInstalled(name, d, host, noBinary),
       async (staging) => {
         const lock = OPTIONAL_DEPENDENCY_LOCKS[name];
         const manifest = { ...lock.packages[''], private: true };
         writeFileSync(join(staging, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
         writeFileSync(join(staging, 'package-lock.json'), `${JSON.stringify(lock, null, 2)}\n`);
-        await runNpm(['ci', `--prefix=${staging}`, ...NPM_CI_FLAGS], staging, env);
-        if (!isInstalled(name, staging, host)) {
+        const args = ['ci', `--prefix=${staging}`, ...NPM_CI_FLAGS, ...omitFlags(name, noBinary)];
+        await runNpm(args, staging, env);
+        if (!isInstalled(name, staging, host, noBinary)) {
           throw new Error(`npm finished but ${name}@${spec.version} is not complete in ${staging}`);
         }
       },
       log,
     );
   } catch (err) {
-    throw installError(name, err, env);
+    throw installError(name, err, env, noBinary);
   }
   log(`Installed ${name}@${spec.version}.`);
   return load();
 }
 
-function installError(name: OptionalDependencyName, err: unknown, env: Env): Error {
+function installError(
+  name: OptionalDependencyName,
+  err: unknown,
+  env: Env,
+  noBinary: boolean,
+): Error {
   if (err instanceof OptionalDependencyError) return err;
   const spec = OPTIONAL_DEPENDENCIES[name];
   const code = (err as NodeJS.ErrnoException).code;
@@ -444,12 +529,12 @@ function installError(name: OptionalDependencyName, err: unknown, env: Env): Err
     return new OptionalDependencyError(
       `${spec.feature} needs ${name}@${spec.version}, which is not installed, and ` +
         `${depsRoot(env)} is not writable here (${code}). Org roles cannot install into it; ` +
-        `ask the operator to run this outside the org:\n  ${manualInstallCommand(name, env)}`,
+        `ask the operator to run this outside the org:\n  ${manualInstallCommand(name, env, noBinary)}`,
     );
   }
   return new OptionalDependencyError(
     `Could not install ${name}@${spec.version}: ${(err as Error).message}\n` +
-      `Install it by hand with:\n  ${manualInstallCommand(name, env)}`,
+      `Install it by hand with:\n  ${manualInstallCommand(name, env, noBinary)}`,
   );
 }
 

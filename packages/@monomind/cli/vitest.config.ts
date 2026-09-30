@@ -30,6 +30,9 @@ export default defineConfig({
     // variably under full-suite parallel load — pure contention flakiness.
     // Tests that need longer still carry their own explicit timeout.
     testTimeout: 30000,
+    // #522: the Claude runtime uses an installed Claude Code when it finds
+    // one; tests must not depend on whether this machine has one.
+    env: { MONOMIND_CLAUDE_PATH: 'bundled' },
     server: {
       // @monoes/monobrowse resolves through the pnpm workspace symlink into
       // node_modules, so Vitest externalizes it by default and vi.mock('ws')
