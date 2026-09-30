@@ -9,15 +9,55 @@
  * `threads` pool os.homedir() (which reads the process environment, not a
  * worker's copy of process.env) sees it as well.
  *
+ * Moving HOME alone is not enough (#544): XDG_* and toolchain variables such
+ * as CARGO_HOME or MISE_DATA_DIR hold absolute paths into the real home, and
+ * tools follow them before HOME. The XDG base dirs move into the temp home,
+ * the toolchain overrides are unset so they fall back to HOME-derived
+ * defaults, and PATH loses its entries under the real home (the running
+ * node's own bin dir goes first, so `node` and `npm` match the run). real-home-guard.ts
+ * then checks that the real home's top level did not change during the run.
+ *
  * The real home stays available as MONOMIND_TEST_REAL_HOME for suites that
  * need credentials from it (live, env-gated suites); the npm cache keeps
  * pointing at the real one so spawned npm/npx do not re-download packages.
  * A nested run (a test that starts a child vitest) keeps the outer run's
  * MONOMIND_TEST_REAL_HOME, unless the parent removes it on purpose.
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, dirname, join, sep } from 'node:path';
+import { checkHome, snapshotHome } from './real-home-guard.js';
+
+/** XDG base dirs and where they go under the test home. */
+export const XDG_DIRS = {
+  XDG_DATA_HOME: '.local/share',
+  XDG_STATE_HOME: '.local/state',
+  XDG_CONFIG_HOME: '.config',
+  XDG_CACHE_HOME: '.cache',
+  XDG_RUNTIME_DIR: '.run',
+} as const;
+
+/** Overrides whose default, when unset, derives from HOME. */
+export const UNSET_KEYS = [
+  'CARGO_HOME',
+  'RUSTUP_HOME',
+  'NVM_DIR',
+  'MISE_DATA_DIR',
+  'MISE_CONFIG_DIR',
+  'MISE_STATE_DIR',
+  'MISE_CACHE_DIR',
+  'PNPM_HOME',
+  'VOLTA_HOME',
+  'BUN_INSTALL',
+  'DENO_DIR',
+  'GOPATH',
+  'GOBIN',
+  'GNUPGHOME',
+  'GH_CONFIG_DIR',
+  'CODEX_HOME',
+  'CLAUDE_CONFIG_DIR',
+  'MONOMIND_HOME',
+] as const;
 
 const KEYS = [
   'HOME',
@@ -25,13 +65,38 @@ const KEYS = [
   'MONOMIND_GLOBAL_BRAIN_DIR',
   'MONOMIND_TEST_REAL_HOME',
   'npm_config_cache',
-] as const;
+  'PATH',
+  ...Object.keys(XDG_DIRS),
+  ...UNSET_KEYS,
+];
 
-/** Points HOME and the global brain at `home`. Shared with the per-file setup. */
+/**
+ * `path` without entries under `realHome`, led by the running node's bin dir,
+ * so a spawned `node`, `npm` or `npx` is the toolchain that runs the tests
+ * (not a different system copy), even where it is only installed in the home.
+ */
+export function pathWithoutHome(path: string, realHome: string): string {
+  const inHome = (p: string) => p === realHome || p.startsWith(realHome + sep);
+  const nodeBin = dirname(process.execPath);
+  const kept = path.split(delimiter).filter((p) => p && p !== nodeBin && !inHome(p));
+  return [nodeBin, ...kept].join(delimiter);
+}
+
+/**
+ * Points HOME, the global brain and the XDG base dirs at `home`, and drops the
+ * toolchain overrides. Shared with the per-file setup.
+ */
 export function useTestHome(home: string): void {
   process.env.HOME = home;
   if (process.platform === 'win32') process.env.USERPROFILE = home;
   process.env.MONOMIND_GLOBAL_BRAIN_DIR = join(home, '.monomind', 'global-brain');
+  for (const [key, rel] of Object.entries(XDG_DIRS)) {
+    const dir = join(home, rel);
+    // XDG_RUNTIME_DIR must be private to the user; 0700 does no harm elsewhere.
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    process.env[key] = dir;
+  }
+  for (const key of UNSET_KEYS) delete process.env[key];
 }
 
 export default function setup(): () => void {
@@ -42,8 +107,12 @@ export default function setup(): () => void {
   if (realHome) {
     process.env.MONOMIND_TEST_REAL_HOME = realHome;
     // Windows keeps the npm cache under LOCALAPPDATA, which HOME does not move.
-    if (process.platform !== 'win32') process.env.npm_config_cache ??= join(realHome, '.npm');
+    if (process.platform !== 'win32') {
+      process.env.npm_config_cache ??= join(realHome, '.npm');
+      if (process.env.PATH) process.env.PATH = pathWithoutHome(process.env.PATH, realHome);
+    }
   }
+  const snapshot = realHome ? snapshotHome(realHome) : null;
   const home = mkdtempSync(join(tmpdir(), 'mm-test-run-home-'));
   useTestHome(home);
   return () => {
@@ -52,5 +121,6 @@ export default function setup(): () => void {
       else process.env[k] = saved[k];
     }
     rmSync(home, { recursive: true, force: true });
+    if (realHome && snapshot) checkHome(realHome, snapshot);
   };
 }
