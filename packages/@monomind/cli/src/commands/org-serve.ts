@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { OrgDaemon } from '../orgrt/daemon.js';
 import { orgSignatureEnforced, verifyOrgDef } from '../orgrt/org-signature.js';
+import { sweepPlantWatches } from '../orgrt/planted-paths.js';
 import { readHistory } from '../orgrt/reporting.js';
 import { startOrgServer } from '../orgrt/server.js';
 import { ORG_DIR } from '../orgrt/types.js';
@@ -450,6 +451,13 @@ export const serveAction = async (ctx: CommandContext): Promise<CommandResult> =
     });
   }, 2000);
   reloadPoll.unref?.();
+  // #502 review round 3: quarantine what a role planted, between its sessions too.
+  const plantPoll = setInterval(() => {
+    sweepPlantWatches().catch((err) =>
+      console.error('[org serve] planted-path sweep failed:', err),
+    );
+  }, 2000);
+  plantPoll.unref?.();
 
   await new Promise<void>((r) => {
     process.once('SIGINT', () => r());
@@ -458,6 +466,7 @@ export const serveAction = async (ctx: CommandContext): Promise<CommandResult> =
   clearInterval(stopPoll);
   clearInterval(runPoll);
   clearInterval(reloadPoll);
+  clearInterval(plantPoll);
   clearInterval(heartbeatInterval);
   sched.stop();
   await daemon.stopAll();

@@ -80,6 +80,8 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
   - **`instructions_file` is read only from inside the project**, through every symlink, and never from the operator or dashboard-auth directories, a credential store or a dashboard token. Its content is signed as a digest; the file is read through a descriptor opened with `O_NOFOLLOW` and checked to be the verified inode with no other hard link, and a session reads it only while its content matches the digest verified at org start.
 
+  - **A path a role plants because it did not exist yet is quarantined:** `~/.claude/.config.json` (which Claude Code prefers over `~/.claude.json`), `.claude*.json` variants, a missing `.mcp.json` or `.claude/` in the org root or a worktree, and the other protected paths. Each role session records which are missing when it starts; they are checked when it ends, on every `org serve` tick and at the next session start. Anything that appeared is moved (never deleted) to `.monomind/orgs/<org>/quarantine/<ts>/`, with an audit event and an operator question saying how to restore it. `doctor -c org-skills` warns when `.mcp.json` servers are approved by name but `.mcp.json` is missing, untracked or modified.
+
   - **`org test-loop` runs its fixture orgs in a throwaway directory**, not in the project, and removes their signatures.
 
   - **Residual:** a role that can read the operator-credential directory can sign, as it can already forge a full-access grant: an active full-access role, or a role that runs with neither the SDK sandbox nor the bubblewrap mask. Whether to refuse such roles is still open; `org sign` and every org start name them.

@@ -201,7 +201,7 @@ describe('7. skills listing and the confinement enforcement point', () => {
       '---\ndescription: mine\ntools: [Bash]\n---\nbody',
     );
     expect(nonBundledSkillLines(root).join('\n')).toMatch(/my-skill \(project, .*\) · tools Bash/);
-    expect((await checkOrgSkills(root)).message).toMatch(/1 from the project or user library/);
+    expect((await checkOrgSkills(root))[0].message).toMatch(/1 from the project or user library/);
   });
 
   it('one function decides and one point enforces (warn-only for now)', () => {

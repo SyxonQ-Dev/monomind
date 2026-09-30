@@ -105,6 +105,9 @@ export const HOME_OPERATOR_EXEC = [
  *  bubblewrap mask, which also wraps Claude Code itself and so cannot make
  *  the whole of ~/.claude (sessions, todos, credentials) read-only. */
 export const CLAUDE_HOME_EXEC = [
+  // The legacy global config: Claude Code prefers it over ~/.claude.json
+  // whenever it exists (#502 review round 3).
+  '.config.json',
   'settings.json',
   'settings.local.json',
   'hooks',

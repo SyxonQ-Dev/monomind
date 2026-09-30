@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { CumulativeMeter } from './cumulative-meter.js';
 import type { StreamOptions } from './mailbox.js';
 import { Mailbox } from './mailbox.js';
+import { beginPlantWatch } from './planted-paths.js';
 import type { TokenUsage } from './policy.js';
 import { createRoleTmpdir, removeRoleTmpdir, roleTmpBase } from './role-tmpdir.js';
 import { FaultRestarts, ProcessFaultError } from './sandbox-fault.js';
@@ -254,6 +255,8 @@ async function runAgentSessionLoop(opts: SessionOpts, tmp: SessionTmpdirs): Prom
     const attempt = { replied: false };
     // Task scope: this process works on one task, so cancelling it ends it.
     const tracked = trackTaskProcess(opts.taskProcesses, scope, sessionKey);
+    // #502 review round 3: what this session could plant is checked when it ends.
+    const endPlantWatch = await beginPlantWatch(opts);
     try {
       const res = await runOneSession(
         sessionOpts,
@@ -264,7 +267,7 @@ async function runAgentSessionLoop(opts: SessionOpts, tmp: SessionTmpdirs): Prom
         streamOpts,
         faultRestarts.watch(sessionKey),
         tracked?.signal,
-      );
+      ).finally(endPlantWatch);
       // Cancelled as the process was ending on its own: still owed the notice.
       if (tracked?.signal.aborted) throw tracked.signal.reason;
       sessionId = res.sessionId;
