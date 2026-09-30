@@ -6,8 +6,8 @@
  * wrote under the `claude` key for such a role is still resumed, and moves to
  * the right key when it is.
  */
-import { describe, it, expect } from 'vitest';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OrgBus } from '../../src/orgrt/bus.js';
@@ -26,7 +26,24 @@ const records = (file: string) =>
     taskKey,
     sessionId,
   }));
+/** A ledger file as a pre-#562 build left it: records carry no runtimeResolved. */
+const oldBuildLedger = (records: object[]) => {
+  const file = join(dir(), 'sessions.json');
+  writeFileSync(file, JSON.stringify({ records, runs: [] }));
+  return file;
+};
 const tick = (ms = 15) => new Promise((r) => setTimeout(r, ms));
+
+// Runner selection reads MONOMIND_RUNTIME; the caller's shell must not decide these tests.
+let savedRuntimeEnv: string | undefined;
+beforeEach(() => {
+  savedRuntimeEnv = process.env.MONOMIND_RUNTIME;
+  delete process.env.MONOMIND_RUNTIME;
+});
+afterEach(() => {
+  if (savedRuntimeEnv === undefined) delete process.env.MONOMIND_RUNTIME;
+  else process.env.MONOMIND_RUNTIME = savedRuntimeEnv;
+});
 
 /** Fake SDK: a session id per query() unless resumed. */
 function fakeSdk() {
@@ -58,7 +75,12 @@ const taskDef = {
   run_config: { session_scope: 'task' },
 } as any;
 
-function run(mailbox: Mailbox, queryFn: any, extra: Record<string, unknown>) {
+function run(
+  mailbox: Mailbox,
+  queryFn: any,
+  extra: Record<string, unknown>,
+  provider: Record<string, unknown> = { kind: 'vercel-api-key' },
+) {
   const bus = new OrgBus('o', 'r', dir());
   const audits: any[] = [];
   bus.subscribe((e) => {
@@ -71,7 +93,7 @@ function run(mailbox: Mailbox, queryFn: any, extra: Record<string, unknown>) {
     type: 'coder',
     reports_to: 'boss',
     responsibilities: [],
-    provider: { kind: 'vercel-api-key' },
+    provider,
   } as any;
   const done = runAgentSession({
     org: 'o',
@@ -129,15 +151,16 @@ describe('#562 session runtime key for a provider.kind role', () => {
     const sdk = fakeSdk();
     const mailbox = new Mailbox();
     mailbox.push('[task:task-1] a');
-    const file = join(dir(), 'sessions.json');
-    new SessionLedger(file).set({
-      role: 'dev',
-      runtime: 'claude',
-      taskKey: 'task-1',
-      cwd: '/work',
-      promptHash: '*',
-      sessionId: 'legacy-sid',
-    });
+    const file = oldBuildLedger([
+      {
+        role: 'dev',
+        runtime: 'claude',
+        taskKey: 'task-1',
+        cwd: '/work',
+        promptHash: '*',
+        sessionId: 'legacy-sid',
+      },
+    ]);
     const ledger = new SessionLedger(file);
     const { done } = run(mailbox, sdk.queryFn, { def: taskDef, sessionLedger: ledger });
     await tick(40);
@@ -151,22 +174,50 @@ describe('#562 session runtime key for a provider.kind role', () => {
   });
 });
 
+describe('#562 session runtime key without a runner', () => {
+  it('keys a role an unknown MONOMIND_RUNTIME leaves on Claude under claude', async () => {
+    process.env.MONOMIND_RUNTIME = 'no-such-runtime';
+    const sdk = fakeSdk();
+    const mailbox = new Mailbox();
+    mailbox.push('hello');
+    const ledger = new SessionLedger();
+    const { done, audits } = run(mailbox, sdk.queryFn, { sessionLedger: ledger }, {});
+    await tick();
+    mailbox.close();
+    await done;
+    expect(ledger.runs()[0]).toMatchObject({ role: 'dev', runtime: 'claude' });
+    expect(audits[0].data).toMatchObject({ runtime: 'claude' });
+  });
+});
+
 describe('#562 SessionLedger legacy lookup', () => {
   const q = { role: 'dev', taskKey: 'task-1', cwd: '/work', promptHash: '*' };
   const legacy = { ...q, runtime: 'claude', sessionId: 'legacy-sid' };
 
   it('reads the legacy key only when asked to', () => {
-    const ledger = new SessionLedger();
-    ledger.set(legacy);
+    const ledger = new SessionLedger(oldBuildLedger([legacy]));
     expect(ledger.resumeFor({ ...q, runtime: 'vercel' }).sessionId).toBeUndefined();
     expect(ledger.resumeFor({ ...q, runtime: 'vercel', legacyRuntime: 'claude' }).sessionId).toBe(
       'legacy-sid',
     );
   });
 
+  it('never moves a claude record this build wrote to another runtime', () => {
+    // The role ran on Claude, then its provider (or MONOMIND_RUNTIME) changed:
+    // that Claude session id must not reach the new runner.
+    const file = join(dir(), 'sessions.json');
+    new SessionLedger(file).set(legacy);
+    const ledger = new SessionLedger(file);
+    expect(ledger.resumeFor({ ...q, runtime: 'vercel', legacyRuntime: 'claude' })).toEqual({
+      reason: 'fresh-no-record',
+    });
+    expect(records(file)).toEqual([
+      { role: 'dev', runtime: 'claude', taskKey: 'task-1', sessionId: 'legacy-sid' },
+    ]);
+  });
+
   it('prefers a record under the new key over the legacy one', () => {
-    const ledger = new SessionLedger();
-    ledger.set(legacy);
+    const ledger = new SessionLedger(oldBuildLedger([legacy]));
     ledger.set({ ...q, runtime: 'vercel', sessionId: 'new-sid' });
     expect(ledger.resumeFor({ ...q, runtime: 'vercel', legacyRuntime: 'claude' }).sessionId).toBe(
       'new-sid',

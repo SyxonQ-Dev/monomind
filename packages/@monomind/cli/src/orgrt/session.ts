@@ -8,6 +8,7 @@ import { beginPlantWatch } from './planted-paths.js';
 import type { TokenUsage } from './policy.js';
 import { createRoleTmpdir, removeRoleTmpdir, roleTmpBase } from './role-tmpdir.js';
 import { resolveRoleRuntime } from './runner-resolve.js';
+import { BASE_SPECS } from './runner-specs.js';
 import { FaultRestarts, ProcessFaultError } from './sandbox-fault.js';
 import type { SessionStartReason } from './session-ledger.js';
 import {
@@ -147,11 +148,17 @@ async function runAgentSessionLoop(opts: SessionOpts, tmp: SessionTmpdirs): Prom
   // #562: the runtime that actually hosts the role, as runner selection
   // resolves it (a provider.kind of vercel-api-key runs on 'vercel').
   const configuredRuntime = opts.role.runtime ?? opts.def?.runtime;
-  const runtimeKey =
-    resolveRoleRuntime(opts.role.runtime, opts.def?.runtime, opts.role.provider?.kind) ?? 'claude';
-  // Older builds filed such a role's records under 'claude'; that record holds
-  // this same runner's session, so it is still resumed. A role that set its
-  // runtime was never keyed that way and never reads it.
+  // An unknown or empty MONOMIND_RUNTIME selects no runner, so Claude hosts it.
+  const resolvedRuntime = resolveRoleRuntime(
+    opts.role.runtime,
+    opts.def?.runtime,
+    opts.role.provider?.kind,
+  );
+  const runtimeKey = BASE_SPECS.find((s) => s.id === resolvedRuntime)?.id ?? 'claude';
+  // Older builds filed such a role's records under 'claude'; such a record
+  // holds this same runner's session, so it is still resumed (the ledger only
+  // moves records those builds wrote). A role that set its runtime was never
+  // keyed that way and never reads it.
   const legacyRuntimeKey =
     configuredRuntime === undefined && runtimeKey !== 'claude' ? 'claude' : undefined;
   let taskKey = ROLE_SESSION_KEY;
