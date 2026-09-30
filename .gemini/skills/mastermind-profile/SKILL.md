@@ -1,6 +1,6 @@
 ---
 name: mastermind-profile
-description: Mastermind profile — view and edit the current operator profile (display name, preferences) and inspect any user's activity statistics, completion rate, and token usage. Merges ProfileSettings.tsx and UserProfile.tsx.
+description: "Mastermind profile — view and edit the operator profile, and show any user's activity, completion rate and token usage."
 type: domain-skill
 default_mode: confirm
 pick: low

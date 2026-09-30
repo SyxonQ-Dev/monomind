@@ -1,6 +1,6 @@
 ---
 name: mastermind-org-settings
-description: Mastermind org-settings — edit Org Runtime configuration (name, goal, schedule, budget_tokens, memory_namespace, max_turns_per_message), export org as portable JSON, and import an org from a previously exported file.
+description: "Mastermind org-settings — edit an org's runtime config (name, goal, schedule, token budget, memory namespace, turn limit) and export or import it as JSON."
 type: domain-skill
 default_mode: confirm
 pick: low

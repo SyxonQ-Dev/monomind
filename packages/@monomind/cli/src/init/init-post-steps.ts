@@ -99,20 +99,45 @@ try { await buildAsync(${JSON.stringify(targetDir)}); } finally {
   }
 }
 
+const CLAUDE_INSTALL = 'npm install -g @anthropic-ai/claude-code';
+
 /**
- * Run doctor --install to auto-fix any remaining issues.
- * Non-fatal: best-effort health check and auto-install.
+ * Whether init may install the Claude Code CLI globally (#420): only when
+ * Claude Code is a selected platform, it is missing, someone is at a
+ * terminal, and they say yes. Anywhere else it prints the install command.
+ */
+async function mayInstallClaudeCode(claudeSelected: boolean): Promise<boolean> {
+  if (!claudeSelected) return false;
+  const { checkClaudeCode } = await import('../commands/doctor-env-checks.js');
+  if ((await checkClaudeCode()).status === 'pass') return false;
+  const { output } = await import('../output.js');
+  const tty = process.stdin.isTTY === true && process.stdout.isTTY === true && !process.env.CI;
+  if (!tty) {
+    output.printInfo(`Claude Code CLI not found — install it with: ${CLAUDE_INSTALL}`);
+    return false;
+  }
+  const { confirm } = await import('../prompt.js');
+  const yes = await confirm({
+    message: `Claude Code CLI not found. Install it now (${CLAUDE_INSTALL})?`,
+    default: false,
+  });
+  if (!yes) output.printInfo(`Skipped — install it later with: ${CLAUDE_INSTALL}`);
+  return yes;
+}
+
+/**
+ * Run doctor's fixes after init. Non-fatal: best-effort health check.
  *
- * `install` gates the Claude Code CLI auto-install specifically (a real
- * network fetch + global write, `npm install -g @anthropic-ai/claude-code`)
- * — pass false (`monomind init --no-install`) to run only the local,
- * no-network doctor fixes. When it will run, disclose it up front rather
- * than letting it appear silently mid-summary (#132).
+ * `install` allows the Claude Code CLI install (a real network fetch and
+ * global write) — false for `monomind init --no-install`. Even then it runs
+ * only as `mayInstallClaudeCode` decides: Claude Code selected, missing,
+ * interactive, and confirmed (#132, #420).
  */
 export async function runDoctorFix(
   targetDir: string,
   result: InitResult,
-  install = true,
+  allowInstall = true,
+  claudeSelected = true,
 ): Promise<void> {
   try {
     const { doctorCommand } = await import('../commands/doctor.js');
@@ -120,16 +145,7 @@ export async function runDoctorFix(
       result.skipped.push('doctor: auto-fix unavailable (run: monomind doctor --install)');
       return;
     }
-    if (install) {
-      const { checkClaudeCode } = await import('../commands/doctor-env-checks.js');
-      const claudeCheck = await checkClaudeCode();
-      if (claudeCheck.status !== 'pass') {
-        const { output } = await import('../output.js');
-        output.printInfo(
-          'Installing Claude Code CLI globally (npm install -g @anthropic-ai/claude-code) — pass --no-install to skip',
-        );
-      }
-    }
+    const install = allowInstall && (await mayInstallClaudeCode(claudeSelected));
     const res = await doctorCommand.action({
       args: [],
       // `fix: true` keeps the local, no-network fixes (monoes tool shims,

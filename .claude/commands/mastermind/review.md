@@ -1,5 +1,5 @@
 ---
-description: "Mastermind review domain — code review, security audit, content and strategy review. Trigger on \"review this session's work,\" \"full review of this session,\" or \"review this worktree\" — add --tillend for exhaustive find-fix-verify looping. Default mode: auto."
+description: "Review code, security, content or strategy, or \"review this session/worktree\"; --tillend loops find-fix-verify. Default mode: auto."
 ---
 
 **First — extract repeat flags:** Follow the REPEAT PREAMBLE from `mastermind-repeat/SKILL.md`. Extracts `--repeat`, `--tillend`, `--maxruns`, `--wait`, `--rep`, `--loop` from `$ARGUMENTS` before all other parsing. If `is_continuation = true`, skip the empty-prompt check and intake below.

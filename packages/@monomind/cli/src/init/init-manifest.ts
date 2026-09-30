@@ -57,6 +57,9 @@ export interface InitManifest {
    *  Absent in manifests written before this field existed; normalised to
    *  an empty list on read, which the sweep treats as "delete nothing". */
   opencodeSkills: string[];
+  /** Opt-in packs installed on top of core (GH #411). Absent on a manifest
+   *  written before packs existed — see `installedPacks`. */
+  packs?: string[];
   /** Every entry ever retired (o-38) — see `RetiredEntry`. Absent on a
    *  manifest written before this field existed; treated as empty. */
   retired?: RetiredEntry[];
@@ -107,6 +110,9 @@ export function readInitManifest(targetDir: string): InitManifest | null {
       opencodeSkills: Array.isArray(parsed.opencodeSkills)
         ? parsed.opencodeSkills.filter((s: unknown) => typeof s === 'string')
         : [],
+      ...(Array.isArray(parsed.packs)
+        ? { packs: parsed.packs.filter((s: unknown) => typeof s === 'string') }
+        : {}),
       retired: Array.isArray(parsed.retired)
         ? parsed.retired.filter(
             (r: unknown): r is RetiredEntry =>
@@ -199,6 +205,27 @@ export function recordGenerated(
     atomicWriteFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   } catch {
     // Non-fatal: without a manifest the next run simply deletes nothing.
+  }
+}
+
+/** Record the opt-in packs a project has installed (GH #411). */
+export function recordPacks(targetDir: string, packs: readonly string[]): void {
+  const manifestPath = path.join(targetDir, INIT_MANIFEST_REL);
+  const manifest: InitManifest = readInitManifest(targetDir) ?? {
+    version: 1,
+    skills: [],
+    commands: [],
+    agents: [],
+    kimiSkills: [],
+    kimiPluginCommands: [],
+    opencodeSkills: [],
+  };
+  manifest.packs = [...new Set(packs)].sort();
+  try {
+    fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+    atomicWriteFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  } catch {
+    // Non-fatal: without it, installedPacks falls back to what is on disk.
   }
 }
 

@@ -1,6 +1,6 @@
 ---
 name: mastermind-activity
-description: Mastermind activity — full activity feed for an org with event-type filtering, actor lookups, and entity name resolution. Fetches up to 200 recent events across issue, project, goal, agent, and routine entity types. Mirrors Activity.tsx.
+description: "Mastermind activity — an org's activity feed (up to 200 recent issue, project, goal, agent and routine events) with event-type filters and actor/entity names."
 type: domain-skill
 default_mode: auto
 pick: low

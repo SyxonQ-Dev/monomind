@@ -1,6 +1,6 @@
 ---
 name: mastermind-plugin-manager
-description: Mastermind plugin-manager — bookkeeping only — not enforced by the Org Runtime. npm-installs or uninstalls packages and records enabled/disabled state in `.monomind/plugins/registry.json`, which nothing loads. Mirrors PluginManager.tsx.
+description: "Mastermind plugin-manager — bookkeeping only — not enforced by the Org Runtime. npm-installs packages and records enabled state in `.monomind/plugins/registry.json`, which nothing loads."
 type: domain-skill
 default_mode: confirm
 pick: low

@@ -1125,7 +1125,9 @@ prompts and, under `--if-missing`, a guarantee that nothing the user already has
 ```
 $ monomind init --project /path/to/workspace --if-missing --json --yes --no-watch --no-install
 {"root":"/path/to/workspace","created":["CLAUDE.md",".claude/settings.json",".mcp.json"],
- "skipped":[],"claude_project_registered":false,"duration_ms":842}
+ "skipped":[],"claude_project_registered":false,
+ "platforms":{"source":"detected","selected":["claude"],"detected":[{"id":"claude","via":["claude on PATH"]}]},
+ "duration_ms":842}
 ```
 
 ### 11.1 Flags (all usable with or without `--json`)
@@ -1144,7 +1146,7 @@ $ monomind init --project /path/to/workspace --if-missing --json --yes --no-watc
   also given; `--if-missing` alone is enough.
 - `--json` — print exactly one JSON document on stdout (schema below) and suppress all
   human-readable output (no spinner, no boxes, no prompts — a caller with `--json` is always
-  treated as non-interactive). Every other init flag (`--minimal`/`--full`/`--target`/`--platform`/
+  treated as non-interactive; it never offers to install the Claude Code CLI). Every other init flag (`--minimal`/`--full`/`--target`/`--platforms`/`--all-platforms`/
   `--skip-claude`/`--only-claude`/`--pin`/`--no-memory`/…) behaves identically whether or not
   `--json` is also passed — they share one option-resolution path
   (`src/init/resolve-options.ts`).
@@ -1155,7 +1157,7 @@ $ monomind init --project /path/to/workspace --if-missing --json --yes --no-watc
 
 ### 11.2 JSON result
 
-Success: `{root, created, skipped, claude_project_registered, duration_ms}`.
+Success: `{root, created, skipped, claude_project_registered, platforms, duration_ms}`.
 
 - `root` — the resolved absolute target directory (`--project`, or the cwd).
 - `created` — every directory and file this run actually wrote (init's `created.directories` and
@@ -1173,6 +1175,12 @@ Success: `{root, created, skipped, claude_project_registered, duration_ms}`.
   checking the filesystem after the run**, never assumed — a plain `init` (no
   `--register-claude-project`, no Claude turn ever run in this directory) truthfully reports
   `false`.
+- `platforms` — which coding platforms this run wrote and why (#420): `source` is `detected`
+  (no platform flag; installed CLIs/config dirs plus the platforms `root` already has),
+  `fallback` (nothing detected, so Claude Code alone) or `explicit` (`--platforms`, `--target`,
+  `--all-platforms`, …); `selected` is the platform ids written; `detected` lists each detected
+  platform as `{id, via}`, where `via` names what found it (`claude on PATH`, `~/.codex`,
+  `already in this project`). Empty for `explicit`.
 - `duration_ms` — wall time for this invocation, measured start to finish of the command's own
   action (not the whole process).
 

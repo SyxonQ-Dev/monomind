@@ -18,6 +18,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  DESCRIPTION_MAX_CHARS,
+  descriptionTooLong,
   extractCommandRefs,
   loadCliCommands,
   unresolvedReason,
@@ -87,5 +89,31 @@ describe('lint-skills command references', () => {
     expect(run.stderr).not.toMatch(/not a command of the built CLI/);
     expect(run.stdout + run.stderr).not.toMatch(/not a subcommand of/);
     expect(run.status).toBe(0);
+  });
+});
+
+// GH #411: Claude Code drops descriptions once the skill/command listing passes
+// ~1% of the context window, so a shipped description may not exceed the cap.
+describe('lint-skills description cap', () => {
+  const md = (fm: string) => `---\nname: x\n${fm}\n---\n\n# X\n`;
+
+  it('flags a description over the cap and passes one at it', () => {
+    expect(DESCRIPTION_MAX_CHARS).toBe(200);
+    expect(descriptionTooLong(md(`description: "${'a'.repeat(200)}"`))).toBeNull();
+    expect(descriptionTooLong(md(`description: "${'a'.repeat(201)}"`))).toMatch(
+      /description is 201 chars \(max 200\)/,
+    );
+  });
+
+  it('measures folded descriptions and a skill’s when_to_use', () => {
+    const folded = md(`description: >\n  ${'word '.repeat(30)}\n  ${'word '.repeat(15)}`);
+    expect(descriptionTooLong(folded)).toMatch(/description is 22\d chars/);
+    const withWhen = md(`description: "${'a'.repeat(150)}"\nwhen_to_use: "${'b'.repeat(60)}"`);
+    expect(descriptionTooLong(withWhen)).toBeNull();
+    expect(descriptionTooLong(withWhen, { skill: true })).toMatch(/211 chars/);
+  });
+
+  it('ignores a file without frontmatter', () => {
+    expect(descriptionTooLong('# Just a heading\n')).toBeNull();
   });
 });

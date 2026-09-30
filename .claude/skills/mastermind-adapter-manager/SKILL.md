@@ -1,6 +1,6 @@
 ---
 name: mastermind-adapter-manager
-description: Mastermind adapter-manager — global instance-level adapter catalog. Lists all built-in and npm-installed adapters, enables/disables them in menus, reinstalls from npm to pick up updates, adds custom HTTP adapters, and removes custom ones. Complements mastermind:adapters (per-org) with the global registry. Mirrors AdapterManager.tsx.
+description: "Mastermind adapter-manager — global adapter catalog: list built-in and npm adapters, enable/disable them, reinstall from npm, add or remove custom HTTP adapters."
 type: domain-skill
 default_mode: confirm
 pick: low

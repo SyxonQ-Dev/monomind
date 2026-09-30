@@ -1,6 +1,6 @@
 ---
 name: mastermind-monotask
-description: Authoritative monotask CLI reference for mastermind agents — boards, columns, cards (with filters, subtasks, prerequisites, scoring, attachments), spaces, GitHub/Linear sync, and common agent workflows. Version 1.1.4.
+description: "Monotask CLI reference for mastermind agents: boards, columns, cards (filters, subtasks, prerequisites, scoring, attachments), spaces and GitHub/Linear sync."
 type: reference-skill
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: monomotion
-description: HTML-native animation system using GSAP — timeline-driven, API-controllable animations that run in the browser without video rendering or React. Covers timeline control, WebSocket/REST-driven playback, effects, and sequencing.
+description: "HTML-native GSAP animation system: timeline-driven, API-controllable browser animations with WebSocket/REST playback, effects and sequencing; no video rendering."
 version: 1.0.0
 triggers:
   - /monomotion

@@ -1,12 +1,6 @@
 ---
 name: monolean-audit
-description: >
-  Whole-repo audit for over-engineering. Scans the entire codebase, not a
-  diff: a ranked list of what to delete, simplify,
-  or replace with stdlib/native equivalents. Use when the user says "audit this
-  codebase", "audit for over-engineering", "what can I delete from this repo",
-  "find bloat", "monolean-audit", or "/monolean-audit". One-shot report, does
-  not apply fixes. Not for security or vulnerability audits.
+description: "Whole-repo over-engineering audit: a ranked list of what to delete, simplify or replace with stdlib/native code. One-shot report, no fixes. Not for security audits."
 ---
 
 An over-engineering review, repo-wide. Scan the whole tree instead of a diff.

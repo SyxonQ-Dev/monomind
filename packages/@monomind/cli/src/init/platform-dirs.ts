@@ -10,14 +10,16 @@
 
 import type { InitOptions } from './types.js';
 
-type Selection = Pick<InitOptions, 'selectedPlatforms'>;
+type Selection = Pick<InitOptions, 'selectedPlatforms' | 'platformTrees'>;
 
 export function wantsGeminiDirs(options: Selection): boolean {
+  if (options.platformTrees) return options.platformTrees.includes('gemini');
   const sel = options.selectedPlatforms;
   return !sel || sel.some((p) => p === 'antigravity' || p === 'gemini');
 }
 
 export function wantsAgentsDirs(options: Selection): boolean {
+  if (options.platformTrees) return options.platformTrees.includes('agents');
   const sel = options.selectedPlatforms;
   return !sel || sel.some((p) => p !== 'claude');
 }

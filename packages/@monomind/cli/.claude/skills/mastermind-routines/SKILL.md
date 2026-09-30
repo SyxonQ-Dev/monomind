@@ -1,6 +1,6 @@
 ---
 name: mastermind-routines
-description: Mastermind routines — manage an org's recurring runs through the one trigger the Org Runtime enforces, the org definition's `schedule` interval (run by `monomind org serve`). Set, clear, pause, resume, or trigger a run now; per-agent cron routines are not supported by the runtime and are flagged as not enforced.
+description: "Mastermind routines — manage an org's recurring runs via its `schedule` interval (run by `monomind org serve`): set, clear, pause, resume, run now. Per-agent cron is not enforced."
 type: domain-skill
 default_mode: confirm
 pick: low

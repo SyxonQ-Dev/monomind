@@ -1,6 +1,6 @@
 ---
 name: mastermind-diagnose
-description: Mastermind diagnose — forensic procedure for investigating why agent work stalled, looped, or went too deep. Surfaces the exact stop-point in the issue tree, frames the fix as a product rule respecting three invariants (productive work continues / only real blockers stop work / no infinite loops), and delivers an approved plan before any code changes. Mirrors diagnose-why-work-stopped Paperclip skill.
+description: "Mastermind diagnose — find why agent work stalled, looped or went too deep: locate the stop-point in the issue tree and get a fix plan approved before code changes."
 type: domain-skill
 default_mode: confirm
 ---

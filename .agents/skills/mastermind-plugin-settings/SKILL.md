@@ -1,6 +1,6 @@
 ---
 name: mastermind-plugin-settings
-description: Mastermind plugin-settings — inspect and configure a single installed plugin. View configuration fields, manage file system access grants (read/write paths), check runtime health/status, and update plugin settings. Mirrors Paperclip's PluginSettings page with configuration and status tabs.
+description: "Mastermind plugin-settings — inspect and configure one installed plugin: settings fields, file-system access grants, and health status."
 type: domain-skill
 default_mode: confirm
 pick: low

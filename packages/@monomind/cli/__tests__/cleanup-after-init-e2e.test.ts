@@ -92,7 +92,7 @@ describe('cleanup after init leaves no config pointing at removed monomind files
     // --force merges monomind's hooks into the existing settings.json (a plain
     // re-run only backfills hooks when there are none).
     const init = await initCommand.action!(
-      ctx({ force: true, 'no-watch': true, 'no-start-all': true }),
+      ctx({ force: true, 'no-watch': true, 'no-start-all': true, 'all-platforms': true }),
     );
     expect(init.success, JSON.stringify(init)).toBe(true);
     expect(read('.claude/settings.json')).toContain('.claude/helpers/hook-handler.cjs');
@@ -168,7 +168,7 @@ describe('cleanup after init leaves no config pointing at removed monomind files
 
   it('keeps the helpers a git-tracked settings.json runs, with the manual edit (#448)', async () => {
     const init = await initCommand.action!(
-      ctx({ force: true, 'no-watch': true, 'no-start-all': true }),
+      ctx({ force: true, 'no-watch': true, 'no-start-all': true, 'all-platforms': true }),
     );
     expect(init.success, JSON.stringify(init)).toBe(true);
     const { execFileSync } = await vi.importActual<typeof import('node:child_process')>(

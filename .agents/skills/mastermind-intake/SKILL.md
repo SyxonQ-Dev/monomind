@@ -1,6 +1,6 @@
 ---
 name: mastermind-intake
-description: Shared intake protocol for mastermind — rich-prompt detection, comprehensive intake questions asked one at a time, and LLM-decide logic. Never invoked directly; called by master and standalone domain commands.
+description: "Shared intake protocol: detects rich prompts, asks intake questions one at a time, decides when to proceed. Never invoked directly."
 type: shared
 ---
 
