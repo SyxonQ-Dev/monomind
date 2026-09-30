@@ -395,22 +395,7 @@ function getMonoswarmStatus() {
     } catch (err) { if (process.env.MONOMIND_DEBUG) console.error('[statusline]', err); /* fall through */ }
   }
 
-  // SECONDARY: state.json written by MCP monoswarm_init — trust if fresh
-  const swarmStatePath = path.join(CWD, '.monomind', 'monoswarm', 'state.json');
-  const swarmState = readJSON(swarmStatePath);
-  if (swarmState) {
-    const updatedAt = swarmState.updatedAt || swarmState.startedAt;
-    const age = updatedAt ? now - new Date(updatedAt).getTime() : Infinity;
-    if (age < staleThresholdMs) {
-      return {
-        activeAgents: swarmState.agents?.length || swarmState.agentCount || 0,
-        maxAgents: swarmState.maxAgents || CONFIG.maxAgents,
-        coordinationActive: true,
-      };
-    }
-  }
-
-  // TERTIARY: monoswarm-activity.json refreshed by post-task hook
+  // SECONDARY: monoswarm-activity.json refreshed by post-task hook
   const activityData = readJSON(path.join(CWD, '.monomind', 'metrics', 'monoswarm-activity.json'));
   if (activityData?.monoswarm) {
     const updatedAt = activityData.timestamp || activityData.monoswarm.timestamp;

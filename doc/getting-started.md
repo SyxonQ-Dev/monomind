@@ -144,7 +144,7 @@ Claude Code lists every installed skill and command with its description, and on
 |---|---|
 | `orgs` | Agent orgs: create, run, stop and inspect them; org tasks, goals and routines |
 | `org-admin` | Org admin bookkeeping: access, invites, plugins, adapters, secrets, backups |
-| `swarm` | Monoswarm, hooks and workflow commands; consensus and optimization agents |
+| `swarm` | Hooks and workflow commands; consensus and optimization agents |
 | `github` | GitHub commands and agents: repo architecture, multi-repo sync, project boards, Actions |
 | `testing` | QA agents: API, accessibility, evidence collection, test analysis |
 | `specialists` | Specialist agents: data, SRE, mobile, embedded, Solidity, WeChat, Feishu, MCP |
@@ -201,4 +201,3 @@ monomind org run my-team --budget-usd 5     # hard-stop at $5
 - `doc/concepts/monograph.md` — how the code graph works
 - `doc/concepts/memory.md` — memory tiers and search
 - `doc/concepts/org-runtime.md` — multi-agent daemon
-- `doc/concepts/monoswarm.md` — multi-agent coordination, topologies, and voting

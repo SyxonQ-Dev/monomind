@@ -13,16 +13,12 @@ import { hooksCommand } from '../commands/hooks.js';
 import { initCommand } from '../commands/init.js';
 import { mcpCommand } from '../commands/mcp.js';
 import { memoryCommand } from '../commands/memory.js';
-import { monoswarmCommand } from '../commands/monoswarm.js';
 import { performanceCommand } from '../commands/performance.js';
 import { providersCommand } from '../commands/providers.js';
 import { securityCommand } from '../commands/security.js';
 import { sessionCommand } from '../commands/session.js';
 import { statusCommand } from '../commands/status.js';
 import { taskCommand } from '../commands/task.js';
-import { MONOSWARM_AUTOPILOT_REMOVAL_VERSION } from '../deprecations.js';
-import { HONEST_MONOSWARM_SENTENCE } from './claudemd-generator.js';
-import { MONOSWARM_DEPRECATED_LINE } from './claudemd-sections-core.js';
 import { atomicWriteFile } from './fs-helpers.js';
 import { WORKER_COUNT, WORKER_ROWS } from './generated-counts.js';
 import {
@@ -57,14 +53,12 @@ export async function writeCapabilitiesDoc(
 ## 📋 Table of Contents
 
 1. [Overview](#overview)
-2. [Monoswarm Orchestration](#monoswarm-orchestration)
-3. [Available Agents (60+)](#available-agents)
-4. [CLI Commands](#cli-commands)
-5. [Hooks System (${subcommandCount(hooksCommand)} Hook Subcommands${hooksAvailable ? ` + ${WORKER_COUNT} Background Workers` : ''})](#hooks-system)
-6. [Memory & Intelligence](#memory--intelligence)
-7. [Monoswarm Vote Strategies](#monoswarm-vote-strategies)
-8. [Performance Targets](#performance-targets)
-9. [Integration Ecosystem](#integration-ecosystem)
+2. [Available Agents (60+)](#available-agents)
+3. [CLI Commands](#cli-commands)
+4. [Hooks System (${subcommandCount(hooksCommand)} Hook Subcommands${hooksAvailable ? ` + ${WORKER_COUNT} Background Workers` : ''})](#hooks-system)
+5. [Memory & Intelligence](#memory--intelligence)
+6. [Performance Targets](#performance-targets)
+7. [Integration Ecosystem](#integration-ecosystem)
 
 ---
 
@@ -72,10 +66,9 @@ export async function writeCapabilitiesDoc(
 
 Monomind is a domain-driven design architecture for multi-agent AI coordination with:
 
-- **15-Agent Monoswarm Coordination** with hierarchical and mesh topologies
+- **Agent Orgs** - \`monomind org run\` runs role-based agent orgs under the Org Runtime
 - **ANN Vector Search** - indexed pattern retrieval via SQLite (better-sqlite3, sql.js WASM fallback)
 - **Keyword Routing** - deterministic task→agent routing with outcome measurement
-- **Vote-Threshold Consensus** - majority/supermajority/unanimous/threshold decisions
 - **MCP Server Integration** - Model Context Protocol support
 
 ### Current Configuration
@@ -85,36 +78,6 @@ Monomind is a domain-driven design architecture for multi-agent AI coordination 
 | Max Agents | ${options.runtime.maxAgents} |
 | Memory Backend | ${options.runtime.memoryBackend} |
 | \`neural.enabled\` | ${options.runtime.enableNeural ? 'On' : 'Off'} (session start loads the local pattern store only when on; no model is trained) |
-
----
-
-## Monoswarm Orchestration
-
-> ${MONOSWARM_DEPRECATED_LINE}
-
-${HONEST_MONOSWARM_SENTENCE}
-
-### Topologies
-| Topology | Description | Best For |
-|----------|-------------|----------|
-| \`hierarchical\` | Coordinator controls workers directly | Anti-drift, tight control |
-| \`mesh\` | Fully connected peer network | Parallel, independent tasks |
-| \`hierarchical-mesh\` | Hybrid (recommended) | 10+ agents |
-| \`ring\` | Circular communication | Sequential workflows |
-| \`star\` | Central coordinator | Simple coordination |
-| \`adaptive\` / \`hybrid\` | Caller-interpreted label — no automatic reconfiguration | Variable workloads |
-
-### Strategies
-- \`balanced\` - Even distribution across agents
-- \`specialized\` - Clear roles, no overlap (anti-drift)
-- \`adaptive\` - Dynamic task routing
-
-### Quick Commands
-\`\`\`bash
-# Deprecated — removed in ${MONOSWARM_AUTOPILOT_REMOVAL_VERSION}
-npx monomind monoswarm init --topology hierarchical --max-agents 8 --strategy specialized
-npx monomind monoswarm status
-\`\`\`
 
 ---
 
@@ -139,7 +102,6 @@ Fallback when picking returns nothing — real core agents:
 |---------|-------------|-------------|
 | \`init\` | ${subcommandCount(initCommand)} | Project initialization |
 | \`agent\` | ${subcommandCount(agentCommand)} | Agent lifecycle management |
-| \`monoswarm\` | ${subcommandCount(monoswarmCommand)} | Deprecated — records state, starts no agents; removed in ${MONOSWARM_AUTOPILOT_REMOVAL_VERSION} |
 | \`memory\` | ${subcommandCount(memoryCommand)} | SQLite with ANN vector search |
 | \`mcp\` | ${subcommandCount(mcpCommand)} | MCP server management |
 | \`task\` | ${subcommandCount(taskCommand)} | Task assignment |
@@ -258,28 +220,6 @@ npx monomind memory init --force
 
 ---
 
-## Monoswarm Vote Strategies
-
-> ${MONOSWARM_DEPRECATED_LINE}
-
-Reach monoswarm coordination through MCP tools (\`monoswarm_*\`) or the
-\`npx monomind monoswarm\` CLI command. See \`doc/concepts/monoswarm.md\`
-for the full picture.
-
-### Agent Types
-Monoswarm members are registry agents (any agent \`name\`); common ones:
-\`researcher\`, \`coder\`, \`tester\`, \`reviewer\`, \`planner\`, \`system-architect\`, \`Performance Benchmarker\`, \`Technical Writer\`
-
-### Vote Strategies
-| Strategy | Threshold |
-|----------|-----------|
-| \`majority\` | More than 50% of votes |
-| \`supermajority\` | At least 2/3 of votes |
-| \`unanimous\` | 100% of votes |
-| \`threshold\` | Custom \`minVotes\` count |
-
----
-
 ## Performance Targets
 
 | Metric | Target | Status |
@@ -324,10 +264,6 @@ claude mcp add monomind -- npx -y monomind mcp start
 # Setup
 npx monomind init wizard
 npx monomind doctor --fix
-
-# Monoswarm (deprecated — removed in ${MONOSWARM_AUTOPILOT_REMOVAL_VERSION}; use the Task tool or \`monomind org run\`)
-npx monomind monoswarm init --topology hierarchical --max-agents 8
-npx monomind monoswarm status
 
 # Agents
 npx monomind agent spawn -t coder

@@ -4,19 +4,18 @@ name: monitoring:README
 
 # Monitoring Commands
 
-Commands for monitoring Monomind system health — swarm status, agents, tasks, memory, and performance metrics.
+Commands for monitoring Monomind system health — agents, tasks, memory, and performance metrics.
 
 ## Available Commands
 
 | Command | Description |
 |---|---|
-| `status` | Full system status (swarm, agents, tasks, memory, MCP) |
+| `status` | Full system status (agents, tasks, memory, MCP) |
 | `status agents` | Detailed agent table with uptime and success rate |
 | `status tasks` | Detailed task table with progress and priority |
 | `status memory` | Memory backend stats (SQLite + local embeddings; keyword fallback) |
 | `agent metrics` | Agent performance metrics by type and time period |
 | `agent health` | Per-agent health check with optional watch mode |
-| `swarm status` | Swarm-specific status (topology, consensus, agents) |
 
 ## Quick Reference
 
@@ -35,9 +34,6 @@ npx monomind status agents
 
 # Agent performance metrics
 npx monomind agent metrics --period 7d
-
-# Swarm status
-npx monomind monoswarm status
 ```
 
 ## Files
@@ -50,8 +46,6 @@ npx monomind monoswarm status
 
 | Tool | Purpose |
 |---|---|
-| `mcp__monomind__monoswarm_status` | Swarm health and agent counts |
-| `mcp__monomind__monoswarm_health` | Swarm health check |
 | `mcp__monomind__agent_list` | All agents with metrics |
 | `mcp__monomind__agent_status` | Specific agent status |
 | `mcp__monomind__agent_health` | Agent health check |

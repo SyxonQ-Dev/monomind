@@ -6,8 +6,6 @@ type: flow
 
 # Self-Healing Workflows
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
-
 ## Purpose
 Automatically detect and recover from errors without interrupting your flow.
 
@@ -72,13 +70,6 @@ mcp__monomind__hooks_intelligence_pattern-search({
 
 ### MCP Tool Coordination
 ```javascript
-// Initialize self-healing swarm
-mcp__monomind__monoswarm_init({
-  "topology": "star",
-  "maxAgents": 4,
-  "strategy": "adaptive"
-})
-
 // Spawn recovery agents
 mcp__monomind__agent_spawn({
   "type": "monitor",

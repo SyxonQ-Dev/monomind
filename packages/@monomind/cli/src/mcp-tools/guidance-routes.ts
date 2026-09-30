@@ -22,12 +22,12 @@ const TASK_ROUTES: TaskRoute[] = [
   },
   {
     pattern: /\b(feature|implement|create|build|add)\b/i,
-    areas: ['monoswarm', 'agent-management', 'hooks-automation'],
+    areas: ['agent-management', 'hooks-automation'],
     workflow: 'feature',
   },
   {
     pattern: /\b(refactor|restructure|reorganize|clean\s*up|modernize)\b/i,
-    areas: ['monoswarm', 'code-analysis'],
+    areas: ['agent-management', 'code-analysis'],
     workflow: 'refactor',
   },
   {
@@ -62,7 +62,7 @@ const TASK_ROUTES: TaskRoute[] = [
   },
   {
     pattern: /\b(swarm|multi.agent|coordin|hive|consensus)\b/i,
-    areas: ['monoswarm'],
+    areas: ['agent-management'],
     workflow: 'swarm',
   },
   {
@@ -82,127 +82,113 @@ const TASK_ROUTES: TaskRoute[] = [
   },
 ];
 
-const WORKFLOW_TEMPLATES: Record<string, { steps: string[]; agents: string[]; topology: string }> =
-  {
-    bugfix: {
-      steps: [
-        'Research the bug (hooks route)',
-        'Reproduce with tests',
-        'Fix the code',
-        'Verify fix passes',
-        'Record outcome (hooks post-task)',
-      ],
-      agents: ['researcher', 'coder', 'tester'],
-      topology: 'hierarchical',
-    },
-    feature: {
-      steps: [
-        'Design architecture',
-        'Implement solution',
-        'Write tests',
-        'Review code',
-        'Record patterns (hooks post-task)',
-      ],
-      agents: ['planner', 'coder', 'tester', 'reviewer'],
-      topology: 'hierarchical',
-    },
-    refactor: {
-      steps: [
-        'Analyze code structure',
-        'Plan refactor approach',
-        'Implement changes',
-        'Verify no regressions',
-      ],
-      agents: ['coder', 'reviewer'],
-      topology: 'hierarchical',
-    },
-    testing: {
-      steps: [
-        'Analyze coverage gaps',
-        'Generate test plan',
-        'Write tests',
-        'Verify coverage improvement',
-      ],
-      agents: ['tester', 'coder'],
-      topology: 'hierarchical',
-    },
-    security: {
-      steps: ['Run security scan', 'Triage findings', 'Fix vulnerabilities', 'Verify remediations'],
-      agents: ['Security Engineer', 'coder', 'reviewer'],
-      topology: 'hierarchical',
-    },
-    performance: {
-      steps: ['Run benchmarks', 'Profile bottlenecks', 'Implement optimizations', 'Re-benchmark'],
-      agents: ['coder'],
-      topology: 'hierarchical',
-    },
-    memory: {
-      steps: [
-        'Initialize memory store',
-        'Store/retrieve patterns',
-        'Search with HNSW',
-        'Compact and optimize',
-      ],
-      agents: ['monoswarm-memory-manager'],
-      topology: 'hierarchical',
-    },
-    'github-pr': {
-      steps: [
-        'Analyze changes',
-        'Run code review swarm',
-        'Check CI status',
-        'Merge or request changes',
-      ],
-      agents: ['pr-manager', 'monoswarm-code-review', 'reviewer'],
-      topology: 'hierarchical',
-    },
-    release: {
-      steps: [
-        'Verify all tests pass',
-        'Generate changelog',
-        'Bump version',
-        'Publish packages',
-        'Create GitHub release',
-      ],
-      agents: ['release-manager', 'tester'],
-      topology: 'hierarchical',
-    },
-    swarm: {
-      steps: [
-        'Initialize swarm topology',
-        'Spawn specialized agents',
-        'Coordinate via memory',
-        'Collect and synthesize results',
-      ],
-      agents: ['mesh-coordinator', 'coder', 'tester', 'reviewer'],
-      topology: 'hierarchical',
-    },
-    learning: {
-      steps: [
-        'Pretrain on codebase',
-        'Record trajectories',
-        'Compute rewards',
-        'Distill learning',
-        'Consolidate (EWC++)',
-      ],
-      agents: [],
-      topology: 'hierarchical',
-    },
-    automation: {
-      steps: [
-        'List available hooks/workers',
-        'Configure hook handlers',
-        'Dispatch workers',
-        'Monitor outcomes',
-      ],
-      agents: [],
-      topology: 'hierarchical',
-    },
-    setup: {
-      steps: ['Run doctor diagnostics', 'Configure providers', 'Initialize memory'],
-      agents: [],
-      topology: 'hierarchical',
-    },
-  };
+const WORKFLOW_TEMPLATES: Record<string, { steps: string[]; agents: string[] }> = {
+  bugfix: {
+    steps: [
+      'Research the bug (hooks route)',
+      'Reproduce with tests',
+      'Fix the code',
+      'Verify fix passes',
+      'Record outcome (hooks post-task)',
+    ],
+    agents: ['researcher', 'coder', 'tester'],
+  },
+  feature: {
+    steps: [
+      'Design architecture',
+      'Implement solution',
+      'Write tests',
+      'Review code',
+      'Record patterns (hooks post-task)',
+    ],
+    agents: ['planner', 'coder', 'tester', 'reviewer'],
+  },
+  refactor: {
+    steps: [
+      'Analyze code structure',
+      'Plan refactor approach',
+      'Implement changes',
+      'Verify no regressions',
+    ],
+    agents: ['coder', 'reviewer'],
+  },
+  testing: {
+    steps: [
+      'Analyze coverage gaps',
+      'Generate test plan',
+      'Write tests',
+      'Verify coverage improvement',
+    ],
+    agents: ['tester', 'coder'],
+  },
+  security: {
+    steps: ['Run security scan', 'Triage findings', 'Fix vulnerabilities', 'Verify remediations'],
+    agents: ['Security Engineer', 'coder', 'reviewer'],
+  },
+  performance: {
+    steps: ['Run benchmarks', 'Profile bottlenecks', 'Implement optimizations', 'Re-benchmark'],
+    agents: ['coder'],
+  },
+  memory: {
+    steps: [
+      'Initialize memory store',
+      'Store/retrieve patterns',
+      'Search with HNSW',
+      'Compact and optimize',
+    ],
+    agents: ['monoswarm-memory-manager'],
+  },
+  'github-pr': {
+    steps: [
+      'Analyze changes',
+      'Run code review swarm',
+      'Check CI status',
+      'Merge or request changes',
+    ],
+    agents: ['pr-manager', 'monoswarm-code-review', 'reviewer'],
+  },
+  release: {
+    steps: [
+      'Verify all tests pass',
+      'Generate changelog',
+      'Bump version',
+      'Publish packages',
+      'Create GitHub release',
+    ],
+    agents: ['release-manager', 'tester'],
+  },
+  swarm: {
+    steps: [
+      'Split the task into independent parts',
+      "Spawn specialized agents with Claude Code's Task tool in one message",
+      'Coordinate via memory',
+      'Collect and synthesize results',
+    ],
+    agents: ['mesh-coordinator', 'coder', 'tester', 'reviewer'],
+  },
+  learning: {
+    steps: [
+      'Pretrain on codebase',
+      'Record trajectories',
+      'Compute rewards',
+      'Distill learning',
+      'Consolidate (EWC++)',
+    ],
+    agents: [],
+  },
+  automation: {
+    steps: [
+      'List available hooks/workers',
+      'Configure hook handlers',
+      'Dispatch workers',
+      'Monitor outcomes',
+    ],
+    agents: [],
+  },
+  setup: {
+    steps: ['Run doctor diagnostics', 'Configure providers', 'Initialize memory'],
+    agents: [],
+  },
+};
 
 export { TASK_ROUTES, WORKFLOW_TEMPLATES };
