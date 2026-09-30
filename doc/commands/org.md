@@ -812,6 +812,21 @@ monomind org sign --all --check [--format json] [--project <dir>]
 | `--project <dir>` | Use `<dir>` as the project root instead of the current directory. It is resolved to its real path and must hold `.monomind/orgs` |
 | `--expect-hash <hex>` | Sign only if the [signable hash](#the-signable-hash) about to be signed is `<hex>`; otherwise exit 1 and write nothing. With `--all`, repeat it as `<org>=<hex>`, once for every org |
 
+**Unknown options:** `org sign` rejects any option it does not know. It prints
+`org sign: unknown option --<name> — nothing signed.`, exits 2 and signs nothing, not even with
+`--yes`. Monomind builds before this change silently ignored an option they did not know, such as
+`--expect-hash`, and signed anyway.
+
+**Checking what this monomind supports:** `monomind --version --json` lists these capabilities
+(see [the Agent Exec Protocol](../agent-exec-protocol.md#2-capability-handshake)), so a tool can
+check before relying on a flag:
+
+| Capability | What it guarantees |
+|---|---|
+| `org-sign-check` | `--check` (text and `--format json`) and `--project <dir>` (#561) |
+| `org-sign-expect-hash` | `--expect-hash`, the `hash` in `--check --format json`, and the exit 2 on an unknown option |
+| `org-sign-review-json` | `org sign <org> --format json` prints the review as JSON and never signs |
+
 **Checking without signing:** `--check` is for tools that rewrite org files themselves, such as
 mono-agent. Such a tool verifies an org before its edit and, after writing, signs with `--yes`
 only if the org verified before, so it re-signs only its own change. `--check` writes nothing:
