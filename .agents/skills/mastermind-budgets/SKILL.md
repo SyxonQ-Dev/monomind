@@ -90,7 +90,7 @@ jq -r --argjson spend "$spendJson" --arg only "${agent_id:-}" '
   | [$roles[] | select(.budget_tokens == null)] as $even
   | (($orgTok - ([$roles[].budget_tokens // 0] | add // 0)) / ([$even | length, 1] | max)
      | floor | [., 0] | max) as $split
-  | "ORG   run_config.budget_tokens \($orgTok)   spent \($spend.totals.tokens) tokens / \($spend.totals.cost_usd | usd)",
+  | "ORG   run_config.budget_tokens \($orgTok)   spent \($spend.totals.tokens) tokens / \($spend.totals.cost_usd | usd)\(if $spend.totals.cost_complete == false and $spend.totals.cost_usd != null then " (lower bound: some roles report no cost)" else "" end)",
     "      (no org-wide USD cap — set budget_usd per role)",
     "",
     ( $roles[] | select($only == "" or .id == $only)

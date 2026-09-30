@@ -30,6 +30,7 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -1260,15 +1261,46 @@ describe('restrictCodexHome (#535)', () => {
     expect(mode(join(home, 'shell_snapshots', 'x.sh'))).toBe(0o644);
   });
 
-  it.skipIf(!posix)('leaves missing dirs and symlinks alone', () => {
-    const real = join(root, 'real');
-    mkdirSync(real);
+  it.skipIf(!posix)('leaves missing and dangling CODEX_HOME alone', () => {
+    expect(restrictCodexHome(join(root, 'absent'))).toEqual([]);
+    const dangling = join(root, 'dangling');
+    symlinkSync(join(root, 'nowhere'), dangling);
+    expect(restrictCodexHome(dangling)).toEqual([]);
+  });
+
+  it.skipIf(!posix)('#540: a symlinked CODEX_HOME has its real target tightened', () => {
+    const real = join(root, 'dotfiles', 'codex');
+    mkdirSync(join(real, 'sessions'), { recursive: true });
     chmodSync(real, 0o755);
+    chmodSync(join(real, 'sessions'), 0o755);
     const link = join(root, 'link');
     symlinkSync(real, link);
+    const realPath = realpathSync(real);
+    expect(restrictCodexHome(link)).toEqual([realPath, join(realPath, 'sessions')]);
+    expect(mode(real)).toBe(0o700);
+    expect(mode(join(real, 'sessions'))).toBe(0o700);
+  });
+
+  it.skipIf(!posix)('#540: a symlink to a file is not chmodded', () => {
+    const file = join(root, 'file');
+    writeFileSync(file, '', { mode: 0o644 });
+    chmodSync(file, 0o644);
+    const link = join(root, 'link');
+    symlinkSync(file, link);
     expect(restrictCodexHome(link)).toEqual([]);
-    expect(mode(real)).toBe(0o755);
-    expect(restrictCodexHome(join(root, 'absent'))).toEqual([]);
+    expect(mode(file)).toBe(0o644);
+  });
+
+  it.skipIf(!posix)('#540: a symlinked sessions/ is not followed (O_NOFOLLOW)', () => {
+    const home = join(root, '.codex');
+    mkdirSync(home);
+    chmodSync(home, 0o700);
+    const elsewhere = join(root, 'elsewhere');
+    mkdirSync(elsewhere);
+    chmodSync(elsewhere, 0o755);
+    symlinkSync(elsewhere, join(home, 'sessions'));
+    expect(restrictCodexHome(home)).toEqual([]);
+    expect(mode(elsewhere)).toBe(0o755);
   });
 
   it('codexHomeDir: CODEX_HOME wins, else HOME/.codex', () => {

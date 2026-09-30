@@ -73,6 +73,18 @@ describe.skipIf(!hasJq)('mastermind-budgets skill jq filters with a null cost', 
       ['--arg', 'only', ''],
     );
     expect(out).toContain('spent 900000 tokens / unknown');
+    expect(out).not.toContain('lower bound');
+  });
+
+  it('show (#540): an incomplete org total is labelled a lower bound', () => {
+    const out = runJq(filters().show, spend, ['--arg', 'only', '']);
+    expect(out).toContain('spent 901000 tokens / $4.5 (lower bound: some roles report no cost)');
+    const complete = runJq(
+      filters().show,
+      { ...spend, totals: { ...spend.totals, cost_complete: true } },
+      ['--arg', 'only', ''],
+    );
+    expect(complete).toMatch(/spent 901000 tokens \/ \$4\.5\n/);
   });
 
   it('alert: flags by tokens and USD, printing unknown for the null-cost role', () => {

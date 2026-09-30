@@ -115,6 +115,30 @@ describe('org report / org costs --json with unknown cost', () => {
   });
 });
 
+describe('org costs --json from live runtime metrics only (#540)', () => {
+  it('a live $0 stays 0; a live null stays unknown', async () => {
+    writeRun([]);
+    writeFileSync(
+      join(root, '.monomind', 'orgs', ORG, 'runtime.json'),
+      JSON.stringify({
+        status: 'running',
+        run: RUN,
+        roleMetrics: {
+          lead: { tokens: 10, costUsd: 0 },
+          coder: { tokens: 5, costUsd: null },
+        },
+      }),
+    );
+    await costsAction(ctx({ format: 'json' }), ORG);
+    const c = json();
+    const byRole = Object.fromEntries(
+      c.items.map((i: { role: string; cost_usd: unknown }) => [i.role, i.cost_usd]),
+    );
+    expect(byRole).toEqual({ lead: 0, coder: null });
+    expect(c.totals).toMatchObject({ tokens: 15, cost_usd: 0, cost_complete: false });
+  });
+});
+
 describe('dashboard state.json usage accumulation', () => {
   const state = () =>
     JSON.parse(readFileSync(join(root, '.monomind', 'orgs', `${ORG}-state.json`), 'utf8'));
