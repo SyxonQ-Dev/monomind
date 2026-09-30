@@ -77,9 +77,9 @@
  *     confirmed live. The top-level `-z` form takes the prompt as a raw
  *     argv string, reintroducing the exact argv-length/quoting problem
  *     `--query-file` exists to avoid — not worth it just for usage
- *     accounting. This runner always reports input_tokens/output_tokens/
- *     cost_usd as 0 (same documented limitation as vercel-runner.ts's
- *     cost_usd:0 — token budgets still enforce via policy.ts elsewhere).
+ *     accounting. This runner always reports input_tokens/output_tokens
+ *     as 0 and omits cost_usd (unknown, reported as null — never a $0
+ *     spend; token budgets still enforce via policy.ts elsewhere).
  *
  * CORRECTIONS FROM LIVE TESTING (what the docs-only version got wrong):
  *   1. `--usage-file` is NOT a `chat` flag (see above) — the original
@@ -222,7 +222,6 @@ export class HermesAgentRunner implements AgentRunner {
           subtype: 'success',
           input_tokens: 0,
           output_tokens: 0,
-          cost_usd: 0,
         };
       }
     } catch (err) {

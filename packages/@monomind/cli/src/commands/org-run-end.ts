@@ -50,5 +50,5 @@ export function runEndLine(
 ): string {
   const { kind, detail } = classifyRunEnd(input);
   const cost = summarizeRun(input.events).totalCostUsd;
-  return `org ${input.name} run ${input.run} ended — outcome: ${kind} (${detail}), wall time ${formatWall(input.wallMs)}, cost $${cost.toFixed(2)}`;
+  return `org ${input.name} run ${input.run} ended — outcome: ${kind} (${detail}), wall time ${formatWall(input.wallMs)}, cost ${cost === null ? 'unknown' : `$${cost.toFixed(2)}`}`;
 }

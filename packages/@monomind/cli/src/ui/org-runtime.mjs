@@ -185,7 +185,8 @@ export function readRecentHistory(root, org, n = 10) {
         runnableTasksAtStop: h.runnableTasksAtStop ?? 0,
         crashes: h.crashes ?? [],
         totalTokens: h.totalTokens ?? 0,
-        totalCostUsd: h.totalCostUsd ?? 0,
+        // null = no role reported a cost (unknown, not $0).
+        totalCostUsd: h.totalCostUsd ?? null,
       });
     } catch {
       /* one bad line doesn't hide the rest */

@@ -8,7 +8,7 @@
  * The four critical design fixes from the plan review are each tested:
  *   1. Session resume via VercelSessionStore
  *   2. Tool execute wraps canUseTool
- *   3. cost_usd: 0 (Vercel returns no USD)
+ *   3. no cost_usd (Vercel returns no USD — unknown, reported as null)
  *   4. Mailbox turn-loop consumption
  */
 import { readFileSync } from 'node:fs';

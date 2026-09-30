@@ -453,7 +453,7 @@ describe('CopilotAgentRunner token accounting (#181)', () => {
     expect(usageEvents).toEqual([
       {
         tokens: 30569,
-        cost_usd: undefined,
+        cost_usd: null, // copilot reports no USD cost: unknown, not $0 (rev 28)
         subtype: 'success',
         tokens_in: 30522,
         tokens_out: 47,

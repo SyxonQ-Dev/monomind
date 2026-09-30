@@ -8320,7 +8320,7 @@ async function v2RenderOrgRuntime() {
         : '<span style="color:var(--text-xs)">none claimed</span>',
       h.runnableTasksAtStop ? `<span style="color:var(--amber, #d29922)">${esc(h.runnableTasksAtStop)}</span>` : '0',
       mono(_rtTok(h.totalTokens)),
-      mono(fmtCost(h.totalCostUsd)),
+      h.totalCostUsd == null ? '<span style="color:var(--text-xs)">unpriced</span>' : mono(fmtCost(h.totalCostUsd)),
     ]), 'No finished runs yet');
   html += '</div>';
   el.innerHTML = html;

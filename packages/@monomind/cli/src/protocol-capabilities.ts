@@ -140,6 +140,10 @@ export const AGENT_PROTOCOL_MIN_CALLER = '1.0.0';
  *    {phase:"notice"}`; `start` carries `sandbox_requested` and
  *    `sandbox_applied`, scan entries `sandbox_mode_reports` (§3.1, §3.2,
  *    §6, §13, rev 26)
+ *  - `agent-exec-cost-null` — an unknown cost is `null`, never `0`:
+ *    `usage`/`result` `cost_usd` on `agent exec`, `agent test --json`'s
+ *    `cost_usd`, and org `usage` events / `org report|costs --json` totals
+ *    when the runtime reported no cost (§3.2, §13, rev 28)
  */
 export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-exec',
@@ -173,6 +177,7 @@ export const AGENT_PROTOCOL_CAPABILITIES = [
   'agent-test-sandbox',
   'agent-exec-sandbox-restricted',
   'agent-exec-sandbox-fallback',
+  'agent-exec-cost-null',
 ] as const;
 
 /** The exact handshake object emitted by `monomind --version --json`. */

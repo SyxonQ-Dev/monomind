@@ -139,7 +139,7 @@ describe('HermesAgentRunner', () => {
       // hermes has no usage-report mechanism reachable from `chat` — always 0.
       expect(result?.input_tokens).toBe(0);
       expect(result?.output_tokens).toBe(0);
-      expect(result?.cost_usd).toBe(0);
+      expect(result?.cost_usd).toBeUndefined(); // no cost reported: unknown, not $0 (rev 28)
       // session_id IS available, but from stderr, not a usage file.
       expect(result?.session_id).toBe('sess_fake_1');
     } finally {
