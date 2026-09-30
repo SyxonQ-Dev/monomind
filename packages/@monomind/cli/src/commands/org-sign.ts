@@ -5,109 +5,32 @@
 // prechecks) and signs it. The runtime refuses to start or reload a
 // definition whose signature does not verify (orgrt/org-signature.ts).
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  describeOrgAuthority,
-  nonBundledSkillLines,
-  projectionDiff,
-} from '../orgrt/org-sign-review.js';
-import {
-  computeOrgDefHash,
   instructionsDigests,
-  lastSignedProjection,
   orgHashMismatchMessage,
   orgSignatureEnforced,
   roleContextMarker,
-  signedProjection,
   signOrgDef,
   verifyOrgDef,
 } from '../orgrt/org-signature.js';
-import { approvalCandidates, firstLookConfigs } from '../orgrt/plant-approvals.js';
-import { ORG_DIR, OrgDefSchema } from '../orgrt/types.js';
+import { ORG_DIR } from '../orgrt/types.js';
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { listOrgConfigFiles, validateOrgName } from './org-control.js';
 import { checkAction, parseExpectHashes, resolveSignRoot } from './org-sign-check.js';
+import {
+  type LoadedOrg,
+  loadOrg,
+  printReview,
+  readRaw,
+  reviewJsonAction,
+} from './org-sign-show.js';
 
 const log = (text: string): void => {
   console.log(text);
 };
-
-function readRaw(cwd: string, name: string): unknown {
-  return JSON.parse(readFileSync(join(cwd, ORG_DIR, `${name}.json`), 'utf8'));
-}
-
-/** The whole review: state, every authority-relevant setting, the
- *  unconfined roles, and what changed since the last signature. */
-function printReview(
-  cwd: string,
-  name: string,
-  raw: unknown,
-  digests?: Record<string, string>,
-): void {
-  const check = verifyOrgDef(cwd, name, raw, { digests });
-  const state = check.ok ? 'signed, unchanged' : check.reason;
-  log(output.bold(`\norg ${name} (${state}):`));
-  for (const line of describeOrgAuthority(raw)) log(line);
-  const extra = nonBundledSkillLines(cwd);
-  if (extra.length) {
-    log(output.bold('  Org skills from the project or user library (not bundled):'));
-    for (const line of extra) log(`  ${line}`);
-  }
-  // #502 review round 5: signing approves no path; say which are waiting.
-  const pending = approvalCandidates({ root: cwd });
-  if (pending.length)
-    log(
-      output.warning(
-        `  ${pending.length} protected path(s) would be quarantined as possible plants: ${pending.join(', ')} — if they are yours, approve them with \`monomind org approve-paths <path>\``,
-      ),
-    );
-  const firstLook = firstLookConfigs({ root: cwd });
-  if (firstLook.length)
-    log(output.dim(`  will be trusted at monomind's first look: ${firstLook.join(', ')}`));
-  const before = lastSignedProjection(cwd, name);
-  if (before === undefined) {
-    log(output.dim('  (no earlier signature on this machine to compare with)'));
-    return;
-  }
-  const diff = projectionDiff(
-    before,
-    JSON.parse(JSON.stringify(signedProjection(raw, cwd, digests))),
-  );
-  log(
-    output.bold(
-      diff.length ? '  Changed since the last signature:' : '  No change since the last signature.',
-    ),
-  );
-  for (const line of diff) log(line);
-}
-
-/** An org read for signing: its definition and instructions digests, each
- *  file read once, and the hash that signing them records. */
-interface LoadedOrg {
-  name: string;
-  raw: unknown;
-  digests: Record<string, string>;
-  hash: string;
-}
-
-/** Read one org to sign, or an error string. */
-function loadOrg(root: string, name: string): LoadedOrg | string {
-  if (!existsSync(join(root, ORG_DIR, `${name}.json`))) return `org not found: ${name}`;
-  let raw: unknown;
-  try {
-    raw = readRaw(root, name);
-  } catch (err) {
-    return `org ${name}: unreadable JSON (${(err as Error).message})`;
-  }
-  const parsed = OrgDefSchema.safeParse(raw);
-  if (!parsed.success) {
-    return `org ${name}: invalid definition — run \`monomind org validate ${name}\` first`;
-  }
-  const digests = instructionsDigests(raw, root);
-  return { name, raw, digests, hash: computeOrgDefHash(raw, root, digests) };
-}
 
 /** Sign one loaded org. Returns an error string, or undefined on success. */
 async function signOne(
@@ -172,6 +95,7 @@ export const signAction = async (input: CommandContext): Promise<CommandResult> 
     return { success: false, message: expect.error, exitCode: 2 };
   }
   const yes = ctx.flags.yes === true;
+  if (!yes && ctx.flags.format === 'json') return reviewJsonAction(ctx, names);
   if (!ctx.interactive && !yes) {
     // Show what would be signed (the createorg skill relies on this), sign nothing.
     for (const name of names) {
@@ -238,7 +162,9 @@ export async function ensureOrgSignedForRun(
   } catch {
     return undefined; // unreadable: let the start path report the real error
   }
-  const check = verifyOrgDef(ctx.cwd, name, raw);
+  // One read of each instructions file: what is reviewed is what is signed.
+  const digests = instructionsDigests(raw, ctx.cwd);
+  const check = verifyOrgDef(ctx.cwd, name, raw, { digests });
   if (check.ok) return undefined;
   if (check.reason === 'unsigned' && ctx.interactive && !roleContextMarker()) {
     log(
@@ -246,14 +172,14 @@ export async function ensureOrgSignedForRun(
         `org ${name} has no operator signature yet (orgs are signed since #502). Review what it may do:`,
       ),
     );
-    printReview(ctx.cwd, name, raw);
+    printReview(ctx.cwd, name, raw, digests);
     const { confirm } = await import('../prompt.js');
     const ok = await confirm({
       message: `Sign org "${name}" as the operator and run it?`,
       default: false,
     });
     if (ok) {
-      signOrgDef(ctx.cwd, name, raw);
+      signOrgDef(ctx.cwd, name, raw, { digests });
       log(output.success(`org ${name}: signed`));
       return undefined;
     }
