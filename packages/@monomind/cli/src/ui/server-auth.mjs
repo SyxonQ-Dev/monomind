@@ -20,6 +20,7 @@ const _HUMAN_PAGES = new Set(['/', '/v2', '/orgs', '/mastermind']);
 // org-runtime.mjs's config patch): the token alone is not enough.
 const _HUMAN_ROUTES = [
   /^\/api\/questions\/answer$/,
+  /^\/api\/questions\/dismiss$/,
   /^\/api\/org\/[^/]+\/approvals\/[^/]+$/,
   /^\/api\/org\/[^/]+\/gates\/[^/]+$/,
   /^\/api\/org\/[^/]+\/config$/,

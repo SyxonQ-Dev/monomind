@@ -7,6 +7,7 @@ import { Mailbox } from './mailbox.js';
 import { beginPlantWatch } from './planted-paths.js';
 import type { TokenUsage } from './policy.js';
 import { createRoleTmpdir, removeRoleTmpdir, roleTmpBase } from './role-tmpdir.js';
+import { effectiveRoleRuntime } from './runner-resolve.js';
 import { FaultRestarts, ProcessFaultError } from './sandbox-fault.js';
 import type { SessionStartReason } from './session-ledger.js';
 import {
@@ -143,7 +144,21 @@ async function runAgentSessionLoop(opts: SessionOpts, tmp: SessionTmpdirs): Prom
   const idleExitMs = (opts.def?.run_config as { session_idle_exit_ms?: number } | undefined)
     ?.session_idle_exit_ms;
   const ledger = opts.sessionLedger ?? new SessionLedger();
-  const runtimeKey = opts.role.runtime ?? opts.def?.runtime ?? 'claude';
+  // #562: the runtime that actually hosts the role, as runner selection
+  // resolves it (a provider.kind of vercel-api-key runs on 'vercel').
+  const configuredRuntime = opts.role.runtime ?? opts.def?.runtime;
+  // An unknown or empty MONOMIND_RUNTIME selects no runner, so Claude hosts it.
+  const runtimeKey = effectiveRoleRuntime(
+    opts.role.runtime,
+    opts.def?.runtime,
+    opts.role.provider?.kind,
+  );
+  // Older builds filed such a role's records under 'claude'; such a record
+  // holds this same runner's session, so it is still resumed (the ledger only
+  // moves records those builds wrote). A role that set its runtime was never
+  // keyed that way and never reads it.
+  const legacyRuntimeKey =
+    configuredRuntime === undefined && runtimeKey !== 'claude' ? 'claude' : undefined;
   let taskKey = ROLE_SESSION_KEY;
   // Why the next fresh session for a key is fresh, when the loop itself threw
   // the record away (stale resume, turn-limit error) — recorded, not guessed.
@@ -201,6 +216,7 @@ async function runAgentSessionLoop(opts: SessionOpts, tmp: SessionTmpdirs): Prom
         taskKey,
         cwd: opts.cwd,
         promptHash,
+        legacyRuntime: legacyRuntimeKey,
       });
       resumeSessionId = pick.sessionId;
       startReason =

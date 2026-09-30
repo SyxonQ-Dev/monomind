@@ -1,21 +1,28 @@
 // packages/@monomind/cli/src/commands/org-observe-questions.ts
 //
 // `monomind org questions | answer` — pending ask_human questions and
-// their live-or-queued answers.
+// their live-or-queued answers. `org questions dismiss` lives in
+// org-observe-questions-dismiss.ts.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  closedQuestionReason,
+  isOpenQuestion,
+  type QuestionDismissal,
+  roleRemovedFromOrgDef,
+} from '../orgrt/question-state.js';
 import { utcDateMinute } from '../orgrt/reporting.js';
 import { ORG_DIR } from '../orgrt/types.js';
 import { output } from '../output.js';
 import type { CommandContext, CommandResult } from '../types.js';
-import { orgJson, printOrgJson, resolverFlag } from './org-observe-shared.js';
+import { hostingDaemonFor, orgJson, printOrgJson, resolverFlag } from './org-observe-shared.js';
 
 const log = (text: string): void => {
   console.log(text);
 };
 
-interface OrgQuestion {
+interface OrgQuestion extends QuestionDismissal {
   questionId: string;
   role: string;
   question: string;
@@ -28,7 +35,7 @@ interface OrgQuestion {
  *  Any other failure (unreadable, malformed — e.g. a partial daemon write) THROWS:
  *  answerAction rewrites this file from what this returns, so silently coercing a
  *  failed read to [] would atomically replace every recorded question with one. */
-const readQuestions = (cwd: string, name: string): OrgQuestion[] => {
+export const readQuestions = (cwd: string, name: string): OrgQuestion[] => {
   const path = join(cwd, ORG_DIR, name, 'questions.json');
   let raw: string;
   try {
@@ -66,13 +73,13 @@ export const questionsAction = async (
     );
     return { success: false, message: 'questions.json unreadable' };
   }
-  const shown = ctx.flags.all === true ? all : all.filter((q) => q.answer === null);
+  const shown = ctx.flags.all === true ? all : all.filter(isOpenQuestion);
   if (orgJson(ctx)) return printOrgJson({ v: 1, org: name, items: shown });
   if (!shown.length) {
     log(
       output.info(
         all.length
-          ? `No pending questions for org ${name} (${all.length} answered — use --all).`
+          ? `No pending questions for org ${name} (${all.length} answered or dismissed — use --all).`
           : `No questions recorded for org ${name}.`,
       ),
     );
@@ -80,15 +87,16 @@ export const questionsAction = async (
   }
   for (const q of shown) {
     const when = utcDateMinute(q.ts);
-    log(
-      output.info(
-        `${q.answer === null ? '❓' : '✓'} [${q.questionId}] ${when}  ${q.role}: ${q.question}`,
-      ),
-    );
-    if (q.answer !== null) log(output.info(`     ↳ ${q.answer}`));
+    const mark = isOpenQuestion(q) ? '❓' : q.state === 'dismissed' ? '✗' : '✓';
+    log(output.info(`${mark} [${q.questionId}] ${when}  ${q.role}: ${q.question}`));
+    if (q.state === 'dismissed')
+      log(output.info(`     ↳ dismissed${q.dismissReason ? `: ${q.dismissReason}` : ''}`));
+    else if (q.answer !== null) log(output.info(`     ↳ ${q.answer}`));
   }
-  if (shown.some((q) => q.answer === null))
+  if (shown.some(isOpenQuestion)) {
     log(output.info(`\nAnswer with: monomind org answer ${name} <question-id> "your answer"`));
+    log(output.info(`Dismiss with: monomind org questions dismiss ${name} <question-id>`));
+  }
   return { success: true };
 };
 
@@ -123,8 +131,8 @@ export const answerAction = async (ctx: CommandContext, name: string): Promise<C
     );
     return { success: false, message: 'question not found' };
   }
-  if (q.answer !== null)
-    return { success: false, message: `question "${questionId}" was already answered` };
+  const closed = closedQuestionReason(questionId, q);
+  if (closed) return { success: false, message: closed };
   const byFlag = await resolverFlag(ctx);
   if (!byFlag.ok) return { success: false, message: byFlag.message };
   const resolvedBy = byFlag.by;
@@ -132,8 +140,8 @@ export const answerAction = async (ctx: CommandContext, name: string): Promise<C
   // Live path: the hosting daemon updates questions.json and pushes into the role's mailbox.
   // SEC: answering a role's question is a human decision — authenticate with
   // the operator credential, not the agent-facing one in the broker entry.
-  const { lookupOrg, readOperatorCredential } = await import('../orgrt/broker.js');
-  const remote = lookupOrg(name);
+  const { readOperatorCredential } = await import('../orgrt/broker.js');
+  const remote = await hostingDaemonFor(ctx.cwd, name);
   if (remote) {
     const cred = readOperatorCredential(name);
     try {
@@ -146,26 +154,37 @@ export const answerAction = async (ctx: CommandContext, name: string): Promise<C
         body: JSON.stringify({ org: name, role: q.role, questionId, answer, resolvedBy }),
         signal: AbortSignal.timeout(10_000),
       });
-      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        delivery?: 'skipped';
+      };
       if (res.ok && data.ok) {
+        const delivery = data.delivery ?? 'live';
         if (orgJson(ctx))
           return printOrgJson({
             v: 1,
             org: name,
             question_id: questionId,
             role: q.role,
-            delivery: 'live',
+            delivery,
             answered: true,
             resolvedBy,
           });
-        log(output.success(`Answer delivered to ${name}:${q.role} (live).`));
+        log(
+          output.success(
+            delivery === 'skipped'
+              ? `Answer recorded — ${q.role} is no longer in org ${name}, so it was not delivered.`
+              : `Answer delivered to ${name}:${q.role} (live).`,
+          ),
+        );
         return { success: true };
       }
-      log(
-        output.warning(
-          `Live delivery rejected (${data.error ?? res.status}) — falling back to offline queue.`,
-        ),
-      );
+      // The daemon running this org refused (403 without the operator
+      // credential, unknown or closed question): recording the answer behind
+      // its back would skip the operator check, delivery and the audit event.
+      log(output.error(`Live delivery rejected (${data.error ?? res.status}) — nothing recorded.`));
+      return { success: false, message: `answer rejected: ${data.error ?? res.status}` };
     } catch (err) {
       log(
         output.warning(
@@ -199,25 +218,29 @@ export const answerAction = async (ctx: CommandContext, name: string): Promise<C
     return { success: false, message: 'questions.json unreadable — answer not recorded' };
   }
   const freshQ = fresh.find((x) => x.questionId === questionId);
-  if (freshQ && freshQ.answer !== null) {
+  if (freshQ && !isOpenQuestion(freshQ)) {
     return {
       success: false,
-      message: `question "${questionId}" was answered while this command was running`,
+      message: `question "${questionId}" was answered or dismissed while this command was running`,
     };
   }
+  // #572: a role removed from the org definition never runs again — record
+  // the answer without queueing it for nobody.
+  const skipped = roleRemovedFromOrgDef(ctx.cwd, name, q.role);
   // Queue BEFORE marking answered (same rule as daemon.answerQuestion): if the
   // append fails, the question must stay pending and answerable. Marking first meant
   // a failed queueMessage recorded the answer as delivered while nothing was queued,
   // and the `already answered` guard then rejected every retry.
   const { queueMessage } = await import('../orgrt/inbox.js');
   try {
-    queueMessage(ctx.cwd, name, {
-      fromQualified: 'human',
-      toRole: q.role,
-      subject: `answer:${questionId}`,
-      body: `question: ${q.question}\n\nanswer: ${answer}`,
-      ts: Date.now(),
-    });
+    if (!skipped)
+      queueMessage(ctx.cwd, name, {
+        fromQualified: 'human',
+        toRole: q.role,
+        subject: `answer:${questionId}`,
+        body: `question: ${q.question}\n\nanswer: ${answer}`,
+        ts: Date.now(),
+      });
   } catch (err) {
     log(
       output.error(
@@ -242,10 +265,16 @@ export const answerAction = async (ctx: CommandContext, name: string): Promise<C
       org: name,
       question_id: questionId,
       role: q.role,
-      delivery: 'queued',
+      delivery: skipped ? 'skipped' : 'queued',
       answered: true,
       resolvedBy,
     });
-  log(output.success(`Answer recorded — ${name}:${q.role} receives it when the org next runs.`));
+  log(
+    output.success(
+      skipped
+        ? `Answer recorded — ${q.role} is no longer in org ${name}, so it was not queued.`
+        : `Answer recorded — ${name}:${q.role} receives it when the org next runs.`,
+    ),
+  );
   return { success: true };
 };
