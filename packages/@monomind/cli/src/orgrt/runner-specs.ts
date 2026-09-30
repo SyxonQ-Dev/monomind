@@ -10,7 +10,7 @@
  * installed when its runner would spawn a different binary (or vice versa).
  */
 
-import type { RuntimeKind } from './daemon.js';
+import type { ProviderKind, RuntimeKind } from './daemon.js';
 import type { RunnerAccess } from './runner-access.js';
 import type { RunnerFeatures } from './runner-features.js';
 
@@ -376,3 +376,46 @@ export const BASE_SPECS: Array<Omit<RunnerSpec, keyof RunnerFeatures | keyof Run
     toolActivityFidelity: 'full',
   },
 ];
+
+/** Auto-resolve runtime from provider kind. Returns undefined for Claude default. */
+export function autoRuntimeFromProvider(kind?: ProviderKind): RuntimeKind | undefined {
+  if (kind === 'vercel-api-key') return 'vercel';
+  if (kind === 'codex') return 'codex';
+  if (kind === 'antigravity') return 'antigravity';
+  return undefined;
+}
+
+/** The runtime resolveRoleRunner selects for a role, undefined for the
+ *  default Claude path. What the session ledger and its audit key on (#562). */
+export function resolveRoleRuntime(
+  roleRuntime?: RuntimeKind,
+  orgRuntime?: RuntimeKind,
+  roleProviderKind?: ProviderKind,
+  orgProviderKind?: ProviderKind,
+): RuntimeKind | undefined {
+  return (
+    roleRuntime ??
+    orgRuntime ??
+    autoRuntimeFromProvider(roleProviderKind ?? orgProviderKind) ??
+    (process.env.MONOMIND_RUNTIME as RuntimeKind | undefined)
+  );
+}
+
+/** The runtime whose runner hosts a role — what the session ledger, the
+ *  full-access check, the sandbox choice and `org sign`'s review all name
+ *  (#562, #567). Takes raw values so the sign review can pass unvalidated
+ *  JSON. A configured runtime (the role's or the org's) is returned as is:
+ *  the schema admits only known ones, and an unknown one keeps the stricter
+ *  treatment it always had (no runner spec, so no full access). With none,
+ *  provider.kind or MONOMIND_RUNTIME decide as in resolveRoleRunner; a name
+ *  no runner answers to leaves the default Claude runner, so it is 'claude'. */
+export function effectiveRoleRuntime(
+  roleRuntime: unknown,
+  orgRuntime: unknown,
+  providerKind: unknown,
+): string {
+  const configured = roleRuntime ?? orgRuntime;
+  if (configured !== undefined && configured !== null) return String(configured);
+  const resolved = resolveRoleRuntime(undefined, undefined, providerKind as ProviderKind);
+  return BASE_SPECS.find((s) => s.id === resolved)?.id ?? 'claude';
+}

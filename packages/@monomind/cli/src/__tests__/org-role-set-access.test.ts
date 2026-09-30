@@ -89,6 +89,19 @@ describe('org role set-access', () => {
     expect(res.message).toMatch(/does not support full access/);
   });
 
+  it('#567: refuses a role whose provider.kind puts it on a runtime without full access (vercel)', async () => {
+    const c = ctx(['myorg', 'builder', 'full'], { 'yes-i-understand': true });
+    makeOrg(c.cwd, 'myorg', {
+      name: 'myorg',
+      roles: [{ id: 'builder', provider: { kind: 'vercel-api-key', vendor: 'openai' } }],
+    });
+    const res = await setAccessAction(c);
+    expect(res.success).toBe(false);
+    expect(res.message).toMatch(/does not support full access/);
+    const written = JSON.parse(readFileSync(join(c.cwd, ORG_DIR, 'myorg.json'), 'utf8'));
+    expect(written.roles[0].policy).toBeUndefined();
+  });
+
   it('grants full access on a non-claude full-access runtime (codex)', async () => {
     const c = ctx(['myorg', 'builder', 'full'], { 'yes-i-understand': true });
     makeOrg(c.cwd, 'myorg', { name: 'myorg', roles: [{ id: 'builder', runtime: 'codex' }] });
