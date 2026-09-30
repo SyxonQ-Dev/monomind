@@ -444,9 +444,22 @@ export class HermesAgentRunner implements AgentRunner {
   }
 }
 
-/** hermes's own "no credentials" wording (0.19.0, printed on stdout). */
+/** hermes 0.19.0's own "no credentials" sentences, printed on stdout as
+ *  the first line: hermes_cli/auth.py:1929 and hermes_cli/main.py:2501.
+ *  Anchored at the start so model text that merely mentions them is not
+ *  taken for hermes's error. */
 const HERMES_NO_CREDENTIALS_RE =
-  /no inference provider configured|isn't configured yet|no api keys or providers found/i;
+  /^(?:No inference provider configured\. Run 'hermes model'|It looks like Hermes isn't configured yet -- no API keys or providers found)/;
+
+/** The first non-empty line of stdout when it is hermes's own
+ *  no-credentials sentence (ANSI colour codes ignored), else undefined. */
+function hermesCredentialLine(stdout: string): string | undefined {
+  const first = stdout
+    .split('\n')
+    .map((l) => l.replace(/\x1b\[[0-9;]*m/g, '').trim())
+    .find((l) => l !== '');
+  return first && HERMES_NO_CREDENTIALS_RE.test(first) ? first : undefined;
+}
 
 /** Build the actionable error for a failed hermes turn. Same shape as
  *  codex-runner.ts's turnError. */
@@ -473,12 +486,10 @@ function turnError(outcome: TurnOutcome, round: number): Error {
     );
   }
   // hermes 0.19.0 prints its setup errors on stdout. Only its own
-  // no-credentials line is part of the classified message; the rest of
-  // stdout (possibly model text) goes after UNCLASSIFIED_MARKER.
-  const credLine = outcome.stdout
-    .split('\n')
-    .find((l) => HERMES_NO_CREDENTIALS_RE.test(l))
-    ?.trim();
+  // no-credentials sentence, as stdout's first line, is part of the
+  // classified message; everything else (possibly model text) goes after
+  // UNCLASSIFIED_MARKER, unclassified and not fatal.
+  const credLine = hermesCredentialLine(outcome.stdout);
   const err = new Error(
     `HermesAgentRunner: hermes chat failed (exit ${outcome.exitCode})` +
       (credLine ? `: ${credLine}` : '') +

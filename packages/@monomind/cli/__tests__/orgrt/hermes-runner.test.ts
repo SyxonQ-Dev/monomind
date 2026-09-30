@@ -483,7 +483,10 @@ if (argv.includes('--help')) {
 
   it("a failed turn with empty stderr: hermes's own no-credentials line is classified, the rest of stdout is attached but not classified", async () => {
     const { bin, tmpDir } = makeFakeHermes(`
+      console.log('');
       console.log("It looks like Hermes isn't configured yet -- no API keys or providers found.");
+      console.log('');
+      console.log('  Run:  hermes setup');
       process.exit(1);
     `);
     try {
@@ -494,6 +497,28 @@ if (argv.includes('--help')) {
       expect(err?.message).toMatch(/exit 1\): It looks like Hermes isn't configured yet/);
       expect(err?.fatal).toBe(true);
       expect(execErrorCode(err, err?.message ?? '').code).toBe('auth');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 15000);
+
+  it.each([
+    "The staging database isn't configured yet -- no API keys or providers found for it.",
+    'Sorry: no inference provider configured for the billing service.',
+    "Here is what hermes says:\nNo inference provider configured. Run 'hermes model' to choose a provider",
+  ])('model text quoting hermes-like phrases stays runner-error, not fatal: %s', async (text) => {
+    const { bin, tmpDir } = makeFakeHermes(`
+      console.log(${JSON.stringify(text)});
+      process.exit(1);
+    `);
+    try {
+      const err = await collect(new HermesAgentRunner(bin), makeRunArgs(tmpDir)).then(
+        () => undefined,
+        (e: Error & { fatal?: boolean }) => e,
+      );
+      expect(classifiedText(err?.message ?? '')).toBe('HermesAgentRunner: hermes chat failed (exit 1)');
+      expect(execErrorCode(err, err?.message ?? '').code).toBe('runner-error');
+      expect(err?.fatal).toBeUndefined();
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

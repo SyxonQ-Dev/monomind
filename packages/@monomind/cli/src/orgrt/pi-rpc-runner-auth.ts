@@ -11,11 +11,15 @@
  * Two checks:
  *   - Up front, before spawning, when a model is set: `pi auth check --model
  *     <m> --json` (pi 0.87.1, ~0.3s). pi resolves the provider itself
- *     (`deepseek/deepseek-chat-v3.1` routes to openrouter), so extensions,
- *     auth.json and gateways all count. Only `status:"not_ready"` fails the
- *     run; any other answer, an error, a timeout or a pi without the
- *     command skips the check — the rejected-prompt path below still fails
- *     in about a second.
+ *     (`deepseek/deepseek-chat-v3.1` routes to openrouter), so auth.json,
+ *     environment keys and gateway routing count. `auth check` does not
+ *     load user extensions, so a provider whose auth an extension overrides
+ *     can get a false `not_ready` here (rare). Only `status:"not_ready"`
+ *     fails the run; any other answer, an error, a timeout or a pi without
+ *     the command skips the check — the rejected-prompt path below still
+ *     fails in about a second. The check runs outside the authority mask
+ *     and, like pi itself, may refresh OAuth tokens in
+ *     ~/.pi/agent/auth.json.
  *   - From pi itself: a rejected `prompt` response, or stderr, whose text
  *     is pi's own "No API key found" wording.
  */
