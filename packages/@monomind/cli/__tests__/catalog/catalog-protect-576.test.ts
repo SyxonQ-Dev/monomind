@@ -114,6 +114,25 @@ describe('a role cannot write .monomind/catalog/', () => {
     expect((await p.decide('Write', { file_path: statePath(root), content: 'x' })).behavior).toBe('allow');
   });
 
+  it("an operator's refused stage keeps the pre-created dir (removing it would let a running role plant one)", async () => {
+    const base = scratch('cp576-keep-');
+    const home = join(base, 'home');
+    const root = join(base, 'root');
+    mkdirSync(root, { recursive: true });
+    ensureOperatorProtectedPaths({ home, env: { HOME: home }, orgRoot: root });
+    const src = mkdtempSync(join(tmpdir(), 'cp576-nolicense-'));
+    writeFileSync(join(src, 'SKILL.md'), '---\nname: x\ndescription: y\n---\nhi\n');
+    const { res } = await run(root, ['stage', src], { actor: 'alice' });
+    expect(res.success).toBe(false);
+    expect(existsSync(join(root, '.monomind', 'catalog'))).toBe(true);
+    expect(existsSync(join(root, '.monomind', 'catalog', 'packages'))).toBe(false);
+    // Without an org start first, a refused stage still leaves nothing.
+    const plain = scratch('cp576-plain-');
+    vi.restoreAllMocks();
+    expect((await run(plain, ['stage', src], { actor: 'alice' })).res.success).toBe(false);
+    expect(existsSync(join(plain, '.monomind', 'catalog'))).toBe(false);
+  });
+
   it.runIf(authorityMaskAvailability().available)('inside the real bubblewrap mask the catalog is read-only', () => {
     const home = scratch('cp576-mhome-');
     const root = scratch('cp576-mroot-');
