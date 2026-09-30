@@ -7,7 +7,7 @@ default_mode: auto
 
 # Mastermind Memory
 
-This skill is invoked by `mastermind:memory` or directly via `/mastermind:memory`.
+This skill is invoked with `Skill("mastermind-memory")`, for example by the mastermind router. (`/mastermind:memory` is a different command, a memory CLI quick reference that comes with the orgs pack: `monomind packs add orgs`.)
 
 ---
 

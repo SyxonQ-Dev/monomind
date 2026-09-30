@@ -116,6 +116,22 @@ export async function writeOpencodeFiles(
     result.skipped.push('.opencode/command/monomind-status.md');
   }
 
+  writeOpencodeTree(targetDir, options, result);
+}
+
+/**
+ * Convert the project's `.claude/{agents,commands,skills}` into
+ * `.opencode/{agent,command,skills}` and sweep skills a previous run generated
+ * and this one no longer does. Split out of writeOpencodeFiles so
+ * `monomind packs add|remove` can refresh the tree without touching
+ * opencode.json, AGENTS.md or the plugin.
+ */
+export function writeOpencodeTree(
+  targetDir: string,
+  options: InitOptions,
+  result: InitResult,
+): void {
+  const guard = guardFor(targetDir, options, result);
   // Convert the .claude/{agents,commands,skills} tree that copyAgents/Skills/
   // Commands just wrote into opencode shape. Reading from the target .claude/
   // dir (not the package source) means only the user's selected subset is

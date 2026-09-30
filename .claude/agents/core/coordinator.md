@@ -117,10 +117,10 @@ must outlive the session, persist it to memory before returning.
 **Routing to monoswarm specialists:**
 
 - Synthesising several agents' findings into durable knowledge →
-  `collective-intelligence-coordinator`
+  `collective-intelligence-coordinator` (pack swarm — `monomind packs add swarm`)
 - Independent slices runnable in parallel with no central owner →
   `mesh-coordinator`
-- A vote tally across agents against an explicit threshold → `quorum-manager`
+- A vote tally across agents against an explicit threshold → `quorum-manager` (pack swarm — `monomind packs add swarm`)
 - Implementation, testing, review, research → `coder`, `tester`, `reviewer`,
   `researcher`, `planner` via the Task tool
 

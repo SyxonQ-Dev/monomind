@@ -7,7 +7,7 @@ default_mode: auto
 
 # Mastermind Review Domain
 
-This skill is invoked by `mastermind:master` or directly via `/mastermind:review`.
+This skill is invoked directly via `/mastermind:review`, or by `/mastermind:master` (pack extras — `monomind packs add extras`).
 
 ---
 
@@ -140,7 +140,7 @@ Use the returned name as that review angle's subagent_type. If nothing is return
 - Code quality: "reviewer"
 - Security: "Security Engineer"
 - Architecture: "Software Architect"
-- Accessibility: "Accessibility Auditor"
+- Accessibility: "Monodesign"
 - Any other angle: "reviewer"
 
 **If `monofence_check = true`** — add a monofence-ai self-validation step to the Security Engineer's briefing:
