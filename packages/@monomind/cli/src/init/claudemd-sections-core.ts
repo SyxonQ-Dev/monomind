@@ -16,8 +16,8 @@ import type { InitOptions } from './types.js';
 export const HONEST_MONOSWARM_SENTENCE =
   "Monoswarm records topology, roster and votes in a state file; it starts no process, and Claude Code's Task-tool agents do the work.";
 
-// #418: monoswarm and autopilot are deprecated and removed in the next minor
-// release. Headings stay as they are (renaming one needs a
+// #418: monoswarm and autopilot are deprecated and removed in
+// MONOSWARM_AUTOPILOT_REMOVAL_VERSION (2.22.0). Headings stay as they are (renaming one needs a
 // RETIRED_GENERATED_HEADINGS entry); each monoswarm section carries this line.
 export const MONOSWARM_DEPRECATED_LINE = `DEPRECATED: the \`monoswarm\` and \`autopilot\` CLI commands and \`monoswarm_*\`/\`autopilot_*\` MCP tools are removed in ${MONOSWARM_AUTOPILOT_REMOVAL_VERSION}. Don't initialize a monoswarm; spawn agents with Claude Code's Task tool, or run an org with \`monomind org run\`.`;
 
