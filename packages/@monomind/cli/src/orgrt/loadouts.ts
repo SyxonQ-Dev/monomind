@@ -25,7 +25,7 @@
  * (role, taskKey) is built with `resolveLoadout(def, task.loadout, root)` via
  * the same `SessionOpts.loadout` field, and the mismatch path disappears.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { readVerifiedInstructions, resolveInstructionsFile } from './instructions-file.js';
 import { getSkill } from './skill-library.js';
