@@ -2,7 +2,7 @@
 
 All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
-## [Unreleased]
+## [2.22.0] — 2026-09-30
 
 ### Fixed
 
@@ -82,7 +82,7 @@ All notable changes to Monomind (`monomind` umbrella + `@monoes/monomindcli`).
 
 ### Removed
 
-- **`monoswarm` and `autopilot` are removed** ([#418](https://github.com/monoes/monomind/issues/418)). They were deprecated in 2.21.0. Neither started an agent: both recorded state files. Instead, spawn subagents with Claude Code's Task tool, all in one message, or run an agent org with `monomind org run <org>`.
+- **BREAKING CHANGE: `monoswarm` and `autopilot` are removed** ([#418](https://github.com/monoes/monomind/issues/418)). They were deprecated in 2.21.0. Neither started an agent: both recorded state files. Instead, spawn subagents with Claude Code's Task tool, all in one message, or run an agent org with `monomind org run <org>`.
 
   - **CLI:** the `monoswarm` command (`init`, `start`, `status`, `stop`, `scale`) and the `autopilot` command (`status`, `enable`, `disable`, `config`, `reset`, `log`, `predict`, `check`) are gone. Running either one prints what to use instead, not a typo suggestion.
 
