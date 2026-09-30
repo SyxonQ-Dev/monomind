@@ -136,3 +136,63 @@ describe('VercelAgentRunner chat events (#563)', () => {
     expect(assistantTexts(msgs)).toEqual(['sent']);
   });
 });
+
+const resultOf = (msgs: AgentMessage[]) => msgs.filter((m) => m.type === 'result');
+
+describe('VercelAgentRunner failed turns', () => {
+  it('reports a turn whose stream carries an error event as a failure', async () => {
+    const apiError = Object.assign(new Error('Rate limit exceeded, retry after 20s'), {
+      statusCode: 429,
+    });
+    stream.parts = [
+      { type: 'start' },
+      { type: 'start-step' },
+      delta('partial '),
+      { type: 'error', error: apiError },
+      { type: 'finish-step' },
+      { type: 'finish' },
+    ];
+    const { msgs, err } = await collect();
+    expect(err).toBeUndefined();
+    expect(assistantTexts(msgs)).toEqual(['partial ']);
+    const [result] = resultOf(msgs);
+    expect(result).toMatchObject({
+      subtype: 'error_during_execution',
+      is_error: true,
+      input_tokens: 1,
+      output_tokens: 2,
+    });
+    expect(result.text).toContain('Rate limit exceeded, retry after 20s');
+  });
+
+  it('reports an aborted turn as a failure', async () => {
+    stream.parts = [{ type: 'start' }, delta('cut '), { type: 'abort' }];
+    const { msgs, err } = await collect();
+    expect(err).toBeUndefined();
+    expect(assistantTexts(msgs)).toEqual(['cut ']);
+    expect(resultOf(msgs)).toEqual([
+      expect.objectContaining({ subtype: 'error_during_execution', is_error: true }),
+    ]);
+    expect(resultOf(msgs)[0].text).toMatch(/aborted/i);
+  });
+
+  it('still reports the failure when usage rejects after an error event', async () => {
+    stream.parts = [{ type: 'error', error: 'upstream 500' }];
+    stream.usageError = new Error('No output generated');
+    const { msgs, err } = await collect();
+    expect(err).toBeUndefined();
+    expect(resultOf(msgs)[0]).toMatchObject({
+      subtype: 'error_during_execution',
+      is_error: true,
+      input_tokens: 0,
+      output_tokens: 0,
+      text: expect.stringContaining('upstream 500'),
+    });
+  });
+
+  it('reports a clean stream as success', async () => {
+    stream.parts = [delta('ok'), { type: 'finish-step' }, { type: 'finish' }];
+    const { msgs } = await collect();
+    expect(resultOf(msgs)[0]).toMatchObject({ subtype: 'success', is_error: false });
+  });
+});
