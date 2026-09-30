@@ -269,6 +269,9 @@ export function dispatchReadyTasks(daemon: OrgDaemon, org: string, running: Runn
       // instead of marking it 'running' with no owner: nothing else in this
       // codebase can detect a "running but no owner" task, so it would be
       // silently stuck forever with zero observability.
+      // #552: a role the org-wide budget ceiling kept from spawning is known —
+      // hold its task with the reason instead.
+      if (holdForBudgetClosedAssignee(running, task)) continue;
       running.bus.emit({
         type: 'audit',
         from: 'dag',

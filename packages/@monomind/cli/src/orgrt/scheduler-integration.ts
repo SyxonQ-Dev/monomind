@@ -2,12 +2,33 @@
 // Extracted from daemon.ts — auto-wake, boss restart, deferred role spawns.
 
 import { waitForCapacity } from '../utils/resource-governor.js';
+import { spawnClosedDetail } from './budget-closure.js';
 import { pushMessage } from './cross-org.js';
 import { activeRoleCount, OrgDaemon, type RunningOrg } from './daemon.js';
 import { dispatchReadyTasks, queueDispatch } from './decisions.js';
 import { isEndpointRole } from './endpoint-roles.js';
 import { drainInbox, newMessageId, queueMessage } from './inbox.js';
 import type { OrgRole } from './types.js';
+
+/** #552: a deferred spawn re-checks budget closure right before it starts —
+ *  the org-wide ceiling or the role's own budget may have closed while it
+ *  waited. When closed, the spawn is cancelled with an audit reason; under
+ *  the org-wide ceiling the role is set aside with the pending roles, so a
+ *  reload that raises it can spawn it again. True when cancelled. */
+function cancelIfBudgetClosed(running: RunningOrg, role: OrgRole): boolean {
+  const detail = spawnClosedDetail(running, role.id);
+  if (!detail) return false;
+  if (running.orgBudgetClosed && !running.agents.has(role.id))
+    (running.orgBudgetPendingRoles ??= new Map()).set(role.id, role);
+  running.bus.emit({
+    type: 'audit',
+    from: role.id,
+    reason: 'deferred-spawn-cancelled',
+    msg: `cancelled the deferred spawn of "${role.id}": ${detail}`,
+    data: { roleId: role.id },
+  });
+  return true;
+}
 
 /** Shared by scheduleDeferredSpawn and scheduleConcurrencyDeferredSpawn: spawn
  *  the role now that its gate has cleared, then deliver any messages queued
@@ -159,6 +180,7 @@ export function scheduleDeferredSpawn(
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const waited = await waitForCapacity(5 * 60_000);
       if (daemon.orgs.get(name) !== running) return; // org stopped/restarted — abandon quietly
+      if (cancelIfBudgetClosed(running, role)) return;
       if (waited.ok) {
         running.bus.emit({
           type: 'audit',
@@ -236,7 +258,11 @@ export function scheduleConcurrencyDeferredSpawn(
         (t as { unref?: () => void }).unref?.();
       });
       if (daemon.orgs.get(name) !== running) return; // org stopped/restarted — abandon quietly
-      if (!stillDeferred()) return;
+      if (!stillDeferred()) return; // cancelled — e.g. the org-wide budget closed (#552)
+      if (cancelIfBudgetClosed(running, role)) {
+        deferred.delete(role.id);
+        return;
+      }
       const limit = running.def.run_config.max_concurrent_agents;
       if (limit == null || activeRoleCount(running) < limit) {
         running.bus.emit({
