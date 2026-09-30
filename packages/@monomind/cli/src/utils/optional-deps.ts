@@ -43,7 +43,7 @@ import {
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { npmCommand } from './npm-command.js';
+import { npmInvocation } from './npm-command.js';
 
 interface OptionalDependencySpec {
   /** Exact version; keep in step with the CLI's devDependencies. */
@@ -298,7 +298,7 @@ async function withLock<T>(lockDir: string, log: Log, fn: () => Promise<T>): Pro
 /** Runs npm with its output on stderr (stdout may be an MCP stdio channel). */
 const defaultRunNpm: NpmRunner = (args, cwd, env) =>
   new Promise((resolve, reject) => {
-    const child = spawn(npmCommand(), args, {
+    const child = spawn(...npmInvocation(args), {
       cwd,
       env,
       shell: false,
