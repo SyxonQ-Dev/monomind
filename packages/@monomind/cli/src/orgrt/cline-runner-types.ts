@@ -58,6 +58,9 @@ export interface ClineTurnOutcome {
   finishReason?: string;
   /** Last unrecoverable error message (agent_event error, JSON-RPC error). */
   errorMessage?: string;
+  /** json: the final text of a turn that did not complete — the model's
+   *  words, shown after the error but never classified. */
+  resultText?: string;
   /** The error is a setup problem a retry cannot fix (e.g. no key for ACP). */
   fatal?: boolean;
   /** This turn's own usage: json `run_result.usage`; acp the growth of the

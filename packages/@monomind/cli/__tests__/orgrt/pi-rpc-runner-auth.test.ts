@@ -4,7 +4,8 @@
  *
  * The rejected-prompt line is a live capture from pi 0.87.1 in `--mode rpc`
  * with an empty HOME and no key (2026-09-30): pi answers the prompt command
- * with `success:false` and sends nothing else.
+ * with `success:false` and sends nothing else. The `pi auth check --json`
+ * lines are live captures from the same pi (2026-09-30).
  */
 import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs';
@@ -13,10 +14,7 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentMessage, AgentRunArgs } from '../../src/orgrt/agent-runner.js';
 import { PiRpcAgentRunner, type PiRpcProcess } from '../../src/orgrt/pi-rpc-runner.js';
-import { missingPiApiKey, piAuthErrorFromText } from '../../src/orgrt/pi-rpc-runner-auth.js';
-
-/** `env` with the variable `name` set; not a real key, only its presence matters. */
-const withKey = (env: Record<string, string>, name: string) => ({ ...env, [name]: 'x' });
+import { piAuthErrorFromText } from '../../src/orgrt/pi-rpc-runner-auth.js';
 
 const REJECTED_PROMPT = JSON.stringify({
   type: 'response',
@@ -79,50 +77,125 @@ async function collect(iter: AsyncIterable<AgentMessage>): Promise<AgentMessage[
   return out;
 }
 
-describe('missingPiApiKey (up-front check)', () => {
-  it('names the key variable when the provider has no key anywhere', () => {
+/**
+ * A fake `pi` whose `auth check` prints FAKE_PI_AUTH (a JSON line) and exits
+ * FAKE_PI_AUTH_EXIT; FAKE_PI_AUTH=unavailable mimics a pi without the
+ * command. Each call's argv is logged to FAKE_PI_LOG.
+ */
+function fakePiBin(dir: string): string {
+  const bin = path.join(dir, 'fake-pi.cjs');
+  fs.writeFileSync(
+    bin,
+    `#!/usr/bin/env node
+const fs = require('fs');
+fs.appendFileSync(process.env.FAKE_PI_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');
+if (process.env.FAKE_PI_AUTH === 'unavailable') {
+  console.error('Error: unknown command "auth"');
+  process.exit(2);
+}
+console.log(process.env.FAKE_PI_AUTH);
+process.exit(Number(process.env.FAKE_PI_AUTH_EXIT || 0));
+`,
+  );
+  fs.chmodSync(bin, 0o755);
+  return bin;
+}
+
+/** Run args for the fake pi: `auth` is what its `auth check` answers. */
+function checkedArgs(home: string, model: string, auth: string, exit = 0): AgentRunArgs {
+  const base = runArgs(home, { model });
+  return {
+    ...base,
+    env: {
+      ...base.env,
+      FAKE_PI_LOG: path.join(home, 'pi.log'),
+      FAKE_PI_AUTH: auth,
+      FAKE_PI_AUTH_EXIT: String(exit),
+    },
+  };
+}
+
+const READY_OPENROUTER = '{"status":"ready","provider":"openrouter","authType":"api_key"}';
+
+describe('pi auth check before spawning (piAuthPrecheck)', () => {
+  it('an OpenRouter-routed id (deepseek/…) that pi reports ready starts pi', async () => {
     const home = tempHome();
-    expect(missingPiApiKey('openai/gpt-5', { HOME: home }, home)).toEqual({
-      provider: 'openai',
-      keyEnv: 'OPENAI_API_KEY',
-    });
+    const fake = fakeProcess();
+    const spawn = vi.fn(() => fake.proc);
+    const runner = new PiRpcAgentRunner(fakePiBin(home), spawn);
+    const done = collect(
+      runner.run(checkedArgs(home, 'deepseek/deepseek-chat-v3.1', READY_OPENROUTER)),
+    );
+    await new Promise((r) => setTimeout(r, 500));
+    expect(spawn).toHaveBeenCalledTimes(1);
+    const calls = fs.readFileSync(path.join(home, 'pi.log'), 'utf8').trim().split('\n');
+    expect(JSON.parse(calls[0])).toEqual([
+      'auth',
+      'check',
+      '--model',
+      'deepseek/deepseek-chat-v3.1',
+      '--json',
+    ]);
+    fake.close(0);
+    await done.catch(() => {});
   });
 
-  it('passes when the variable is set', () => {
+  it('not_ready (credentials_not_configured) fails before spawning with the missing-key error', async () => {
     const home = tempHome();
-    expect(missingPiApiKey('openai/gpt-5', withKey({ HOME: home }, 'OPENAI_API_KEY'), home)).toBe(
-      undefined,
+    const spawn = vi.fn();
+    const runner = new PiRpcAgentRunner(fakePiBin(home), spawn);
+    const notReady =
+      '{"status":"not_ready","provider":"openrouter","reason":"credentials_not_configured"}';
+    const err = await collect(
+      runner.run(checkedArgs(home, 'deepseek/deepseek-chat-v3.1', notReady, 1)),
+    ).then(
+      () => undefined,
+      (e: Error & { fatal?: boolean }) => e,
     );
+    expect(err?.message).toMatch(/missing API key: set OPENROUTER_API_KEY for provider openrouter/);
+    expect(err?.fatal).toBe(true);
+    expect(spawn).not.toHaveBeenCalled();
   });
 
-  it('passes when pi auth.json holds a credential for the provider', () => {
+  it('not_ready for another reason says not logged in / login expired, not missing key', async () => {
     const home = tempHome();
-    fs.mkdirSync(path.join(home, '.pi', 'agent'), { recursive: true });
-    fs.writeFileSync(
-      path.join(home, '.pi', 'agent', 'auth.json'),
-      JSON.stringify({ openai: { type: 'api_key', key: 'sk-x' } }),
+    const spawn = vi.fn();
+    const runner = new PiRpcAgentRunner(fakePiBin(home), spawn);
+    const expired = '{"status":"not_ready","provider":"openai","reason":"credentials_expired"}';
+    const err = await collect(runner.run(checkedArgs(home, 'openai/gpt-5', expired, 1))).then(
+      () => undefined,
+      (e: Error) => e,
     );
-    expect(missingPiApiKey('openai/gpt-5', { HOME: home }, home)).toBe(undefined);
+    expect(err?.message).toMatch(/not logged in or the login expired/);
+    expect(err?.message).not.toMatch(/missing API key/);
+    expect(spawn).not.toHaveBeenCalled();
   });
 
-  it('passes when models.json defines a provider of that name', () => {
+  it.each([
+    ['auth check unavailable (older pi)', 'unavailable', 2],
+    ['not JSON', 'garbage', 0],
+    ['invalid model', '{"status":"invalid","provider":"x/y","reason":"invalid_state"}', 2],
+  ])('%s: skips the pre-check and starts pi', async (_name, auth, exit) => {
     const home = tempHome();
-    const agentDir = path.join(home, 'agent');
-    fs.mkdirSync(agentDir);
-    fs.writeFileSync(
-      path.join(agentDir, 'models.json'),
-      JSON.stringify({ providers: { openai: { baseUrl: 'http://localhost:1' } } }),
-    );
-    expect(missingPiApiKey('openai/gpt-5', { HOME: home, PI_CODING_AGENT_DIR: agentDir }, home)).toBe(
-      undefined,
-    );
+    const fake = fakeProcess();
+    const spawn = vi.fn(() => fake.proc);
+    const runner = new PiRpcAgentRunner(fakePiBin(home), spawn);
+    const done = collect(runner.run(checkedArgs(home, 'openai/gpt-5', auth, exit)));
+    await new Promise((r) => setTimeout(r, 500));
+    expect(spawn).toHaveBeenCalledTimes(1);
+    fake.close(0);
+    await done.catch(() => {});
   });
 
-  it('does not guess without a provider prefix or for a provider it does not know', () => {
+  it('runs no check without a model', async () => {
     const home = tempHome();
-    expect(missingPiApiKey(undefined, { HOME: home }, home)).toBe(undefined);
-    expect(missingPiApiKey('gpt-5', { HOME: home }, home)).toBe(undefined);
-    expect(missingPiApiKey('my-local/llama', { HOME: home }, home)).toBe(undefined);
+    const fake = fakeProcess();
+    const runner = new PiRpcAgentRunner(fakePiBin(home), () => fake.proc);
+    const done = collect(runner.run(checkedArgs(home, '', READY_OPENROUTER)));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(fs.existsSync(path.join(home, 'pi.log'))).toBe(false);
+    fake.close(0);
+    await done.catch(() => {});
   });
 });
 
@@ -141,19 +214,15 @@ describe('piAuthErrorFromText', () => {
   it('ignores unrelated text', () => {
     expect(piAuthErrorFromText('Warning: No project session found', undefined)).toBe(undefined);
   });
+
+  it('a bare "Use /login" (e.g. an expired login) is not a missing key', () => {
+    expect(piAuthErrorFromText('Login expired. Use /login to sign in again.', 'openai/gpt-5')).toBe(
+      undefined,
+    );
+  });
 });
 
 describe('PiRpcAgentRunner without an API key', () => {
-  it('fails before spawning pi when the model provider has no key', async () => {
-    const home = tempHome();
-    const spawn = vi.fn();
-    const runner = new PiRpcAgentRunner('pi', spawn);
-    await expect(collect(runner.run(runArgs(home, { model: 'openai/gpt-5' })))).rejects.toThrow(
-      /missing API key: set OPENAI_API_KEY for provider openai/,
-    );
-    expect(spawn).not.toHaveBeenCalled();
-  });
-
   it("fails at once on pi's rejected prompt instead of waiting for the watchdog", async () => {
     const home = tempHome();
     const fake = fakeProcess();
@@ -188,11 +257,12 @@ describe('PiRpcAgentRunner without an API key', () => {
   it('reports the missing key when pi prints it on stderr and exits', async () => {
     const home = tempHome();
     const fake = fakeProcess();
-    const runner = new PiRpcAgentRunner('pi', () => fake.proc);
-    // The key variable is set, so the up-front check lets pi start.
-    const env = withKey(runArgs(home).env, 'OPENROUTER_API_KEY');
-    const done = collect(runner.run(runArgs(home, { model: 'openrouter/some-model', env })));
-    await new Promise((r) => setTimeout(r, 10));
+    // pi's auth check says ready, so the run starts.
+    const runner = new PiRpcAgentRunner(fakePiBin(home), () => fake.proc);
+    const done = collect(
+      runner.run(checkedArgs(home, 'openrouter/some-model', READY_OPENROUTER)),
+    );
+    await new Promise((r) => setTimeout(r, 500));
     fake.err('Error: No API key found for the selected model.\n');
     fake.close(1);
     await expect(done).rejects.toThrow(/missing API key: set OPENROUTER_API_KEY/);

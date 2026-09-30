@@ -15,6 +15,11 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { z } from 'zod';
+import {
+  classifiedText,
+  execErrorCode,
+  UNCLASSIFIED_MARKER,
+} from '../../src/orgrt/agent-exec-errors.js';
 import { HERMES_MAX_QUERY_ARG_BYTES, HermesAgentRunner } from '../../src/orgrt/hermes-runner.js';
 import type { AgentMessage, AgentRunArgs } from '../../src/orgrt/agent-runner.js';
 
@@ -198,6 +203,110 @@ describe('HermesAgentRunner', () => {
     }
   }, 15000);
 
+  describe('`chat --help` probe', () => {
+    /** A fake hermes whose `chat --help` runs `helpBody` (with `n`, the
+     *  1-based probe count, logged to help.log); any other call answers
+     *  "ok" and logs its argv to FAKE_HERMES_LOG. */
+    function makeProbeHermes(helpBody: string): { bin: string; tmpDir: string; probes: () => number } {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'monomind-fake-hermes-'));
+      const helpLog = path.join(tmpDir, 'help.log');
+      const bin = path.join(tmpDir, 'fake-hermes.cjs');
+      fs.writeFileSync(
+        bin,
+        `#!/usr/bin/env node
+const fs = require('fs');
+const argv = process.argv.slice(2);
+if (argv.includes('--help')) {
+  fs.appendFileSync(${JSON.stringify(helpLog)}, 'x\\n');
+  const n = fs.readFileSync(${JSON.stringify(helpLog)}, 'utf8').trim().split('\\n').length;
+  ${helpBody}
+} else {
+  fs.appendFileSync(process.env.FAKE_HERMES_LOG, JSON.stringify({ argv }) + '\\n');
+  console.log('ok');
+}
+`,
+      );
+      fs.chmodSync(bin, 0o755);
+      const probes = () =>
+        fs.existsSync(helpLog) ? fs.readFileSync(helpLog, 'utf8').trim().split('\n').length : 0;
+      return { bin, tmpDir, probes };
+    }
+
+    it('a hung probe times out, the run falls back to --query=, and the next run probes again', async () => {
+      const { bin, tmpDir, probes } = makeProbeHermes('setTimeout(() => {}, 60_000);');
+      try {
+        const runner = new HermesAgentRunner(bin, { helpProbeTimeoutMs: 300 });
+        const { messages } = await collect(runner, makeRunArgs(tmpDir));
+        expect(messages.find((m) => m.type === 'result')?.subtype).toBe('success');
+        const [inv] = readInvocations(path.join(tmpDir, 'argv.log'));
+        expect(inv.argv[1].startsWith('--query=')).toBe(true);
+        await collect(runner, makeRunArgs(tmpDir));
+        expect(probes()).toBe(2);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    }, 15000);
+
+    it('a non-zero probe exit is not cached', async () => {
+      const { bin, tmpDir, probes } = makeProbeHermes(
+        "console.log('usage: hermes chat [-q QUERY]'); process.exit(1);",
+      );
+      try {
+        const runner = new HermesAgentRunner(bin);
+        await collect(runner, makeRunArgs(tmpDir));
+        await collect(runner, makeRunArgs(tmpDir));
+        expect(probes()).toBe(2);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    }, 15000);
+
+    it('reads help printed on stderr', async () => {
+      const { bin, tmpDir } = makeProbeHermes(
+        "console.error('usage: hermes chat --query-file PATH --oneshot'); process.exit(0);",
+      );
+      try {
+        await collect(new HermesAgentRunner(bin), makeRunArgs(tmpDir));
+        const [inv] = readInvocations(path.join(tmpDir, 'argv.log'));
+        expect(inv.argv.slice(0, 2)).toEqual(['chat', '--query-file']);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    }, 15000);
+
+    it('re-probes after a failed probe, then caches the first clean one', async () => {
+      const { bin, tmpDir, probes } = makeProbeHermes(
+        "if (n === 1) process.exit(3); console.log('usage: hermes chat [-q QUERY]');",
+      );
+      try {
+        const runner = new HermesAgentRunner(bin);
+        await collect(runner, makeRunArgs(tmpDir));
+        await collect(runner, makeRunArgs(tmpDir));
+        await collect(runner, makeRunArgs(tmpDir));
+        expect(probes()).toBe(2);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    }, 15000);
+
+    it('honours args.signal while the probe runs', async () => {
+      const { bin, tmpDir } = makeProbeHermes('setTimeout(() => {}, 60_000);');
+      try {
+        const abort = new AbortController();
+        const runner = new HermesAgentRunner(bin);
+        const start = Date.now();
+        setTimeout(() => abort.abort(), 200);
+        await expect(
+          collect(runner, makeRunArgs(tmpDir, { signal: abort.signal })),
+        ).rejects.toThrow(/aborted/);
+        expect(Date.now() - start).toBeLessThan(4000);
+        expect(fs.existsSync(path.join(tmpDir, 'argv.log'))).toBe(false);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    }, 15000);
+  });
+
   it('fails with a clear error instead of E2BIG when a --query= prompt is over the argv limit', async () => {
     const { bin, logFile, tmpDir } = makeFakeHermes(FAKE_HERMES_SIMPLE);
     try {
@@ -372,15 +481,63 @@ describe('HermesAgentRunner', () => {
     }
   }, 15000);
 
-  it('a failed turn with nothing on stderr reports what hermes printed on stdout (0.19.0 prints its setup error there)', async () => {
+  it("a failed turn with empty stderr: hermes's own no-credentials line is classified, the rest of stdout is attached but not classified", async () => {
     const { bin, tmpDir } = makeFakeHermes(`
+      console.log('');
       console.log("It looks like Hermes isn't configured yet -- no API keys or providers found.");
+      console.log('');
+      console.log('  Run:  hermes setup');
       process.exit(1);
     `);
     try {
-      await expect(collect(new HermesAgentRunner(bin), makeRunArgs(tmpDir))).rejects.toThrow(
-        /exit 1\)\noutput: It looks like Hermes isn't configured yet/,
+      const err = await collect(new HermesAgentRunner(bin), makeRunArgs(tmpDir)).then(
+        () => undefined,
+        (e: Error & { fatal?: boolean }) => e,
       );
+      expect(err?.message).toMatch(/exit 1\): It looks like Hermes isn't configured yet/);
+      expect(err?.fatal).toBe(true);
+      expect(execErrorCode(err, err?.message ?? '').code).toBe('auth');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 15000);
+
+  it.each([
+    "The staging database isn't configured yet -- no API keys or providers found for it.",
+    'Sorry: no inference provider configured for the billing service.',
+    "Here is what hermes says:\nNo inference provider configured. Run 'hermes model' to choose a provider",
+  ])('model text quoting hermes-like phrases stays runner-error, not fatal: %s', async (text) => {
+    const { bin, tmpDir } = makeFakeHermes(`
+      console.log(${JSON.stringify(text)});
+      process.exit(1);
+    `);
+    try {
+      const err = await collect(new HermesAgentRunner(bin), makeRunArgs(tmpDir)).then(
+        () => undefined,
+        (e: Error & { fatal?: boolean }) => e,
+      );
+      expect(classifiedText(err?.message ?? '')).toBe('HermesAgentRunner: hermes chat failed (exit 1)');
+      expect(execErrorCode(err, err?.message ?? '').code).toBe('runner-error');
+      expect(err?.fatal).toBeUndefined();
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 15000);
+
+  it('model text on stdout of a failed turn never feeds the error classifier', async () => {
+    const { bin, tmpDir } = makeFakeHermes(`
+      console.log('The API returned 401 unauthorized and quota exceeded, missing API key.');
+      process.exit(1);
+    `);
+    try {
+      const err = await collect(new HermesAgentRunner(bin), makeRunArgs(tmpDir)).then(
+        () => undefined,
+        (e: Error & { fatal?: boolean }) => e,
+      );
+      expect(err?.message).toContain(`${UNCLASSIFIED_MARKER}hermes stdout: The API returned 401`);
+      expect(classifiedText(err?.message ?? '')).toBe('HermesAgentRunner: hermes chat failed (exit 1)');
+      expect(execErrorCode(err, err?.message ?? '').code).toBe('runner-error');
+      expect(err?.fatal).toBeUndefined();
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

@@ -61,7 +61,7 @@ import {
 import { maskedCommand } from './authority-mask.js';
 import { classifyStderr } from './kimicode-runner.js';
 import { NativeToolCalls } from './kimicode-runner-tools.js';
-import { missingApiKeyError, missingPiApiKey, piAuthErrorFromText } from './pi-rpc-runner-auth.js';
+import { piAuthErrorFromText, piAuthPrecheck } from './pi-rpc-runner-auth.js';
 import {
   defaultSpawnPiRpc,
   encodePiRpcCommand,
@@ -123,10 +123,14 @@ export class PiRpcAgentRunner implements AgentRunner {
       PI_SKIP_VERSION_CHECK: '1',
       ...args.env,
     };
-    // Fail before spawning when the model's provider has no key at all —
-    // pi would only reject the prompt (see pi-rpc-runner-auth.ts).
-    const missingKey = missingPiApiKey(args.model, env, args.cwd);
-    if (missingKey) throw missingApiKeyError(missingKey);
+    // Fail before spawning when pi itself says the model has no usable
+    // credential — pi would only reject the prompt (pi-rpc-runner-auth.ts).
+    const notReady = await piAuthPrecheck(bin, args.model, {
+      env,
+      cwd: args.cwd,
+      signal: args.signal,
+    });
+    if (notReady) throw notReady;
 
     const child = this.spawnFn(
       ...maskedCommand(args.authorityMask, bin, piCliArgs('rpc', sessionId, args)),

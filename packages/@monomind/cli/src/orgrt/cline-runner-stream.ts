@@ -85,8 +85,10 @@ export async function* streamJsonTurn(
       if (p.result) {
         outcome.finishReason = p.result.finishReason;
         if (p.result.usage) outcome.usage = p.result.usage;
-        if (p.result.finishReason !== 'completed' && !outcome.errorMessage && p.result.text) {
-          outcome.errorMessage = p.result.text;
+        // Model text, not an error from cline: kept apart so it is shown
+        // but never classified (clineTurnFailure).
+        if (p.result.finishReason !== 'completed' && p.result.text) {
+          outcome.resultText = p.result.text;
         }
       }
       if (
