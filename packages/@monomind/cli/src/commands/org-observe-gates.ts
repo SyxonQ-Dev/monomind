@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { type DecisionGate, ORG_DIR } from '../orgrt/types.js';
 import { output } from '../output.js';
 import type { CommandContext, CommandResult } from '../types.js';
-import { orgJson, printOrgJson, resolverFlag } from './org-observe-shared.js';
+import { hostingDaemonFor, orgJson, printOrgJson, resolverFlag } from './org-observe-shared.js';
 
 const log = (text: string): void => {
   console.log(text);
@@ -118,8 +118,8 @@ export const gateResolveAction = async (
   const resolvedBy = byFlag.by;
 
   // SEC: gate resolution is a human decision — operator credential only.
-  const { lookupOrg, readOperatorCredential } = await import('../orgrt/broker.js');
-  const remote = lookupOrg(name);
+  const { readOperatorCredential } = await import('../orgrt/broker.js');
+  const remote = await hostingDaemonFor(ctx.cwd, name);
   if (remote) {
     const cred = readOperatorCredential(name);
     try {
@@ -146,11 +146,9 @@ export const gateResolveAction = async (
         log(output.success(`Gate ${gateId} ${approved ? 'approved' : 'rejected'} (live).`));
         return { success: true, message: `gate ${approved ? 'approved' : 'rejected'}` };
       }
-      log(
-        output.warning(
-          `Live resolution rejected (${d.error ?? res.status}) — falling back to offline queue.`,
-        ),
-      );
+      // SEC: a refusal must not fall through to writing gates.json (see hostingDaemonFor).
+      log(output.error(`Live resolution rejected (${d.error ?? res.status}) — nothing recorded.`));
+      return { success: false, message: `gate resolution rejected: ${d.error ?? res.status}` };
     } catch (err) {
       log(
         output.warning(
