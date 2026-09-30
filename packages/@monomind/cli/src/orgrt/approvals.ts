@@ -5,6 +5,12 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { writeJsonFileAtomic } from '../utils/json-file.js';
+import {
+  type ApprovalWaitResult,
+  notifyApprovalWaiters,
+  registerApprovalWait,
+  resolverLabel,
+} from './approval-waiters.js';
 import type { OrgDaemon } from './daemon.js';
 import { summarizeToolInput } from './policy.js';
 import { ORG_DIR } from './types.js';
@@ -152,15 +158,27 @@ export async function checkApproval(
   return (await checkApprovalEntry(daemon, org, role, rawAction, input)).approved;
 }
 
-/** #553: checkApproval plus the queued entry it matched or created, so
- *  approval-decider.ts can wait on that exact request. */
+/** #553: when a request stays pending, whether (and how long) the call waits
+ *  for its resolution — asked with the normalized action, inside the lock. */
+export type ApprovalWaitPlan = (
+  action: string,
+) => { timeoutMs: number; stillLive: () => boolean } | undefined;
+
+/** #553: checkApproval plus the queued entry it matched or created. With
+ *  `planWait`, a still-pending request gets its waiter registered here,
+ *  inside the approvals lock, so setApproval cannot resolve it unseen. */
 export function checkApprovalEntry(
   daemon: OrgDaemon,
   org: string,
   role: string,
   rawAction: string,
   input: Record<string, unknown> = {},
-): Promise<{ approved: boolean | null; entry?: ApprovalEntry }> {
+  planWait?: ApprovalWaitPlan,
+): Promise<{
+  approved: boolean | null;
+  entry?: ApprovalEntry;
+  wait?: Promise<ApprovalWaitResult>;
+}> {
   const action = normalizeToolAction(rawAction);
   const fingerprint = fingerprintAction(action, input);
   return withApprovalLock(daemon, org, async () => {
@@ -222,45 +240,13 @@ export function checkApprovalEntry(
           input: entry.input ?? summary,
         },
       });
-      return { approved: null, entry }; // Pending approval
+      const plan = planWait?.(action);
+      const wait = plan ? registerApprovalWait(entry, plan.timeoutMs, plan.stillLive) : undefined;
+      return { approved: null, entry, wait }; // Pending approval
     }
 
     return { approved: true }; // Auto-approved for non-sensitive actions
   });
-}
-
-/** #553: tool calls waiting inline for a decider, per queued entry. */
-const approvalWaiters = new WeakMap<ApprovalEntry, Set<(approved: boolean) => void>>();
-
-/** #553: resolves with the entry's verdict once setApproval resolves it, or
- *  null after `timeoutMs`. The entry stays queued either way. */
-export function waitForApprovalResolution(
-  entry: ApprovalEntry,
-  timeoutMs: number,
-): Promise<boolean | null> {
-  if (entry.approved !== null) return Promise.resolve(entry.approved);
-  return new Promise((resolve) => {
-    const waiters = approvalWaiters.get(entry) ?? new Set();
-    approvalWaiters.set(entry, waiters);
-    const done = (approved: boolean | null) => {
-      clearTimeout(timer);
-      waiters.delete(waiter);
-      resolve(approved);
-    };
-    const waiter = (approved: boolean) => done(approved);
-    const timer = setTimeout(() => done(null), timeoutMs);
-    timer.unref?.();
-    waiters.add(waiter);
-  });
-}
-
-/** Wakes the calls waiting on `entry`; true when at least one was waiting. */
-function notifyApprovalWaiters(entry: ApprovalEntry, approved: boolean): boolean {
-  const waiters = approvalWaiters.get(entry);
-  if (!waiters?.size) return false;
-  for (const w of [...waiters]) w(approved);
-  approvalWaiters.delete(entry);
-  return true;
 }
 
 /** The actions that wait for human approval unless a role's autoApproveTools
@@ -375,21 +361,28 @@ export async function setApproval(
     // #553: a call waiting inline on a request gets the verdict directly (it
     // runs or is refused now), so the role must not also be told to repeat
     // it — that would run it twice.
-    const woken = items.map((item) => notifyApprovalWaiters(item, approved));
+    const notWaiting = items.filter((item) => !notifyApprovalWaiters(item, approved));
 
     // Notify the waiting agent via its mailbox
     const running = daemon.orgs.get(org);
     const agent = running?.agents.get(role);
-    if (agent && !agent.mailbox.isClosed && woken.some((w) => !w)) {
+    if (agent && !agent.mailbox.isClosed && notWaiting.length) {
       // #492: the `[approval] <action>: APPROVED|DENIED` prefix is unchanged;
       // the rest tells the role what the verdict means for its next step.
-      // #553: it names the resolver, since a decider is not a human.
-      const who = resolver === DEFAULT_RESOLVER ? 'a human' : `the decider (${resolver})`;
+      // #553: it names who resolved it, and when some of the resolved calls
+      // were waiting (and so already ran or were refused), which ones this
+      // message is about.
+      const who = resolverLabel(resolver);
+      const only =
+        notWaiting.length < items.length
+          ? ` This is only about: ${notWaiting.map((i) => JSON.stringify(i.input ?? {}).slice(0, 200)).join('; ')}. The call that was waiting for this decision already got it — do not repeat that one.`
+          : '';
       agent.mailbox.push(
         `[approval] ${action}: ${approved ? 'APPROVED' : 'DENIED'} — ` +
           (approved
             ? `${who} approved your pending ${action} call(s); repeat the identical call now and it will run.`
-            : `${who} refused your pending ${action} call(s); do not retry them — choose another approach. Your task queue is not stuck.`),
+            : `${who} refused your pending ${action} call(s); do not retry them — choose another approach. Your task queue is not stuck.`) +
+          only,
       );
     }
 

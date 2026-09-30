@@ -1,6 +1,7 @@
 // packages/@monomind/cli/src/orgrt/session-gate.ts
 // Extracted from session.ts — the canUseTool gate every role session runs behind.
 import type { ApprovalVerdict } from './approval-decider.js';
+import { resolverLabel } from './approval-waiters.js';
 import type { RoleFence } from './fence.js';
 import { scanInput } from './fence.js';
 import type { Decision, PolicyEngine } from './policy.js';
@@ -31,18 +32,20 @@ export function approvalGateOutcome(
  *  approve/deny. Roles read the old one-liner as "the task queue is stuck";
  *  this says what is waiting and what to do meanwhile. Keeps the leading
  *  "pending human approval" phrase the old text had.
- *  #553: a decider-owned request the call already waited on says so, and
- *  names the decider instead of a human. */
+ *  #553: a request the org's autonomy routes away from a person, which the
+ *  call already waited on, says so. It may still have escalated to a person
+ *  (decider failure, a cap, an `escalate` verdict), so it names neither. */
 export function approvalPendingMessage(toolName: string, verdict?: ApprovalVerdict): string {
   if (verdict?.owner === 'decider') {
-    const waited =
-      verdict.waitedMs !== undefined ? ` within ${Math.round(verdict.waitedMs / 1000)}s` : ' yet';
+    const why = verdict.cancelled
+      ? 'the org or this role is stopping'
+      : `no decision within ${Math.round((verdict.waitedMs ?? 0) / 1000)}s`;
     return (
-      `Tool "${toolName}" is waiting on the org's decider (${verdict.decider ?? 'decider'}), not a human — ` +
-      `this one ${toolName} call waited for its decision, but it has not decided${waited}. The request stays queued and the decider will approve or deny it. ` +
+      `Tool "${toolName}" waited for the org's autonomy (${verdict.decider ?? 'decider'}) to decide this one ${toolName} call, but ${why}. ` +
+      `The request stays queued: a decider or a human will resolve it, and an [approval] message follows. ` +
       `Only this call is held; your task queue is not stuck and your other tools still work. ` +
-      `Meanwhile, continue with other work that does not need this call. ` +
-      `You will get an [approval] message when it is decided; if it is approved, repeat the identical call and it will run; if it is denied, choose another approach.`
+      `Meanwhile, continue with other work that does not need this call, and do not retry this identical call while it is pending. ` +
+      `If the [approval] message says it was approved, repeat the identical call and it will run; if it was denied, choose another approach.`
     );
   }
   return (
@@ -56,10 +59,8 @@ export function approvalPendingMessage(toolName: string, verdict?: ApprovalVerdi
 /** #492: the tool result after a human denied ONE call. The identical call
  *  stays denied (checkApproval keys decisions on the call's fingerprint). */
 export function approvalDeniedMessage(toolName: string, verdict?: ApprovalVerdict): string {
-  const who =
-    verdict?.owner === 'decider'
-      ? `the org's decider (${verdict.resolvedBy ?? verdict.decider ?? 'decider'})`
-      : 'a human';
+  // #553: named from who actually resolved it (a rule, a decider, a person).
+  const who = resolverLabel(verdict?.resolvedBy);
   return (
     `Tool "${toolName}" was denied by guardrail approval — ${who} refused this one ${toolName} call. ` +
     `Your task queue is not stuck and your other tools still work. ` +
