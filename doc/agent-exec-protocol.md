@@ -17,10 +17,12 @@
     `total_cost_usd`, its per-role `roles[].costUsd`, and `org costs --json`'s
     `items[].cost_usd` / `totals.cost_usd` are `null` when no usage event of that scope
     reported a cost (otherwise the sum of the reported costs). Callers that summed the field
-    must treat `null` as "unknown", not `0`. **Same rev** (issue #534): `agent models --json` (§12) lists
-    one entry per resolved model — aliases that resolve to the same model (claude `default`
-    and `opus`) are one entry with `aliases`, so a caller that tests every listed model runs
-    each model once. Neither alias's resolution changed.
+    must treat `null` as "unknown", not `0`. **Same rev** (issue #534), capability
+    `agent-models-alias-of`: `agent models --json` (§12) keeps every entry, and one that
+    resolves to the same model as an earlier entry carries `alias_of: <that entry's id>` (claude
+    `opus` → `"alias_of":"default"`); the earlier, canonical entry lists every id in `aliases`. A
+    caller that tests each model once skips `alias_of` entries; a lookup by id still finds them.
+    Neither alias's resolution changed.
   - rev 27 (2026-09-30): **a missing API key is `auth`** (issue #532) — no new capability. §3.4's
     `auth` also covers a credential that was never set: an error whose message says "missing API
     key" or "no API key found/configured" (pi, and the pi-rpc runner's own up-front check) is
@@ -506,12 +508,15 @@ by swarm management and is NOT reused by this protocol — the installed-only vi
 
 ```
 $ monomind --version --json
-{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-exec-background-pids","agent-exec-full-access-any","agent-exec-effort","agent-scan","agent-scan-read-only","agent-models","agent-test-json","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","org-role-full-access","doctor-json","doctor-read-only","doctor-offline","init-json","knowledge-profile-captures","agent-exec-subagent-events","agent-exec-rate-limit-retry","agent-exec-access-read","agent-exec-full-access-tools","agent-exec-sandbox","agent-test-sandbox","agent-exec-sandbox-restricted","agent-exec-sandbox-fallback","agent-exec-cost-null"]}
+{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-exec-background-pids","agent-exec-full-access-any","agent-exec-effort","agent-scan","agent-scan-read-only","agent-models","agent-test-json","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","org-role-full-access","doctor-json","doctor-read-only","doctor-offline","init-json","knowledge-profile-captures","agent-exec-subagent-events","agent-exec-rate-limit-retry","agent-exec-access-read","agent-exec-full-access-tools","agent-exec-sandbox","agent-test-sandbox","agent-exec-sandbox-restricted","agent-exec-sandbox-fallback","agent-exec-cost-null","agent-models-alias-of"]}
 ```
 
 Callers MUST handshake before use and fail with an actionable message (install/upgrade hint)
 when a required capability is absent. `min_caller` is advisory. New capabilities are additive;
-removals or semantic changes bump the capability string (e.g. `org-json-v2`) or frame `v`.
+removals or semantic changes bump the capability string (e.g. `org-json-v2`) or frame `v`. A field
+that becomes nullable is a semantic change: it is announced by a new capability string, so a
+caller that sums or compares the field checks for it first — e.g. `agent-exec-cost-null` (rev 28):
+`cost_usd` may be `null` (unknown) on `agent exec`, `agent test` and the org surfaces.
 
 ## 3. `monomind agent exec`
 
@@ -1250,7 +1255,9 @@ stays read-only.
   {"id":"default","resolved_id":"claude-opus-5-5","label":"Default (recommended)",
    "description":"Opus 5.5 · Best for everyday, complex tasks","default":true,
    "aliases":["default","opus"],"effort_levels":["low","medium","high","xhigh","max"]},
-  {"id":"sonnet","resolved_id":"claude-sonnet-5","label":"Sonnet","effort_levels":["low","medium","high"]}
+  {"id":"sonnet","resolved_id":"claude-sonnet-5","label":"Sonnet","effort_levels":["low","medium","high"]},
+  {"id":"opus","resolved_id":"claude-opus-5-5","label":"Opus","alias_of":"default",
+   "effort_levels":["low","medium","high","xhigh","max"]}
 ]}
 ```
 
@@ -1258,7 +1265,8 @@ stays read-only.
 |---|---|
 | `id` | What to pass as the runtime's model option (`agent exec --model`, a role's `model`) |
 | `resolved_id` | The concrete model an alias resolves to today (claude only; omitted when equal to `id`) |
-| `aliases` | rev 28. Every id that resolves to this entry's model, `id` first (e.g. `["default","opus"]`); omitted when only one does. The list has one entry per resolved model, so test each entry once |
+| `aliases` | rev 28, capability `agent-models-alias-of`. On the canonical (first) entry for a model: every id that resolves to it, `id` first (e.g. `["default","opus"]`); omitted when only one does |
+| `alias_of` | rev 28, capability `agent-models-alias-of`. On a later entry that resolves to the same model: the canonical entry's `id` (claude `opus` → `"default"`). The entry stays in the list, so a lookup by `id` works; a caller that runs each model once (`agent test` per model) skips entries with `alias_of` |
 | `label`, `description` | Display text from the runtime |
 | `default` | `true` on the runtime's own default choice (claude's `default` entry) |
 | `effort_levels` | Supported reasoning-effort values, when the runtime reports them |

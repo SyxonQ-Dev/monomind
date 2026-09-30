@@ -76,6 +76,7 @@ describe('version handshake (§2)', () => {
         'agent-exec-sandbox-restricted',
         'agent-exec-sandbox-fallback',
         'agent-exec-cost-null',
+        'agent-models-alias-of',
       ],
     });
     expect(p.capabilities).toContain('agent-exec');

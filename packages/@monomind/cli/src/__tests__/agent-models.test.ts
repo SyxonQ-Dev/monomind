@@ -1,8 +1,8 @@
 // #369: `agent models` — each runtime's real model list.
 import { describe, expect, it } from 'vitest';
 import {
-  dedupeByResolvedModel,
   listRuntimeModels,
+  markAliases,
   parseAgyModels,
   parseClaudeModels,
   parseCodexModels,
@@ -35,7 +35,7 @@ describe('agent models parsers', () => {
     ]);
   });
 
-  it('claude: default and opus resolving to the same model are one entry with both aliases', () => {
+  it('claude: every entry is kept; opus is marked alias_of default (mono-agent looks up by id)', () => {
     const models = parseClaudeModels([
       { value: 'default', resolvedModel: 'claude-opus-5-5', displayName: 'Default (recommended)' },
       { value: 'sonnet', resolvedModel: 'claude-sonnet-5', displayName: 'Sonnet' },
@@ -50,24 +50,29 @@ describe('agent models parsers', () => {
         default: true,
       },
       { id: 'sonnet', resolved_id: 'claude-sonnet-5', label: 'Sonnet' },
+      { id: 'opus', resolved_id: 'claude-opus-5-5', label: 'Opus', alias_of: 'default' },
     ]);
-    // Aliases are listed as given; neither alias's resolution changes.
-    expect(models.map((m) => m.resolved_id)).toEqual(['claude-opus-5-5', 'claude-sonnet-5']);
+    // A lookup by id (mono-agent's `m.ID == "opus"`) still finds opus.
+    expect(models.find((m) => m.id === 'opus')?.resolved_id).toBe('claude-opus-5-5');
+    // A caller testing each model once skips alias_of entries.
+    expect(models.filter((m) => !m.alias_of).map((m) => m.id)).toEqual(['default', 'sonnet']);
   });
 
-  it('dedupe: an explicit id and an alias of it merge; default sticks from a later alias', () => {
+  it('markAliases: an explicit id and a later alias of it; the alias keeps its own fields', () => {
     expect(
-      dedupeByResolvedModel([
+      markAliases([
         { id: 'claude-opus-5-5', label: 'Opus 5.5' },
         { id: 'default', resolved_id: 'claude-opus-5-5', label: 'Default', default: true },
         { id: 'haiku', resolved_id: 'claude-haiku-5', label: 'Haiku' },
       ]),
     ).toEqual([
+      { id: 'claude-opus-5-5', label: 'Opus 5.5', aliases: ['claude-opus-5-5', 'default'] },
       {
-        id: 'claude-opus-5-5',
-        label: 'Opus 5.5',
-        aliases: ['claude-opus-5-5', 'default'],
+        id: 'default',
+        resolved_id: 'claude-opus-5-5',
+        label: 'Default',
         default: true,
+        alias_of: 'claude-opus-5-5',
       },
       { id: 'haiku', resolved_id: 'claude-haiku-5', label: 'Haiku' },
     ]);

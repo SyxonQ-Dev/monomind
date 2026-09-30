@@ -25,10 +25,14 @@ export interface AgentModel {
   id: string;
   /** The concrete model an alias (`default`, `opus`) resolves to today. */
   resolved_id?: string;
-  /** Every id that resolves to this same model, this entry's own `id`
-   *  first (claude `default` and `opus` → one entry). Omitted when only one
-   *  id does. */
+  /** On the canonical entry: every id that resolves to this same model,
+   *  this entry's own `id` first (claude `default` and `opus`). Omitted when
+   *  only one id does. */
   aliases?: string[];
+  /** On a duplicate: the canonical entry's `id` (the first entry for the
+   *  same resolved model). A caller that tests every model skips these; a
+   *  lookup by id still finds them. */
+  alias_of?: string;
   label: string;
   description?: string;
   /** The runtime's own default choice. */
@@ -71,28 +75,29 @@ export function parseClaudeModels(list: SdkModelInfo[]): AgentModel[] {
       ...(m.value === 'default' ? { default: true } : {}),
       ...(m.supportedEffortLevels?.length ? { effort_levels: m.supportedEffortLevels } : {}),
     }));
-  return dedupeByResolvedModel(models);
+  return markAliases(models);
 }
 
 /**
- * One entry per concrete model: aliases that resolve to the same model
- * (claude `default` and `opus` both → claude-opus-5-5) would otherwise be
- * listed, tested and billed twice. The first entry wins and lists every
- * alias in `aliases`; `default` sticks if any merged alias was the default.
+ * Marks aliases of the same concrete model (claude `default` and `opus` both
+ * → claude-opus-5-5), which would otherwise be tested and billed twice.
+ * Every entry is kept, so a lookup by id (`opus`) still works: the first
+ * entry per resolved model is canonical and lists every id in `aliases`; each
+ * later one gets `alias_of: <canonical id>`.
  */
-export function dedupeByResolvedModel(models: AgentModel[]): AgentModel[] {
-  const byModel = new Map<string, AgentModel>();
-  for (const m of models) {
+export function markAliases(models: AgentModel[]): AgentModel[] {
+  const canonical = new Map<string, AgentModel>();
+  return models.map((m) => {
     const key = m.resolved_id ?? m.id;
-    const kept = byModel.get(key);
-    if (!kept) {
-      byModel.set(key, { ...m });
-      continue;
+    const first = canonical.get(key);
+    if (!first) {
+      const kept = { ...m };
+      canonical.set(key, kept);
+      return kept;
     }
-    kept.aliases = [...(kept.aliases ?? [kept.id]), m.id];
-    if (m.default) kept.default = true;
-  }
-  return [...byModel.values()];
+    first.aliases = [...(first.aliases ?? [first.id]), m.id];
+    return { ...m, alias_of: first.id };
+  });
 }
 
 export function parseCodexModels(stdout: string): AgentModel[] {
