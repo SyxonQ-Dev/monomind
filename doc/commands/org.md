@@ -905,8 +905,8 @@ The hash `--expect-hash` compares, `--check` reports and the signature records i
      U+2029, is written as-is in UTF-8. Go's `encoding/json` escapes these last five, so turn
      off `SetEscapeHTML` and write U+2028/U+2029 raw.
    - Numbers are IEEE-754 doubles printed as ECMAScript `Number.prototype.toString` prints
-     them: `1.0` → `1`, `1e2` → `100`, `1.5e-7` → `1.5e-7`. Go's `encoding/json` prints a
-     `float64` the same way.
+     them: `1.0` → `1`, `1e2` → `100`, `1.5e-7` → `1.5e-7`, and `-0` → `0`. Go's
+     `encoding/json` prints a `float64` the same way except `-0`, which it writes as `-0`.
    - `true`, `false` and `null` are literal.
 6. **Hash:** the lowercase hex SHA-256 of that UTF-8 string, 64 characters.
 

@@ -67,7 +67,11 @@ export function parseExpectHashes(
     return { hashes };
   }
   for (const v of values) {
-    const [org, hex] = v.split('=', 2);
+    // Split at the first '=' only: split('=', 2) would drop a trailing
+    // '=junk' and accept `<org>=<hex>=junk`.
+    const eq = v.indexOf('=');
+    const org = eq < 0 ? v : v.slice(0, eq);
+    const hex = eq < 0 ? '' : v.slice(eq + 1);
     if (!hex || !ORG_NAME_RE.test(org) || !HASH_RE.test(hex))
       return { error: `--all --expect-hash takes <org>=<hex sha256>, got: ${v}` };
     if (hashes.has(org)) return { error: `--expect-hash: ${org} given more than once` };

@@ -276,6 +276,7 @@ describe('org sign --all --expect-hash <org>=<hex>', () => {
       [`a=${FIXTURE_HASH}`, `a=${FIXTURE_HASH}`, `b=${BARE_HASH}`],
       [FIXTURE_HASH],
       `a=${FIXTURE_HASH}`,
+      [`a=${FIXTURE_HASH}=junk`, `b=${BARE_HASH}`],
     ]) {
       const r = await signAction(ctx([], { all: true, yes: true, 'expect-hash': hashes }));
       expect(r).toMatchObject({ success: false, exitCode: 2 });
