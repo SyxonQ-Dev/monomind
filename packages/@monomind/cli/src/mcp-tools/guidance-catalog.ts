@@ -7,6 +7,7 @@
  * `guidanceTools`.
  */
 
+import { MONOSWARM_AUTOPILOT_REMOVAL_VERSION } from '../deprecations.js';
 import { HOOKS_SUBCOMMAND_COUNT, WORKER_COUNT } from '../init/generated-counts.js';
 
 // ── Capability Catalog ──────────────────────────────────────
@@ -48,8 +49,7 @@ export const CAPABILITY_CATALOG: Record<string, CapabilityArea> = {
   },
   monoswarm: {
     name: 'Monoswarm Coordination',
-    description:
-      "Deprecated (removed in the next minor release; use Claude Code's Task tool or `monomind org run`). Topology/roster bookkeeping in a JSON state file and threshold-based voting (majority/supermajority/unanimous/threshold); starts no agents.",
+    description: `Deprecated (removed in ${MONOSWARM_AUTOPILOT_REMOVAL_VERSION}; use Claude Code's Task tool or \`monomind org run\`). Topology/roster bookkeeping in a JSON state file and threshold-based voting (majority/supermajority/unanimous/threshold); starts no agents.`,
     tools: [
       'monoswarm_init',
       'monoswarm_status',

@@ -12,6 +12,7 @@ import {
   getCommandsByCategory,
   hasCommand,
 } from './commands/index.js';
+import { MONOSWARM_AUTOPILOT_REMOVAL_VERSION } from './deprecations.js';
 import type { OutputFormatter } from './output.js';
 import type { CommandParser } from './parser.js';
 import { versionJsonPayload } from './protocol-capabilities.js';
@@ -97,7 +98,7 @@ export async function printMainHelp(
     'Local SQLite memory with on-device embeddings (HNSW ANN index above 100,000 entries)',
     'Monograph codebase knowledge graph (tree-sitter + SQLite)',
     'Org runtime daemon with per-role policy gates (monomind org run)',
-    'Monoswarm topology, roster and vote state (deprecated; removed in the next minor release)',
+    `Monoswarm topology, roster and vote state (deprecated; removed in ${MONOSWARM_AUTOPILOT_REMOVAL_VERSION})`,
     'Keyword routing + route-outcome measurement',
   ]);
   output.writeln();

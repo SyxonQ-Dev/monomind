@@ -38,6 +38,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, sep } from 'node:path';
+import { protectableDepsRoot } from '../utils/optional-deps.js';
 import { dashboardCredentialPaths, HOME_DENY_WRITE, operatorDirOverride } from './file-roots.js';
 import {
   maskReadOnlyPaths,
@@ -103,12 +104,20 @@ export function authorityMaskArgs(ctx: {
   // (`~/.local`, `~/.local/share`, …) bound onto themselves, so none can be
   // renamed aside and a new toolchain planted in its place. First, so the
   // binds below nest inside these mount points instead of covering them.
-  const anchors = [...new Set(operatorMountPoints(ctx).map(realPath))];
+  // #518's deps dir first, so ~/.monomind exists for the layout below.
+  const deps = protectableDepsRoot(ctx.env, ctx.home);
+  const mm = monomindMaskLayout(ctx.home, ctx.env);
+  const roPaths = maskReadOnlyPaths({ ...ctx, homeDenyWrite: HOME_DENY_WRITE });
+  // A directory bound read-only below is a mount point already, and must not
+  // get a read-write bind at all (~/.monomind).
+  const roBound = new Set([...mm.readOnly, ...roPaths].map(realPath));
+  const anchors = [...new Set(operatorMountPoints(ctx).map(realPath))].filter(
+    (d) => !roBound.has(d),
+  );
   for (const d of anchors) args.push('--bind', d, d);
   const afterAnchors = args.length;
   // #502 review: ~/.monomind read-only, only its role-writable entries bound
   // back — first, so a work tree below it (binds further down) still opens.
-  const mm = monomindMaskLayout(ctx.home, ctx.env);
   for (const d of mm.readOnly.map(realPath)) args.push('--ro-bind', d, d);
   for (const d of mm.writable.map(realPath)) args.push('--bind', d, d);
   // #498: the mask binds only existing work dirs read-write, so create them
@@ -138,10 +147,14 @@ export function authorityMaskArgs(ctx: {
   for (const d of orgs.writable) args.push('--bind', d, d);
   for (const f of orgs.files) args.push('--ro-bind', f, f);
   // #502 review: what the operator's own processes run or trust, and the
-  // shell/git config that would undo the guard.
-  for (const p of new Set(
-    maskReadOnlyPaths({ ...ctx, homeDenyWrite: HOME_DENY_WRITE }).map(realPath),
-  ))
+  // shell/git config that would undo the guard. #518's first-use deps dir
+  // (utils/optional-deps.ts: code the unsandboxed daemons load) is one of
+  // them — ~/.monomind is already a read-only mount point above, with only
+  // the role-writable entries bound back, so deps is never writable; it is
+  // bound read-only again here, after the org binds, in case one of those is
+  // an ancestor. No read-write bind of ~/.monomind itself: that would let a
+  // role plant new top-level entries again.
+  for (const p of new Set([...roPaths, ...(deps ? [deps] : [])].map(realPath)))
     args.push('--ro-bind', p, p);
   // Last, so that no bind above can uncover them.
   for (const d of hidden) if (existsSync(d)) args.push('--tmpfs', d);

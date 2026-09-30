@@ -138,6 +138,8 @@ describe.skipIf(
       `echo '{"hooks":"evil"}' > ${cwd}/.claude/settings.json 2>/dev/null; echo "SETW=$?"`,
       `echo evil > ${home}/.monomind/org-skills/evil.md 2>/dev/null; echo "HSKW=$?"`,
       `echo evil > ${cwd}/.monomind/org-skills/evil.md 2>/dev/null; echo "PSKW=$?"`,
+      `echo evil > ${home}/.monomind/deps/planted.js 2>/dev/null; echo "DEPSW=$?"`,
+      `mkdir -p ${home}/.monomind/projects && echo ok > ${home}/.monomind/projects/p.txt; echo "PROJW=$?"`,
       `echo ok > ${cwd}/work.txt; echo "CWDW=$?"`,
     ].join('; ');
     const server = await scriptedApi(command);
@@ -182,6 +184,9 @@ describe.skipIf(
     expect(existsSync(join(home, '.monomind', 'org-skills', 'evil.md'))).toBe(false);
     expect(existsSync(join(cwd, '.monomind', 'org-skills', 'evil.md'))).toBe(false);
     expect(readFileSync(join(cwd, 'work.txt'), 'utf8')).toBe('ok\n');
+    // #518 merged: the deps dir stays read-only, the role-writable entries writable.
+    expect(existsSync(join(home, '.monomind', 'deps', 'planted.js'))).toBe(false);
+    expect(text).toMatch(/PROJW=0/);
   }, 90_000);
 });
 

@@ -51,7 +51,7 @@ Three concrete implementations are available:
 ### 2.1 ClaudeAgentRunner (Default)
 
 - **Source:** [`orgrt/agent-runner.ts → ClaudeAgentRunner`](packages/@monomind/cli/src/orgrt/agent-runner.ts#ClaudeAgentRunner)
-- **SDK:** `@anthropic-ai/claude-agent-sdk` — wraps `query`, `tool`, `createSdkMcpServer`.
+- **SDK:** `@anthropic-ai/claude-agent-sdk` — wraps `query`, `tool`, `createSdkMcpServer`. Not a dependency of the published package: it is installed on first use into `~/.monomind/deps` ([#428](https://github.com/monoes/monomind/issues/428), `utils/optional-deps.ts`).
 - **Activation:** Default when `MONOMIND_RUNTIME` is unset. Also the fallback inside `runOneSession()`.
 - **Singleton:** `defaultClaudeRunner` (line 132) — stateless, reused across sessions.
 - **Provider auth:** `subscription` kind deletes all `ANTHROPIC_*` env vars so the session

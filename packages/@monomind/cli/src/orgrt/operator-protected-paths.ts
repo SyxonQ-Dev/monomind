@@ -107,7 +107,8 @@ export function monomindMaskLayout(
 /** Under $HOME, beyond file-roots.ts's HOME_DENY_WRITE. */
 export const HOME_OPERATOR_EXEC = [
   '.npm/_npx',
-  '.npmrc',
+  // (.npmrc, .config/npm and .monomind/deps are in file-roots.ts's
+  // HOME_DENY_WRITE since #518, applied in the same places.)
   '.local/bin',
   '.config/fish',
   '.bashrc.d',

@@ -112,7 +112,7 @@ pnpm run lint
 
 ## Monoswarm Rules
 
-- DEPRECATED: `monoswarm` (the CLI command and the `monoswarm_*` MCP tools) is deprecated and removed in 2.21.0 (#418): it records state and starts no agents. Don't initialize a monoswarm; spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
+- DEPRECATED: `monoswarm` (the CLI command and the `monoswarm_*` MCP tools) is deprecated and removed in 2.22.0 (#418): it records state and starts no agents. Don't initialize a monoswarm; spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
 - Monoswarm records topology, roster and votes in a state file; it starts no process, and Claude Code's Task-tool agents do the work.
 - ALWAYS spawn ALL agents in ONE message via the Task tool with `run_in_background: true` — CLI tools coordinate, Task agents do the work
 - After spawning, STOP — never poll TaskOutput or check monoswarm status; trust agents to return
@@ -127,7 +127,7 @@ pnpm run lint
 |---------|-------------|-------------|
 | `init` | 6 | Project initialization |
 | `agent` | 11 | Agent lifecycle management |
-| `monoswarm` | 5 | Deprecated — records state, starts no agents; removed in 2.21.0 |
+| `monoswarm` | 5 | Deprecated — records state, starts no agents; removed in 2.22.0 |
 | `memory` | 12 | SQLite memory with ANN search |
 | `task` | 5 | Task creation and lifecycle |
 | `session` | 6 | Session state management |
@@ -225,7 +225,7 @@ npx monomind doctor --fix
 ## Claude Code vs CLI Tools
 
 - Claude Code's Task tool handles ALL execution: agents, file ops, code generation, git
-- CLI tools handle coordination via Bash: memory, hooks, routing (`monoswarm` is deprecated and removed in 2.21.0)
+- CLI tools handle coordination via Bash: memory, hooks, routing (`monoswarm` is deprecated and removed in 2.22.0)
 - NEVER use CLI tools as a substitute for Task tool agents
 
 ## Support
