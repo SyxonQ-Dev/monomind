@@ -9,14 +9,15 @@
  */
 
 import {
+  autoInstallDisabled,
   type EnsureOptions,
   ensureOptionalDependency,
   OPTIONAL_DEPENDENCIES,
   type OptionalDependencyName,
 } from '../utils/optional-deps.js';
 
-// Packages whose install failed this session; they are not retried.
-const failedInstalls = new Set<string>();
+// Install failures this session, rethrown instead of installing again.
+const failedInstalls = new Map<string, unknown>();
 
 export interface AutoInstallOptions extends EnsureOptions {
   /**
@@ -37,7 +38,10 @@ function isInstallable(name: string): name is OptionalDependencyName {
  *
  * @param packageName - npm package name
  * @param options - Installation options
- * @returns The imported module or null if unavailable
+ * @returns The imported module, or null for a missing package that is not on
+ *   the allow-list
+ * @throws {OptionalDependencyError} when an allow-listed package cannot be
+ *   loaded or installed; its message says how to install it by hand
  */
 export async function tryImportOrInstall<T = unknown>(
   packageName: string,
@@ -53,7 +57,7 @@ export async function tryImportOrInstall<T = unknown>(
     }
   }
 
-  if (failedInstalls.has(packageName)) return null;
+  if (failedInstalls.has(packageName)) throw failedInstalls.get(packageName);
 
   try {
     return await ensureOptionalDependency<T>(packageName, {
@@ -61,23 +65,9 @@ export async function tryImportOrInstall<T = unknown>(
       log: silent ? () => {} : ensureOptions.log,
     });
   } catch (error) {
-    failedInstalls.add(packageName);
-    if (!silent) {
-      console.error(`[monomind] ${packageName} is not available: ${(error as Error).message}`);
-    }
-    return null;
-  }
-}
-
-/**
- * Check if a package is available without installing
- */
-export async function isPackageAvailable(packageName: string): Promise<boolean> {
-  try {
-    await import(packageName);
-    return true;
-  } catch {
-    return false;
+    // With auto-install off nothing was attempted; the next call re-checks.
+    if (!autoInstallDisabled(ensureOptions.env)) failedInstalls.set(packageName, error);
+    throw error;
   }
 }
 
@@ -87,24 +77,3 @@ export async function isPackageAvailable(packageName: string): Promise<boolean> 
 export function resetInstallAttempts(): void {
   failedInstalls.clear();
 }
-
-/**
- * Optional package dependencies and their purposes
- */
-export const OPTIONAL_PACKAGES = {
-  'monofence-ai': {
-    description: 'AI manipulation defense (prompt injection, PII detection)',
-    tools: ['aidefence_scan', 'aidefence_analyze', 'aidefence_stats', 'aidefence_learn'],
-  },
-  'onnxruntime-node': {
-    description: 'ONNX runtime for neural network inference',
-    tools: ['neural_*'],
-  },
-} as const;
-
-export default {
-  tryImportOrInstall,
-  isPackageAvailable,
-  resetInstallAttempts,
-  OPTIONAL_PACKAGES,
-};

@@ -18,7 +18,7 @@ const _require = createRequire(import.meta.url);
 export type MonoFenceInstance = Record<string, (...args: any[]) => any>;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type MonoFenceModule = Record<string, (...args: any[]) => any>;
+export type MonoFenceModule = Record<string, (...args: any[]) => any>;
 
 // Lazy-loaded MonoFence module and instance
 let monofenceModule: MonoFenceModule | null = null;
@@ -44,14 +44,14 @@ export function capSecurityInput(raw: unknown, fieldName = 'input'): string {
  * Load the monofence-ai module, installing it into monomind's deps directory
  * on first use (never into the user's project, #519). Callers must use the
  * returned module rather than `import('monofence-ai')`, which does not see
- * that directory.
+ * that directory. Used by the monofence_* MCP tools, `security defend`,
+ * `security redteam` and the org runtime's role fences.
  */
 export async function loadMonoFenceModule(): Promise<MonoFenceModule> {
   if (monofenceModule) return monofenceModule;
-  const mod = await tryImportOrInstall<MonoFenceModule>('monofence-ai');
-  if (!mod) {
-    throw new Error('MonoFence package not available. Install with: npm install monofence-ai');
-  }
+  // Throws OptionalDependencyError, whose message says how to install it by
+  // hand; never null for an allow-listed package.
+  const mod = (await tryImportOrInstall<MonoFenceModule>('monofence-ai')) as MonoFenceModule;
   monofenceModule = mod;
   return mod;
 }

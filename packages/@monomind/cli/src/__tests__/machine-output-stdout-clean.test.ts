@@ -22,9 +22,12 @@ vi.mock('../memory/intelligence.js', () => ({
   initializeIntelligence: vi.fn(async () => undefined),
 }));
 
-vi.mock('monofence-ai', () => ({
-  createMonoDefence: () => ({
-    detect: async () => ({ safe: true, threats: [], piiFound: false }),
+vi.mock('../mcp-tools/security-tools-core.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../mcp-tools/security-tools-core.js')>()),
+  loadMonoFenceModule: async () => ({
+    createMonoDefence: () => ({
+      detect: async () => ({ safe: true, threats: [], piiFound: false }),
+    }),
   }),
 }));
 

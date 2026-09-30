@@ -15,10 +15,13 @@ import { registerOrg } from '../../src/orgrt/broker.js';
 import { queueMessage } from '../../src/orgrt/inbox.js';
 import { Mailbox } from '../../src/orgrt/mailbox.js';
 
-// The daemon builds per-role fences through `monofence-ai`; stand in a
+// The daemon builds per-role fences through `monofence-ai` (loaded by
+// loadMonoFenceModule); stand in a
 // deterministic detector so the chokepoint tests below can drive real
 // startOrg()/receiveRemote() paths without the ML model.
-vi.mock('monofence-ai', () => ({
+vi.mock('../../src/mcp-tools/security-tools-core.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/mcp-tools/security-tools-core.js')>()),
+  loadMonoFenceModule: async () => ({
   createMonoDefence: () => ({
     async detect(input: string) {
       const hit = input.includes('INJECT');
@@ -31,6 +34,7 @@ vi.mock('monofence-ai', () => ({
     async scanOutput() { return { safe: true, leakageFound: false }; },
     getContextState() { return { escalationState: 'clean' }; },
     addAllowlistRule() {},
+  }),
   }),
 }));
 

@@ -16,7 +16,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetInstallAttempts, tryImportOrInstall } from '../mcp-tools/auto-install.js';
-import { depsRoot, type NpmRunner, OPTIONAL_DEPENDENCIES } from '../utils/optional-deps.js';
+import {
+  depsRoot,
+  manualInstallCommand,
+  type NpmRunner,
+  OPTIONAL_DEPENDENCIES,
+  OptionalDependencyError,
+} from '../utils/optional-deps.js';
 
 const PKG = 'monofence-ai';
 const VERSION = OPTIONAL_DEPENDENCIES[PKG].version;
@@ -27,10 +33,8 @@ let project: string;
 let env: NodeJS.ProcessEnv;
 const originalCwd = process.cwd();
 
-const notFound = async (name: string) => {
-  throw Object.assign(new Error(`Cannot find package '${name}' imported from /x`), {
-    code: 'ERR_MODULE_NOT_FOUND',
-  });
+const notFound = (name: string): string => {
+  throw Object.assign(new Error(`Cannot find module '${name}'`), { code: 'MODULE_NOT_FOUND' });
 };
 
 /** A stand-in for npm that "installs" a fake monofence-ai into --prefix. */
@@ -43,7 +47,13 @@ function fakeNpm() {
     mkdirSync(dir, { recursive: true });
     writeFileSync(
       join(dir, 'package.json'),
-      JSON.stringify({ name: PKG, version: VERSION, type: 'module', exports: './index.js' }),
+      // ESM-only, like the real package: exports has only an "import" condition.
+      JSON.stringify({
+        name: PKG,
+        version: VERSION,
+        type: 'module',
+        exports: { '.': { import: './index.js' } },
+      }),
     );
     writeFileSync(join(dir, 'index.js'), 'export const isSafe = () => true;\n');
   };
@@ -65,15 +75,20 @@ afterEach(() => {
 });
 
 describe('tryImportOrInstall (#519)', () => {
-  it('pins monofence-ai to an exact version on the allow-list', () => {
-    expect(VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+  it('pins monofence-ai to the workspace package version', () => {
+    // A workspace bump without a pin bump would silently install the older
+    // release from the registry.
+    const workspacePkg = JSON.parse(
+      readFileSync(new URL('../../../../monofence-ai/package.json', import.meta.url), 'utf8'),
+    );
+    expect(VERSION).toBe(workspacePkg.version);
   });
 
   it('installs into the deps directory and leaves the project untouched', async () => {
     const npm = fakeNpm();
     const mod = await tryImportOrInstall<{ isSafe: () => boolean }>(PKG, {
       env,
-      importOwn: notFound,
+      resolveOwn: notFound,
       runNpm: npm.run,
       silent: true,
     });
@@ -81,7 +96,7 @@ describe('tryImportOrInstall (#519)', () => {
     expect(mod?.isSafe()).toBe(true);
     expect(npm.calls).toHaveLength(1);
     const { args, cwd } = npm.calls[0];
-    expect(args).toContain(`${PKG}@${VERSION}`);
+    expect(args[0]).toBe('ci');
     expect(args).toContain('--ignore-scripts');
     expect(args).not.toContain('--no-save');
     expect(cwd.startsWith(depsRoot(env))).toBe(true);
@@ -92,16 +107,30 @@ describe('tryImportOrInstall (#519)', () => {
     expect(readFileSync(join(project, 'package.json'), 'utf8')).toBe(PROJECT_PKG);
   });
 
-  it('does not retry a failed install in the same session', async () => {
+  it('reports a failed install and does not retry it in the same session', async () => {
     const runNpm = vi.fn<NpmRunner>(async () => {
       throw new Error('offline');
     });
-    const opts = { env, importOwn: notFound, runNpm, silent: true };
+    const opts = { env, resolveOwn: notFound, runNpm, silent: true };
 
-    expect(await tryImportOrInstall(PKG, opts)).toBeNull();
-    expect(await tryImportOrInstall(PKG, opts)).toBeNull();
+    // The helper's error, with its manual install command, reaches the caller.
+    const first = await tryImportOrInstall(PKG, opts).catch((e: unknown) => e);
+    expect(first).toBeInstanceOf(OptionalDependencyError);
+    expect((first as Error).message).toContain('offline');
+    expect((first as Error).message).toContain(manualInstallCommand(PKG, env));
+    await expect(tryImportOrInstall(PKG, opts)).rejects.toBe(first);
     expect(runNpm).toHaveBeenCalledTimes(1);
     expect(existsSync(join(project, 'node_modules'))).toBe(false);
+  });
+
+  it("loads monomind's own ESM-only copy without installing", async () => {
+    // The workspace links monofence-ai, whose exports have only an "import"
+    // condition, which require.resolve alone cannot resolve.
+    const runNpm = vi.fn<NpmRunner>();
+    const mod = await tryImportOrInstall<{ isSafe: unknown }>(PKG, { env, runNpm, silent: true });
+    expect(typeof mod?.isSafe).toBe('function');
+    expect(runNpm).not.toHaveBeenCalled();
+    expect(existsSync(depsRoot(env))).toBe(false);
   });
 
   it('never installs a package that is not on the allow-list', async () => {
