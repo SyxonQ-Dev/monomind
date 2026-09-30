@@ -17,6 +17,7 @@ import {
 } from '../orgrt/org-signature.js';
 import { ORG_DIR } from '../orgrt/types.js';
 import { output } from '../output.js';
+import { commandParser } from '../parser.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { listOrgConfigFiles, validateOrgName } from './org-control.js';
 import { checkAction, parseExpectHashes, resolveSignRoot } from './org-sign-check.js';
@@ -56,7 +57,32 @@ async function signOne(
   return undefined;
 }
 
+const kebab = (key: string): string => key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+const camel = (key: string): string => key.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+
+/** `org sign` fails closed on a flag it does not know: an older build
+ *  silently ignored `--expect-hash` and signed anyway. The CLI parser allows
+ *  unknown flags globally, so this command checks its own. */
+function unknownSignFlags(flags: CommandContext['flags']): string[] {
+  const known = new Set<string>(['_']);
+  for (const opt of [...commandParser.getGlobalOptions(), ...(signSubcommand.options ?? [])]) {
+    known.add(opt.name);
+    known.add(camel(opt.name));
+  }
+  const unknown = new Set<string>();
+  for (const key of Object.keys(flags)) if (!known.has(key)) unknown.add(`--${kebab(key)}`);
+  return [...unknown];
+}
+
 export const signAction = async (input: CommandContext): Promise<CommandResult> => {
+  const unknown = unknownSignFlags(input.flags);
+  if (unknown.length) {
+    const message =
+      `org sign: unknown option${unknown.length > 1 ? 's' : ''} ${unknown.join(', ')} — nothing signed. ` +
+      'See `monomind org sign --help`.';
+    log(output.error(message));
+    return { success: false, message, exitCode: 2 };
+  }
   // Read-only (#558): runs anywhere, including inside a role.
   if (input.flags.check === true) return checkAction(input);
   // A role's own process tree must never sign — it would approve its own

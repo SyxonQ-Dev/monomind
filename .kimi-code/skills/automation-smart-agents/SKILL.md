@@ -6,8 +6,6 @@ type: flow
 
 # Smart Agent Auto-Spawning
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
-
 ## Purpose
 Automatically spawn the right agents at the right time without manual intervention.
 
@@ -37,11 +35,6 @@ The system monitors workload and spawns additional agents when:
 
 **Status Monitoring:**
 ```javascript
-// Check swarm health
-mcp__monomind__monoswarm_status({
-  swarmId: "current"
-})
-
 // Monitor agent status and health
 mcp__monomind__agent_status({
   id: "agent-123"
@@ -57,13 +50,6 @@ mcp__monomind__agent_health({
 ### MCP Tool Integration
 Uses Monomind MCP tools for agent coordination:
 ```javascript
-// Initialize swarm with appropriate topology
-mcp__monomind__monoswarm_init({
-  "topology": "mesh",
-  "maxAgents": 8,
-  "strategy": "auto"
-})
-
 // Spawn agents based on file type
 mcp__monomind__agent_spawn({
   "type": "coder",

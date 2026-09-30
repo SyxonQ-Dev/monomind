@@ -38,7 +38,12 @@ export function resolveOrgComplete(
   blockerDetail: string | undefined,
   runFacts: Pick<
     CompletionFacts,
-    'mode' | 'maxBudgetFraction' | 'pendingHumanWaits' | 'hasActiveBlock' | 'hasPendingWork'
+    | 'mode'
+    | 'maxBudgetFraction'
+    | 'pendingHumanWaits'
+    | 'hasActiveBlock'
+    | 'hasPendingWork'
+    | 'openBlockingQuestions'
   >,
 ): string | null {
   const refusal = checkCompletion({ outcome, blocker, blockerDetail, ...runFacts });
@@ -209,13 +214,15 @@ export function buildRoleSessionOpts(
             // legitimate-wait check (:1316-1328) — a pending gate or an
             // unanswered question is the same "genuinely waiting on a
             // human" fact either way.
+            const blockingQuestions = questionOps.pendingBlockingQuestions(daemon.root, name);
             const pendingHumanWaits =
-              daemon.listGates(name, 'pending').length +
-              questionOps.pendingBlockingQuestions(daemon.root, name).length;
+              daemon.listGates(name, 'pending').length + blockingQuestions.length;
             return resolveOrgComplete(bus, r, outcome, summary, blocker, blockerDetail, {
               mode: def.run_config.completion ?? 'boss',
               maxBudgetFraction,
               pendingHumanWaits,
+              // #564: the boss's own and every other role's blocking questions.
+              openBlockingQuestions: blockingQuestions.map((q) => q.questionId),
               hasActiveBlock: running.taskDag?.hasActiveBlock(Date.now()) ?? false,
               hasPendingWork: running.taskDag?.hasPendingWork() ?? false,
             });

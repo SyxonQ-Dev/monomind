@@ -150,9 +150,18 @@ Where and how:
 - Only these packages can be installed this way, at the versions pinned in
   `packages/@monomind/cli/src/utils/optional-deps.ts`.
 
-To pre-install the Claude runtime, run `monomind agent models --runtime claude`
-(it installs the SDK and lists models without sending a prompt), or run the
-command monomind prints when auto-install is off. To opt out, set
+To pre-install the Claude runtime, run `monomind deps install` or
+`monomind agent models --runtime claude` (it installs the SDK and lists models
+without sending a prompt), or run the command monomind prints when
+auto-install is off.
+
+Org roles cannot write `~/.monomind/deps` (#527), so the org runtime installs
+the SDK on the host before it starts a role whose runtime is claude
+([#559](https://github.com/monoes/monomind/issues/559)). Roles on other
+runtimes trigger no download. `MONOMIND_NO_AUTO_INSTALL=1` turns this host
+install off too, for offline or no-network use; a role that then needs the
+SDK fails with a message to run `monomind deps install`, which installs it
+even with `MONOMIND_NO_AUTO_INSTALL` set, since it is an explicit request. To opt out, set
 `MONOMIND_NO_AUTO_INSTALL=1`: nothing is installed, and the feature fails
 with the exact command to run by hand (a plain `npm install` of the pinned
 version, without the lockfile), such as

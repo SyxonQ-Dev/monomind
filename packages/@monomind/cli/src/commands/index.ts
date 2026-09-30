@@ -19,7 +19,6 @@ const COMMAND_LOADERS: Record<string, CommandLoader> = {
   task: async () => (await import('./task.js')).taskCommand,
   session: async () => (await import('./session.js')).sessionCommand,
   agent: async () => (await import('./agent.js')).agentCommand,
-  monoswarm: async () => (await import('./monoswarm.js')).monoswarmCommand,
   memory: async () => (await import('./memory.js')).memoryCommand,
   mcp: async () => (await import('./mcp.js')).mcpCommand,
   hooks: async () => (await import('./hooks.js')).hooksCommand,
@@ -37,7 +36,6 @@ const COMMAND_LOADERS: Record<string, CommandLoader> = {
   update: async () => (await import('./update.js')).default,
   guidance: async () => (await import('./guidance.js')).guidanceCommand,
   cleanup: async () => (await import('./cleanup.js')).cleanupCommand,
-  autopilot: async () => (await import('./autopilot.js')).autopilotCommand,
   monograph: async () => (await import('./monograph.js')).monographCommand,
   tokens: async () => (await import('./tokens.js')).default,
   platforms: async () => (await import('./platforms.js')).platformsCommand,
@@ -51,6 +49,7 @@ const COMMAND_LOADERS: Record<string, CommandLoader> = {
   org: async () => (await import('./org.js')).orgCommand,
   ui: async () => (await import('./ui.js')).uiCommand,
   events: async () => (await import('./events.js')).eventsCommand,
+  deps: async () => (await import('./deps.js')).depsCommand,
   'download-embeddings': async () =>
     (await import('./download-embeddings.js')).downloadEmbeddingsCommand,
 };
@@ -80,7 +79,6 @@ const CATEGORY_NAMES = {
     'status',
     'ui',
     'agent',
-    'monoswarm',
     'org',
     'memory',
     'doc',
@@ -89,7 +87,7 @@ const CATEGORY_NAMES = {
     'mcp',
     'hooks',
   ],
-  advanced: ['security', 'performance', 'guidance', 'autopilot', 'design'],
+  advanced: ['security', 'performance', 'guidance', 'design'],
   utility: ['config', 'doctor', 'completions', 'report-crash', 'crash-reporting', 'events'],
   analysis: ['analyze', 'route', 'pick', 'monograph', 'tokens', 'search'],
   management: [
@@ -101,6 +99,7 @@ const CATEGORY_NAMES = {
     'catalog',
     'mastermind',
     'browse',
+    'deps',
     'download-embeddings',
   ],
 } as const;

@@ -719,7 +719,7 @@ Authorization: Bearer <credential_file contents>
 
 `/api/xdeliver` accepts an **operator credential** that carries human authority — the daemon skips the broker sender-identity check and trusts `fromOrg:fromRole` as given. This allows senders that aren't registered orgs (workflows, automation roles) to deliver messages live ([`server.ts → startOrgServer`](packages/@monomind/cli/src/orgrt/server.ts#startOrgServer)).
 
-**Operator credential:** Stored in `.monomind/operator.key` (generated on first `org serve`), separate from per-org broker credentials. Routes requiring operator authority: `/api/xdeliver`, `/api/human-message`, `/api/answer-question`, `/api/resolve-gate`, `/api/set-approval`.
+**Operator credential:** Stored in `.monomind/operator.key` (generated on first `org serve`), separate from per-org broker credentials. Routes requiring operator authority: `/api/xdeliver`, `/api/human-message`, `/api/answer-question`, `/api/dismiss-question`, `/api/resolve-gate`, `/api/set-approval`.
 
 **Live inbox:** `monomind org inbox` now authenticates with the operator credential (falling back to the sender org's broker credential), fixing the issue where messages to a running org were rejected and silently queued until next start ([`server.ts → startOrgServer`](packages/@monomind/cli/src/orgrt/server.ts#startOrgServer)).
 
@@ -772,8 +772,8 @@ Every human decision (approvals, question answers, gate resolutions) now records
 
 **Attribution fields:**
 - `resolvedBy`: Who resolved the decision (default: `"human"`)
-  - CLI: `org approve --by <name>`, `org deny --by <name>`, `org answer --by <name>`, `org gate-approve --by <name>`, `org gate-reject --by <name>`
-  - API: `resolvedBy` param on `/api/set-approval`, `/api/answer-question`, `/api/resolve-gate`
+  - CLI: `org approve --by <name>`, `org deny --by <name>`, `org answer --by <name>`, `org questions dismiss --by <name>`, `org gate-approve --by <name>`, `org gate-reject --by <name>`
+  - API: `resolvedBy` param on `/api/set-approval`, `/api/answer-question`, `/api/dismiss-question`, `/api/resolve-gate`
 - `resolvedAt`: Timestamp of resolution
 - Stored in `approvals.json`, `questions.json`, `gates.json`
 
@@ -936,7 +936,7 @@ Constructs system prompt containing:
 | Tool | Available to | Purpose |
 |---|---|---|
 | `org_send` | All roles | Send message to another role or org (`org:role` syntax) |
-| `ask_human` | All roles | Pause and queue a question for human answer |
+| `ask_human` | All roles | Queue a question for a human; the answer arrives as a new message. While a `blocking` question is unanswered, `org_complete` is refused except as `partial` with blocker `human` |
 | `org_recall` / `org_remember` / `org_learn` | All roles | Cross-run knowledge-graph memory |
 | `knowledge_search` | All roles (if enabled) | Semantic search over Second Brain |
 | `org_gate` | All roles | Create a decision gate — a hard-blocking human-approval checkpoint for irreversible actions ([`org-tools.ts → buildOrgTools`](packages/@monomind/cli/src/orgrt/org-tools.ts#buildOrgTools)) |
@@ -1249,3 +1249,5 @@ coordinator gets one message (`channel-fault-exhausted`).
 4. `monomind org answer <name> <question-id> "<text>"` delivers the answer:
    - **Live delivery** if the org is running (daemon receives it immediately).
    - **Queued offline** if the org is stopped (answer stored, consumed on next start).
+   - If the asking role was removed from the org definition, the answer is recorded without delivery and the audit event says `delivery: "skipped"`.
+5. `monomind org questions dismiss <name> <question-id> [--reason "<text>"]` closes a question without an answer (`state: "dismissed"` in `questions.json`). It releases the `org_complete` gate and the idle-watchdog hold, and tells the asking role no answer is coming (live, or queued while the org is stopped; not at all for a removed role). The dashboard's Human Input view has a Dismiss button for the same thing.

@@ -46,7 +46,9 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
+  accessSync,
   chmodSync,
+  constants,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -102,6 +104,9 @@ export const OPTIONAL_DEPENDENCIES = {
 export type OptionalDependencyName = keyof typeof OPTIONAL_DEPENDENCIES;
 
 export const NO_AUTO_INSTALL_ENV = 'MONOMIND_NO_AUTO_INSTALL';
+/** The operator's command that installs the Claude Agent SDK outside any org
+ *  role (commands/deps.ts, #559). */
+export const DEPS_INSTALL_COMMAND = 'monomind deps install';
 
 /** A missing dependency that was not (or could not be) installed. */
 export class OptionalDependencyError extends Error {
@@ -130,6 +135,9 @@ export interface EnsureOptions {
   withoutSdkBinary?: boolean;
   /** Appended to the install notice. */
   note?: string;
+  /** The operator asked for this install (`monomind deps install`), so
+   *  MONOMIND_NO_AUTO_INSTALL does not stop it. */
+  requested?: boolean;
 }
 
 /** Flags for the printed manual command (plain `npm install`, no lockfile). */
@@ -267,6 +275,34 @@ export function isInstalled(
     withoutSdkBinary ||
     hasSdkPlatformPackage(dir, host)
   );
+}
+
+/** Whether `name` loads without an install (#559): monomind resolves the
+ *  pinned copy itself, or the deps dir holds a complete one. The pins are
+ *  checked when it loads. */
+export function optionalDependencyPresent(
+  name: OptionalDependencyName,
+  opts: Pick<EnsureOptions, 'env' | 'resolveOwn' | 'host' | 'withoutSdkBinary'> = {},
+): boolean {
+  try {
+    if (ownEntry(name, opts.resolveOwn ?? defaultResolveOwn)) return true;
+  } catch {
+    // not resolvable from here: the deps dir decides
+  }
+  const dir = dependencyDir(name, opts.env ?? process.env);
+  return isInstalled(name, dir, opts.host ?? thisHost(), !!opts.withoutSdkBinary);
+}
+
+/** The errno code when this process cannot write the deps root (an org
+ *  role's sandbox binds it read-only), else undefined. */
+function depsRootReadOnly(env: Env): string | undefined {
+  try {
+    accessSync(ensureDepsRoot(env), constants.W_OK);
+    return undefined;
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    return code && READ_ONLY_CODES.has(code) ? code : undefined;
+  }
 }
 
 /** Why `p` may not be trusted as monomind's own file, or undefined. */
@@ -477,13 +513,17 @@ export async function ensureOptionalDependency<T = unknown>(
   };
   if (isInstalled(name, dir, host, noBinary)) return load();
 
-  if (autoInstallDisabled(env)) {
+  if (autoInstallDisabled(env) && !opts.requested) {
     throw new OptionalDependencyError(
       `${spec.feature} needs ${name}@${spec.version} (${size}), which is not installed, ` +
         `and ${NO_AUTO_INSTALL_ENV} is set, so monomind will not install it. Install it with:\n` +
         `  ${manualInstallCommand(name, env, noBinary)}`,
     );
   }
+
+  // #559: in an org role the deps dir is read-only; say so before trying.
+  const readOnly = depsRootReadOnly(env);
+  if (readOnly) throw readOnlyError(name, readOnly, env, noBinary);
 
   log(
     `${spec.feature} needs ${name}@${spec.version} (${size}). Installing it once into ${dir} ` +
@@ -525,16 +565,27 @@ function installError(
   if (err instanceof OptionalDependencyError) return err;
   const spec = OPTIONAL_DEPENDENCIES[name];
   const code = (err as NodeJS.ErrnoException).code;
-  if (code && READ_ONLY_CODES.has(code)) {
-    return new OptionalDependencyError(
-      `${spec.feature} needs ${name}@${spec.version}, which is not installed, and ` +
-        `${depsRoot(env)} is not writable here (${code}). Org roles cannot install into it; ` +
-        `ask the operator to run this outside the org:\n  ${manualInstallCommand(name, env, noBinary)}`,
-    );
-  }
+  if (code && READ_ONLY_CODES.has(code)) return readOnlyError(name, code, env, noBinary);
   return new OptionalDependencyError(
     `Could not install ${name}@${spec.version}: ${(err as Error).message}\n` +
       `Install it by hand with:\n  ${manualInstallCommand(name, env, noBinary)}`,
+  );
+}
+
+function readOnlyError(
+  name: OptionalDependencyName,
+  code: string,
+  env: Env,
+  noBinary: boolean,
+): OptionalDependencyError {
+  const spec = OPTIONAL_DEPENDENCIES[name];
+  const operator =
+    name === '@anthropic-ai/claude-agent-sdk' ? `  ${DEPS_INSTALL_COMMAND}\nor by hand:\n` : '';
+  return new OptionalDependencyError(
+    `${spec.feature} needs ${name}@${spec.version}, which is not installed, and ` +
+      `${depsRoot(env)} is not writable here (${code}). Org roles cannot install into it; ` +
+      `ask the operator to run this outside the org:\n${operator}` +
+      `  ${manualInstallCommand(name, env, noBinary)}`,
   );
 }
 

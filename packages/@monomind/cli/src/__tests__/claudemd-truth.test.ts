@@ -13,11 +13,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { hooksCommand } from '../commands/hooks.js';
-import {
-  _resetOptionalPackageCache,
-  generateClaudeMd,
-  HONEST_MONOSWARM_SENTENCE,
-} from '../init/claudemd-generator.js';
+import { _resetOptionalPackageCache, generateClaudeMd } from '../init/claudemd-generator.js';
 import { WORKER_COUNT } from '../init/generated-counts.js';
 import { generateMCPJson } from '../init/mcp-generator.js';
 import { _isOptionalPackageResolvable } from '../init/shared.js';
@@ -65,12 +61,6 @@ async function generatedCapabilities(): Promise<string> {
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
-}
-
-function allTemplateDocs(): string[] {
-  return TEMPLATES.map((tmpl) =>
-    generateClaudeMd({ ...DEFAULT_INIT_OPTIONS, targetDir: process.cwd() }, tmpl),
-  );
 }
 
 describe('claudemd-truth (i-041/i-117)', () => {
@@ -148,7 +138,6 @@ describe('claudemd-truth (i-041/i-117)', () => {
       expect(generated).toContain(`\`hooks\` | ${hooksSubcommands.length}`);
       expect(generated).not.toMatch(/\| `init` \| 5 \|/); // real is 6 — proves it isn't just re-hardcoded at a different number
       expect(generated).not.toMatch(/\| `agent` \| 7 \|/); // real is 10
-      expect(generated).not.toMatch(/\| `monoswarm` \| 6 \|/); // real is 5
       expect(generated).not.toMatch(/\| `mcp` \| 9 \|/); // real is 11
     });
 
@@ -450,25 +439,6 @@ describe('claudemd-truth (i-041/i-117)', () => {
       expect(generated).not.toContain('ReasoningBank');
       expect(generated).not.toContain('Confidence evolves');
       expect(generated).toContain('No model is trained');
-    });
-  });
-
-  describe('i-035 regression guard (same worktree, same two generators)', () => {
-    it("the honest monoswarm sentence still survives this item's edits", () => {
-      // Only swarmOrchestration() ("## Monoswarm Orchestration", full/
-      // security/performance) carries i-035's honest sentence (swarmRules(),
-      // "## Monoswarm Rules", left the standard template in GH #412) — antiDriftConfig(),
-      // autoStartProtocol() and executionRules() never made the claim it
-      // replaces, so a broad "## Monoswarm" substring match would wrongly
-      // flag them.
-      for (const generated of allTemplateDocs()) {
-        if (
-          generated.includes('## Monoswarm Orchestration') ||
-          generated.includes('## Monoswarm Rules')
-        ) {
-          expect(generated).toContain(HONEST_MONOSWARM_SENTENCE);
-        }
-      }
     });
   });
 });

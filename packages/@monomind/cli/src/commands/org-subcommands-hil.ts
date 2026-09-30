@@ -49,9 +49,42 @@ export const inboxSubcommand: Command = {
 export const questionsSubcommand: Command = {
   name: 'questions',
   description: "List pending ask_human questions from an org's agents",
-  options: [{ name: 'all', description: 'Include answered questions', type: 'boolean' }],
+  options: [
+    { name: 'all', description: 'Include answered and dismissed questions', type: 'boolean' },
+  ],
+  subcommands: [
+    {
+      name: 'dismiss',
+      description:
+        'Close a pending question without an answer (releases the org_complete gate; the asking role is told)',
+      options: [
+        { name: 'reason', description: 'Why it is dismissed (shown to the role)', type: 'string' },
+        {
+          name: 'by',
+          description: 'Resolver recorded as resolvedBy (default: human)',
+          type: 'string',
+        },
+      ],
+      examples: [
+        {
+          command: 'monomind org questions dismiss growth q-123-ab --reason "no longer needed"',
+          description: 'Dismiss question q-123-ab',
+        },
+      ],
+      action: async (ctx: CommandContext): Promise<CommandResult> => {
+        const v = validateOrgName(ctx.args[0]);
+        if (!v.ok) return v.result;
+        const { dismissAction } = await import('./org-observe.js');
+        return dismissAction(ctx, v.name);
+      },
+    },
+  ],
   examples: [
     { command: 'monomind org questions growth', description: 'Show unanswered questions' },
+    {
+      command: 'monomind org questions dismiss growth q-123-ab --reason "moot"',
+      description: 'Dismiss a question nobody will answer',
+    },
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
     const v = validateOrgName(ctx.args[0]);

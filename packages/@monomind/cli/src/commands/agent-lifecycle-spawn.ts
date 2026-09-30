@@ -44,11 +44,11 @@ export const spawnCommand: Command = {
   examples: [
     {
       command: 'monomind agent spawn --type coder --name bot-1',
-      description: 'Spawn a coder agent',
+      description: 'Record a coder agent (starts no process)',
     },
     {
       command: 'monomind agent spawn -t researcher --task "Research React 19"',
-      description: 'Spawn researcher with task',
+      description: 'Record a researcher agent with a task',
     },
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {

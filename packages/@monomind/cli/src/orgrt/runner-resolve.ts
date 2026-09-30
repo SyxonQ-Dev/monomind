@@ -16,6 +16,7 @@ import { PiRpcAgentRunner } from './pi-rpc-runner.js';
 import { PiAgentRunner } from './pi-runner.js';
 import { QwenRpcAgentRunner } from './qwen-rpc-runner.js';
 import { QwenAgentRunner } from './qwen-runner.js';
+import { autoRuntimeFromProvider, resolveRoleRuntime } from './runner-specs.js';
 import type { ProviderConfig } from './types.js';
 import { VercelAgentRunner } from './vercel-runner.js';
 
@@ -83,14 +84,6 @@ export type ProviderKind =
   | 'codex'
   | 'antigravity';
 
-/** Auto-resolve runtime from provider kind. Returns undefined for Claude default. */
-function autoRuntimeFromProvider(kind?: ProviderKind): RuntimeKind | undefined {
-  if (kind === 'vercel-api-key') return 'vercel';
-  if (kind === 'codex') return 'codex';
-  if (kind === 'antigravity') return 'antigravity';
-  return undefined;
-}
-
 export function resolveRunner(
   orgRuntime?: RuntimeKind,
   providerKind?: ProviderKind,
@@ -142,7 +135,11 @@ export function resolveRoleRunner(
   orgProviderKind?: ProviderKind,
   roleProvider?: ProviderConfig,
 ): AgentRunner | undefined {
-  const explicit = roleRuntime ?? orgRuntime;
-  if (explicit) return resolveRunner(explicit, undefined, roleProvider);
-  return resolveRunner(undefined, roleProviderKind ?? orgProviderKind, roleProvider);
+  return resolveRunner(
+    resolveRoleRuntime(roleRuntime, orgRuntime, roleProviderKind, orgProviderKind),
+    undefined,
+    roleProvider,
+  );
 }
+
+export { effectiveRoleRuntime, resolveRoleRuntime } from './runner-specs.js';

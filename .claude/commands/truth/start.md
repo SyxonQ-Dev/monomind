@@ -50,10 +50,6 @@ mcp__monomind__mcp_status({})
 // List active agents and their states
 mcp__monomind__agent_list({})
 mcp__monomind__agent_health({})
-
-// Swarm health (if a swarm is running)
-mcp__monomind__monoswarm_health({})
-mcp__monomind__monoswarm_status({ swarmId: "current" })
 ```
 
 ### Neural Pattern Quality

@@ -265,9 +265,8 @@ fi
 # ── 8. Swarm Coordination ────────────────────────────────────
 if should_run "swarm"; then
   section 8 "Swarm Coordination"
-  check_warn "monoswarm status" $MONOMIND_CMD monoswarm status
-  check_warn "monoswarm init (hierarchical)" $MONOMIND_CMD monoswarm init --topology hierarchical --max-agents 4
-  check_warn "monoswarm init (mesh)" $MONOMIND_CMD monoswarm init --topology mesh --max-agents 4
+  # monoswarm was removed in 2.22.0 (#418): the name now points to its replacements.
+  check_contains "monoswarm removed, points to org run" "monomind org run" $MONOMIND_CMD monoswarm
 fi
 
 # ── 9. Task System ────────────────────────────────────────────
@@ -458,8 +457,6 @@ if should_run "swarm-e2e"; then
   check "swarm-e2e: store coordination context" $MONOMIND_CMD memory store --key "swarm-e2e-context" --value "Agent swarm coordination test: architect designs, coder implements, tester validates" --namespace swarm-e2e
   check_contains "swarm-e2e: search finds coordination" "swarm-e2e" $MONOMIND_CMD memory search --query "agent coordination" --namespace swarm-e2e
   check "swarm-e2e: agent list available" $MONOMIND_CMD agent list
-  check_warn "swarm-e2e: monoswarm init" $MONOMIND_CMD monoswarm init --topology hierarchical --max-agents 4
-  check_warn "swarm-e2e: monoswarm status" $MONOMIND_CMD monoswarm status
   # Cleanup
   $MONOMIND_CMD memory delete --key "swarm-e2e-context" --namespace swarm-e2e >/dev/null 2>&1 || true
 fi

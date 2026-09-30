@@ -27,6 +27,11 @@
  * `run_config.completion`) is an ADDITIONAL, stronger constraint on top of
  * that, not a replacement: it also refuses `achieved` while runnable work
  * remains, which the default half never does.
+ *
+ * #564 exception: while a BLOCKING `ask_human` question is unanswered, every
+ * outcome is refused except `partial` with blocker `human` — a boss must not
+ * end the run on an answer it made up. That escape keeps the property above:
+ * a run whose human never replies can still be ended, honestly.
  */
 
 export type CompletionOutcome = 'achieved' | 'partial' | 'failed';
@@ -54,6 +59,10 @@ export interface CompletionFacts {
    *  block on), which would wrongly refuse a run that legitimately finished
    *  every task. */
   hasPendingWork: boolean;
+  /** #564: ids of unanswered BLOCKING `ask_human` questions in the org. While
+   *  any is open, every outcome is refused except `partial` with blocker
+   *  `human` — the one honest way to end a run that is waiting on a person. */
+  openBlockingQuestions?: string[];
 }
 
 /** A role at/above this fraction of its budget ceiling is a genuine
@@ -106,11 +115,24 @@ const DAG_PENDING_WORK =
 /** Decide whether an `org_complete` call is honest, given already-gathered
  *  facts. Returns a refusal message, or `null` to allow. */
 export function checkCompletion(f: CompletionFacts): string | null {
+  const open = f.openBlockingQuestions ?? [];
+  if (open.length > 0 && !(f.outcome === 'partial' && f.blocker === 'human')) {
+    return `org_complete refused: a blocking ask_human question is still unanswered (${open.join(', ')}). Do not answer it yourself or assume the reply — end your turn and wait; the human's answer arrives as a new message, and org_complete works again once it has. To end the run without the answer, use outcome: 'partial' with blocker: 'human'.`;
+  }
   if (f.outcome === 'partial') {
     const refusal = checkBlocker(f);
     if (refusal) return refusal;
   }
-  if (f.mode === 'dag' && f.outcome !== 'failed' && f.hasPendingWork && !f.hasActiveBlock) {
+  // Past the check above, an open blocking question means this is `partial`
+  // with blocker `human`. Runnable work cannot refuse it too: that would
+  // refuse every outcome and trap the run (#564).
+  if (
+    f.mode === 'dag' &&
+    f.outcome !== 'failed' &&
+    f.hasPendingWork &&
+    !f.hasActiveBlock &&
+    open.length === 0
+  ) {
     return DAG_PENDING_WORK;
   }
   return null;

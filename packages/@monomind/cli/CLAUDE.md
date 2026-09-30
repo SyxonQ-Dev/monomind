@@ -6,51 +6,16 @@
 - For ANY UI testing, browser automation, or web navigation request: ALWAYS invoke `Skill("agent-browser-testing")` FIRST — no exceptions.
 - NEVER use `mcp__claude-in-chrome__*`, `mcp__plugin_playwright__*`, `mcp__playwright__*`, Playwright, Puppeteer, Selenium, or any external browser tool. ALWAYS use `npx monomind browse`. This rule has no exceptions. If a `browse` command appears to hang or a Chrome process is left running after one, see `doc/concepts/monobrowse.md#5-recovery--if-a-command-hangs-or-chrome-is-left-running` for the recovery path (commands time out on their own after ~30s; Ctrl-C runs best-effort cleanup; `browse close` in a fresh process can kill an orphan via its persisted PID) before reaching for a different tool.
 
-## Automatic Monoswarm Orchestration
+## Parallel Agent Orchestration
 
-> **Deprecated:** `monoswarm` (the CLI command and the `monoswarm_*` MCP tools) is deprecated and removed in 2.22.0 (#418): it records state and starts no agents. Don't initialize a monoswarm; spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
+For complex work, spawn agents via Claude Code's Task tool in the same message so they run concurrently — Task tool agents do the actual work. For a standing team of roles, run an org with `monomind org run <org>`.
 
-For complex work, spawn agents via the Task tool in the same message so they run concurrently — Task tool agents do the actual work.
-
-Coordination state (topology, roster, votes) lives in
-`.monomind/monoswarm/state.json`; agents relate and vote per that state. See
-`doc/concepts/monoswarm.md` for the full picture, including the vote strategy
-table (`majority`/`supermajority`/`unanimous`/`threshold`).
-
-**Monoswarm spawn-and-wait rules:**
+**Spawn-and-wait rules:**
 
 - Spawn ALL agents in ONE message, each with `run_in_background: true` and full instructions
 - After spawning, tell the user what each agent is doing, then STOP — no more tool calls
-- Never poll TaskOutput or check monoswarm status; don't ask "should I check?" — wait for results
+- Never poll TaskOutput; don't ask "should I check?" — wait for results
 - When agent results arrive, review ALL results before proceeding
-
-### Anti-Drift Config (deprecated — removed in 2.22.0)
-
-These commands only record a state file; they start no agents and change no behaviour:
-
-```bash
-# Small teams (6-8 agents) - use hierarchical for tight control
-npx monomind@latest monoswarm init --topology hierarchical --max-agents 8 --strategy specialized
-
-# Large teams (10-15 agents) - use hierarchical-mesh for V1 queen + peer communication
-npx monomind@latest monoswarm init --topology hierarchical-mesh --max-agents 15 --strategy specialized
-```
-
-**Valid Topologies:**
-
-- `hierarchical` - Queen controls workers directly (anti-drift for small teams)
-- `hierarchical-mesh` - V1 queen + peer communication (recommended for 10+ agents)
-- `mesh` - Fully connected peer network
-- `ring` - Circular communication pattern
-- `star` - Central coordinator with spokes
-- `hybrid` / `adaptive` - Caller-interpreted labels recorded in monoswarm state — no automatic reconfiguration
-
-**Anti-Drift Guidelines:**
-
-- **hierarchical**: Coordinator catches divergence
-- **max-agents 6-8**: Smaller team = less drift
-- **specialized**: Clear roles, no overlap
-- **consensus**: `majority` — see `doc/concepts/monoswarm.md` for `supermajority`/`unanimous`/`threshold`
 
 ## Memory Loop (Feedback + Knowledge Graph)
 
@@ -178,7 +143,6 @@ emitted for new projects by `src/init/claudemd-generator.ts` stops at code 9.
 | `init`      | 5           | Project initialization with wizard, presets, skills, hooks               | Working         |
 | `ui`        | 0           | Start the Neural Control Room dashboard (`--no-open`, `--port`; alias `dashboard`) | Working         |
 | `agent`     | 7           | Agent lifecycle (spawn, list, status, stop, metrics, pool, health)       | Working — runs in-process, no MCP server needed |
-| `monoswarm` | 6           | Deprecated — records state, starts no agents; removed in 2.22.0          | Deprecated (#418) |
 | `memory`    | 12          | Memory store (SQLite/JSON; optional vector search)                        | Working         |
 | `mcp`       | 9           | MCP server management and tool execution                                 | Working         |
 | `task`      | 5           | Task creation, assignment, and lifecycle                                 | Working         |
@@ -190,7 +154,7 @@ emitted for new projects by `src/init/claudemd-generator.ts` stops at code 9.
 
 ### Advanced Commands
 
-`agent` and `monoswarm` above execute MCP tool handlers directly in-process via the local tool registry (`src/mcp-client.ts`) — they do **not** require a running `mcp start` server. A separate MCP server is only needed when an external MCP *client* (e.g. Claude Code) wants to call these tools over stdio/HTTP.
+`agent` above executes MCP tool handlers directly in-process via the local tool registry (`src/mcp-client.ts`) — it does **not** require a running `mcp start` server. A separate MCP server is only needed when an external MCP *client* (e.g. Claude Code) wants to call these tools over stdio/HTTP.
 
 | Command       | Subcommands | Description                                                                   | Status           |
 | ------------- | ----------- | ----------------------------------------------------------------------------- | ---------------- |
@@ -212,7 +176,7 @@ npx monomind@latest init --wizard
 # Spawn an agent
 npx monomind@latest agent spawn -t coder --name my-coder
 
-# Run an agent org (monoswarm is deprecated and removed in 2.22.0)
+# Run an agent org
 npx monomind@latest org run <org> --task "..."
 
 # Search memory (local SQLite + local HF-embeddings; keyword fallback. HNSW ANN
@@ -229,10 +193,10 @@ npx monomind@latest security scan --depth full
 npx monomind@latest performance benchmark --suite all
 ```
 
-## Available Agents (<!-- doc-count:bundled-agents -->88<!-- /doc-count:bundled-agents --> shipped, <!-- doc-count:pickable-agents -->84<!-- /doc-count:pickable-agents --> pickable)
+## Available Agents (<!-- doc-count:bundled-agents -->87<!-- /doc-count:bundled-agents --> shipped, <!-- doc-count:pickable-agents -->83<!-- /doc-count:pickable-agents --> pickable)
 
 **Counts are for THIS package, not the repo root.** `packages/@monomind/cli/.claude/agents/`
-holds 97 `.md` files. The 9 under `reengineer-squad/` are repo-only: `package.json`'s `files`
+holds 96 `.md` files. The 9 under `reengineer-squad/` are repo-only: `package.json`'s `files`
 array excludes them and the registry builder skips them, so npm users get the rest, and
 `monomind init` copies the core pack's share of them into `.claude/agents/` (the rest come
 with opt-in packs — `src/init/packs.ts`, `monomind packs add`). Of those, 4 carry `deprecated: true`
@@ -240,7 +204,7 @@ with opt-in packs — `src/init/packs.ts`, `monomind packs add`). Of those, 4 ca
 spawnable by name but are never picked.
 
 By directory: engineering 23, specialized 15, github 12, testing 9, reengineer-squad 9,
-core 6, optimization 5, marketing 5, monoswarm 5, consensus 2, templates 2, plus one
+core 6, optimization 5, marketing 5, monoswarm 5, consensus 2, templates 1, plus one
 file each in architecture, design, goal, and specialists.
 
 Where agents, skills and Org skills live, their frontmatter, and how to add your own:
@@ -264,7 +228,7 @@ checked-in definitions in this package, and `src/init/executor.ts` and
 
 `github-modes`, `pr-manager`, `monoswarm-code-review`, `issue-tracker`, `release-manager`, `repo-architect`
 
-### Monoswarm / Consensus
+### Coordination / Consensus
 
 `mesh-coordinator`, `collective-intelligence-coordinator`, `quorum-manager`
 (`queen-coordinator` was absorbed into `core/coordinator` in 2026-07.)
@@ -279,7 +243,7 @@ checked-in definitions in this package, and `src/init/executor.ts` and
 
 ### Non-roster definitions
 
-`monoswarm-init` (template) and `dashboard-verifier` (repo-root tree only).
+`automation-smart-agent` (template) and `dashboard-verifier` (repo-root tree only).
 
 ### Input Guards (inlined into `src/utils/input-guards.ts`)
 
@@ -463,7 +427,6 @@ npx monomind@latest doctor --fix
 
 ### CLI Tools Handle Coordination (via Bash):
 
-- **Monoswarm init/status** (deprecated, removed in 2.22.0 — records state, starts no agents): `npx monomind@latest monoswarm init --topology <type>`, `npx monomind@latest monoswarm status`
 - **Agent spawn**: `npx monomind@latest agent spawn -t <type> --name <name>`
 - **Memory store**: `npx monomind@latest memory store --key "mykey" --value "myvalue" --namespace patterns`
 - **Memory search**: `npx monomind@latest memory search --query "search terms"`
@@ -484,10 +447,9 @@ For a comprehensive overview of all Monomind features, agents, commands, and int
 It includes:
 
 - Agent type definitions with recommendations
-- All <!-- doc-count:cli-commands -->39<!-- /doc-count:cli-commands --> CLI commands
+- All <!-- doc-count:cli-commands -->38<!-- /doc-count:cli-commands --> CLI commands
 - All <!-- doc-count:hooks-subcommands -->28<!-- /doc-count:hooks-subcommands --> hook subcommands + <!-- doc-count:workers -->9<!-- /doc-count:workers --> background workers (@monoes/hooks)
 - Intelligence system details (keyword routing + trajectory/outcome logging)
-- Monoswarm coordination and vote strategies
 - Integration ecosystem (agentic-flow, agentic-jujutsu)
 - Performance targets and status
 

@@ -1,24 +1,14 @@
 /**
  * Regression tests for "an error must never be presentable as a successful zero".
  *
- * Four separate scanners/readers used to swallow their own failures and return
+ * Three separate scanners/readers used to swallow their own failures and return
  * an empty/clean-looking result:
  *   (a) security secret scanner  — unreadable dirs + depth truncation
  *   (b) embeddings_neural drift/consolidate — read singleton before init
  *   (c) getGitDiffNumstat        — git failure returned []
- *   (d) consensus audit readLines — >50MB error swallowed to []
  */
 
-import {
-  chmodSync,
-  closeSync,
-  mkdirSync,
-  mkdtempSync,
-  openSync,
-  rmSync,
-  truncateSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -29,7 +19,6 @@ import {
   type SecretFinding,
   scanWasIncomplete,
 } from '../commands/security-scan.js';
-import { AuditWriter } from '../consensus/audit-writer.js';
 import { getGitDiffNumstat } from '../monovector/diff-classifier.js';
 
 // Assembled at runtime so the repo's own secret gate does not flag this file.
@@ -147,37 +136,5 @@ describe('getGitDiffNumstat git failure', () => {
     } finally {
       process.chdir(cwd);
     }
-  });
-});
-
-// ─── (d) consensus audit reader ──────────────────────────────────────────────
-
-describe('AuditWriter read failures', () => {
-  // AuditWriter refuses dataDirs outside cwd, so these live under the package dir.
-  let auditTmp: string;
-
-  beforeEach(() => {
-    auditTmp = mkdtempSync(join(process.cwd(), '.tmp-audit-'));
-  });
-  afterEach(() => {
-    rmSync(auditTmp, { recursive: true, force: true });
-  });
-
-  it('returns an empty list when the audit log genuinely does not exist', () => {
-    const writer = new AuditWriter(join(auditTmp, 'consensus'));
-    expect(writer.listDecisions()).toEqual([]);
-  });
-
-  it('throws rather than reporting an empty trail when the log exceeds the size cap', () => {
-    const dir = join(auditTmp, 'consensus');
-    const writer = new AuditWriter(dir);
-    const auditPath = join(dir, 'consensus-audit.jsonl');
-    // Sparse file: 51MB apparent size, ~0 bytes on disk.
-    const fd = openSync(auditPath, 'w');
-    closeSync(fd);
-    truncateSync(auditPath, 51 * 1024 * 1024);
-
-    expect(() => writer.listDecisions()).toThrow(/50MB/);
-    expect(() => writer.verifyDecision('d1', 'secret')).toThrow(/50MB/);
   });
 });

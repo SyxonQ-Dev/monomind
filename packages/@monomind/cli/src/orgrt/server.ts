@@ -22,6 +22,7 @@ const OPERATOR_ROUTES = new Set([
   '/api/set-approval',
   '/api/resolve-gate',
   '/api/answer-question',
+  '/api/dismiss-question',
   '/api/human-message',
 ]);
 
@@ -257,6 +258,32 @@ export async function startOrgServer(
           return;
         }
         const result = await daemon.answerQuestion(org, role, questionId, answer!, resolver);
+        json(res, result.ok ? 200 : 404, result);
+      } else if (req.url === '/api/dismiss-question') {
+        // #572: close an open question without an answer.
+        const { org, questionId, reason, resolvedBy } = payload as Record<string, unknown>;
+        if (typeof org !== 'string' || !org || typeof questionId !== 'string' || !questionId) {
+          json(res, 400, { ok: false, error: 'org, questionId are required' });
+          return;
+        }
+        if (reason !== undefined && (typeof reason !== 'string' || reason.length > 4000)) {
+          json(res, 400, {
+            ok: false,
+            error: 'reason must be a string of at most 4000 characters',
+          });
+          return;
+        }
+        const resolver = resolverField(resolvedBy);
+        if (resolver === null) {
+          json(res, 400, { ok: false, error: 'resolvedBy must be 1-128 printable characters' });
+          return;
+        }
+        const result = await daemon.dismissQuestion(
+          org,
+          questionId,
+          (reason as string | undefined)?.trim() || undefined,
+          resolver,
+        );
         json(res, result.ok ? 200 : 404, result);
       } else if (req.url === '/api/resolve-gate') {
         const { org, gateId, approved, resolution, resolvedBy } = payload as Record<

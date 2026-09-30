@@ -102,6 +102,7 @@ pnpm run lint
 - ALWAYS spawn ALL agents in ONE message with full instructions via Task tool
 - ALWAYS batch ALL file reads/writes/edits in ONE message
 - ALWAYS batch ALL Bash commands in ONE message
+- After spawning agents, STOP — never poll TaskOutput; trust agents to return, then review ALL results before proceeding
 
 ## Agent & Skill Picking
 
@@ -111,15 +112,6 @@ pnpm run lint
 - `pick` results carry `confident`; when it is false, nothing fits well enough — pick yourself or proceed without a specialist.
 - Never invent agent names — a `subagent_type` that is not installed fails at spawn time.
 
-## Monoswarm Rules
-
-- DEPRECATED: `monoswarm` (the CLI command and the `monoswarm_*` MCP tools) is deprecated and removed in 2.22.0 (#418): it records state and starts no agents. Don't initialize a monoswarm; spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
-- Monoswarm records topology, roster and votes in a state file; it starts no process, and Claude Code's Task-tool agents do the work.
-- ALWAYS spawn ALL agents in ONE message via the Task tool with `run_in_background: true` — CLI tools coordinate, Task agents do the work
-- After spawning, STOP — never poll TaskOutput or check monoswarm status; trust agents to return
-- When agent results arrive, review ALL results before proceeding
-- Keep shared memory namespace for all agents; run frequent checkpoints via `post-task` hooks
-
 ## CLI Commands
 
 ### Core Commands
@@ -128,15 +120,13 @@ pnpm run lint
 |---------|-------------|-------------|
 | `init` | 6 | Project initialization |
 | `agent` | 11 | Agent lifecycle management |
-| `monoswarm` | 5 | Deprecated — records state, starts no agents; removed in 2.22.0 |
 | `memory` | 12 | SQLite memory with ANN search |
 | `task` | 5 | Task creation and lifecycle |
 | `session` | 6 | Session state management |
 | `hooks` | 28 | Edit/outcome logging, agent routing + 9 background workers |
 
 > Note: there is no `neural` CLI command. Its pattern commands live under
-> `hooks intelligence` — a local JSON pattern store; no model is trained. See `doc/concepts/monoswarm.md` for monoswarm
-> coordination and vote strategies.
+> `hooks intelligence` — a local JSON pattern store; no model is trained.
 
 ### Quick CLI Examples
 
@@ -160,7 +150,7 @@ complete set.
 ### Specialized
 `Security Engineer`
 
-### Monoswarm Coordination
+### Coordination
 `mesh-coordinator`
 
 ### GitHub & Repository
@@ -214,7 +204,7 @@ Single-file edits, doc/config changes, quick fixes where you already know the ex
 ## Quick Setup
 
 ```bash
-# Add MCP server — includes monograph, monoswarm, memory, hooks, all 66+ tools
+# Add MCP server — includes monograph, memory, hooks and more
 claude mcp add monomind -- npx -y monomind@latest mcp start
 
 # Verify everything works
@@ -226,7 +216,7 @@ npx monomind doctor --fix
 ## Claude Code vs CLI Tools
 
 - Claude Code's Task tool handles ALL execution: agents, file ops, code generation, git
-- CLI tools handle coordination via Bash: memory, hooks, routing (`monoswarm` is deprecated and removed in 2.22.0)
+- CLI tools handle coordination via Bash: memory, hooks, routing
 - NEVER use CLI tools as a substitute for Task tool agents
 
 ## Support
