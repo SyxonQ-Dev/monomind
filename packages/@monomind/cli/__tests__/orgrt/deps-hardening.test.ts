@@ -84,7 +84,7 @@ const bound = (args: string[], flag: string, p: string) =>
 describe('(2) missing HOME_DENY_WRITE entries are stubbed before a role starts', () => {
   it('creates the harmless ones empty, and none that would change behaviour', () => {
     const home = scratch('dh-home-');
-    ensureOperatorProtectedPaths({ home, env: {} });
+    ensureOperatorProtectedPaths({ home, env: {}, platform: 'linux' });
     for (const f of HOME_DENY_WRITE_STUB_FILES) {
       expect(lstatSync(join(home, f)).isFile(), f).toBe(true);
       expect(readFileSync(join(home, f), 'utf8'), f).toBe('');
@@ -124,6 +124,32 @@ describe('(2) missing HOME_DENY_WRITE entries are stubbed before a role starts',
     ensureOperatorProtectedPaths({ home: stubbed, env: {} });
     for (const args of [['-l'], ['-i'], ['-l', '-i']])
       expect(run(stubbed, args), args.join(' ')).toBe(run(bare, args));
+  });
+
+  it('skips ~/.profile when the login shell is zsh or fish', () => {
+    for (const [shell, made] of [
+      ['/usr/bin/zsh', false],
+      ['/usr/local/bin/fish', false],
+      ['/bin/bash', true],
+    ] as const) {
+      const home = scratch('dh-home-');
+      ensureOperatorProtectedPaths({ home, env: { SHELL: shell }, platform: 'linux' });
+      expect(existsSync(join(home, '.profile')), shell).toBe(made);
+      expect(existsSync(join(home, '.bashrc')), shell).toBe(true);
+    }
+  });
+
+  it('on macOS creates only ~/.config: seatbelt denies the missing paths themselves', () => {
+    const home = scratch('dh-home-');
+    ensureOperatorProtectedPaths({ home, env: {}, platform: 'darwin' });
+    expect(lstatSync(join(home, '.config')).isDirectory()).toBe(true);
+    expect(readdirSync(join(home, '.config'))).toEqual([]);
+    for (const p of [...HOME_DENY_WRITE_STUB_FILES, '.ssh'])
+      expect(existsSync(join(home, p)), p).toBe(false);
+    // …and the deny list then names them, and ~/.config/npm under the new ~/.config.
+    const fs = restrictions({ home, base: scratch('dh-base-'), platform: 'darwin' }).filesystem;
+    for (const p of ['.npmrc', '.profile', '.ssh', '.config/npm'])
+      expect(fs.denyWrite, p).toContain(join(home, p));
   });
 
   it('accounts for every HOME_DENY_WRITE entry', () => {

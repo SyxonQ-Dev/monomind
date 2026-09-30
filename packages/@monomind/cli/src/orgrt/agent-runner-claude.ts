@@ -9,6 +9,7 @@ import { createSubagentTracker } from './agent-runner-claude-subagent.js';
 import type { AgentMessage, AgentRunArgs, AgentRunner } from './agent-runner-types.js';
 import { killOnAbort } from './agent-runner-types.js';
 import { maskedCommand } from './authority-mask.js';
+import { withPinnedExecutable } from './claude-sdk-pin.js';
 import { coverEveryToolCall, POLICY_HOOK_TIMEOUT_S } from './policy-hook.js';
 import { type DescendantTracker, trackDescendants } from './process-tree.js';
 import { omitAnthropicManagedKeys } from './provider.js';
@@ -26,12 +27,13 @@ let claudeSdk: Promise<ClaudeSdk> | undefined;
  *  (#428); it is not a dependency of the published package. Loaded once per
  *  process; a failure is not cached, so a later session retries. */
 export const loadClaudeSdk = (): Promise<ClaudeSdk> =>
-  (claudeSdk ??= ensureOptionalDependency<ClaudeSdk>('@anthropic-ai/claude-agent-sdk').catch(
-    (err) => {
+  (claudeSdk ??= ensureOptionalDependency<ClaudeSdk>('@anthropic-ai/claude-agent-sdk')
+    // #526 review: every query runs the binary that was hashed, rechecked.
+    .then(withPinnedExecutable)
+    .catch((err) => {
       claudeSdk = undefined;
       throw err;
-    },
-  ));
+    }));
 
 /** Launch the Claude Code process inside the authority mask. Same stdio as the
  *  SDK's own spawn; stderr is drained (an unread pipe would stall the CLI once

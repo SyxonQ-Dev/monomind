@@ -378,7 +378,7 @@ export async function ensureOptionalDependency<T = unknown>(
   // the same pins as one in the deps dir.
   const own = ownEntry(name, opts.resolveOwn ?? defaultResolveOwn);
   if (own) {
-    if (pins) verifyPinnedCode(name, pins, { ...own, remove: own.pkgDir }, host, refuseLoad);
+    if (pins) await verifyPinnedCode(name, pins, { ...own, remove: own.pkgDir }, host, refuseLoad);
     return (await importFile(own.entry)) as T;
   }
 
@@ -392,7 +392,7 @@ export async function ensureOptionalDependency<T = unknown>(
     const entry = createRequire(join(dir, 'package.json')).resolve(name);
     if (pins) {
       const pkgDir = join(dir, 'node_modules', name);
-      verifyPinnedCode(name, pins, { entry, pkgDir, remove: dir }, host, refuseLoad);
+      await verifyPinnedCode(name, pins, { entry, pkgDir, remove: dir }, host, refuseLoad);
     }
     return (await importFile(entry)) as T;
   };

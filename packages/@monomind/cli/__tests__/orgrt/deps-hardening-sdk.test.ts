@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { afterEach, describe, expect, it } from 'vitest';
+import { loadClaudeSdk } from '../../src/orgrt/agent-runner-claude.js';
 import { ensureAuthorityDirs } from '../../src/orgrt/authority-mask.js';
 import { gitCommonDir, prepareGitGuard } from '../../src/orgrt/git-guard.js';
 import { ensureOperatorProtectedPaths } from '../../src/orgrt/operator-protected-paths.js';
@@ -165,5 +166,48 @@ describe.skipIf(
     expect(readFileSync(join(home, '.npmrc'), 'utf8')).toBe('');
     expect(existsSync(join(home, '.config', 'npm', 'npmrc'))).toBe(false);
     expect(readFileSync(join(home, '.bashrc'), 'utf8')).toBe('');
+  }, 90_000);
+
+  it('the pinned query runs the verified bundled binary (#526 review)', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'dh6-'));
+    dirs.push(base);
+    const home = join(base, 'home');
+    for (const d of ['projects', 'shell-snapshots', 'session-env', 'plugins', 'backups'])
+      mkdirSync(join(home, '.claude', d), { recursive: true });
+    const sdk = await loadClaudeSdk();
+    expect((sdk as { executable?: string }).executable).toMatch(/claude$/);
+    const server = await scriptedApi('echo "PINNED=ok"');
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      HOME: home,
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+      ANTHROPIC_API_KEY: ['test', 'pinned'].join('-'),
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+      CLAUDECODE: undefined,
+      CLAUDE_CONFIG_DIR: undefined,
+    };
+    delete env.CLAUDE_CODE_OAUTH_TOKEN;
+    const out: string[] = [];
+    try {
+      for await (const m of sdk.query({
+        prompt: 'go',
+        options: {
+          cwd: base,
+          env,
+          settingSources: [],
+          maxTurns: 3,
+          permissionMode: 'bypassPermissions',
+          allowDangerouslySkipPermissions: true,
+        },
+      })) {
+        if (m.type !== 'user' || !Array.isArray(m.message.content)) continue;
+        for (const b of m.message.content)
+          if (b.type === 'tool_result')
+            out.push(typeof b.content === 'string' ? b.content : JSON.stringify(b.content));
+      }
+    } finally {
+      server.close();
+    }
+    expect(out.join('\n')).toContain('PINNED=ok');
   }, 90_000);
 });

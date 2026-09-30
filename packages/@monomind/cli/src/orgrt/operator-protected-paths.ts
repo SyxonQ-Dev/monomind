@@ -20,7 +20,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 
 /** `~/.monomind` entries a role's own `monomind` commands write: browser
  *  automation state, the embedding-model cache, per-project memory, update
@@ -232,6 +232,7 @@ export function ensureOperatorProtectedPaths(ctx: {
   home: string;
   env: NodeJS.ProcessEnv;
   orgRoot?: string;
+  platform?: NodeJS.Platform;
 }): void {
   const mmHome = monomindHome(ctx.home, ctx.env);
   const dirs = [join(mmHome, 'org-skills'), join(ctx.home, '.npm', '_npx')];
@@ -249,7 +250,7 @@ export function ensureOperatorProtectedPaths(ctx: {
   } catch {
     /* exists (the operator's own choice) or unwritable */
   }
-  ensureHomeDenyWriteStubs(ctx.home);
+  ensureHomeDenyWriteStubs(ctx.home, ctx.env, ctx.platform ?? process.platform);
 }
 
 /** #526: HOME_DENY_WRITE entries created in the operator's HOME when they
@@ -261,11 +262,16 @@ export function ensureOperatorProtectedPaths(ctx: {
  *  - `.bashrc`: read only by interactive bash, which runs nothing from it;
  *  - `.profile`: read by sh/dash login shells, and by bash only when
  *    `.bash_profile` and `.bash_login` are absent; zsh never reads it;
- *    empty, it runs nothing in any of them;
+ *    empty, it runs nothing in any of them. Not created when $SHELL is zsh
+ *    or fish: installers such as nvm's append to ~/.profile when it exists
+ *    instead of the shell's own rc file, which that shell would then miss;
  *  - `.ssh`, `.config/git`, `.config/gh`, `.config/npm`: tools read files
  *    inside them, never the directory itself (git's `--global` target
  *    depends on `~/.config/git/config`, a file, not on the directory).
- *  `~/.config` is created too when it is missing. */
+ *  `~/.config` is created too when it is missing.
+ *  Linux only. On macOS the SDK's seatbelt denies a missing path by rule
+ *  (role-sandbox-restrictions.ts), so only `~/.config` is created there, so
+ *  that the entries below it can be passed (their parent must exist). */
 export const HOME_DENY_WRITE_STUB_DIRS = ['.ssh', '.config/git', '.config/gh', '.config/npm'];
 export const HOME_DENY_WRITE_STUB_FILES = ['.npmrc', '.bashrc', '.profile'];
 /** Never created, left to the planted-path watch (planted-paths.ts; on
@@ -292,7 +298,24 @@ export const HOME_DENY_WRITE_NOT_STUBBED = [
   '.monomind/deps',
 ];
 
-function ensureHomeDenyWriteStubs(home: string): void {
+function ensureHomeDenyWriteStubs(
+  home: string,
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): void {
+  if (platform === 'darwin') {
+    try {
+      mkdirSync(join(home, '.config'));
+    } catch {
+      /* exists, or unwritable */
+    }
+    return;
+  }
+  if (platform !== 'linux') return;
+  const loginShell = basename(env.SHELL ?? '');
+  const files = HOME_DENY_WRITE_STUB_FILES.filter(
+    (f) => f !== '.profile' || (loginShell !== 'zsh' && loginShell !== 'fish'),
+  );
   for (const d of HOME_DENY_WRITE_STUB_DIRS) {
     try {
       mkdirSync(dirname(join(home, d)), { recursive: true });
@@ -301,7 +324,7 @@ function ensureHomeDenyWriteStubs(home: string): void {
       /* exists, or unwritable: nothing can plant it either */
     }
   }
-  for (const f of HOME_DENY_WRITE_STUB_FILES) {
+  for (const f of files) {
     try {
       writeFileSync(join(home, f), '', { flag: 'wx', mode: 0o600 });
     } catch {

@@ -424,12 +424,12 @@ export interface CodePins {
 /**
  * #526: SHA-256 of the code monomind loads from the trees above, checked
  * once per process before the entry is imported and before the SDK can
- * spawn its Claude binary (optional-deps-pins.ts). assertTrustedTree tells
+ * spawn its Claude binary (optional-deps-verify.ts). assertTrustedTree tells
  * a foreign or group-writable tree from monomind's own, but not a tree
  * planted by this same user; a planted file fails here. sdk.mjs is one
  * bundle that imports only Node built-ins, so it and the platform binary
- * are all the SDK runs. @puppeteer/browsers is not pinned: it loads a whole
- * dependency tree.
+ * are all the SDK runs. What is not pinned is listed, with the reason, in
+ * OPTIONAL_DEPENDENCIES_UNPINNED.
  *
  * Regenerate together with the lockfile, from the registry tarballs it
  * names. For the SDK and each of its platform packages:
@@ -482,4 +482,12 @@ export const OPTIONAL_DEPENDENCY_CODE_PINS: Partial<Record<string, CodePins>> = 
       },
     },
   },
+};
+
+/** Optional dependencies loaded without code pins, each with the reason.
+ *  optional-deps-pins.test.ts fails for one that is in neither list. */
+export const OPTIONAL_DEPENDENCIES_UNPINNED: Record<string, string> = {
+  '@puppeteer/browsers':
+    'it loads its own dependency tree (about 30 packages) rather than one bundle, and only ' +
+    'downloads Chrome; the lockfile integrity and assertTrustedTree still apply',
 };

@@ -28,19 +28,21 @@ vi.mock('node:fs', async (orig) => {
   const real = await orig<typeof import('node:fs')>();
   return {
     ...real,
-    openSync: ((p: fs.PathLike, ...rest: unknown[]) => {
+    createReadStream: ((p: fs.PathLike, ...rest: unknown[]) => {
       if (String(p).endsWith('sdk.mjs')) opened.entry++;
-      return (real.openSync as (...a: unknown[]) => number)(p, ...rest);
-    }) as typeof real.openSync,
+      return (real.createReadStream as (...a: unknown[]) => fs.ReadStream)(p, ...rest);
+    }) as typeof real.createReadStream,
   };
 });
 
+import { withPinnedExecutable } from '../orgrt/claude-sdk-pin.js';
 import {
   dependencyDir,
   ensureOptionalDependency,
   OPTIONAL_DEPENDENCIES,
 } from '../utils/optional-deps.js';
 import {
+  OPTIONAL_DEPENDENCIES_UNPINNED,
   OPTIONAL_DEPENDENCY_CODE_PINS,
   OPTIONAL_DEPENDENCY_LOCKS,
 } from '../utils/optional-deps-locks.js';
@@ -106,11 +108,11 @@ describe('the pins stay in step with the pinned versions and lockfiles', () => {
     });
   });
 
-  it('matches the registry copy this checkout installed (sdk.mjs and this host’s binary)', () => {
+  it('matches the registry copy this checkout installed (sdk.mjs and this host’s binary)', async () => {
     // The CLI's devDependency is the same pinned version, installed by pnpm
     // from the registry with the tarball's integrity checked.
     const entry = createRequire(import.meta.url).resolve(SDK);
-    expect(sha256File(entry)).toBe(pins?.entry.sha256);
+    expect(await sha256File(entry)).toBe(pins?.entry.sha256);
     const req = createRequire(entry);
     const found = claudeBinaryCandidates({ platform: process.platform, arch: process.arch })
       .map((spec) => {
@@ -122,7 +124,17 @@ describe('the pins stay in step with the pinned versions and lockfiles', () => {
       })
       .find((x) => x);
     expect(found, 'pnpm installs this host’s platform package').toBeDefined();
-    if (found) expect(sha256File(found.bin)).toBe(pins?.binaries?.[found.pkg]?.sha256);
+    if (found) expect(await sha256File(found.bin)).toBe(pins?.binaries?.[found.pkg]?.sha256);
+  });
+
+  it('pins every optional dependency or lists it as unpinned, with a reason', () => {
+    for (const name of Object.keys(OPTIONAL_DEPENDENCIES)) {
+      const pinned = !!OPTIONAL_DEPENDENCY_CODE_PINS[name];
+      const reason = OPTIONAL_DEPENDENCIES_UNPINNED[name];
+      expect(pinned !== !!reason, name).toBe(true);
+      if (reason) expect(reason.length, name).toBeGreaterThan(20);
+    }
+    expect(Object.keys(OPTIONAL_DEPENDENCIES_UNPINNED)).toEqual(['@puppeteer/browsers']);
   });
 
   it('tries the Claude binaries in the SDK’s order', () => {
@@ -213,21 +225,81 @@ describe('a same-user plant fails the pins', () => {
 });
 
 describe('verified once per process, again when the file changes', () => {
-  it('does not rehash an unchanged file, and rehashes one that changed', () => {
+  it('does not rehash an unchanged file, and rehashes one that changed', async () => {
     const pkgDir = dirname(writeFakeSdk(join(home, 'p'), 'x'));
     const entry = join(pkgDir, 'sdk.mjs');
     const pins = FAKE_PINS[SDK];
     const where = { entry, pkgDir, remove: pkgDir };
     opened.entry = 0;
-    verifyPinnedCode(SDK, pins, where, HOST, fail);
-    verifyPinnedCode(SDK, pins, where, HOST, fail);
+    await verifyPinnedCode(SDK, pins, where, HOST, fail);
+    await verifyPinnedCode(SDK, pins, where, HOST, fail);
     expect(opened.entry).toBe(1);
     const later = new Date(Date.now() + 5000);
     utimesSync(entry, later, later);
-    verifyPinnedCode(SDK, pins, where, HOST, fail);
+    await verifyPinnedCode(SDK, pins, where, HOST, fail);
     expect(opened.entry).toBe(2);
     writeFileSync(entry, 'export const marker = "CHANGED";\n');
-    expect(() => verifyPinnedCode(SDK, pins, where, HOST, fail)).toThrow(/has SHA-256/);
+    await expect(verifyPinnedCode(SDK, pins, where, HOST, fail)).rejects.toThrow(/has SHA-256/);
+  });
+});
+
+describe('every query runs the binary that was verified (#526 review)', () => {
+  const load = async () => {
+    plant('PINNED');
+    const mod = await ensureOptionalDependency<{ query: never }>(SDK, opts({ pins: FAKE_PINS }));
+    const calls: Array<Record<string, unknown>> = [];
+    const fakeQuery = ((p: { options?: Record<string, unknown> }) => {
+      calls.push(p.options ?? {});
+      const spawn = p.options?.spawnClaudeCodeProcess as ((o: unknown) => unknown) | undefined;
+      return spawn?.({ command: 'x', args: [] });
+    }) as never;
+    const sdk = withPinnedExecutable({ ...(mod as object), query: fakeQuery });
+    const bin = realpathSync(
+      join(dependencyDir(SDK, env), 'node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude'),
+    );
+    const query = sdk.query as unknown as (p: unknown) => unknown;
+    return { sdk, query, calls, bin };
+  };
+
+  it('passes the verified binary as pathToClaudeCodeExecutable on every query', async () => {
+    const { sdk, query, calls, bin } = await load();
+    expect(sdk.executable).toBe(bin);
+    query({ prompt: 'a', options: { cwd: home } });
+    query({ prompt: 'b' });
+    expect(calls.map((c) => c.pathToClaudeCodeExecutable)).toEqual([bin, bin]);
+    expect(calls[0].cwd).toBe(home);
+  });
+
+  it('refuses the next query once the binary is swapped after the check', async () => {
+    const { query, bin } = await load();
+    query({ prompt: 'a' });
+    writeFileSync(bin, '#!/bin/sh\necho swapped\n');
+    expect(() => query({ prompt: 'b' })).toThrow(/changed after monomind verified it/);
+  });
+
+  it('checks again right before a spawn hook runs', async () => {
+    const { query: run, bin } = await load();
+    const spawned: unknown[] = [];
+    const spawnClaudeCodeProcess = (o: unknown) => {
+      spawned.push(o);
+      return 'child';
+    };
+    expect(run({ prompt: 'a', options: { spawnClaudeCodeProcess } })).toBe('child');
+    // Swapped between the query's own check and the SDK's spawn.
+    const wrapped = withPinnedExecutable({
+      query: ((p: { options?: { spawnClaudeCodeProcess?: (o: unknown) => unknown } }) => {
+        const s = p.options?.spawnClaudeCodeProcess as (o: unknown) => unknown;
+        writeFileSync(bin, '#!/bin/sh\necho swapped\n');
+        return s({ command: 'x' });
+      }) as never,
+    });
+    expect(() =>
+      (wrapped.query as unknown as (p: unknown) => unknown)({
+        prompt: 'b',
+        options: { spawnClaudeCodeProcess },
+      }),
+    ).toThrow(/changed after monomind verified it/);
+    expect(spawned).toHaveLength(1);
   });
 });
 
