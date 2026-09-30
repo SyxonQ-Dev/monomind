@@ -19,6 +19,8 @@ import {
   validateNumber,
   validateTaskSources,
 } from '../autopilot-state.js';
+import { AUTOPILOT_DEPRECATION } from '../deprecations.js';
+import { deprecateTools } from './deprecated-tools.js';
 import type { MCPTool } from './types.js';
 
 function ok(data: unknown) {
@@ -30,7 +32,7 @@ function ok(data: unknown) {
 const autopilotStatus: MCPTool = {
   name: 'autopilot_status',
   description:
-    'Get autopilot state including enabled status, iteration count, task progress, and learning metrics.',
+    'Get the recorded autopilot state: enabled flag, iteration count, limits, and completion counts over locally discovered task files.',
   category: 'autopilot',
   inputSchema: { type: 'object', properties: {} },
   handler: async () => {
@@ -47,7 +49,7 @@ const autopilotStatus: MCPTool = {
       tasks: {
         completed,
         total: tasks.length,
-        percent: tasks.length === 0 ? 100 : Math.round((completed / tasks.length) * 100),
+        percent: tasks.length === 0 ? 0 : Math.round((completed / tasks.length) * 100),
       },
       taskSources: state.taskSources,
     });
@@ -57,7 +59,7 @@ const autopilotStatus: MCPTool = {
 const autopilotEnable: MCPTool = {
   name: 'autopilot_enable',
   description:
-    'Enable autopilot persistent completion. Agents will be re-engaged when tasks remain incomplete.',
+    'Set the autopilot enabled flag in its state file and reset the iteration counter. While it is set, `monomind autopilot check` answers CONTINUE with a prompt listing incomplete local tasks; nothing re-engages agents unless a hook calls that check.',
   category: 'autopilot',
   inputSchema: { type: 'object', properties: {} },
   handler: async () => {
@@ -77,7 +79,8 @@ const autopilotEnable: MCPTool = {
 
 const autopilotDisable: MCPTool = {
   name: 'autopilot_disable',
-  description: 'Disable autopilot. Agents will be allowed to stop even if tasks remain.',
+  description:
+    'Clear the autopilot enabled flag in its state file, so `monomind autopilot check` answers ALLOW STOP.',
   category: 'autopilot',
   inputSchema: { type: 'object', properties: {} },
   handler: async () => {
@@ -186,7 +189,7 @@ const autopilotProgress: MCPTool = {
       overall: {
         completed,
         total: tasks.length,
-        percent: tasks.length === 0 ? 100 : Math.round((completed / tasks.length) * 100),
+        percent: tasks.length === 0 ? 0 : Math.round((completed / tasks.length) * 100),
       },
       bySource,
     });
@@ -217,13 +220,17 @@ const autopilotPredict: MCPTool = {
 
 // ── Export ─────────────────────────────────────────────────────
 
-export const autopilotTools: MCPTool[] = [
-  autopilotStatus,
-  autopilotEnable,
-  autopilotDisable,
-  autopilotConfig,
-  autopilotReset,
-  autopilotLog,
-  autopilotProgress,
-  autopilotPredict,
-];
+// Deprecated (#418): each description and result carries the removal note.
+export const autopilotTools: MCPTool[] = deprecateTools(
+  [
+    autopilotStatus,
+    autopilotEnable,
+    autopilotDisable,
+    autopilotConfig,
+    autopilotReset,
+    autopilotLog,
+    autopilotProgress,
+    autopilotPredict,
+  ],
+  AUTOPILOT_DEPRECATION,
+);
