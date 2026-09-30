@@ -132,19 +132,19 @@ documented case)'`. No new seam was found that needed a new test for this issue:
 does not touch env construction at all (`args.access` and `args.envAuthoritative` are independent
 fields), so the existing coverage already exercises the exact code path a full-access turn runs.
 
-**codex shell snapshots** (#535). Interactive codex writes a snapshot of the user's shell — every
-exported variable, so every API key and token in its environment — to
-`$CODEX_HOME/shell_snapshots/<id>.sh`, created with the process umask (0644 under the usual
-022; codex 0.156.1 restricts `auth.json` and `history.jsonl` to 0600 but not these). monomind
-does not cause this with current codex: the runner uses `codex exec`, and a live check of
-`codex exec` 0.156.1 wrote no snapshot, with or without the flags below. As defence in depth
-for codex versions or modes that do snapshot, the codex runner, in every access mode, passes
-`-c features.shell_snapshot=false -c features.shell_snapshot_v2=false` (codex's own feature
-flags) and spawns the child under umask 077 (`withChildUmask` in
-[`orgrt/codex-runner-stream.ts`](../../packages/@monomind/cli/src/orgrt/codex-runner-stream.ts)),
-so anything codex writes under `$CODEX_HOME` — or in the workspace — is owner-only. It sets no
-`CODEX_HOME` and never copies codex's auth. Snapshots already on disk come from interactive
-codex sessions: delete `~/.codex/shell_snapshots/*.sh` and rotate the keys they contain.
+**codex shell snapshots** (#535). codex's `shell_snapshot` feature is enabled by default (stable)
+in codex 0.156.1, and `codex exec` — what the codex runner runs — creates
+`$CODEX_HOME/shell_snapshots/`. A snapshot holds the user's shell environment, so every API key
+and token in the environment above, and is created with the process umask (0644 under the usual
+022; codex restricts `auth.json` and `history.jsonl` to 0600 but not these). The codex runner, in
+every access mode, passes `-c features.shell_snapshot=false -c features.shell_snapshot_v2=false`
+(codex's own feature flags), so no snapshot is written. Before each spawn, `restrictCodexHome` in
+[`orgrt/codex-runner-stream.ts`](../../packages/@monomind/cli/src/orgrt/codex-runner-stream.ts)
+makes `$CODEX_HOME` (default `~/.codex`) and its `sessions/` and `shell_snapshots/` 0700 when the
+current user owns them: a 0700 directory hides its files whatever their modes. The process umask is
+not changed, so the agent's workspace files keep their usual modes. monomind sets no `CODEX_HOME`
+and never copies codex's auth. Snapshots already on disk stay there: delete
+`~/.codex/shell_snapshots/*.sh` and rotate the keys they contain.
 
 ### 2.4 Audit trail
 

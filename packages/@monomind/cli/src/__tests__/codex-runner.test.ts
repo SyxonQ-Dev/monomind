@@ -26,10 +26,21 @@
 
 import * as cp from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { CodexAgentRunner } from '../orgrt/codex-runner.js';
-import { withChildUmask } from '../orgrt/codex-runner-stream.js';
+import { codexHomeDir, restrictCodexHome } from '../orgrt/codex-runner-stream.js';
 
 vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
@@ -213,43 +224,6 @@ describe('CodexAgentRunner', () => {
       ]),
     );
     expect(argv.indexOf('features.shell_snapshot=false')).toBeLessThan(argv.indexOf('resume'));
-  });
-
-  it('security: spawns codex under umask 077 and restores the old umask after', async () => {
-    const order: string[] = [];
-    let current = 0o022;
-    const umask = vi.spyOn(process, 'umask').mockImplementation(((mask?: number) => {
-      const prev = current;
-      if (mask !== undefined) {
-        current = mask;
-        order.push(`umask ${mask.toString(8)}`);
-      }
-      return prev;
-    }) as typeof process.umask);
-    vi.mocked(cp.spawn).mockImplementation((() => {
-      order.push(`spawn under ${current.toString(8)}`);
-      return makeMockChild([
-        JSON.stringify({ type: 'session_configured', session_id: 't1', thread_id: 't1' }),
-      ]);
-    }) as unknown as typeof cp.spawn);
-    try {
-      for await (const _m of runner.run({
-        tools: [],
-        prompt: (async function* () {
-          yield 'hello';
-        })(),
-        systemPrompt: '',
-        cwd: '/tmp',
-        env: {},
-        maxTurns: 5,
-      })) {
-        /* consume */
-      }
-    } finally {
-      umask.mockRestore();
-    }
-    if (process.platform === 'win32') return;
-    expect(order).toEqual(['umask 77', 'spawn under 77', 'umask 22']);
   });
 
   it('captures session id from session_configured event', async () => {
@@ -1260,33 +1234,82 @@ describe('CodexAgentRunner sandbox mapping (#263)', () => {
   });
 });
 
-describe('withChildUmask', () => {
-  it('still spawns when the umask cannot be set (worker thread)', () => {
-    const umask = vi.spyOn(process, 'umask').mockImplementation((() => {
-      throw new Error('ERR_WORKER_UNSUPPORTED_OPERATION');
-    }) as typeof process.umask);
-    try {
-      expect(withChildUmask(0o077, () => 'spawned')).toBe('spawned');
-    } finally {
-      umask.mockRestore();
+describe('restrictCodexHome (#535)', () => {
+  const posix = process.platform !== 'win32';
+  let root: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'codex-home-537-'));
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+  const mode = (p: string) => statSync(p).mode & 0o777;
+
+  it.skipIf(!posix)('makes CODEX_HOME, sessions/ and shell_snapshots/ 0700', () => {
+    const home = join(root, '.codex');
+    for (const d of [home, join(home, 'sessions'), join(home, 'shell_snapshots')]) {
+      mkdirSync(d, { recursive: true });
+      chmodSync(d, 0o755);
     }
+    writeFileSync(join(home, 'shell_snapshots', 'x.sh'), 'export K=1\n', { mode: 0o644 });
+    expect(restrictCodexHome(home)).toHaveLength(3);
+    expect(mode(home)).toBe(0o700);
+    expect(mode(join(home, 'sessions'))).toBe(0o700);
+    expect(mode(join(home, 'shell_snapshots'))).toBe(0o700);
+    // Files inside are hidden by the dir, not rewritten.
+    expect(mode(join(home, 'shell_snapshots', 'x.sh'))).toBe(0o644);
   });
 
-  it('restores the umask even when the spawn throws', () => {
-    const calls: Array<number | undefined> = [];
-    const umask = vi.spyOn(process, 'umask').mockImplementation(((mask?: number) => {
-      calls.push(mask);
-      return 0o022;
-    }) as typeof process.umask);
-    try {
-      expect(() =>
-        withChildUmask(0o077, () => {
-          throw new Error('ENOENT');
-        }),
-      ).toThrow('ENOENT');
-    } finally {
-      umask.mockRestore();
-    }
-    if (process.platform !== 'win32') expect(calls).toEqual([0o077, 0o022]);
+  it.skipIf(!posix)('leaves missing dirs and symlinks alone', () => {
+    const real = join(root, 'real');
+    mkdirSync(real);
+    chmodSync(real, 0o755);
+    const link = join(root, 'link');
+    symlinkSync(real, link);
+    expect(restrictCodexHome(link)).toEqual([]);
+    expect(mode(real)).toBe(0o755);
+    expect(restrictCodexHome(join(root, 'absent'))).toEqual([]);
   });
+
+  it('codexHomeDir: CODEX_HOME wins, else HOME/.codex', () => {
+    expect(codexHomeDir({ CODEX_HOME: '/c', HOME: '/h' })).toBe('/c');
+    expect(codexHomeDir({ HOME: '/h' })).toBe(join('/h', '.codex'));
+  });
+
+  it.skipIf(!posix)(
+    'a codex turn tightens the child CODEX_HOME and leaves the process umask alone',
+    async () => {
+      const home = join(root, 'ch');
+      mkdirSync(home);
+      chmodSync(home, 0o755);
+      const umask = vi.spyOn(process, 'umask');
+      vi.mocked(cp.spawn).mockReturnValue(
+        makeMockChild([
+          JSON.stringify({ type: 'session_configured', session_id: 't1', thread_id: 't1' }),
+        ]),
+      );
+      for await (const _m of new CodexAgentRunner().run({
+        tools: [],
+        prompt: (async function* () {
+          yield 'hello';
+        })(),
+        systemPrompt: '',
+        cwd: root,
+        env: { CODEX_HOME: home },
+        maxTurns: 5,
+      })) {
+        /* consume */
+      }
+      expect(mode(home)).toBe(0o700);
+      // Workspace files keep the caller's umask: nothing sets it.
+      expect(umask.mock.calls.filter((c) => c.length > 0 && c[0] !== undefined)).toEqual([]);
+      const argv = vi.mocked(cp.spawn).mock.calls[0][1] as string[];
+      expect(argv).toEqual(
+        expect.arrayContaining([
+          'features.shell_snapshot=false',
+          'features.shell_snapshot_v2=false',
+        ]),
+      );
+    },
+  );
 });
