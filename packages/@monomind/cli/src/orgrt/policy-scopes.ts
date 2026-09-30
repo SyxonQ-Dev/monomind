@@ -4,10 +4,10 @@
 // ONCE, when the PolicyEngine is built from the operator's config, so a role
 // cannot widen a grant later by swapping the directory (or a missing entry)
 // for a symlink from Bash.
-import { existsSync } from 'node:fs';
+import { existsSync, lstatSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, normalize, parse, resolve, sep } from 'node:path';
-import { isWithin, pathFolds, realPath, samePath } from './policy-paths.js';
+import { dirname, isAbsolute, normalize, parse, resolve, sep } from 'node:path';
+import { isWithin, pathSegments, realPath } from './policy-paths.js';
 
 /** An entry containing none of these is a plain path; any other is a glob
  *  matched by globToRegExp. */
@@ -34,19 +34,40 @@ export interface ScopeSnapshot {
 
 /** Why `entry` cannot be a directory grant, or undefined when it can. */
 function refusal(entry: string, lexical: string, real: string, home: string): string | undefined {
-  // #496: realPath() returns the on-disk case, so on a case-insensitive
-  // filesystem `site` for a directory named `Site` is the same path, not a
-  // symlink. Refusing a too-broad grant is a deny: it folds whenever the
-  // filesystem might.
-  const fold = pathFolds(real);
-  if (!samePath(real, lexical, fold.allow))
+  if (real !== lexical && !onDiskSpelling(lexical, real))
     return `scope entry ${entry} resolves through a symlink (to ${real}) — name the real path instead`;
   const realHome = realPath(home);
-  if (parse(real).root === real || isWithin(real, realHome, fold.deny)) {
+  // Refusing a too-broad grant is a deny, so it folds (#496).
+  if (parse(real).root === real || isWithin(real, realHome, 'deny')) {
     const glob = `${entry.replace(/[/\\]+$/, '')}/**`;
     return `scope entry ${entry} is the filesystem root, $HOME or an ancestor of $HOME — too broad for a directory grant; if you really mean it, write the explicit glob ${glob}`;
   }
   return undefined;
+}
+
+/**
+ * #496: `real` differs from `lexical` only because realpathSync.native gave
+ * the on-disk case (darwin/win32): no part of `lexical` is a symlink and the
+ * two differ in case alone. Then `site` for a directory named `Site` is that
+ * directory, not a symlink to it.
+ */
+export function onDiskSpelling(
+  lexical: string,
+  real: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (platform !== 'darwin' && platform !== 'win32') return false;
+  const a = pathSegments(lexical, platform, 'case');
+  const b = pathSegments(real, platform, 'case');
+  if (a.length !== b.length || a.some((s, i) => s !== b[i])) return false;
+  for (let cur = lexical; dirname(cur) !== cur; cur = dirname(cur)) {
+    try {
+      if (lstatSync(cur).isSymbolicLink()) return false;
+    } catch {
+      /* not there yet — nothing to follow */
+    }
+  }
+  return true;
 }
 
 /** Snapshot one non-glob entry. A missing entry snapshots its lexical path. */

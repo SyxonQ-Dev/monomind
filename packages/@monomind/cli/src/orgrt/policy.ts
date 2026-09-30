@@ -11,6 +11,7 @@ import { checkGitPolicy } from './policy-git.js';
 import {
   gitWriteViolation,
   globToRegExp,
+  grantWithin,
   isWithin,
   pathFolds,
   realPath,
@@ -362,9 +363,11 @@ export class PolicyEngine {
     const real = realPath(resolve(this.cwd, p));
     const realCwd = realPath(this.cwd);
     // #496: on a case-insensitive filesystem `.SSH`, `.GIT` and `Site` are
-    // `.ssh`, `.git` and `site`. Deny checks compare with `fold.deny` (case-
-    // and NFC-folded unless the filesystem is known case-sensitive), grants
-    // with `fold.allow` (folded only where it is known case-insensitive).
+    // `.ssh`, `.git` and `site`. Deny checks compare with `fold.deny`
+    // (always fully folded — policy-paths.ts's SegmentFold). Grants compare
+    // on-disk spellings exactly and fold only a not-yet-existing tail, only
+    // on darwin/win32 where the filesystem is probed case-insensitive
+    // (grantWithin); globs never fold.
     const fold = pathFolds(real);
     // fileWrite/fileRead globs are always authored with '/' separators (POSIX
     // convention, matches every example in types.ts and the skill docs) — but
@@ -390,10 +393,9 @@ export class PolicyEngine {
       if (drift) return drift;
     }
     const inScope = (g: string): boolean => {
-      if (isGlobScope(g))
-        return globToRegExp(g, fold.allow).test(isAbsolute(g) ? realPosix : relPosix);
+      if (isGlobScope(g)) return globToRegExp(g).test(isAbsolute(g) ? realPosix : relPosix);
       const s = this.scopeSnapshots.get(g);
-      return !!s && !s.refused && isWithin(s.real, real, fold.allow);
+      return !!s && !s.refused && grantWithin(s.real, real, fold.allow);
     };
     const refusedNote = snaps
       .map(([, s]) => s?.refused)
@@ -417,7 +419,7 @@ export class PolicyEngine {
       // #492: an absolute scope entry is a grant of its own — name it too,
       // with how it matches, or the role never learns it exists.
       const absGrants = globs.filter((g) => isAbsolute(g));
-      if (!realRoots.some((root) => isWithin(root, real, fold.allow)))
+      if (!realRoots.some((root) => grantWithin(root, real, fold.allow)))
         return `path escapes every root this role may use: ${p} (roots: ${realRoots.join(', ')}${absGrants.length ? `; ${WRITE_TOOLS.has(tool) ? 'write' : 'read'} scope also grants ${absGrants.map(describeScope).join(', ')}` : ''} — paths are resolved relative to org workdir ${this.cwd}; retry with a path inside one of them)${refusedNote}`;
     }
     // #303: a widened root must not make credential stores, guard-undoing

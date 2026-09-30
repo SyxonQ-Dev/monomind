@@ -1,22 +1,27 @@
 // packages/@monomind/cli/src/orgrt/fs-case.ts
 /**
  * #496: does the filesystem a path lives on compare names case-insensitively?
+ * Used only to let a GRANT fold case (policy-paths.ts's pathFolds); deny
+ * checks fold unconditionally and never ask.
  *
- * Probed, not assumed from the platform: Linux mounts can fold case (vfat,
- * exfat, SMB, ext4 casefold dirs) and a macOS or Windows volume can be
- * case-sensitive. The probe takes the nearest existing ancestor of the path,
- * picks the deepest segment of it that has letters, swaps that segment's
- * case and `lstat`s the variant: the same directory (dev and inode) means
- * the filesystem folds case there. Only directories are compared, since a
- * directory cannot be hard-linked, and `lstat` does not follow a symlink, so
- * a role cannot plant a look-alike that fakes the answer. Results are cached
- * per probed directory.
+ * Two probes of the nearest existing directory `dir` of the path, which must
+ * agree, or the answer is `unknown`:
+ *   - outer: `dir`'s own name with its case swapped, looked up in its parent
+ *     — directories only (a directory cannot be hard-linked);
+ *   - inner: one entry of `dir` with its case swapped, looked up in `dir` —
+ *     what a not-yet-existing name below `dir` will be compared as. A Linux
+ *     casefold flag, or a Windows per-directory case-sensitivity flag,
+ *     governs a directory's entries, not its own name, and a mount root has
+ *     no parent on the same filesystem, so the outer probe alone can be
+ *     wrong.
+ * Each compares dev and inode through `lstat`, so a planted symlink never
+ * counts as the same entry. Results are cached per directory.
  */
-import { lstatSync, type Stats } from 'node:fs';
+import { lstatSync, readdirSync, type Stats } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
-/** `unknown`: nothing on the path exists, or no existing segment has a
- *  letter whose case can be swapped (e.g. `/`). */
+/** `unknown`: the probes disagree, or have nothing to test (no existing
+ *  directory, no name with a letter whose case can be swapped). */
 export type CaseSensitivity = 'insensitive' | 'sensitive' | 'unknown';
 
 const cache = new Map<string, CaseSensitivity>();
@@ -35,34 +40,52 @@ const swapCase = (s: string): string => {
   return up !== s ? up : s.toLowerCase();
 };
 
-function probeDir(dir: string): CaseSensitivity {
-  for (let cur = dir; ; cur = dirname(cur)) {
+/** Whether `name` and its case-swapped spelling are one entry of `parent`. */
+function sameEntry(parent: string, name: string, dirsOnly: boolean): CaseSensitivity {
+  const a = lstatOf(join(parent, name));
+  if (!a || a.isSymbolicLink() || (dirsOnly && !a.isDirectory())) return 'unknown';
+  const b = lstatOf(join(parent, swapCase(name)));
+  return b && !b.isSymbolicLink() && b.ino === a.ino && b.dev === a.dev
+    ? 'insensitive'
+    : 'sensitive';
+}
+
+function outerProbe(dir: string): CaseSensitivity {
+  for (let cur = dir; dirname(cur) !== cur; cur = dirname(cur)) {
     const name = basename(cur);
-    const swapped = swapCase(name);
-    if (name && swapped !== name) {
-      const a = lstatOf(cur);
-      if (!a?.isDirectory()) return 'unknown';
-      const b = lstatOf(join(dirname(cur), swapped));
-      return b?.isDirectory() && b.ino === a.ino && b.dev === a.dev ? 'insensitive' : 'sensitive';
-    }
-    if (dirname(cur) === cur) return 'unknown';
+    if (swapCase(name) !== name) return sameEntry(dirname(cur), name, true);
   }
+  return 'unknown';
+}
+
+function innerProbe(dir: string): CaseSensitivity {
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return 'unknown';
+  }
+  for (const name of names) {
+    if (swapCase(name) === name) continue;
+    const r = sameEntry(dir, name, false);
+    if (r !== 'unknown') return r;
+  }
+  return 'unknown';
 }
 
 /** How the filesystem holding `p` (an absolute, resolved path) compares
- *  names. `p` itself need not exist. */
+ *  names below its nearest existing directory. `p` itself need not exist. */
 export function probeCase(p: string): CaseSensitivity {
   let dir = p;
-  for (;;) {
-    const st = lstatOf(dir);
-    if (st?.isDirectory()) break;
+  while (!lstatOf(dir)?.isDirectory()) {
     const parent = dirname(dir);
     if (parent === dir) return 'unknown';
     dir = parent;
   }
   const hit = cache.get(dir);
   if (hit) return hit;
-  const value = probeDir(dir);
+  const outer = outerProbe(dir);
+  const value = outer === innerProbe(dir) ? outer : 'unknown';
   if (cache.size >= CACHE_MAX) cache.clear();
   cache.set(dir, value);
   return value;

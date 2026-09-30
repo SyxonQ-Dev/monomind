@@ -168,7 +168,7 @@ const GIT_GUARD_ENV =
   /^(GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+|PARAMETERS|GLOBAL|SYSTEM|NOSYSTEM)|GIT_SSH|GIT_SSH_COMMAND|GIT_ASKPASS|SSH_ASKPASS|GIT_TERMINAL_PROMPT|SSH_AUTH_SOCK|GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN)$/;
 /** Words that change another command's environment: `env`, and the shell
  *  builtins that assign or clear variables. */
-const ENV_SETTERS = /^(env|unset|export|declare|typeset|readonly|set)$/;
+const ENV_SETTERS = /^(env|unset|export|declare|typeset|readonly|set)(\.exe)?$/i;
 
 /** The guard variable a token touches, if any — covering `VAR=…` assignments,
  *  bare `unset VAR` names, and env's `-u VAR` / `-uVAR` / `--unset=VAR`. */
@@ -178,15 +178,18 @@ function guardEnvName(token: string): boolean {
 }
 const CLEARS_ENV = /^(-i|--ignore-environment|-)$/;
 
-/** `git`, `/usr/bin/git`, `git.exe` — but not `--foo=git` or `mygit`. */
-const GIT_BIN = /(^|\/)git(\.exe)?$/;
+/** `git`, `/usr/bin/git`, `git.exe` — but not `--foo=git` or `mygit`. Any
+ *  case (#496): on a case-insensitive filesystem `GIT`, `/usr/bin/GIT` and
+ *  `Git.EXE` run git; on Linux a `GIT` binary is not git, so matching it
+ *  costs nothing. */
+const GIT_BIN = /(^|[/\\])git(\.exe)?$/i;
 /** A subcommand token the classifier can actually name. Anything else
  *  (`$SUB`, `$(echo push)`, `` `echo push` ``, `${x}`) is indirection. */
 const GIT_SUBCOMMAND_SHAPE = /^[a-z][a-z0-9-]*$/;
 /** Command words that run whatever their arguments say — a `git` inside
  *  their argument string is invisible to token classification. */
 const INTERPRETERS =
-  /^(sh|bash|zsh|dash|ksh|fish|eval|exec|python[0-9.]*|node|perl|ruby|php|xargs)$/;
+  /^(sh|bash|zsh|dash|ksh|fish|eval|exec|python[0-9.]*|node|perl|ruby|php|xargs)(\.exe)?$/i;
 
 /**
  * Subcommands of every `git` invocation in a shell command — or, when the
@@ -244,7 +247,7 @@ function gitSubcommands(
       if (args.some(guardEnvName) && stop(`${word} changes the role's git guard environment`))
         return { subs, opaque: first, hard };
       if (
-        basename(word) === 'env' &&
+        /^env(\.exe)?$/i.test(basename(word)) &&
         args.some((t) => CLEARS_ENV.test(t)) &&
         stop("env clears the environment the role's git guard lives in")
       )
@@ -253,7 +256,7 @@ function gitSubcommands(
     if (INTERPRETERS.test(basename(word))) {
       const args = tokens.slice(k + 1);
       if (
-        args.some((t) => /\bgit\b/.test(t)) &&
+        args.some((t) => /\bgit\b/i.test(t)) &&
         stop(`${word} invokes git through an argument string`, true)
       )
         return { subs, opaque: first, hard };

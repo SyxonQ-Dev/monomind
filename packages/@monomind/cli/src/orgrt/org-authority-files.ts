@@ -153,7 +153,13 @@ export function isAuthorityFile(
   const roots = typeof orgRoots === 'string' ? [orgRoots] : orgRoots;
   for (const orgRoot of roots) {
     const { real, anchors: bases } = anchors(orgRoot, platform, fold);
-    const isMemory = (org: string) => isMemoryDir(real, org);
+    // `org` is a folded name (#496): look for its definition among the
+    // folded names in the orgs dir, not by that spelling on disk.
+    const isMemory = (org: string) =>
+      MEMORY_DIR.test(org) &&
+      !list(real).some((e) =>
+        DEF_EXTS.some((x) => normalizeSegment(e.name, platform, fold) === `${org}${x}`),
+      );
     for (const { base, prefix } of bases)
       for (const p of paths) {
         const below = segmentsBelow(base, p, platform, fold);

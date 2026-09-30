@@ -13,7 +13,7 @@ const REGEX_METACHARS = new Set('.+^${}()|[]\\'.split(''));
  * `**\/*.md` matches both `README.md` and `docs/README.md`, standard glob
  * semantics), bare `**` matches any depth, `*` matches one path segment.
  */
-export function globToRegExp(glob: string, fold: SegmentFold = 'exact'): RegExp {
+export function globToRegExp(glob: string): RegExp {
   let out = '';
   let i = 0;
   while (i < glob.length) {
@@ -41,8 +41,7 @@ export function globToRegExp(glob: string, fold: SegmentFold = 'exact'): RegExp 
     out += c;
     i++;
   }
-  // #496: a grant on a case-insensitive filesystem matches any case.
-  return new RegExp(`^${out}$`, fold === 'exact' ? '' : 'i');
+  return new RegExp(`^${out}$`);
 }
 
 /** webAllow entry matcher. `*` allows any host (the intuitive "no
@@ -69,6 +68,42 @@ export function isWithin(container: string, target: string, fold: SegmentFold = 
   if (container === target) return true;
   const withSep = container.endsWith(sep) ? container : container + sep;
   return target.startsWith(withSep);
+}
+
+/**
+ * #496: is `target` inside the granted `container`? Both realPath()-resolved,
+ * so every EXISTING part of either is already in its on-disk spelling
+ * (realpathSync.native) and compares exactly: a grant never folds its way
+ * into a differently-cased directory that really exists. Only with `fold`
+ * `case` (pathFolds().allow: darwin/win32, where the probe shows the
+ * filesystem folds case) do the not-yet-existing segments of `target`
+ * compare case-insensitively, since they will be created on that filesystem.
+ */
+export function grantWithin(
+  container: string,
+  target: string,
+  fold: SegmentFold = 'exact',
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (isWithin(container, target)) return true;
+  if (fold !== 'case') return false;
+  const c = pathSegments(container, platform, 'exact');
+  const t = pathSegments(target, platform, 'exact');
+  if (t.length < c.length) return false;
+  const existing = pathSegments(existingAncestor(target), platform, 'exact').length;
+  return c.every((s, i) => (i < existing ? s === t[i] : s.toLowerCase() === t[i].toLowerCase()));
+}
+
+/** The nearest ancestor of `p` (or `p` itself) that exists. */
+export function existingAncestor(p: string): string {
+  for (let cur = p; ; cur = dirname(cur)) {
+    try {
+      lstatSync(cur);
+      return cur;
+    } catch {
+      if (dirname(cur) === cur) return cur;
+    }
+  }
 }
 
 /** realpath of `p`, resolving through the nearest EXISTING ancestor when the
@@ -106,11 +141,15 @@ function resolveReal(p: string, depth: number): string {
 /**
  * #496: how path segments compare.
  *   - `exact`: as written — a case-sensitive filesystem.
- *   - `case`: case-folded — for a GRANT, used only where the filesystem is
- *     known to fold case, so a grant never reaches a different file.
- *   - `deny`: case-folded and Unicode-NFC-normalized (macOS also ignores
- *     NFC/NFD differences) — for a DENY check wherever the filesystem might
- *     fold either, so a case or normalization variant cannot slip past.
+ *   - `case`: lower-cased — the default on darwin and win32, and for a
+ *     GRANT's not-yet-existing segments where the filesystem folds case
+ *     (grantWithin).
+ *   - `deny`: for every DENY check, on every platform: NFKC-normalized and
+ *     fully case-folded (lower, upper, lower again, so `ſ`, `ß`/`ẞ`, `ı`,
+ *     the Kelvin sign and ligatures such as `ﬁ` meet their ASCII forms), with
+ *     trailing dots and spaces and a `:stream` suffix dropped as Windows,
+ *     vfat and exfat drop them. It over-folds on purpose: a deny may refuse
+ *     a look-alike, it must never miss the real file.
  */
 export type SegmentFold = 'exact' | 'case' | 'deny';
 
@@ -119,23 +158,26 @@ const platformFolds = (platform: NodeJS.Platform): boolean =>
   platform === 'darwin' || platform === 'win32';
 
 /**
- * #496: the folds for the checks on one resolved path. The filesystem is
- * probed where the path lives (fs-case.ts). Deny checks fold on darwin and
- * win32 whatever the probe says, and anywhere the probe is not sure the
- * filesystem is case-sensitive: they fail closed. Grants fold only where the
- * probe saw the filesystem fold case, so on a case-sensitive one they match
- * exactly as before.
+ * #496: the folds for the checks on one resolved path. Deny checks always
+ * use `deny`, on every platform: a filesystem probe can be wrong (the
+ * casefold flag of a Linux directory governs its entries, not its own name;
+ * a mount root has no parent to compare), so it never relaxes a deny.
+ * Grants fold (see grantWithin) only on darwin and win32, and only where
+ * fs-case.ts's probe shows the filesystem folds case; on Linux they never
+ * fold.
  */
 export function pathFolds(
   real: string,
   platform: NodeJS.Platform = process.platform,
 ): { deny: SegmentFold; allow: SegmentFold } {
-  const probed = probeCase(real);
   return {
-    deny: platformFolds(platform) || probed !== 'sensitive' ? 'deny' : 'exact',
-    allow: probed === 'insensitive' ? 'case' : 'exact',
+    deny: 'deny',
+    allow: platformFolds(platform) && probeCase(real) === 'insensitive' ? 'case' : 'exact',
   };
 }
+
+const foldForDeny = (s: string): string =>
+  s.normalize('NFKC').toLowerCase().toUpperCase().toLowerCase().normalize('NFKC');
 
 /**
  * #498: the spelling of one path segment as the filesystem compares it,
@@ -153,16 +195,18 @@ export function normalizeSegment(
   fold: SegmentFold = platformFolds(platform) ? 'case' : 'exact',
 ): string {
   let s = seg;
-  if (platform === 'win32' && !/^[a-z]:$/i.test(s)) {
+  if ((platform === 'win32' || fold === 'deny') && !/^[a-z]:$/i.test(s)) {
     s = s.replace(/:.*$/s, '');
     if (s !== '.' && s !== '..') s = s.replace(/[. ]+$/, '');
   }
-  if (fold === 'deny') s = s.normalize('NFC');
+  if (fold === 'deny') return foldForDeny(s);
   return fold === 'exact' ? s : s.toLowerCase();
 }
 
 /** The normalized segments of an absolute path (see normalizeSegment), with
- *  `.` and `..` collapsed lexically, as `path.resolve()` would. */
+ *  `.` and `..` collapsed lexically, as `path.resolve()` would. Only a
+ *  segment WRITTEN as `.` or `..` is one: a name that folds to `..`
+ *  (fullwidth `．．` under NFKC) is an ordinary name on disk. */
 export function pathSegments(
   p: string,
   platform: NodeJS.Platform = process.platform,
@@ -170,11 +214,13 @@ export function pathSegments(
 ): string[] {
   const out: string[] = [];
   for (const raw of p.split(platform === 'win32' ? /[\\/]+/ : /\/+/)) {
-    if (!raw) continue;
+    if (!raw || raw === '.') continue;
+    if (raw === '..') {
+      out.pop();
+      continue;
+    }
     const s = normalizeSegment(raw, platform, fold);
-    if (s === '.' || s === '') continue;
-    if (s === '..') out.pop();
-    else out.push(s);
+    if (s !== '' && s !== '.') out.push(s);
   }
   return out;
 }
@@ -191,11 +237,6 @@ export function segmentsBelow(
   const t = pathSegments(target, platform, fold);
   if (t.length < b.length || b.some((s, i) => s !== t[i])) return null;
   return t.slice(b.length);
-}
-
-/** #496: `a` and `b` name the same path when compared as `fold` says. */
-export function samePath(a: string, b: string, fold: SegmentFold = 'exact'): boolean {
-  return fold === 'exact' ? a === b : isWithin(a, b, fold) && isWithin(b, a, fold);
 }
 
 /**
