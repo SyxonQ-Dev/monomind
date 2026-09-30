@@ -4,14 +4,29 @@
 // record (pid + start identity), and `org status` / `org run` / `org serve`
 // mark a dead run crashed with an audit line.
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { statusAction, stopAction } from '../commands/org-lifecycle.js';
 import { listAction } from '../commands/org-manage.js';
 import { reconcileAllStaleRuns, reconcileStaleRun } from '../commands/org-stale-run.js';
-import { ownStartId, processStartId, recordedPidLiveness } from '../orgrt/run-liveness.js';
+import {
+  ownStartId,
+  processStartId,
+  recordedPidLiveness,
+  recordedPidVerified,
+  sameStartId,
+} from '../orgrt/run-liveness.js';
 import type { CommandContext } from '../types.js';
 import { runtimeView } from '../ui/org-runtime.mjs';
 
@@ -88,6 +103,29 @@ describe('recordedPidLiveness (#573)', () => {
 
   it('trusts a live pid on a record written before start identities existed', () => {
     expect(recordedPidLiveness(process.pid, undefined)).toBe('alive');
+  });
+
+  it('does not call a live run reused when writer and reader read its identity differently', () => {
+    const id = processStartId(process.pid) as string;
+    if (!id.startsWith('linux:')) return;
+    const start = id.slice(id.lastIndexOf(':') + 1);
+    // Writer had no boot id; writer had no procfs and fell back to ps.
+    expect(recordedPidLiveness(process.pid, `linux::${start}`)).toBe('alive');
+    expect(recordedPidLiveness(process.pid, 'ps:Wed Sep 30 12:00:00 2026')).toBe('alive');
+    // …but neither proves the run is there.
+    expect(recordedPidVerified(process.pid, 'ps:Wed Sep 30 12:00:00 2026')).toBe(false);
+    expect(recordedPidVerified(process.pid, id)).toBe(true);
+    expect(recordedPidVerified(process.pid, undefined)).toBe(false);
+  });
+
+  it('sameStartId compares like with like', () => {
+    expect(sameStartId('linux:b1:100', 'linux:b1:100')).toBe(true);
+    expect(sameStartId('linux:b1:100', 'linux:b1:101')).toBe(false);
+    expect(sameStartId('linux:b1:100', 'linux:b2:100')).toBe(false);
+    expect(sameStartId('linux::100', 'linux:b2:100')).toBe(true);
+    expect(sameStartId('linux:b1:100', 'ps:Wed Sep 30 12:00:00 2026')).toBeUndefined();
+    expect(sameStartId('ps:a', 'ps:a')).toBe(true);
+    expect(sameStartId('ps:a', 'ps:b')).toBe(false);
   });
 });
 
@@ -198,6 +236,47 @@ describe('reconcileStaleRun at org run / serve start (#573)', () => {
     expect(reconcileStaleRun(root, ORG, 'org run')).toEqual({ outcome: 'live', pid: child.pid });
     expect(readRt().status).toBe('running');
   });
+
+  it('does not refuse on a pre-#573 record whose live pid it cannot tie to the run', async () => {
+    // No pidStart: the pid may have been reused by anything since.
+    child = spawn(process.execPath, ['-e', 'setTimeout(()=>{},60000)'], { stdio: 'ignore' });
+    writeRt({ pid: child.pid });
+    expect(reconcileStaleRun(root, ORG, 'org run')).toEqual({ outcome: 'live' });
+    expect(readRt().status).toBe('running');
+  });
+
+  it('never writes from inside an org role', () => {
+    const prev = process.env.MONOMIND_ORG_ROLE;
+    process.env.MONOMIND_ORG_ROLE = 'lead';
+    try {
+      writeRt({ pid: deadPid() });
+      const before = readFileSync(rtPath(), 'utf8');
+      expect(reconcileStaleRun(root, ORG, 'org status')).toEqual({ outcome: 'none' });
+      expect(readFileSync(rtPath(), 'utf8')).toBe(before);
+      expect(existsSync(join(orgDir(), 'liveness.jsonl'))).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env.MONOMIND_ORG_ROLE;
+      else process.env.MONOMIND_ORG_ROLE = prev;
+    }
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    'org status survives a runtime.json it cannot write and still reports crashed',
+    async () => {
+      const pid = deadPid();
+      writeRt({ pid, pidStart: 'linux:x:1' });
+      chmodSync(orgDir(), 0o555);
+      try {
+        expect(reconcileStaleRun(root, ORG, 'org status')).toEqual({ outcome: 'none' });
+        const out = await capture(() => statusAction(ctx([ORG])));
+        expect(out).toContain('crashed');
+        expect(readRt().status).toBe('running');
+        expect(readdirSync(orgDir()).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+      } finally {
+        chmodSync(orgDir(), 0o755);
+      }
+    },
+  );
 
   it('ignores records that are not running, and the calling process own record', () => {
     writeRt({ status: 'stopped', pid: deadPid() });

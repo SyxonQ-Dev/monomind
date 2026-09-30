@@ -7,11 +7,10 @@
  * call this: once classifyRun finds no sign of life, the record is rewritten
  * as crashed and the change is logged in the org's `liveness.jsonl`.
  */
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { deadPidReason, recordedPidLiveness } from '../orgrt/run-liveness.js';
+import { deadPidReason, recordedPidLiveness, recordedPidVerified } from '../orgrt/run-liveness.js';
 import { ORG_DIR } from '../orgrt/types.js';
-import { writeJsonFileAtomic } from '../utils/json-file.js';
 import { classifyRun, listOrgConfigFiles } from './org-control.js';
 
 /** `closedBy` on a record this module closed. */
@@ -28,7 +27,8 @@ type RuntimeRecord = {
 export type StaleRunCheck =
   /** Nothing to do: no record, not 'running', or it is this process's own. */
   | { outcome: 'none' }
-  /** The run is alive; `pid` is set when its recorded pid proves it. */
+  /** The run is alive; `pid` is set only when its recorded pid AND start
+   *  identity prove it (a pre-#573 record's pid may be anyone's now). */
   | { outcome: 'live'; pid?: number }
   /** The record was stale and is now marked crashed. */
   | { outcome: 'crashed'; run?: string; pid?: number; reason: string };
@@ -38,6 +38,24 @@ const readRecord = (path: string): RuntimeRecord | undefined => {
     return JSON.parse(readFileSync(path, 'utf8')) as RuntimeRecord;
   } catch {
     return undefined;
+  }
+};
+
+/** Write runtime.json atomically; false when it can't be written (a role
+ *  sandbox binds it read-only, #498), leaving no temp file behind. */
+const tryWriteRecord = (path: string, data: RuntimeRecord): boolean => {
+  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
+    renameSync(tmp, path);
+    return true;
+  } catch {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* never created */
+    }
+    return false;
   }
 };
 
@@ -54,7 +72,15 @@ export function reconcileStaleRun(
   if (rt?.status !== 'running' || rt.pid === process.pid) return { outcome: 'none' };
   const verdict = classifyRun(cwd, org, rt, now);
   if (verdict.state !== 'crashed')
-    return { outcome: 'live', ...(verdict.evidence === 'pid' ? { pid: rt.pid } : {}) };
+    return {
+      outcome: 'live',
+      ...(verdict.evidence === 'pid' && recordedPidVerified(rt.pid, rt.pidStart)
+        ? { pid: rt.pid }
+        : {}),
+    };
+  // runtime.json is the daemon's record (#498): a role's process never writes
+  // it, and inside a role sandbox its pids are not the host's anyway.
+  if (process.env.MONOMIND_ORG_ROLE) return { outcome: 'none' };
   // Re-read before writing: a run that started since the first read owns the
   // file now and must not be overwritten.
   const again = readRecord(path);
@@ -62,13 +88,16 @@ export function reconcileStaleRun(
     return { outcome: 'none' };
   const reason = deadPidReason(rt.pid, recordedPidLiveness(rt.pid, rt.pidStart));
   const updated = new Date(now).toISOString();
-  writeJsonFileAtomic(path, {
-    ...rt,
-    status: 'crashed',
-    updated,
-    closedBy: STALE_RUN_CLOSED_BY,
-    error: reason,
-  });
+  if (
+    !tryWriteRecord(path, {
+      ...rt,
+      status: 'crashed',
+      updated,
+      closedBy: STALE_RUN_CLOSED_BY,
+      error: reason,
+    })
+  )
+    return { outcome: 'none' }; // readers still classify it crashed on their own
   try {
     appendFileSync(
       join(cwd, ORG_DIR, org, 'liveness.jsonl'),

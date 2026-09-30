@@ -36,15 +36,39 @@ export function processStartId(pid: number): string | undefined {
     /* no procfs (macOS) or the process is gone */
   }
   try {
+    // lstart is printed in the caller's locale and time zone; pin both so a
+    // writer and a reader with different LANG/TZ (a launchd daemon vs a login
+    // shell) print the same string for the same process.
     const out = execFileSync('ps', ['-p', String(pid), '-o', 'lstart='], {
       encoding: 'utf8',
       timeout: 1000,
       stdio: ['ignore', 'pipe', 'ignore'],
+      env: { ...process.env, LC_ALL: 'C', LANG: 'C', TZ: 'UTC' },
     }).trim();
     return out ? `ps:${out}` : undefined;
   } catch {
     return undefined;
   }
+}
+
+/** Whether two start identities name the same process: true or false when
+ *  they can be compared, undefined when they can't — they were read by
+ *  different methods (procfs vs ps, e.g. one side had no /proc), which says
+ *  nothing about the process. A missing boot id on either side compares the
+ *  start time alone. */
+export function sameStartId(recorded: string, now: string): boolean | undefined {
+  const kind = (id: string) => id.slice(0, id.indexOf(':') + 1);
+  if (kind(recorded) !== kind(now)) return undefined;
+  if (kind(recorded) !== 'linux:') return recorded === now;
+  const split = (id: string) => {
+    const rest = id.slice('linux:'.length);
+    const at = rest.lastIndexOf(':');
+    return { boot: rest.slice(0, at), start: rest.slice(at + 1) };
+  };
+  const a = split(recorded);
+  const b = split(now);
+  if (a.boot && b.boot && a.boot !== b.boot) return false;
+  return a.start === b.start;
 }
 
 let selfStartId: string | undefined | null = null;
@@ -73,9 +97,26 @@ export function recordedPidLiveness(pid: unknown, pidStart?: unknown): PidLivene
   }
   if (typeof pidStart !== 'string' || !pidStart) return 'alive';
   const now = processStartId(pid);
-  // Unreadable identity for a pid that answers: don't call a live run dead.
-  if (now === undefined) return 'alive';
-  return now === pidStart ? 'alive' : 'reused';
+  // Unreadable or incomparable identity for a pid that answers: don't call a
+  // live run dead.
+  const same = now === undefined ? undefined : sameStartId(pidStart, now);
+  return same === false ? 'reused' : 'alive';
+}
+
+/** True only when the record's pid is alive AND its start identity was read
+ *  and matches — proof the run is still there, not just a pid that answers.
+ *  A record without `pidStart` (pre-#573) never proves it: its pid may since
+ *  belong to anything. */
+export function recordedPidVerified(pid: unknown, pidStart?: unknown): boolean {
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) return false;
+  if (typeof pidStart !== 'string' || !pidStart) return false;
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+  const now = processStartId(pid);
+  return now !== undefined && sameStartId(pidStart, now) === true;
 }
 
 /** Short reason for a record whose pid is no longer its process. */
