@@ -929,9 +929,25 @@ The hash `--expect-hash` compares, `--check` reports and the signature records i
    UTF-8 file is the SHA-256 of its bytes. A file monomind refuses to read (outside the project,
    a symlink to a protected path, a hard link, missing) is recorded as `unreadable: <reason>`
    instead. A tool can't rebuild that reason, so take the `hash` from `--check` for such an org.
-4. **Combine.** With no digests, the value to hash is the projection itself. Otherwise it is the
-   object `{"definition": <projection>, "instructions": {<digests>}}`.
-5. **Canonical JSON.** Order the keys of every object, at every depth, in two groups:
+4. **Digest the blueprints.** For each role in `roles` whose `blueprint` is a string, add the
+   entry `<blueprint>` (the name itself, once per name however many roles use it). The value is
+   `sha256:` followed by the lowercase hex SHA-256 of the bytes of that blueprint's
+   `blueprint.json`, the one a role would get its `skills` and `skill_pool` from at start: in the
+   project's `.monomind/catalog/state.json`, the entry with `id` `blueprint:<name>`, `status`
+   `active` and `org` in `targets`, whose package directory
+   `.monomind/catalog/packages/<name>/<first 12 hex characters of the entry's sha256>/` still
+   has that `sha256` (SHA-256 over every file in the directory, paths sorted by UTF-16 code units,
+   each fed as a big-endian u32 byte length of the UTF-8 path, the path, a big-endian u64 byte
+   length of the content, and the content). A blueprint monomind can't load that way (none
+   active for `org`, or its package no longer matches) is recorded as `unavailable: <reason>`;
+   take the `hash` from `--check` for such an org.
+5. **Combine.** With no digests of either kind, the value to hash is the projection itself.
+   Otherwise it is an object with `definition` (the projection), plus `instructions` (the
+   instructions-file digests) if there is at least one, plus `blueprints` (the blueprint digests)
+   if there is at least one: `{"blueprints": {<name>: <digest>}, "definition": <projection>,
+   "instructions": {<key>: <digest>}}`, keys in the order of step 6. An org that names no
+   blueprint hashes exactly as it did before blueprints were signed.
+6. **Canonical JSON.** Order the keys of every object, at every depth, in two groups:
    - **Array-index keys come first, in ascending numeric order.** A key is an array index when
      it is the canonical decimal form of an integer from 0 to 4294967294 (2^32 − 2): only the
      digits `0`–`9`, no sign, no leading zero except the key `0` itself, and a value no greater
@@ -962,7 +978,7 @@ The hash `--expect-hash` compares, `--check` reports and the signature records i
      them: `1.0` → `1`, `1e2` → `100`, `1.5e-7` → `1.5e-7`, and `-0` → `0`. Go's
      `encoding/json` prints a `float64` the same way except `-0`, which it writes as `-0`.
    - `true`, `false` and `null` are literal.
-6. **Hash:** the lowercase hex SHA-256 of that UTF-8 string, 64 characters.
+7. **Hash:** the lowercase hex SHA-256 of that UTF-8 string, 64 characters.
 
 For example, this org, with `boss.md` holding `Be the boss.\n`:
 
@@ -983,6 +999,26 @@ and the hash `a895d86cd63d1374360add64ce590de7591895b523e53512f5a2d9257ddf7125`.
 `{"name":"fx","roles":[{"id":"boss","reports_to":null,"type":"boss"},{"id":"dev","policy":{"git":"read"},"reports_to":"boss"}]}`,
 with the hash `2bb0a6ad90aa73e34b175333c401695c88079fb8faee131a43e27030689f247c`. A test pins
 both (`org-sign-expect-hash.test.ts`), so the algorithm can't change silently.
+
+With a blueprint: this org, whose active `org` blueprint `sec` has the `blueprint.json` bytes
+`{"name":"sec","description":"Reviews code","skills":["audit"]}` (no trailing newline),
+
+```json
+{"name":"fx","goal":"ship it","roles":[
+  {"id":"boss","type":"boss","reports_to":null,"title":"CEO","blueprint":"sec"}]}
+```
+
+has the canonical JSON
+
+```json
+{"blueprints":{"sec":"sha256:bef85f02692707ae3179d10366050315d13b4ecd6383eba0a90bc1212725dc53"},"definition":{"name":"fx","roles":[{"blueprint":"sec","id":"boss","reports_to":null,"type":"boss"}]}}
+```
+
+and the hash `2db4cf8c4596e17c97bd20a66d30c56cdaccf6bf9fc71a4e57adbadf2d7e7508`
+(`org-signature-blueprint.test.ts` pins it). A changed `blueprint.json`, or another package
+activated under the same name, changes the hash, so the org verifies as `changed` until you sign
+it again; `org run` and `org reload` also refuse a blueprint whose bytes changed after the
+signature was checked.
 
 **Source:** [`commands/org-sign.ts → signAction`](packages/@monomind/cli/src/commands/org-sign.ts#signAction), [`orgrt/org-signature.ts → verifyOrgDef`](packages/@monomind/cli/src/orgrt/org-signature.ts#verifyOrgDef)
 

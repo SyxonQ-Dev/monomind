@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -35,8 +36,9 @@ export interface ResolvedBlueprints {
   notes: string[];
 }
 
-/** Active `org` blueprint by name, parsed from its verified package. */
-function loadBlueprint(root: string, name: string): Blueprint | undefined {
+/** The raw `blueprint.json` of the active `org` blueprint `name`, read once
+ *  from its verified package; undefined when none is active. */
+function readBlueprintBytes(root: string, name: string): Buffer | undefined {
   const asset = eligible(buildSnapshot(root), 'org').find(
     (a) => a.kind === 'blueprint' && a.name === name,
   );
@@ -44,7 +46,25 @@ function loadBlueprint(root: string, name: string): Blueprint | undefined {
   // The snapshot may be cached; the bytes read below must still match the digest.
   const check = verifyEntry(root, asset);
   if (!check.ok) throw new Error(`package ${check.reason}`);
-  return BlueprintSchema.parse(JSON.parse(readFileSync(join(check.dir, 'blueprint.json'), 'utf8')));
+  return readFileSync(join(check.dir, 'blueprint.json'));
+}
+
+const bytesDigest = (bytes: Buffer): string =>
+  `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+
+/**
+ * #571: what the signed hash records for blueprint `name` — `sha256:<hex>` of
+ * its `blueprint.json` bytes, or `unavailable: <reason>` when no active `org`
+ * blueprint of that name can be read. Start and reload resolve a blueprint
+ * only while its bytes still have the digest that was verified.
+ */
+export function blueprintDigest(root: string, name: string): string {
+  try {
+    const bytes = readBlueprintBytes(root, name);
+    return bytes ? bytesDigest(bytes) : 'unavailable: not active for org on this machine';
+  } catch (e) {
+    return `unavailable: ${(e as Error).message}`;
+  }
 }
 
 /**
@@ -53,23 +73,36 @@ function loadBlueprint(root: string, name: string): Blueprint | undefined {
  * `policy` or `tool_providers` — their hints only become `notes`. Returns the
  * input object itself when no role names a blueprint, and never writes the
  * Org JSON. Skill names are left to the existing `validateRoleSkills`.
+ *
+ * With `digests` (the ones the signature was verified with, keyed
+ * `blueprint:<name>`), a blueprint is used only if the bytes read now have
+ * that digest (#571), so what the operator signed is what the roles get.
  */
-export function resolveOrgDefBlueprints(def: OrgDef, root: string): ResolvedBlueprints {
+export function resolveOrgDefBlueprints(
+  def: OrgDef,
+  root: string,
+  digests?: Record<string, string>,
+): ResolvedBlueprints {
   if (!def.roles.some((r) => r.blueprint !== undefined)) return { def, errors: [], notes: [] };
   const errors: string[] = [];
   const notes: string[] = [];
   const roles = def.roles.map((role) => {
     if (role.blueprint === undefined) return role;
     const label = `role "${role.id}": blueprint "${role.blueprint}"`;
-    let bp: Blueprint | undefined;
+    let bp: Blueprint;
     try {
-      bp = loadBlueprint(root, role.blueprint);
+      const bytes = readBlueprintBytes(root, role.blueprint);
+      if (!bytes) {
+        errors.push(`${label} is not active for org on this machine`);
+        return role;
+      }
+      if (digests && digests[`blueprint:${role.blueprint}`] !== bytesDigest(bytes)) {
+        errors.push(`${label} changed since the org was signed`);
+        return role;
+      }
+      bp = BlueprintSchema.parse(JSON.parse(bytes.toString('utf8')));
     } catch (e) {
       errors.push(`${label} is invalid: ${(e as Error).message}`);
-      return role;
-    }
-    if (!bp) {
-      errors.push(`${label} is not active for org on this machine`);
       return role;
     }
     if (bp.runtimeHints?.reasoning)

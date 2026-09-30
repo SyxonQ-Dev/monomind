@@ -15,7 +15,8 @@
  *   role's whole `policy`, its id/runtime/adapter_config/provider/tool
  *   providers/budgets/endpoint, its `instructions_file` (a path the daemon
  *   reads into the prompt) and `skills`/`skill_pool` (they decide the MCP
- *   tools the daemon grants), the role list itself, `run_config`,
+ *   tools the daemon grants) — plus a digest of each catalog blueprint a
+ *   role names, which can fill those two (#571) — the role list itself, `run_config`,
  *   `schedule`, `runtime`, `fence`, `federation` and `loadouts` are all
  *   covered, and so is any field added later. A definition holding a
  *   `__proto__`, `constructor` or `prototype` key anywhere is refused.
@@ -51,6 +52,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { blueprintDigest } from '../catalog/blueprints.js';
 import {
   ensureFullAccessGrantKey,
   loadOperatorKey,
@@ -144,7 +146,9 @@ function signedRole(role: unknown): unknown {
 }
 
 /** Digests of every `instructions_file` in the definition (roles and
- *  loadouts), keyed `role:<id>` / `loadout:<name>` (instructions-file.ts). */
+ *  loadouts), keyed `role:<id>` / `loadout:<name>` (instructions-file.ts),
+ *  and of every catalog blueprint a role names, keyed `blueprint:<name>`
+ *  (#571: its skills/skill_pool become the role's at start). */
 export function instructionsDigests(raw: unknown, root: string): Record<string, string> {
   const out = Object.create(null) as Record<string, string>;
   const def = (raw && typeof raw === 'object' ? raw : {}) as {
@@ -152,9 +156,11 @@ export function instructionsDigests(raw: unknown, root: string): Record<string, 
     loadouts?: unknown;
   };
   for (const r of Array.isArray(def.roles) ? def.roles : []) {
-    const role = (r ?? {}) as { id?: unknown; instructions_file?: unknown };
+    const role = (r ?? {}) as { id?: unknown; instructions_file?: unknown; blueprint?: unknown };
     if (typeof role.instructions_file === 'string')
       out[`role:${String(role.id)}`] = instructionsDigest(role.instructions_file, root);
+    if (typeof role.blueprint === 'string' && !(`blueprint:${role.blueprint}` in out))
+      out[`blueprint:${role.blueprint}`] = blueprintDigest(root, role.blueprint);
   }
   const loadouts = (def.loadouts && typeof def.loadouts === 'object' ? def.loadouts : {}) as Record<
     string,
@@ -186,7 +192,8 @@ export function pinInstructionDigests(
 }
 
 /** What is signed: the projection, plus — with the project root — the
- *  digests of the instructions files it names. */
+ *  digests of the instructions files and blueprints it names, each group
+ *  only when there is one (so an org with neither hashes bare). */
 export function signedProjection(
   raw: unknown,
   root?: string,
@@ -196,7 +203,17 @@ export function signedProjection(
   if (root === undefined) return projection;
   const d = digests ?? instructionsDigests(raw, root);
   if (!Object.keys(d).length) return projection;
-  return canonical({ definition: projection, instructions: d });
+  const instructions = Object.create(null) as Record<string, string>;
+  const blueprints = Object.create(null) as Record<string, string>;
+  for (const [key, value] of Object.entries(d)) {
+    if (key.startsWith('blueprint:')) blueprints[key.slice('blueprint:'.length)] = value;
+    else instructions[key] = value;
+  }
+  return canonical({
+    definition: projection,
+    ...(Object.keys(instructions).length ? { instructions } : {}),
+    ...(Object.keys(blueprints).length ? { blueprints } : {}),
+  });
 }
 
 export function computeOrgDefHash(
@@ -288,7 +305,7 @@ export function orgSignatureMessage(
     reason === 'unsigned'
       ? 'has no operator signature'
       : reason === 'changed'
-        ? 'changed since the operator signed it (policy, roles, runtime, skills, instructions_file, schedule or run_config)'
+        ? 'changed since the operator signed it (policy, roles, runtime, skills, instructions_file, blueprint, schedule or run_config)'
         : reason === 'forbidden-key'
           ? `holds a forbidden key (${problem}) — remove it`
           : `has an operator signature that does not verify (${problem ?? 'the signing key is missing on this host, or the signature was not made with it'})`;

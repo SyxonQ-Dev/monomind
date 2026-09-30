@@ -83,7 +83,8 @@ export async function prepareOrgStart(
   const digests = instructionsDigests(rawDef, daemon.root);
   assertOrgDefSigned(daemon.root, name, rawDef, { digests });
   const parsedDef = OrgDefSchema.parse(rawDef);
-  const bp = resolveOrgDefBlueprints(parsedDef, daemon.root);
+  // #571: the blueprint bytes must still be the ones the signature covered.
+  const bp = resolveOrgDefBlueprints(parsedDef, daemon.root, digests);
   // {{home}} / {{org_root}} in policy paths, before any root or sandbox sees them.
   const def = expandOrgPolicyPathVars(bp.def, promptVarsFor(daemon.root));
   pinInstructionDigests(def, digests);
