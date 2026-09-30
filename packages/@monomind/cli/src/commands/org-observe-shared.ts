@@ -14,6 +14,26 @@ import type { CommandContext, CommandResult } from '../types.js';
 // flag: one JSON object on stdout, diagnostics on stderr only. Envelope for
 // lists {v, org, items}; singletons are bare objects carrying v.
 
+/** The broker entry of the daemon hosting THIS project's org `name`, or null
+ *  (same rule as the dashboard's hostingDaemon): a same-named org hosted from
+ *  another project root must not receive this project's decisions. An entry
+ *  that predates the root field is taken as this project's.
+ *
+ *  A human decision (answer, dismissal, approval, gate) goes to that daemon
+ *  when there is one. If it REFUSES — 403 without the operator credential,
+ *  unknown id, already resolved — the command must fail with nothing
+ *  recorded: writing the state file behind its back would resolve the
+ *  decision without the operator check, the audit event or delivery. Only an
+ *  unreachable daemon falls back to the offline file write. */
+export const hostingDaemonFor = async (
+  cwd: string,
+  name: string,
+): Promise<{ url: string } | null> => {
+  const { lookupOrg, normalizeRoot } = await import('../orgrt/broker.js');
+  const found = lookupOrg(name);
+  return found && (!found.root || found.root === normalizeRoot(cwd)) ? found : null;
+};
+
 /** True when this invocation asked for protocol JSON output. */
 export const orgJson = (ctx: CommandContext): boolean => ctx.flags.format === 'json';
 

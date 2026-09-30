@@ -406,6 +406,7 @@ Residual: the key is as safe as the operator-credential directory, the same as f
 **What the operator's own sessions run (#502 review).** A role must not be able to write something the operator's processes later execute or obey outside every role sandbox. These are refused to the file tools, listed in the SDK sandbox's `denyWrite`, and bound read-only in the bubblewrap mask ([`operator-protected-paths.ts`](packages/@monomind/cli/src/orgrt/operator-protected-paths.ts)):
 - the org root's (and the role cwd's) `.claude/` and `.mcp.json`: the operator's Claude Code session loads their settings, hooks, helpers and MCP servers;
 - `<project>/.monomind/org-skills/` and `~/.monomind/org-skills/` (or `$MONOMIND_HOME/org-skills`), the org skill libraries; both are created empty before a role starts, so a role cannot plant one;
+- `<project>/.monomind/catalog/` (#576), the [skill catalog](./catalog.md): its active `org` skills' content and `grantedTools` and its blueprints decide what roles get at start, and the org signature covers only their names (and blueprint digests). It is created empty before a role starts, and `monomind catalog`'s mutating verbs refuse inside a role;
 - `~/.monomind/enable-terminal.json`, the terminal-execution opt-in, written as `{ "enabled": false }` when it does not exist yet (what its absence already meant);
 - the rest of `~/.monomind` except what the CLI writes while a role uses it (`projects/` memory, browser state, `models/`, `cache/`, `sessions`, update checks, `release-locks/`). cline and aider keep an org role's state in the role's own `$TMPDIR`, not in the shared `~/.monomind/cline-scoped` and `aider-sessions`, which a later unconfined session would load. Under the bubblewrap mask `~/.monomind` itself is read-only and only those entries are bound writable again (the allowlisted directories are created first), so no new top-level entry can be planted there; an allowlisted file that does not exist yet cannot be created inside the mask either (for example `browse.db`'s journal, so `monomind browse workflow` storage needs the file to exist already). The SDK sandbox cannot express that layout and still lets a role create a new top-level entry;
 - `~/.npm/_npx` (what `npx -y monomind …` runs), `~/.npmrc`, `~/.local/bin`, `~/.config/fish`, `~/.bashrc.d`, `~/.zshrc.d`, on top of the shell and git files above. The mask also binds `~/.claude.json` (the operator's `mcpServers`) read-only, and `~/.claude`'s settings, hooks, commands, skills, agents, plugins and `CLAUDE.md`. Claude Code itself runs inside the mask for such roles and works with `~/.claude.json` read-only (checked end to end in `operator-paths-sdk.test.ts`); the rest of `~/.claude` (sessions, todos, credentials) stays writable because it needs them.
@@ -717,7 +718,7 @@ Authorization: Bearer <credential_file contents>
 
 `/api/xdeliver` accepts an **operator credential** that carries human authority — the daemon skips the broker sender-identity check and trusts `fromOrg:fromRole` as given. This allows senders that aren't registered orgs (workflows, automation roles) to deliver messages live ([`server.ts → startOrgServer`](packages/@monomind/cli/src/orgrt/server.ts#startOrgServer)).
 
-**Operator credential:** Stored in `.monomind/operator.key` (generated on first `org serve`), separate from per-org broker credentials. Routes requiring operator authority: `/api/xdeliver`, `/api/human-message`, `/api/answer-question`, `/api/resolve-gate`, `/api/set-approval`.
+**Operator credential:** Stored in `.monomind/operator.key` (generated on first `org serve`), separate from per-org broker credentials. Routes requiring operator authority: `/api/xdeliver`, `/api/human-message`, `/api/answer-question`, `/api/dismiss-question`, `/api/resolve-gate`, `/api/set-approval`.
 
 **Live inbox:** `monomind org inbox` now authenticates with the operator credential (falling back to the sender org's broker credential), fixing the issue where messages to a running org were rejected and silently queued until next start ([`server.ts → startOrgServer`](packages/@monomind/cli/src/orgrt/server.ts#startOrgServer)).
 
@@ -770,8 +771,8 @@ Every human decision (approvals, question answers, gate resolutions) now records
 
 **Attribution fields:**
 - `resolvedBy`: Who resolved the decision (default: `"human"`)
-  - CLI: `org approve --by <name>`, `org deny --by <name>`, `org answer --by <name>`, `org gate-approve --by <name>`, `org gate-reject --by <name>`
-  - API: `resolvedBy` param on `/api/set-approval`, `/api/answer-question`, `/api/resolve-gate`
+  - CLI: `org approve --by <name>`, `org deny --by <name>`, `org answer --by <name>`, `org questions dismiss --by <name>`, `org gate-approve --by <name>`, `org gate-reject --by <name>`
+  - API: `resolvedBy` param on `/api/set-approval`, `/api/answer-question`, `/api/dismiss-question`, `/api/resolve-gate`
 - `resolvedAt`: Timestamp of resolution
 - Stored in `approvals.json`, `questions.json`, `gates.json`
 
@@ -1247,3 +1248,5 @@ coordinator gets one message (`channel-fault-exhausted`).
 4. `monomind org answer <name> <question-id> "<text>"` delivers the answer:
    - **Live delivery** if the org is running (daemon receives it immediately).
    - **Queued offline** if the org is stopped (answer stored, consumed on next start).
+   - If the asking role was removed from the org definition, the answer is recorded without delivery and the audit event says `delivery: "skipped"`.
+5. `monomind org questions dismiss <name> <question-id> [--reason "<text>"]` closes a question without an answer (`state: "dismissed"` in `questions.json`). It releases the `org_complete` gate and the idle-watchdog hold, and tells the asking role no answer is coming (live, or queued while the org is stopped; not at all for a removed role). The dashboard's Human Input view has a Dismiss button for the same thing.

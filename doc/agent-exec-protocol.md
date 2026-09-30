@@ -1,4 +1,4 @@
-# Agent Exec Protocol — v1 (rev 28)
+# Agent Exec Protocol — v1 (rev 29)
 
 - **Status**: Implemented (Phase 0 of the mono-agent delegation plan — see
   `mono-agent:docs/plans/local-agent-monomind-delegation.md`)
@@ -6,6 +6,17 @@
   the Coder mode threat model, the `--access full` guardrails (root refusal, no transitive
   escalation, env hygiene, audit log), what callers own, and residual risks (issue #360).
 - **Revision history**:
+  - rev 29 (2026-09-30): **`org sign` capabilities, and `org sign` rejects unknown options** — new
+    capabilities `org-sign-check`, `org-sign-expect-hash` and `org-sign-review-json` (§7.2). They
+    announce `org sign`'s machine-facing flags so a caller can handshake before relying on one:
+    `org-sign-check` — `org sign <org>|--all --check [--format json]` and `--project <dir>`
+    (issue #561); `org-sign-expect-hash` — `org sign --expect-hash <hex>` (`<org>=<hex>` per org
+    with `--all`) and the `hash` in `--check --format json`; `org-sign-review-json` —
+    `org sign <org> --format json` prints the review as one JSON object and never signs. From this
+    revision `org sign` exits 2 on any option it does not know and signs nothing; before it, an
+    unknown option was ignored, so a build without `--expect-hash` signed with exit 0. A caller
+    that passes `--expect-hash` checks for `org-sign-expect-hash` first. Other commands' flag
+    handling is unchanged. Full contract: `doc/commands/org.md` (`sign`).
   - rev 28 (2026-09-30): **unknown cost is `null`, never `0`** (issue #533) — new capability
     `agent-exec-cost-null`. `usage.cost_usd` and `result.cost_usd` (§3.2) are `null` when the
     runtime reported no cost for the turn (`reports_cost: false` in §6, e.g. codex, kimicode,
@@ -517,7 +528,7 @@ by swarm management and is NOT reused by this protocol — the installed-only vi
 
 ```
 $ monomind --version --json
-{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-exec-background-pids","agent-exec-full-access-any","agent-exec-effort","agent-scan","agent-scan-read-only","agent-models","agent-test-json","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","org-role-full-access","doctor-json","doctor-read-only","doctor-offline","init-json","knowledge-profile-captures","agent-exec-subagent-events","agent-exec-rate-limit-retry","agent-exec-access-read","agent-exec-full-access-tools","agent-exec-sandbox","agent-test-sandbox","agent-exec-sandbox-restricted","agent-exec-sandbox-fallback","agent-exec-cost-null","agent-models-alias-of"]}
+{"v":1,"version":"<x.y.z>","min_caller":"1.0.0","capabilities":["agent-exec","agent-exec-full-access","agent-exec-settings","agent-exec-tool-activity","agent-exec-background-pids","agent-exec-full-access-any","agent-exec-effort","agent-scan","agent-scan-read-only","agent-models","agent-test-json","org-json-v1","org-tool-providers","org-decision-attribution","org-endpoint-roles","org-federation","org-idle-deadline","org-role-full-access","doctor-json","doctor-read-only","doctor-offline","init-json","knowledge-profile-captures","agent-exec-subagent-events","agent-exec-rate-limit-retry","agent-exec-access-read","agent-exec-full-access-tools","agent-exec-sandbox","agent-test-sandbox","agent-exec-sandbox-restricted","agent-exec-sandbox-fallback","agent-exec-cost-null","agent-models-alias-of","org-sign-check","org-sign-expect-hash","org-sign-review-json"]}
 ```
 
 Callers MUST handshake before use and fail with an actionable message (install/upgrade hint)
@@ -957,6 +968,14 @@ changed since the grant), or `"unattended-blocked"` (a scheduled/daemon run with
 `run_config.allow_unattended_full_access`); `reason` is a human-readable explanation, present
 whenever `access_state !== "active"`. See `doc/concepts/org-runtime.md`'s "Full access" section
 and `monomind org role set-access --help`.
+
+**Org signing** (capabilities `org-sign-check`, `org-sign-expect-hash`, `org-sign-review-json`,
+rev 29): `org sign <org>|--all --check [--format json] [--project <dir>]` reports each org's
+signature state without prompting, signing or writing (exit 0 all signed, 1 otherwise, 2 not
+found or usage error); `org sign --expect-hash <hex>` signs only when the org's signable hash is
+`<hex>`, else exits 1 and writes nothing; `org sign <org> --format json` without `--yes` prints
+`{org, state, hash, review, reviewText}` and never signs. `org sign` exits 2 on an unknown option
+and signs nothing. Shapes and exit codes: `doc/commands/org.md` (`sign`).
 
 ### 7.3 `monomind org events --ndjson [--follow] [--since]`
 

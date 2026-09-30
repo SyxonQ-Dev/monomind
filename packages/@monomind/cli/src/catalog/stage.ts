@@ -27,7 +27,7 @@ import { basename, dirname, join, relative } from 'node:path';
 import { checkout, findSkillDirs, skillLicense, toSkillName } from '../orgrt/skill-import.js';
 import { parseFrontmatter } from '../orgrt/skill-library.js';
 import { BlueprintSchema } from './blueprints.js';
-import { packageDigest, packagesDir } from './digest.js';
+import { catalogDir, packageDigest, packagesDir } from './digest.js';
 import { sanitizeFrontmatter } from './frontmatter.js';
 import { type FenceLoader, inspectPackage, MAX_FILE_BYTES, SKIP_DIRS } from './scan.js';
 import { CatalogStateError, HISTORY_CAP, loadCatalogState, mutateCatalogState } from './state.js';
@@ -233,6 +233,9 @@ export async function stage(root: string, src: string, opts: StageOptions): Prom
   const co = checkout(src);
   const store = packagesDir(root);
   const storeExisted = existsSync(store);
+  // #576: an org start creates `.monomind/catalog/` empty so a role can't
+  // plant one; a refused stage must not remove it again mid-run.
+  const catalogExisted = existsSync(catalogDir(root));
   let temp: string | undefined;
   try {
     const { kind, c } = choose(co.root, opts);
@@ -345,7 +348,7 @@ export async function stage(root: string, src: string, opts: StageOptions): Prom
     rmdirIfEmpty(join(store, '.incoming'));
     if (!storeExisted) {
       rmdirIfEmpty(store);
-      rmdirIfEmpty(dirname(store));
+      if (!catalogExisted) rmdirIfEmpty(catalogDir(root));
     }
   }
 }

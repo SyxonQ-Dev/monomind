@@ -24,6 +24,7 @@ import { buildSnapshot, type CatalogAsset, catalogAudit, eligible } from '../cat
 import { stage } from '../catalog/stage.js';
 import { loadCatalogState } from '../catalog/state.js';
 import { CatalogKindSchema, type CatalogTarget, CatalogTargetSchema } from '../catalog/types.js';
+import { roleContextMarker } from '../orgrt/org-signature.js';
 import { rankSkillMeta } from '../orgrt/skill-library.js';
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult, ParsedFlags } from '../types.js';
@@ -365,10 +366,32 @@ const VERBS: Record<string, Verb> = {
   unproject,
 };
 
+/** Verbs that write `.monomind/catalog/` (or, applied, the projection). */
+const MUTATING = new Set([
+  'stage',
+  'approve',
+  'activate',
+  'disable',
+  'quarantine',
+  'release',
+  'revoke',
+]);
+
 export async function catalogAction(ctx: CommandContext): Promise<CommandResult> {
   const [verb = 'list', ...rest] = ctx.args;
   const fn = Object.hasOwn(VERBS, verb) ? VERBS[verb] : undefined;
   if (!fn) return fail(`unknown verb "${verb}" — use ${Object.keys(VERBS).join(', ')}`);
+  // #576: the catalog decides the skill content, tool grants and blueprints
+  // org roles get, so, like `org sign`, only the operator changes it. The
+  // sandbox's read-only .monomind/catalog/ is the real barrier; this refuses
+  // early with a clear message. Read-only verbs and dry runs still work.
+  const applies = (verb === 'project' || verb === 'unproject') && ctx.flags.apply === true;
+  const marker = MUTATING.has(verb) || applies ? roleContextMarker() : undefined;
+  if (marker)
+    return fail(
+      `Refusing: ${marker} is set — this is an org role or agent-exec process. ` +
+        `Only the operator changes the catalog; run \`monomind catalog ${verb}\` yourself in a terminal.`,
+    );
   try {
     return await fn({
       root: ctx.cwd || process.cwd(),

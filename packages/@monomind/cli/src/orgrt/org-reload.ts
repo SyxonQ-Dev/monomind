@@ -44,7 +44,7 @@ export function reloadOrgDef(
     );
   }
   const parsedDef = OrgDefSchema.parse(rawDef);
-  const bp = resolveOrgDefBlueprints(parsedDef, daemon.root);
+  const bp = resolveOrgDefBlueprints(parsedDef, daemon.root, digests);
   if (bp.errors.length) throw new Error(`org ${name}: ${bp.errors.join('; ')}`);
   const newDef = expandOrgPolicyPathVars(bp.def, promptVarsFor(daemon.root));
   pinInstructionDigests(newDef, digests); // for roles this reload adds

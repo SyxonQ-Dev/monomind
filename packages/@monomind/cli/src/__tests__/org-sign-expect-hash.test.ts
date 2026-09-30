@@ -136,7 +136,7 @@ describe('the signable hash (fixed fixture)', () => {
     expect(signOrgDef(root, 'fx', raw('fx')).hash).toBe(FIXTURE_HASH);
   });
 
-  // Step 5's key order: array-index keys first (ascending numeric), then the
+  // Step 6's key order: array-index keys first (ascending numeric), then the
   // rest by UTF-16 code units. canonical() is kept as is: 2.21 signatures
   // and mono-agent's goldens depend on it.
   it('orders array-index keys first, as documented', () => {
