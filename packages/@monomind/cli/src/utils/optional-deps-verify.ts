@@ -19,10 +19,12 @@
 import { createHash } from 'node:crypto';
 import {
   accessSync,
+  closeSync,
   constants,
-  createReadStream,
   existsSync,
   lstatSync,
+  openSync,
+  readSync,
   realpathSync,
   statSync,
 } from 'node:fs';
@@ -48,16 +50,21 @@ const realOrSelf = (p: string): string => {
   }
 };
 
-/** Streams `file` through SHA-256 off the event loop's critical path (the
- *  Claude binary is about 300 MB). */
-export function sha256File(file: string): Promise<string> {
-  return new Promise((resolveHash, reject) => {
-    const hash = createHash('sha256');
-    createReadStream(file)
-      .on('error', reject)
-      .on('data', (chunk) => hash.update(chunk))
-      .on('end', () => resolveHash(hash.digest('hex')));
-  });
+/** SHA-256 of `file`, read in 4 MB chunks. Synchronous, as before this
+ *  hashing existed the load had no long I/O step: hashing the Claude binary
+ *  (about 300 MB) blocks for a few hundred milliseconds once per process.
+ *  An asynchronous hash was tried and let timers in the session code and its
+ *  tests run in the middle of the first SDK load. */
+export async function sha256File(file: string): Promise<string> {
+  const hash = createHash('sha256');
+  const buf = Buffer.allocUnsafe(4 << 20);
+  const fd = openSync(file, 'r');
+  try {
+    for (let n = readSync(fd, buf); n > 0; n = readSync(fd, buf)) hash.update(buf.subarray(0, n));
+  } finally {
+    closeSync(fd);
+  }
+  return hash.digest('hex');
 }
 
 const statKey = (file: string): string => {

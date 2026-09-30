@@ -28,10 +28,10 @@ vi.mock('node:fs', async (orig) => {
   const real = await orig<typeof import('node:fs')>();
   return {
     ...real,
-    createReadStream: ((p: fs.PathLike, ...rest: unknown[]) => {
+    openSync: ((p: fs.PathLike, ...rest: unknown[]) => {
       if (String(p).endsWith('sdk.mjs')) opened.entry++;
-      return (real.createReadStream as (...a: unknown[]) => fs.ReadStream)(p, ...rest);
-    }) as typeof real.createReadStream,
+      return (real.openSync as (...a: unknown[]) => number)(p, ...rest);
+    }) as typeof real.openSync,
   };
 });
 
