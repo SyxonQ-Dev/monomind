@@ -13,6 +13,7 @@ import { buildOrgTools } from './org-tools.js';
 import type { TokenUsage } from './policy.js';
 import { summarizeToolOutput } from './policy.js';
 import { resolveRoleProvider } from './provider.js';
+import { ensureRoleDeps, roleDepsFailure } from './role-deps.js';
 import { resolveRoleGitEnforcement, roleAuthorityMask } from './role-sandbox.js';
 import { BUDGET_STOP_SUBTYPE } from './runner-usage.js'; // #550: a runner's budget stop
 import { type FaultRestarts, ProcessFaultError } from './sandbox-fault.js';
@@ -146,6 +147,16 @@ export async function runOneSession(
     // classification — guard env for every runtime, OS sandbox + file-tool
     // deny rules for Claude. Throws (session fails) when the role requires
     // the sandbox and it can't start.
+    // #559: the role cannot write ~/.monomind/deps, so the host installs what
+    // it may need there first.
+    const deps = await (opts.ensureRoleDeps ?? ensureRoleDeps)(runtimeKey);
+    if (deps.status === 'failed')
+      bus.emit({
+        type: 'audit',
+        from: role.id,
+        reason: 'role-deps-missing',
+        msg: roleDepsFailure(deps.error),
+      });
     // Before the sandbox is built: it can only mask directories that exist.
     ensureAuthorityDirs(homedir(), process.env);
     // #502 review: and the operator-protected paths a role must not plant.

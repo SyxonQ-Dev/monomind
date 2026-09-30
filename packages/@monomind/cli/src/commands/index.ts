@@ -51,6 +51,7 @@ const COMMAND_LOADERS: Record<string, CommandLoader> = {
   org: async () => (await import('./org.js')).orgCommand,
   ui: async () => (await import('./ui.js')).uiCommand,
   events: async () => (await import('./events.js')).eventsCommand,
+  deps: async () => (await import('./deps.js')).depsCommand,
   'download-embeddings': async () =>
     (await import('./download-embeddings.js')).downloadEmbeddingsCommand,
 };
@@ -101,6 +102,7 @@ const CATEGORY_NAMES = {
     'catalog',
     'mastermind',
     'browse',
+    'deps',
     'download-embeddings',
   ],
 } as const;

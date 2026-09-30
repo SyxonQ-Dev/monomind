@@ -59,6 +59,27 @@ export const UNSET_KEYS = [
   'MONOMIND_HOME',
 ] as const;
 
+/**
+ * Markers an org role's session (session-stream.ts) and the runners inside
+ * it set (#560). A suite run from inside a role inherits them, and code that
+ * branches on them (cline-runner-host.ts's scoped dir, for one) then fails
+ * tests that assume a plain operator shell. A test that needs one sets it.
+ */
+export const ORG_ROLE_ENV_KEYS = [
+  'MONOMIND_ORG_ROLE',
+  'MONOMIND_ROLE_ID',
+  'MONOMIND_ORG_NAME',
+  'MONOMIND_ORG_DIR',
+  'MONOMIND_ORG_RUN',
+  'MONOMIND_ORG_ROOT',
+  'MONOMIND_AGENT_EXEC',
+  'MONOMIND_SDK_AGENT',
+  'MONOMIND_CLINE_TURN',
+  'MONOMIND_AIDER',
+  'MONOMIND_HOOK_QUIET',
+  'MONOMIND_GRAPH_GATE',
+] as const;
+
 const KEYS = [
   'HOME',
   'USERPROFILE',
@@ -68,6 +89,7 @@ const KEYS = [
   'PATH',
   ...Object.keys(XDG_DIRS),
   ...UNSET_KEYS,
+  ...ORG_ROLE_ENV_KEYS,
 ];
 
 /**
@@ -84,7 +106,7 @@ export function pathWithoutHome(path: string, realHome: string): string {
 
 /**
  * Points HOME, the global brain and the XDG base dirs at `home`, and drops the
- * toolchain overrides. Shared with the per-file setup.
+ * toolchain overrides and the org-role markers. Shared with the per-file setup.
  */
 export function useTestHome(home: string): void {
   process.env.HOME = home;
@@ -97,6 +119,7 @@ export function useTestHome(home: string): void {
     process.env[key] = dir;
   }
   for (const key of UNSET_KEYS) delete process.env[key];
+  for (const key of ORG_ROLE_ENV_KEYS) delete process.env[key];
 }
 
 export default function setup(): () => void {
