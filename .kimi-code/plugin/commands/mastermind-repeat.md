@@ -1,5 +1,5 @@
 ---
-description: Monomind — Repeat any prompt or slash command on a schedule — default 15 min interval, 10 repetitions. This is the universal loop wrapper for all commands.
+description: "Repeat a prompt or slash command on a schedule (default every 15 min, 10 times); the loop wrapper for all commands."
 ---
 
 ## Argument Parsing

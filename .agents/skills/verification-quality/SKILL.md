@@ -1,6 +1,6 @@
 ---
 name: verification-quality
-description: Comprehensive truth scoring, code quality verification, and automatic rollback system with a 0.95 confidence threshold for ensuring high-quality agent outputs and codebase reliability.
+description: "Truth scoring and code quality verification with automatic rollback below a 0.95 confidence threshold, for checking agent output."
 ---
 
 # verification-quality — Evidence Before Claims
@@ -331,7 +331,7 @@ alert on trend, not on single values.
 ## Related Skills
 
 - [`mastermind-debug`](../mastermind-debug/SKILL.md) — root-cause methodology when verification finds a failure; Phase 4 covers failing-test-first evidence collection
-- [`performance-analysis`](../performance-analysis/SKILL.md) — Phase 2 Angle 4 deep-dive
+- [`performance-analysis`](../performance-analysis/SKILL.md) — Phase 2 Angle 4 deep-dive (pack extras — `monomind packs add extras`)
 - [`mastermind-receive-review`](../mastermind-receive-review/SKILL.md) — same rigor applied to incoming review feedback
 - [`swarm-orchestration`](../swarm-orchestration/SKILL.md) — every agent output runs through Phase 1–4 before merge
 

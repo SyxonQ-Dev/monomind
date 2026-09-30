@@ -1,6 +1,6 @@
 ---
 name: mastermind-repeat
-description: REPEAT POSTAMBLE — executes inter-session repeat/tillend loop continuation after any mastermind or monomind command completes. Calls ScheduleWakeup when work remains.
+description: "Repeat postamble: continues --repeat/--tillend loops after a mastermind command finishes, scheduling a wakeup while work remains."
 type: protocol-skill
 ---
 

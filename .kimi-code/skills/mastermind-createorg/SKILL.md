@@ -1,6 +1,6 @@
 ---
 name: mastermind-createorg
-description: Mastermind createorg — design and persist an autonomous agent organization (Org Runtime) as a `.monomind/orgs/<name>.json` config that `monomind org run/serve` loads directly. Supports optional --schedule flag for daemon-scheduled orgs.
+description: "Mastermind createorg — design an autonomous agent org and save it as `.monomind/orgs/<name>.json` for `monomind org run/serve`; --schedule for daemon-scheduled orgs."
 type: domain-skill
 default_mode: confirm
 ---

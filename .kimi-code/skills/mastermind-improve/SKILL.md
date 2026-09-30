@@ -1,5 +1,5 @@
 ---
-description: Mastermind — Deeply analyze a component, research improvements online, and create improvement tasks saved to docs/improvements/ (default) or monotask boards (--monotask flag)
+description: "Analyze a component, research improvements, and write improvement tasks to docs/improvements/ or a monotask board (--monotask)."
 type: flow
 name: mastermind-improve
 ---

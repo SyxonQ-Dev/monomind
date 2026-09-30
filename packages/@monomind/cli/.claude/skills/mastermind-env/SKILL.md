@@ -1,6 +1,6 @@
 ---
 name: mastermind-env
-description: Mastermind env — audit and configure the runtime environment for an org. Shows LLM provider config, memory backend, agent JWT settings, logging, and storage — highlighting missing or misconfigured values.
+description: "Mastermind env — audit an org's runtime environment (LLM provider, memory backend, agent JWT, logging, storage) and flag missing or misconfigured values."
 type: domain-skill
 default_mode: auto
 pick: low

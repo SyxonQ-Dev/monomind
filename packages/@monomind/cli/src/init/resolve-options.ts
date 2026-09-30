@@ -14,20 +14,34 @@ import { MCP_FLOATING_PIN } from '../platform-adapters/renderers/mcp.js';
 import type { PlatformId } from '../platform-adapters/types.js';
 import type { CommandContext } from '../types.js';
 import {
+  chooseDefaultPlatforms,
+  type DetectedPlatform,
+  detectInstalledPlatforms,
+  type PlatformChoice,
+  platformsInProject,
+  withProjectPlatforms,
+} from './detect-platforms.js';
+import {
   DEFAULT_INIT_OPTIONS,
   FULL_INIT_OPTIONS,
   type InitOptions,
   MINIMAL_INIT_OPTIONS,
 } from './index.js';
+import { PACK_NAMES, parsePackList } from './packs.js';
 
 export type ResolveInitOptionsResult =
-  | { ok: true; options: InitOptions }
+  | { ok: true; options: InitOptions; platforms: PlatformChoice }
   | { ok: false; message: string };
 
-/** Builds `InitOptions` for `targetDir` from `ctx.flags`. No I/O. */
+/**
+ * Builds `InitOptions` for `targetDir` from `ctx.flags`. The only I/O is the
+ * read-only platform detection (`detect`), used when no flag names the
+ * platforms (#420).
+ */
 export function resolveInitOptions(
   ctx: CommandContext,
   targetDir: string,
+  detect: () => DetectedPlatform[] = detectInstalledPlatforms,
 ): ResolveInitOptionsResult {
   const force = ctx.flags.force as boolean;
   const minimal = ctx.flags.minimal as boolean;
@@ -35,7 +49,12 @@ export function resolveInitOptions(
   const skipClaude = ctx.flags['skip-claude'] as boolean;
   const onlyClaude = ctx.flags['only-claude'] as boolean;
   const requestedTarget = ctx.flags.target as string | undefined;
-  const requestedPlatforms = ctx.flags.platform as string | undefined;
+  // `--platforms` is the documented spelling; `--platform` predates it.
+  if (ctx.flags.platforms !== undefined && ctx.flags.platform !== undefined) {
+    return { ok: false, message: 'Use either --platforms or --platform, not both' };
+  }
+  let requestedPlatforms = (ctx.flags.platforms ?? ctx.flags.platform) as string | undefined;
+  const allPlatforms = ctx.flags['all-platforms'] === true || ctx.flags.allPlatforms === true;
   const enablePlatformHooks = ctx.flags['enable-hooks'] === true;
   const noInstall = (ctx.flags['no-install'] || ctx.flags.noInstall) as boolean;
   // Absent (the default) pins to the running CLI (#419); bare `--pin` does the
@@ -76,9 +95,54 @@ export function resolveInitOptions(
     };
   }
 
+  // Opt-in packs on top of core (GH #411): `--packs a,b` or `--all-packs`.
+  const packFlag = ctx.flags.packs;
+  if (ctx.flags['all-packs'] === true || ctx.flags.allPacks === true) {
+    options.packs = [...PACK_NAMES];
+  } else if (typeof packFlag === 'string') {
+    const parsed = parsePackList(packFlag);
+    if (!parsed.ok) return { ok: false, message: parsed.message };
+    options.packs = parsed.packs;
+  }
+
   const legacyTargets = ['opencode', 'kimicode', 'codex'].filter(
     (name) => ctx.flags[name] === true,
   );
+  if (allPlatforms) {
+    const narrowing = [
+      requestedPlatforms !== undefined && '--platforms',
+      requestedTarget !== undefined && requestedTarget !== 'all' && '--target',
+      onlyClaude && '--only-claude',
+      skipClaude && '--skip-claude',
+      ...legacyTargets.map((name) => `--${name}`),
+    ].filter(Boolean);
+    if (narrowing.length > 0) {
+      return {
+        ok: false,
+        message: `--all-platforms cannot be combined with ${narrowing.join(', ')}`,
+      };
+    }
+  }
+
+  // #420: with no flag naming platforms, write the installed ones plus the
+  // ones this project already has (so `init --force` refreshes them).
+  // `--all-platforms`, `--full`, `--skip-claude` (all minus Claude) and an
+  // explicit `--target all` keep all five.
+  let platformChoice: PlatformChoice | undefined;
+  if (
+    !requestedPlatforms &&
+    !requestedTarget &&
+    !onlyClaude &&
+    !skipClaude &&
+    legacyTargets.length === 0 &&
+    !allPlatforms &&
+    !full
+  ) {
+    platformChoice = chooseDefaultPlatforms(
+      withProjectPlatforms(detect(), platformsInProject(targetDir)),
+    );
+    requestedPlatforms = platformChoice.platforms.join(',');
+  }
   const target =
     requestedTarget ||
     (onlyClaude ? 'claude' : legacyTargets.length === 1 ? legacyTargets[0] : 'all');
@@ -204,5 +268,11 @@ export function resolveInitOptions(
     options.components.monograph = false;
   }
 
-  return { ok: true, options };
+  return {
+    ok: true,
+    options,
+    platforms: platformChoice
+      ? { ...platformChoice, platforms: selectedPlatforms }
+      : { source: 'explicit', platforms: selectedPlatforms, detected: [] },
+  };
 }

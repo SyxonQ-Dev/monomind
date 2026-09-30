@@ -1,6 +1,6 @@
 ---
 name: mastermind-delegation
-description: Agent Delegation Capability — injected into every spawned agent prompt so subagents can further delegate specialized work. Never invoked directly; referenced by mastermind-protocol/SKILL.md and domain skills.
+description: "Delegation capability injected into spawned agent prompts so subagents can delegate further. Never invoked directly."
 type: shared
 ---
 

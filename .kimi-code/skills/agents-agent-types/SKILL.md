@@ -6,7 +6,7 @@ type: flow
 
 # agent-types
 
-`monomind init` installs <!-- doc-count:installed-agents -->84<!-- /doc-count:installed-agents --> agent definitions with the default selection. The core ones are below.
+`monomind init` installs <!-- doc-count:installed-agents -->20<!-- /doc-count:installed-agents --> agent definitions with the default selection (the core pack; `monomind packs add` adds more). The core ones are below.
 
 ## Core Development Agents
 - `coder` - Implementation specialist

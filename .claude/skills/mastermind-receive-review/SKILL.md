@@ -1,6 +1,6 @@
 ---
 name: mastermind-receive-review
-description: Use when receiving code review feedback, before implementing suggestions, especially if feedback seems unclear or technically questionable — requires technical rigor and verification, not performative agreement or blind implementation
+description: "Use when receiving code review feedback, before implementing it: verify each point technically, ask about unclear items, push back when warranted."
 ---
 
 # Code Review Reception

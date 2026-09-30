@@ -1,13 +1,13 @@
 ---
 name: mastermind-idea
-description: Mastermind idea domain — product ideation, feature brainstorming, pivot exploration. Spawns an Idea Manager agent for divergent thinking, then validates, elaborates, and decomposes approved ideas into actionable subtasks on separate dev and ops task boards.
+description: "Product ideation and feature brainstorming: an Idea Manager explores options, then validates approved ideas and splits them into dev and ops tasks."
 type: domain-skill
 default_mode: confirm
 ---
 
 # Mastermind Idea Domain
 
-This skill is invoked by `mastermind:master` or directly via `/mastermind:idea`.
+This skill is invoked directly via `/mastermind:idea`, or by `/mastermind:master` (pack extras — `monomind packs add extras`).
 
 **Extract `--monotask` flag:** If present in `$ARGUMENTS`, set `USE_MONOTASK=true` and remove it from `$ARGUMENTS`. Default: `USE_MONOTASK=false`.
 
@@ -185,7 +185,7 @@ specialist_list=$(jq -s 'add // [] | unique | .[0:8]' \
 
 # Fallback if picking is unavailable or returned too few — need at least 2 specialists
 specialist_count=$(echo "$specialist_list" | jq 'length // 0' 2>/dev/null || echo 0)
-[ "${specialist_count:-0}" -lt 2 ] && specialist_list='["researcher","Launch Strategist","CRO Specialist","Competitive Content Strategist","Software Architect","Pricing Strategist"]'
+[ "${specialist_count:-0}" -lt 2 ] && specialist_list='["researcher","planner","Software Architect","Technical Writer","Frontend Developer","reviewer"]'
 
 echo "Selected specialists: $specialist_list"
 ```
@@ -724,7 +724,7 @@ dev_decomp_agent=$(pick_one "decompose into engineering tasks: $dev_ideas_list" 
 dev_decomp_agent="${dev_decomp_agent:-Software Architect}"
 
 ops_decomp_agent=$(pick_one "decompose into go-to-market and operations tasks: $ops_ideas_list" "marketing specialized")
-ops_decomp_agent="${ops_decomp_agent:-Launch Strategist}"
+ops_decomp_agent="${ops_decomp_agent:-planner}"
 
 echo "Dev decomp: $dev_decomp_agent | Ops decomp: $ops_decomp_agent"
 ```

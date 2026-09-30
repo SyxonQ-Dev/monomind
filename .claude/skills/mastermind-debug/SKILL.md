@@ -1,6 +1,6 @@
 ---
 name: mastermind-debug
-description: Systematic root-cause debugging protocol. Use before ANY fix attempt — for test failures, bugs, unexpected behavior, build failures, performance regressions.
+description: "Root-cause debugging protocol to run before any fix: test failures, bugs, unexpected behavior, build failures, performance regressions."
 ---
 
 # mastermind:debug — Systematic Debugging
