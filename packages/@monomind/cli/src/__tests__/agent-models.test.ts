@@ -1,6 +1,7 @@
 // #369: `agent models` — each runtime's real model list.
 import { describe, expect, it } from 'vitest';
 import {
+  dedupeByResolvedModel,
   listRuntimeModels,
   parseAgyModels,
   parseClaudeModels,
@@ -31,6 +32,44 @@ describe('agent models parsers', () => {
         effort_levels: ['low', 'high'],
       },
       { id: 'claude-fable-5-1', label: 'Fable 5.1' },
+    ]);
+  });
+
+  it('claude: default and opus resolving to the same model are one entry with both aliases', () => {
+    const models = parseClaudeModels([
+      { value: 'default', resolvedModel: 'claude-opus-5-5', displayName: 'Default (recommended)' },
+      { value: 'sonnet', resolvedModel: 'claude-sonnet-5', displayName: 'Sonnet' },
+      { value: 'opus', resolvedModel: 'claude-opus-5-5', displayName: 'Opus' },
+    ]);
+    expect(models).toEqual([
+      {
+        id: 'default',
+        resolved_id: 'claude-opus-5-5',
+        aliases: ['default', 'opus'],
+        label: 'Default (recommended)',
+        default: true,
+      },
+      { id: 'sonnet', resolved_id: 'claude-sonnet-5', label: 'Sonnet' },
+    ]);
+    // Aliases are listed as given; neither alias's resolution changes.
+    expect(models.map((m) => m.resolved_id)).toEqual(['claude-opus-5-5', 'claude-sonnet-5']);
+  });
+
+  it('dedupe: an explicit id and an alias of it merge; default sticks from a later alias', () => {
+    expect(
+      dedupeByResolvedModel([
+        { id: 'claude-opus-5-5', label: 'Opus 5.5' },
+        { id: 'default', resolved_id: 'claude-opus-5-5', label: 'Default', default: true },
+        { id: 'haiku', resolved_id: 'claude-haiku-5', label: 'Haiku' },
+      ]),
+    ).toEqual([
+      {
+        id: 'claude-opus-5-5',
+        label: 'Opus 5.5',
+        aliases: ['claude-opus-5-5', 'default'],
+        default: true,
+      },
+      { id: 'haiku', resolved_id: 'claude-haiku-5', label: 'Haiku' },
     ]);
   });
 

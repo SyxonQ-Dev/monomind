@@ -17,7 +17,10 @@
     `total_cost_usd`, its per-role `roles[].costUsd`, and `org costs --json`'s
     `items[].cost_usd` / `totals.cost_usd` are `null` when no usage event of that scope
     reported a cost (otherwise the sum of the reported costs). Callers that summed the field
-    must treat `null` as "unknown", not `0`.
+    must treat `null` as "unknown", not `0`. **Same rev** (issue #534): `agent models --json` (§12) lists
+    one entry per resolved model — aliases that resolve to the same model (claude `default`
+    and `opus`) are one entry with `aliases`, so a caller that tests every listed model runs
+    each model once. Neither alias's resolution changed.
   - rev 26 (2026-09-29): **more `--sandbox` modes, and `--sandbox-fallback`** (issue #482) — new
     capabilities `agent-exec-sandbox-restricted` and `agent-exec-sandbox-fallback`. Without
     `--sandbox` nothing changes: every runtime's argv and `start` are as in rev 25. **New mode
@@ -1242,7 +1245,7 @@ stays read-only.
 {"v":1,"runtime":"claude","supported":true,"models":[
   {"id":"default","resolved_id":"claude-opus-5-5","label":"Default (recommended)",
    "description":"Opus 5.5 · Best for everyday, complex tasks","default":true,
-   "effort_levels":["low","medium","high","xhigh","max"]},
+   "aliases":["default","opus"],"effort_levels":["low","medium","high","xhigh","max"]},
   {"id":"sonnet","resolved_id":"claude-sonnet-5","label":"Sonnet","effort_levels":["low","medium","high"]}
 ]}
 ```
@@ -1251,6 +1254,7 @@ stays read-only.
 |---|---|
 | `id` | What to pass as the runtime's model option (`agent exec --model`, a role's `model`) |
 | `resolved_id` | The concrete model an alias resolves to today (claude only; omitted when equal to `id`) |
+| `aliases` | rev 28. Every id that resolves to this entry's model, `id` first (e.g. `["default","opus"]`); omitted when only one does. The list has one entry per resolved model, so test each entry once |
 | `label`, `description` | Display text from the runtime |
 | `default` | `true` on the runtime's own default choice (claude's `default` entry) |
 | `effort_levels` | Supported reasoning-effort values, when the runtime reports them |

@@ -24,6 +24,10 @@ export interface AgentModel {
   id: string;
   /** The concrete model an alias (`default`, `opus`) resolves to today. */
   resolved_id?: string;
+  /** Every id that resolves to this same model, this entry's own `id`
+   *  first (claude `default` and `opus` → one entry). Omitted when only one
+   *  id does. */
+  aliases?: string[];
   label: string;
   description?: string;
   /** The runtime's own default choice. */
@@ -56,7 +60,7 @@ interface SdkModelInfo {
 }
 
 export function parseClaudeModels(list: SdkModelInfo[]): AgentModel[] {
-  return list
+  const models = list
     .filter((m) => typeof m.value === 'string' && m.value)
     .map((m) => ({
       id: m.value as string,
@@ -66,6 +70,28 @@ export function parseClaudeModels(list: SdkModelInfo[]): AgentModel[] {
       ...(m.value === 'default' ? { default: true } : {}),
       ...(m.supportedEffortLevels?.length ? { effort_levels: m.supportedEffortLevels } : {}),
     }));
+  return dedupeByResolvedModel(models);
+}
+
+/**
+ * One entry per concrete model: aliases that resolve to the same model
+ * (claude `default` and `opus` both → claude-opus-5-5) would otherwise be
+ * listed, tested and billed twice. The first entry wins and lists every
+ * alias in `aliases`; `default` sticks if any merged alias was the default.
+ */
+export function dedupeByResolvedModel(models: AgentModel[]): AgentModel[] {
+  const byModel = new Map<string, AgentModel>();
+  for (const m of models) {
+    const key = m.resolved_id ?? m.id;
+    const kept = byModel.get(key);
+    if (!kept) {
+      byModel.set(key, { ...m });
+      continue;
+    }
+    kept.aliases = [...(kept.aliases ?? [kept.id]), m.id];
+    if (m.default) kept.default = true;
+  }
+  return [...byModel.values()];
 }
 
 export function parseCodexModels(stdout: string): AgentModel[] {
