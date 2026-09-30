@@ -757,6 +757,7 @@ org growth: the definition has no operator signature — run `monomind org sign 
 ```bash
 monomind org sign <org> [--yes] [--project <dir>] [--expect-hash <hex>]
 monomind org sign --all [--yes] [--project <dir>] [--expect-hash <org>=<hex> …]
+monomind org sign <org> --format json [--project <dir>]    # review as JSON, never signs
 monomind org sign <org> --check [--format json] [--project <dir>]
 monomind org sign --all --check [--format json] [--project <dir>]
 ```
@@ -832,6 +833,39 @@ pass `--expect-hash <org>=<hex>` once for every org in the project. A missing, r
 unknown org, or a malformed value, is a usage error (exit 2). If any org does not match, none is
 signed.
 
+**The review as JSON (signing what the user saw):** `org sign <org> --format json` without
+`--yes` prints the review with the hash of exactly the content it reviewed. It reads the org file
+and each instructions file once, the same single read that `--expect-hash` uses. It never
+prompts and never signs, including on a TTY, and exits 0:
+
+```json
+{"org":"growth","state":"changed","hash":"<hex>",
+ "review":{"authority":["  lead: runtime claude · git read · access scoped", "…"],
+           "unconfinedRoles":[{"id":"ops","why":"…"}],
+           "nonBundledSkills":["deploy (project, /repo/.monomind/skills/deploy)"],
+           "approvalCandidates":["/repo/.claude/settings.json"],
+           "firstLookConfigs":[],
+           "diff":["  ~ definition.roles: … → …"]},
+ "reviewText":"\norg growth (changed):\n  lead: runtime claude · …"}
+```
+
+`state` is `signed`, `changed`, `unsigned`, `invalid-signature` or `forbidden-key`. `review`
+holds what the text review shows:
+- `authority`: the per-role and org-level settings lines;
+- `unconfinedRoles`: the roles that run with no OS confinement here, which the text review also
+  lists as a warning;
+- `nonBundledSkills`: org skills from the project or user library;
+- `approvalCandidates`: the protected paths that would be quarantined;
+- `firstLookConfigs`: the Claude configs monomind's first look will trust;
+- `diff`: one line per change since the last signature, or `null` when this machine has no
+  earlier signature.
+
+`reviewText` is the text review, line for line, without colour. After the user approves, sign
+with `org sign <org> --yes --expect-hash <hash>`. If a role changed the org file or an
+instructions file after the review, the hashes differ and nothing is signed, so a signature is
+always of what the user saw. A missing org prints `{"org","error"}` and exits 2, an unreadable or
+invalid one exits 1, and `--all` is a usage error (exit 2).
+
 **`--project`:** the signature binds the project's real path, so signing with
 `--project <dir>` (also through a symlink) makes the same signature as running `org sign` inside
 `<dir>`. The refusal inside a role's process tree (below) still applies when signing.
@@ -872,7 +906,8 @@ you run an org from) is signed separately.
 in your own terminal. `org create` signs the org it writes.
 
 **Migration.** Orgs made before this release have no signature. `org run` on a TTY shows the
-full review and offers a one-time sign for such an org. A changed or unverifiable signature, or any run without
+full review and offers a one-time sign for such an org, and signs the instructions files it
+read for that review. A changed or unverifiable signature, or any run without
 a TTY (`org serve`, a detached `org run`, the mastermind skills), is refused with the message
 above. Run `monomind org sign --all` once per checkout, including for the shipped
 `.monomind/orgs/*.json` and `config/orgs/release.json`, whose signatures are per machine and never
@@ -896,9 +931,28 @@ The hash `--expect-hash` compares, `--check` reports and the signature records i
    instead. A tool can't rebuild that reason, so take the `hash` from `--check` for such an org.
 4. **Combine.** With no digests, the value to hash is the projection itself. Otherwise it is the
    object `{"definition": <projection>, "instructions": {<digests>}}`.
-5. **Canonical JSON.** Sort the keys of every object at every depth by UTF-16 code units. That
-   is the byte order of the UTF-8 keys unless a key holds a character above U+FFFF. Keep array
-   order. Serialize with no whitespace, as ECMAScript `JSON.stringify` does:
+5. **Canonical JSON.** Order the keys of every object, at every depth, in two groups:
+   - **Array-index keys come first, in ascending numeric order.** A key is an array index when
+     it is the canonical decimal form of an integer from 0 to 4294967294 (2^32 − 2): only the
+     digits `0`–`9`, no sign, no leading zero except the key `0` itself, and a value no greater
+     than 4294967294. So `0`, `9`, `10` and `4294967294` are index keys; `01`, `-1`, `+1`, `1.0`,
+     `1e3`, ` 1` and `4294967295` are not.
+   - **Every other key follows, sorted by UTF-16 code units.** That is the byte order of the UTF-8
+     keys unless a key holds a character above U+FFFF.
+
+   For example, keys `b`, `10`, `9`, `a` give `{"9":1,"10":1,"a":1,"b":1}`, and keys `b`, `01`,
+   `4294967295`, `4294967294`, `a`, `10` give
+   `{"10":1,"4294967294":1,"01":1,"4294967295":1,"a":1,"b":1}`. (monomind sorts all keys by UTF-16
+   code units and `JSON.stringify` then writes the array-index keys first, as every JavaScript
+   object does. The order is kept as is, because existing signatures depend on it.) In Go,
+   don't marshal a `map`, because `encoding/json` sorts map keys by bytes. Write each object
+   yourself instead: split its keys with
+   `isIndex(k) = k == "0" || (k[0] >= '1' && k[0] <= '9' && allDigits(k) && len(k) <= 10 && parseUint(k) <= 4294967294)`,
+   sort the index keys by `parseUint` and the rest by their UTF-16 encoding
+   (`utf16.Encode([]rune(k))`, compared element by element), and write the index keys and then
+   the rest.
+
+   Keep array order. Serialize with no whitespace, as ECMAScript `JSON.stringify` does:
    - Strings escape `"` and `\` as `\"` and `\\`, and use `\b` `\f` `\n` `\r` `\t` for those
      control characters. Any other character below U+0020 is `\u00xx` with lowercase hex. A
      lone surrogate is `\udxxx`. Every other character, including `<`, `>`, `&`, U+2028 and

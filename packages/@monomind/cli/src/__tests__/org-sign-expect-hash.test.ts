@@ -135,6 +135,33 @@ describe('the signable hash (fixed fixture)', () => {
     writeFixture();
     expect(signOrgDef(root, 'fx', raw('fx')).hash).toBe(FIXTURE_HASH);
   });
+
+  // Step 5's key order: array-index keys first (ascending numeric), then the
+  // rest by UTF-16 code units. canonical() is kept as is: 2.21 signatures
+  // and mono-agent's goldens depend on it.
+  it('orders array-index keys first, as documented', () => {
+    const vectors: Array<[string, string, string]> = [
+      [
+        '{"b":1,"10":1,"9":1,"a":1}',
+        '{"9":1,"10":1,"a":1,"b":1}',
+        '7730e4e01fd746abc3ff48aba427bd2f794534d137ff7ad01463a347faadf6e9',
+      ],
+      [
+        // "01" (leading zero) and "4294967295" (2^32 - 1) are not index keys.
+        '{"b":1,"01":1,"4294967295":1,"4294967294":1,"a":1,"10":1}',
+        '{"10":1,"4294967294":1,"01":1,"4294967295":1,"a":1,"b":1}',
+        '42003f4c98a3d30c373a90b3fc40179cf7c58411c477f1b11c83285a78ba8113',
+      ],
+    ];
+    for (const [input, canonicalJson, hash] of vectors) {
+      expect(sha(canonicalJson)).toBe(hash);
+      expect(computeOrgDefHash(JSON.parse(input))).toBe(hash);
+      // The same order at any depth.
+      expect(computeOrgDefHash(JSON.parse(`{"name":"k","x":${input}}`))).toBe(
+        sha(`{"name":"k","x":${canonicalJson}}`),
+      );
+    }
+  });
 });
 
 describe('org sign --check --format json: hash', () => {
