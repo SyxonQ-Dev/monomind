@@ -505,6 +505,9 @@ monomind org answer <name> <question-id> "<answer text>" [--by <resolver>]
 - `--by` is recorded as `resolvedBy` (default `human`; 1-128 printable characters).
 - **Live delivery** if the org is running.
 - **Queued to disk** if the org is stopped (consumed on next start).
+- If the daemon hosting this project's org refuses the answer (for example 403
+  without the operator credential), nothing is recorded or queued and the command
+  exits 1. Only an unreachable daemon falls back to the offline queue.
 - If the asking role is no longer in the org definition, the answer is recorded
   (the question stops being pending) but not delivered or queued; a running org
   notes that in its `decision-resolved` audit event (`delivery: "skipped"`).
@@ -524,6 +527,10 @@ monomind org approve <name> <role> <action> [--request <apr-id>] [--by <resolver
   named by `--request`. `--by` is recorded as `resolvedBy` (default `human`).
 - **Live** through the hosting daemon when the org is running, otherwise written
   straight to `approvals.json`.
+- If the daemon hosting this project's org refuses the decision (for example 403
+  without the operator credential), nothing is written and the command exits 1.
+  Only an unreachable daemon falls back to writing `approvals.json`. The same holds
+  for `deny`, `gate-approve` and `gate-reject` (`gates.json`).
 
 ---
 

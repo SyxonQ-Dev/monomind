@@ -4589,7 +4589,9 @@ async function _hilPost(url, body) {
     if (!res.ok || !data.ok) { showToast('Not delivered', data.error || `HTTP ${res.status}`, 'err'); return null; }
     showToast('Done', data.delivery === 'live'
       ? 'Delivered to the running org'
-      : 'Recorded — the org picks it up when it next runs', 'ok');
+      : data.delivery === 'skipped'
+        ? 'Recorded — not delivered: the role is no longer in the org'
+        : 'Recorded — the org picks it up when it next runs', 'ok');
     return data;
   } catch (e) { showToast('Error', e.message, 'err'); return null; }
 }

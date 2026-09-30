@@ -16,7 +16,7 @@ import { ORG_DIR } from '../orgrt/types.js';
 import { output } from '../output.js';
 import type { CommandContext, CommandResult } from '../types.js';
 import { readQuestions } from './org-observe-questions.js';
-import { orgJson, printOrgJson, resolverFlag } from './org-observe-shared.js';
+import { hostingDaemonFor, orgJson, printOrgJson, resolverFlag } from './org-observe-shared.js';
 
 const log = (text: string): void => {
   console.log(text);
@@ -86,10 +86,9 @@ export const dismissAction = async (ctx: CommandContext, name: string): Promise<
   };
 
   // Live path: the hosting daemon records it, tells the role and emits the audit event.
-  const { lookupOrg, normalizeRoot, readOperatorCredential } = await import('../orgrt/broker.js');
-  const found = lookupOrg(name);
+  const { readOperatorCredential } = await import('../orgrt/broker.js');
   // Only a daemon hosting THIS project's org (same rule as the dashboard's hostingDaemon).
-  const remote = found && (!found.root || found.root === normalizeRoot(ctx.cwd)) ? found : null;
+  const remote = await hostingDaemonFor(ctx.cwd, name);
   if (remote) {
     const cred = readOperatorCredential(name);
     try {

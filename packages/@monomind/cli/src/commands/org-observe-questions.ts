@@ -16,7 +16,7 @@ import { utcDateMinute } from '../orgrt/reporting.js';
 import { ORG_DIR } from '../orgrt/types.js';
 import { output } from '../output.js';
 import type { CommandContext, CommandResult } from '../types.js';
-import { orgJson, printOrgJson, resolverFlag } from './org-observe-shared.js';
+import { hostingDaemonFor, orgJson, printOrgJson, resolverFlag } from './org-observe-shared.js';
 
 const log = (text: string): void => {
   console.log(text);
@@ -140,8 +140,8 @@ export const answerAction = async (ctx: CommandContext, name: string): Promise<C
   // Live path: the hosting daemon updates questions.json and pushes into the role's mailbox.
   // SEC: answering a role's question is a human decision — authenticate with
   // the operator credential, not the agent-facing one in the broker entry.
-  const { lookupOrg, readOperatorCredential } = await import('../orgrt/broker.js');
-  const remote = lookupOrg(name);
+  const { readOperatorCredential } = await import('../orgrt/broker.js');
+  const remote = await hostingDaemonFor(ctx.cwd, name);
   if (remote) {
     const cred = readOperatorCredential(name);
     try {
@@ -180,11 +180,11 @@ export const answerAction = async (ctx: CommandContext, name: string): Promise<C
         );
         return { success: true };
       }
-      log(
-        output.warning(
-          `Live delivery rejected (${data.error ?? res.status}) — falling back to offline queue.`,
-        ),
-      );
+      // The daemon running this org refused (403 without the operator
+      // credential, unknown or closed question): recording the answer behind
+      // its back would skip the operator check, delivery and the audit event.
+      log(output.error(`Live delivery rejected (${data.error ?? res.status}) — nothing recorded.`));
+      return { success: false, message: `answer rejected: ${data.error ?? res.status}` };
     } catch (err) {
       log(
         output.warning(
