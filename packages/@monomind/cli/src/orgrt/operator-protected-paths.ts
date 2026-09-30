@@ -10,6 +10,10 @@
  *     registry, audit logs… — except the entries the CLI legitimately
  *     writes while a role uses it (ROLE_WRITABLE_MONOMIND);
  *   - `<project>/.monomind/org-skills/` (the project skill library);
+ *   - #576: `<project>/.monomind/catalog/` — the catalog's state and
+ *     packages, whose active `org` skills (their content and grantedTools,
+ *     which decide the MCP tools the daemon grants) and blueprints roles get
+ *     at start. Only the operator's `monomind catalog` writes it;
  *   - `~/.npm/_npx` (what `npx -y monomind …` runs), `~/.npmrc`,
  *     `~/.local/bin`, and shell startup files beyond HOME_DENY_WRITE;
  *   - #527: the node, npm, claude and monomind installs the operator's
@@ -225,6 +229,7 @@ function protectedCandidates(ctx: ProtectedCtx): string[] {
     // The project's MCP servers, which the operator's Claude Code starts.
     ...roots.map((r) => join(r, '.mcp.json')),
     ...roots.map((r) => join(r, '.monomind', 'org-skills')),
+    ...roots.map((r) => join(r, '.monomind', 'catalog')),
     join(mmHome, 'org-skills'),
     join(mmHome, 'enable-terminal.json'),
     ...monomindEntries,
@@ -278,7 +283,8 @@ export function maskReadOnlyPaths(ctx: {
  *  of these first would plant it. The skill libraries and the npx cache are
  *  empty directories; the terminal gate is written as disabled, which is
  *  what its absence already meant (terminal-tools-core.ts); and the
- *  HOME_DENY_WRITE stubs below (#526). */
+ *  HOME_DENY_WRITE stubs below (#526). An empty `.monomind/catalog/` means
+ *  what its absence meant: no state.json, catalog not configured. */
 export function ensureOperatorProtectedPaths(ctx: {
   home: string;
   env: NodeJS.ProcessEnv;
@@ -287,7 +293,11 @@ export function ensureOperatorProtectedPaths(ctx: {
 }): void {
   const mmHome = monomindHome(ctx.home, ctx.env);
   const dirs = [join(mmHome, 'org-skills'), join(ctx.home, '.npm', '_npx')];
-  if (ctx.orgRoot) dirs.push(join(ctx.orgRoot, '.monomind', 'org-skills'));
+  if (ctx.orgRoot)
+    dirs.push(
+      join(ctx.orgRoot, '.monomind', 'org-skills'),
+      join(ctx.orgRoot, '.monomind', 'catalog'),
+    );
   for (const d of dirs) {
     try {
       mkdirSync(d, { recursive: true });
