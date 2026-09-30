@@ -164,31 +164,54 @@ export const CLAUDE_HOME_EXEC = [
  *  them), extensions, skills and commands. A role that wrote one would get
  *  code run, or a skill loaded, in the operator's next Codex, Gemini, agy,
  *  Kimi, OpenCode, Qwen, Crush, pi, Cline, aider, Cursor, Kiro or Droid
- *  session. Instruction files (AGENTS.md, GEMINI.md, QWEN.md, the rest of
- *  `.agents/`) stay writable, like CLAUDE.md, and so do runtime state dirs
- *  such as Crush's `.crush/`. */
+ *  session. Instruction files (AGENTS.md, GEMINI.md, QWEN.md, rules) stay
+ *  writable, like CLAUDE.md. Where a runtime writes into its own project dir
+ *  while it runs as a role, only the parts it loads are listed (#582
+ *  review), so that runtime keeps working:
+ *  - OpenCode writes `.opencode/.gitignore` at every start and exits
+ *    ("FileSystem.writeFile … Unknown") when it can't;
+ *  - pi creates `.pi/settings.json.lock` to read its settings, and ignores
+ *    them all when it can't;
+ *  - Qwen Code writes `.qwen/worktrees/`, `batch/`, `PROJECT_SUMMARY.md`;
+ *  - agy writes `.agents/teamwork/`; Crush keeps its data dir in `.crush/`. */
+const under = (dir: string, entries: string[]): string[] => entries.map((e) => `${dir}/${e}`);
 export const PROJECT_RUNTIME_CONFIG = [
   // The catalog's other projection surface (Codex, Gemini, Cursor, OpenCode,
   // Kimi… skills).
   '.agents/skills',
   // `node .agents/monomind/hook-bridge.mjs`, which rendered hooks run.
   '.agents/monomind',
-  // settings.json (mcpServers, hooks), helpers, commands, skills, plugins.
+  // agy's workspace hooks, plugins (their MCP servers and hooks) and the
+  // skill dirs skills.json points it at.
+  ...under('.agents', ['hooks.json', 'plugins', 'skills.json']),
+  // settings.json (mcpServers, hooks), .env, helpers, commands, skills.
   '.gemini',
   // config.toml (mcp_servers, hooks) and the hook scripts it names.
   '.codex',
   // mcp.json and the plugin hooks.
   '.kimi-code',
-  '.opencode',
+  // What OpenCode loads from `.opencode/` (its globs), and the packages it
+  // installs there for the plugins.
+  ...under('.opencode', [
+    ...['agent', 'agents', 'command', 'commands', 'mode', 'modes', 'plugin', 'plugins'],
+    ...['skill', 'skills', 'tool', 'tools', 'themes', 'opencode.json', 'opencode.jsonc'],
+    ...['tui.json', 'tui.jsonc', 'package.json', 'package-lock.json', 'bun.lock', 'node_modules'],
+  ]),
   'opencode.json',
   'opencode.jsonc',
-  '.qwen',
+  ...under('.qwen', ['settings.json', '.env', 'commands', 'agents', 'skills', 'extensions']),
   'crush.json',
   '.crush.json',
-  // pi's project extensions.
-  '.pi',
-  // Cline rules and hooks.
-  '.clinerules',
+  // Crush's shell-format project config, and its project skills.
+  'crushrc',
+  '.crushrc',
+  '.crush/skills',
+  // pi's settings (and the packages they install), extensions, skills,
+  // prompt templates, themes and system prompt.
+  ...under('.pi', ['settings.json', 'extensions', 'skills', 'prompts', 'themes', 'npm', 'git']),
+  ...under('.pi', ['SYSTEM.md', 'APPEND_SYSTEM.md']),
+  // Cline hooks and workflows (its rules are instructions).
+  ...under('.clinerules', ['hooks', 'workflows']),
   // lint-cmd / test-cmd, which aider runs.
   '.aider.conf.yml',
   '.cursor',
@@ -196,6 +219,30 @@ export const PROJECT_RUNTIME_CONFIG = [
   '.kiro',
   '.factory',
 ];
+
+/** #582 review: at a root that is $HOME these PROJECT_RUNTIME_CONFIG dirs are
+ *  the runtimes' own state (sessions, caches, installs), which a role's codex,
+ *  agy, kimi, qwen, pi, OpenCode, cursor, droid or kiro writes while it runs;
+ *  there they are left to the home rules. */
+const RUNTIME_HOME_STATE = new Set([
+  '.codex',
+  '.gemini',
+  '.kimi-code',
+  '.qwen',
+  '.pi',
+  '.opencode',
+  '.cursor',
+  '.factory',
+  '.kiro',
+]);
+
+/** PROJECT_RUNTIME_CONFIG under `root`, less RUNTIME_HOME_STATE at $HOME. */
+function runtimeConfigUnder(root: string, home: string): string[] {
+  const atHome = resolve(root) === resolve(home) || realPath(root) === realPath(home);
+  return PROJECT_RUNTIME_CONFIG.filter(
+    (p) => !(atHome && RUNTIME_HOME_STATE.has(p.split('/')[0])),
+  ).map((p) => join(root, p));
+}
 
 export const monomindHome = (home: string, env: NodeJS.ProcessEnv): string =>
   env.MONOMIND_HOME ? resolve(env.MONOMIND_HOME) : join(home, '.monomind');
@@ -276,7 +323,7 @@ function protectedCandidates(ctx: ProtectedCtx): string[] {
     ...roots.map((r) => join(r, '.mcp.json')),
     ...roots.map((r) => join(r, '.monomind', 'org-skills')),
     ...roots.map((r) => join(r, '.monomind', 'catalog')),
-    ...roots.flatMap((r) => PROJECT_RUNTIME_CONFIG.map((p) => join(r, p))),
+    ...roots.flatMap((r) => runtimeConfigUnder(r, ctx.home)),
     join(mmHome, 'org-skills'),
     join(mmHome, 'enable-terminal.json'),
     ...monomindEntries,

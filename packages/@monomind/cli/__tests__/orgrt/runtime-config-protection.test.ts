@@ -38,17 +38,30 @@ const write = (root: string, rel: string, content = 'x') => {
 const PLANTS: Record<string, string> = {
   '.agents/skills': '.agents/skills/evil/SKILL.md',
   '.agents/monomind': '.agents/monomind/hook-bridge.mjs',
+  '.agents/hooks.json': '.agents/hooks.json',
+  '.agents/plugins': '.agents/plugins/evil/plugin.json',
+  '.agents/skills.json': '.agents/skills.json',
   '.gemini': '.gemini/settings.json',
   '.codex': '.codex/config.toml',
   '.kimi-code': '.kimi-code/plugin/hooks/monomind-gate.mjs',
-  '.opencode': '.opencode/plugins/evil.ts',
+  ...Object.fromEntries(
+    PROJECT_RUNTIME_CONFIG.filter((p) => p.startsWith('.opencode/')).map((p) => [p, `${p}/x`]),
+  ),
   'opencode.json': 'opencode.json',
   'opencode.jsonc': 'opencode.jsonc',
-  '.qwen': '.qwen/settings.json',
+  ...Object.fromEntries(
+    PROJECT_RUNTIME_CONFIG.filter((p) => p.startsWith('.qwen/')).map((p) => [p, `${p}/x`]),
+  ),
   'crush.json': 'crush.json',
   '.crush.json': '.crush.json',
-  '.pi': '.pi/extensions/evil.ts',
-  '.clinerules': '.clinerules/hooks/PreToolUse',
+  crushrc: 'crushrc',
+  '.crushrc': '.crushrc',
+  '.crush/skills': '.crush/skills/evil/SKILL.md',
+  ...Object.fromEntries(
+    PROJECT_RUNTIME_CONFIG.filter((p) => p.startsWith('.pi/')).map((p) => [p, `${p}/x`]),
+  ),
+  '.clinerules/hooks': '.clinerules/hooks/PreToolUse',
+  '.clinerules/workflows': '.clinerules/workflows/evil.md',
   '.aider.conf.yml': '.aider.conf.yml',
   '.cursor': '.cursor/mcp.json',
   '.vscode/mcp.json': '.vscode/mcp.json',
@@ -65,6 +78,14 @@ const WRITABLE = [
   '.agents/rules/monomind.md',
   '.crush/crush.db',
   '.vscode/settings.json',
+  // #582 review: what the runtimes write into their own project dirs.
+  '.opencode/.gitignore',
+  '.pi/settings.json.lock/pid',
+  '.qwen/worktrees/w1/file.ts',
+  '.qwen/batch/plan.md',
+  '.qwen/PROJECT_SUMMARY.md',
+  '.agents/teamwork/role/plan.md',
+  '.clinerules/rules.md',
 ];
 
 let home: string;
@@ -143,6 +164,46 @@ describe('#580 review: other runtimes’ project config is operator-protected', 
     expect(existsSync(join(root, '.codex'))).toBe(false);
     expect(existsSync(join(root, 'AGENTS.md'))).toBe(true);
   });
+
+  it('at a root that is $HOME, leaves the runtimes’ own home state dirs alone', () => {
+    const paths = operatorProtectedPaths({ home, env: { HOME: home }, orgRoot: home, cwd: home });
+    for (const d of ['.codex', '.gemini', '.kimi-code', '.qwen', '.pi', '.opencode', '.cursor', '.factory', '.kiro'])
+      expect(paths.filter((p) => p === join(home, d) || p.startsWith(join(home, d, '/'))), d).toEqual([]);
+    for (const p of ['.agents/skills', 'opencode.json', 'crush.json', '.aider.conf.yml'])
+      expect(paths, p).toContain(join(home, p));
+    // Elsewhere they are protected.
+    const root = scratch('rcp-nothome-');
+    expect(operatorProtectedPaths({ home, env: { HOME: home }, orgRoot: root })).toContain(join(root, '.codex'));
+  });
+
+  it.runIf(authorityMaskAvailability().available)(
+    'inside the real mask OpenCode and pi can still write what they write at start',
+    () => {
+      const root = scratch('rcp-mrt-');
+      const env = {} as NodeJS.ProcessEnv;
+      ensureAuthorityDirs(home, env);
+      for (const f of ['.opencode/plugins/p.ts', '.opencode/command/c.md', '.pi/settings.json'])
+        write(root, f, 'orig');
+      ensureOperatorProtectedPaths({ home, env, orgRoot: root });
+      const [cmd, argv] = maskedCommand(authorityMaskArgs({ home, env, roots: [root], orgRoot: root, cwd: root }), 'bash', [
+        '-c',
+        [
+          `echo node_modules > ${root}/.opencode/.gitignore`,
+          `mkdir ${root}/.pi/settings.json.lock`,
+          `echo evil > ${root}/.opencode/plugins/p.ts`,
+          `echo evil > ${root}/.pi/settings.json`,
+          `mv ${root}/.opencode ${root}/.opencode-aside`,
+          'true',
+        ].join('; '),
+      ]);
+      spawnSync(cmd, argv, { encoding: 'utf8' });
+      expect(existsSync(join(root, '.opencode', '.gitignore'))).toBe(true);
+      expect(existsSync(join(root, '.pi', 'settings.json.lock'))).toBe(true);
+      for (const f of ['.opencode/plugins/p.ts', '.pi/settings.json'])
+        expect(spawnSync('cat', [join(root, f)], { encoding: 'utf8' }).stdout, f).toBe('orig');
+      expect(existsSync(join(root, '.opencode-aside'))).toBe(false);
+    },
+  );
 
   it.runIf(authorityMaskAvailability().available)('inside the real bubblewrap mask the existing ones are read-only', () => {
     const root = scratch('rcp-mroot-');
