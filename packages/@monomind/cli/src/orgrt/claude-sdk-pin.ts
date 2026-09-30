@@ -15,8 +15,9 @@
  * write it. The deps dir is read-only to roles in both sandboxes; the stat
  * check catches what an unsandboxed process changes there.
  *
- * An installed Claude Code (#522) is not this binary: it is passed and
- * checked by its own code, and this wrapper is not applied to it.
+ * An installed Claude Code (#522) is not this binary: a query that already
+ * names another `pathToClaudeCodeExecutable` is passed through unchanged,
+ * with no pin check, and #522's own code checks that binary.
  */
 import type { Options, query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import { assertStillVerified, verifiedBinary } from '../utils/optional-deps-verify.js';
@@ -27,6 +28,10 @@ type Query = typeof sdkQuery;
 /** `query` pinned to the verified binary `bin` (see the module doc). */
 export function pinnedQuery(query: Query, bin: { path: string; sha256: string }): Query {
   return ((params: Parameters<Query>[0]) => {
+    // A binary the caller chose (#522's installed Claude Code) is not this
+    // one: it is passed through untouched and has its own checks.
+    const chosen = params.options?.pathToClaudeCodeExecutable;
+    if (chosen && chosen !== bin.path) return query(params);
     assertStillVerified(bin.path, bin.sha256);
     const spawn = params.options?.spawnClaudeCodeProcess;
     const options: Options = {

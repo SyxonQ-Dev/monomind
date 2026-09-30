@@ -270,6 +270,16 @@ describe('every query runs the binary that was verified (#526 review)', () => {
     expect(calls[0].cwd).toBe(home);
   });
 
+  it('leaves a caller-chosen binary (an installed Claude Code) alone, with no pin check', async () => {
+    const { query, calls, bin } = await load();
+    const external = join(home, 'installed', 'claude');
+    writeFileSync(bin, '#!/bin/sh\necho swapped\n'); // would fail a pin check
+    expect(() =>
+      query({ prompt: 'a', options: { pathToClaudeCodeExecutable: external } }),
+    ).not.toThrow();
+    expect(calls.at(-1)?.pathToClaudeCodeExecutable).toBe(external);
+  });
+
   it('refuses the next query once the binary is swapped after the check', async () => {
     const { query, bin } = await load();
     query({ prompt: 'a' });
