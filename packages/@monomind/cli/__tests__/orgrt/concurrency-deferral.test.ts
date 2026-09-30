@@ -187,6 +187,30 @@ describe('#551 — max_concurrent_agents deferral keeps the assignee resolvable'
     expect(got('workerB', 'hello C')).toBe(false);
   }, 15_000);
 
+  it('#589: a freed slot goes to the role deferred first, even when a later deferral polls first', async () => {
+    const { d, running } = await startAtCeiling();
+    await d.deliver('o', 'boss', 'workerB', 'for-b', 'hello B');
+    // Offset workerC's poll phase from workerB's, as a slow deliver() does.
+    await new Promise((r) => setTimeout(r, 10));
+    await d.deliver('o', 'boss', 'workerC', 'for-c', 'hello C');
+    // Free one slot right after workerB's check came back full, so workerC's
+    // timer is the first to see it.
+    const emit = running.bus.emit.bind(running.bus);
+    let freed = false;
+    running.bus.emit = ((e: any) => {
+      emit(e);
+      const bFull =
+        e.reason === 'concurrency-limit' && e.from === 'workerB' && /retrying/.test(e.msg);
+      if (!freed && bFull) {
+        freed = true;
+        running.def.run_config.max_concurrent_agents = 3;
+      }
+    }) as typeof running.bus.emit;
+    expect(await waitUntil(() => running.agents.has('workerB'))).toBe(true);
+    await new Promise((r) => setTimeout(r, 150));
+    expect(running.agents.has('workerC')).toBe(false);
+  }, 15_000);
+
   it('#557 review: giving up on a deferral with only queued messages persists it and tells the coordinator', async () => {
     const { d, running } = await startAtCeiling({ maxAttempts: 3 });
     const boxed: string[] = [];

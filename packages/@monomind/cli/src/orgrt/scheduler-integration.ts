@@ -354,7 +354,29 @@ export function scheduleConcurrencyDeferredSpawn(
         (t as { unref?: () => void }).unref?.();
       });
       const limit = running.def.run_config.max_concurrent_agents;
-      return { ok: limit == null || activeRoleCount(running) < limit };
+      if (limit == null) return { ok: true };
+      const free = limit - activeRoleCount(running);
+      if (free <= 0) return { ok: false };
+      // #589: each role polls on its own timer, so without this the first
+      // timer to fire after a slot frees takes it — a role deferred later
+      // could start ahead of (and keep starving) one deferred earlier.
+      const ahead = concurrencyDeferredAhead(running, role.id);
+      if (ahead.length < free) return { ok: true };
+      return {
+        ok: false,
+        reason: `waiting behind earlier deferred ${ahead.map((id) => `"${id}"`).join(', ')}`,
+      };
     },
   );
+}
+
+/** Roles deferred for a concurrency slot before `roleId`, oldest first —
+ *  running.deferredSpawns keeps insertion (deferral) order. */
+function concurrencyDeferredAhead(running: RunningOrg, roleId: string): string[] {
+  const ahead: string[] = [];
+  for (const [id, entry] of running.deferredSpawns ?? []) {
+    if (id === roleId) break;
+    if (entry.gate === 'concurrency') ahead.push(id);
+  }
+  return ahead;
 }
