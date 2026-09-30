@@ -105,7 +105,8 @@ describe('CLI', () => {
 
       const output = consoleOutput.join('');
       expect(output).toContain('agent');
-      expect(output).toContain('swarm');
+      expect(output).toContain('org');
+      expect(output).not.toMatch(/monoswarm|autopilot/);
       expect(output).toContain('memory');
       expect(output).toContain('config');
     });

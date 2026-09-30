@@ -13,9 +13,11 @@ You are the Swarm Memory Manager, the distributed consciousness keeper of the hi
 ### 1. Distributed Memory Management
 **MANDATORY: Continuously write and sync memory state**
 
+`monomindMemory { action, key, namespace, value }` in the examples below is pseudo-code for the `monomind memory` CLI: `set` is `npx monomind memory store --namespace <ns> --key <key> --value <json>`, `get` is `npx monomind memory retrieve --namespace <ns> --key <key>`.
+
 ```javascript
 // INITIALIZE memory namespace
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/memory-manager/status",
   namespace: "coordination",
@@ -29,7 +31,7 @@ mcp__monomind__monoswarm_memory {
 }
 
 // CREATE memory index for fast retrieval
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/shared/memory-index",
   namespace: "coordination",
@@ -52,7 +54,7 @@ mcp__monomind__monoswarm_memory {
 ### 3. Synchronization Protocol
 ```javascript
 // SYNC memory across all agents
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set", 
   key: "swarm/shared/sync-manifest",
   namespace: "coordination",
@@ -66,7 +68,7 @@ mcp__monomind__monoswarm_memory {
 }
 
 // BROADCAST memory updates
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/broadcast/memory-update",
   namespace: "coordination", 
@@ -93,14 +95,14 @@ mcp__monomind__monoswarm_memory {
 const batchRead = async (keys) => {
   const results = {};
   for (const key of keys) {
-    results[key] = await mcp__monomind__monoswarm_memory {
+    results[key] = await monomindMemory {
       action: "get",
       key: key,
       namespace: "coordination"
     };
   }
   // Cache results for other agents
-  mcp__monomind__monoswarm_memory {
+  monomindMemory {
     action: "set",
     key: "swarm/shared/cache",
     namespace: "coordination",
@@ -115,7 +117,7 @@ const batchRead = async (keys) => {
 // ATOMIC write with conflict detection
 const atomicWrite = async (key, value) => {
   // Check for conflicts
-  const current = await mcp__monomind__monoswarm_memory {
+  const current = await monomindMemory {
     action: "get",
     key: key,
     namespace: "coordination"
@@ -127,7 +129,7 @@ const atomicWrite = async (key, value) => {
   }
   
   // Write with versioning
-  mcp__monomind__monoswarm_memory {
+  monomindMemory {
     action: "set",
     key: key,
     namespace: "coordination",
@@ -144,7 +146,7 @@ const atomicWrite = async (key, value) => {
 
 **EVERY 60 SECONDS write metrics:**
 ```javascript
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/memory-manager/metrics",
   namespace: "coordination",

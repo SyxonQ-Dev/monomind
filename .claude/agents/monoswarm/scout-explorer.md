@@ -13,9 +13,11 @@ You are a Scout Explorer, the eyes and sensors of the hive mind. Your mission is
 ### 1. Reconnaissance Protocol
 **MANDATORY: Report all discoveries immediately to memory**
 
+`monomindMemory { action, key, namespace, value }` in the examples below is pseudo-code for the `monomind memory` CLI: `set` is `npx monomind memory store --namespace <ns> --key <key> --value <json>`, `get` is `npx monomind memory retrieve --namespace <ns> --key <key>`.
+
 ```javascript
 // DEPLOY - Signal exploration start
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/scout-[ID]/status",
   namespace: "coordination",
@@ -29,7 +31,7 @@ mcp__monomind__monoswarm_memory {
 }
 
 // DISCOVER - Report findings in real-time
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/shared/discovery-[timestamp]",
   namespace: "coordination",
@@ -50,7 +52,7 @@ mcp__monomind__monoswarm_memory {
 #### Codebase Scout
 ```javascript
 // Map codebase structure
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/shared/codebase-map",
   namespace: "coordination",
@@ -72,7 +74,7 @@ mcp__monomind__monoswarm_memory {
 #### Dependency Scout  
 ```javascript
 // Analyze external dependencies
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/shared/dependency-analysis",
   namespace: "coordination",
@@ -91,7 +93,7 @@ mcp__monomind__monoswarm_memory {
 #### Performance Scout
 ```javascript
 // Identify performance bottlenecks
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/shared/performance-bottlenecks",
   namespace: "coordination",
@@ -114,7 +116,7 @@ mcp__monomind__monoswarm_memory {
 ### 3. Threat Detection
 ```javascript
 // ALERT - Report threats immediately
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/shared/threat-alert",
   namespace: "coordination",
@@ -133,7 +135,7 @@ mcp__monomind__monoswarm_memory {
 ### 4. Opportunity Identification
 ```javascript
 // OPPORTUNITY - Report improvement possibilities
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/shared/opportunity",
   namespace: "coordination",
@@ -152,7 +154,7 @@ mcp__monomind__monoswarm_memory {
 ### 5. Environmental Scanning
 ```javascript
 // ENVIRONMENT - Monitor system state
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/scout-[ID]/environment",
   namespace: "coordination",
@@ -227,7 +229,7 @@ mcp__monomind__monoswarm_memory {
 ## Performance Metrics
 ```javascript
 // Track exploration efficiency
-mcp__monomind__monoswarm_memory {
+monomindMemory {
   action: "set",
   key: "swarm/scout-[ID]/metrics",
   namespace: "coordination",

@@ -9,16 +9,13 @@
 
 import { _resetOptionalPackageCache } from './claudemd-detect.js';
 import {
-  antiDriftConfig,
   autoStartProtocol,
   behavioralRules,
   codingPrinciples,
   concurrencyRules,
   executionRules,
   fileOrganization,
-  HONEST_MONOSWARM_SENTENCE,
   projectArchitecture,
-  swarmOrchestration,
 } from './claudemd-sections-core.js';
 import {
   agentPicking,
@@ -38,13 +35,13 @@ import {
 } from './claudemd-sections-reference.js';
 import type { ClaudeMdTemplate, InitOptions } from './types.js';
 
-export { _resetOptionalPackageCache, HONEST_MONOSWARM_SENTENCE };
+export { _resetOptionalPackageCache };
 
 // i-041/i-117 §4: MONOMIND_MEMORY_BACKEND and MONOMIND_MEMORY_PATH had no
 // `process.env` reader anywhere in the repo (grepped — see claudemd-truth.test.ts
 // and the developer report for the exact commands run). MONOMIND_CONFIG
-// (services/config-file-manager.ts) and MONOMIND_LOG_LEVEL
-// (mcp-tools/monoswarm-tools.ts) do; ANTHROPIC_API_KEY is read by the SDK,
+// (services/config-file-manager.ts) does; MONOMIND_LOG_LEVEL lost its only
+// src/ reader with monoswarm (#418); ANTHROPIC_API_KEY is read by the SDK,
 // not by us. Keep only vars with a real reader — a var nobody reads is the
 // same class of lie as a wrong count.
 function envVars(): string {
@@ -52,7 +49,6 @@ function envVars(): string {
 
 \`\`\`bash
 MONOMIND_CONFIG=./monomind.config.json
-MONOMIND_LOG_LEVEL=info
 ANTHROPIC_API_KEY=sk-ant-...
 \`\`\``;
 }
@@ -98,8 +94,6 @@ const TEMPLATE_SECTIONS: Record<ClaudeMdTemplate, Array<(opts: InitOptions) => s
     (_opts) => securityRulesLight(),
     concurrencyRules,
     pickingRules,
-    (_opts) => swarmOrchestration(),
-    (_opts) => antiDriftConfig(),
     (_opts) => autoStartProtocol(),
     executionRules,
     (_opts) => cliCommandsTable(),
@@ -121,8 +115,6 @@ const TEMPLATE_SECTIONS: Record<ClaudeMdTemplate, Array<(opts: InitOptions) => s
     buildAndTest,
     concurrencyRules,
     pickingRules,
-    (_opts) => swarmOrchestration(),
-    (_opts) => antiDriftConfig(),
     executionRules,
     (_opts) => securitySection(),
     (_opts) => cliCommandsTable(),
@@ -141,8 +133,6 @@ const TEMPLATE_SECTIONS: Record<ClaudeMdTemplate, Array<(opts: InitOptions) => s
     (_opts) => securityRulesLight(),
     concurrencyRules,
     pickingRules,
-    (_opts) => swarmOrchestration(),
-    (_opts) => antiDriftConfig(),
     executionRules,
     (_opts) => performanceSection(),
     (_opts) => cliCommandsTable(),

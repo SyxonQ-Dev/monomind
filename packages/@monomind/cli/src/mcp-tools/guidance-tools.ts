@@ -149,7 +149,7 @@ const guidanceCapabilities: MCPTool = {
       area: {
         type: 'string',
         description:
-          'Filter to a specific area (e.g., "monoswarm", "memory-knowledge"). Omit to list all areas.',
+          'Filter to a specific area (e.g., "agent-management", "memory-knowledge"). Omit to list all areas.',
       },
       format: {
         type: 'string',
@@ -285,7 +285,6 @@ const guidanceRecommend: MCPTool = {
                 message: 'No specific pattern matched. Here are general-purpose capabilities:',
                 suggestions: [
                   { area: 'agent-management', reason: 'Spawn individual agents for targeted work' },
-                  { area: 'monoswarm', reason: 'Use swarms for multi-file or complex tasks' },
                   { area: 'hooks-automation', reason: 'Use hooks for task routing and learning' },
                 ],
                 agents,
@@ -322,7 +321,6 @@ const guidanceRecommend: MCPTool = {
                     name: primaryWorkflow,
                     steps: template.steps,
                     agents: template.agents,
-                    topology: template.topology,
                   }
                 : undefined,
             },
@@ -370,8 +368,7 @@ const guidanceDiscover: MCPTool = {
 
 const guidanceWorkflow: MCPTool = {
   name: 'guidance_workflow',
-  description:
-    'Get a recommended workflow template for a task type. Includes steps, agents, and topology.',
+  description: 'Get a recommended workflow template for a task type. Includes steps and agents.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -418,12 +415,6 @@ const guidanceWorkflow: MCPTool = {
             {
               workflow: type,
               ...template,
-              swarmConfig: {
-                topology: template.topology,
-                maxAgents: Math.max(template.agents.length + 1, 4),
-                strategy: 'specialized',
-                consensus: 'majority',
-              },
             },
             null,
             2,

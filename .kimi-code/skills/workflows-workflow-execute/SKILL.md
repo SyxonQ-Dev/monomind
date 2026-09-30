@@ -6,8 +6,6 @@ type: flow
 
 # Workflow Execute
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
-
 Run a multi-stage, multi-agent workflow. The CLI has no `workflow` command; use one of the two real paths below.
 
 ## How to Invoke
@@ -35,10 +33,9 @@ Task({ subagent_type: "tester", prompt: "Write tests for the auth API contract .
 Task({ subagent_type: "reviewer", prompt: "Review the diff in src/auth/ ..." })
 ```
 
-Optionally record topology and roster, and track the task for routing:
+Optionally track the task for routing:
 
 ```bash
-npx monomind monoswarm init --topology hierarchical --max-agents 8
 npx monomind hooks pre-task --description "Build REST API with auth" --task-id api-auth
 # ... stages run ...
 npx monomind hooks post-task --task-id api-auth --success true
@@ -90,5 +87,4 @@ npx monomind org report api-dev          # outcome, per-role activity, tokens
 - `workflows:workflow-create` — Create a reusable workflow as an org config
 - `workflows:development` — Development workflow pattern
 - `workflows:research` — Research workflow pattern
-- `monoswarm:monoswarm` — Monoswarm coordination
 - `mastermind-runorg` — Start a saved org

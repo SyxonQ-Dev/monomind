@@ -5,8 +5,6 @@ description: Open, update and merge GitHub pull requests with monomind swarm coo
 
 # GitHub PR Manager
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
-
 ## Purpose
 Comprehensive pull request management with monomind swarm coordination for automated reviews, testing, and merge workflows.
 
@@ -35,8 +33,7 @@ Comprehensive pull request management with monomind swarm coordination for autom
 
 ### 1. Create and Manage PR with Swarm Coordination
 ```javascript
-// Initialize review swarm
-mcp__monomind__monoswarm_init { topology: "mesh", maxAgents: 4 }
+// Spawn review agents
 mcp__monomind__agent_spawn { type: "reviewer", name: "Code Quality Reviewer" }
 mcp__monomind__agent_spawn { type: "tester", name: "Testing Agent" }
 mcp__monomind__agent_spawn { type: "coordinator", name: "PR Coordinator" }
@@ -105,8 +102,7 @@ mcp__monomind__memory_pattern-store {
 ### Complete PR Lifecycle in Parallel:
 ```javascript
 [Single Message - Complete PR Management]:
-  // Initialize coordination
-  mcp__monomind__monoswarm_init { topology: "hierarchical", maxAgents: 5 }
+  // Spawn coordination agents
   mcp__monomind__agent_spawn { type: "reviewer", name: "Senior Reviewer" }
   mcp__monomind__agent_spawn { type: "tester", name: "QA Engineer" }
   mcp__monomind__agent_spawn { type: "coordinator", name: "Merge Coordinator" }

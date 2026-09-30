@@ -5,8 +5,6 @@ description: Workflow skills index — run multi-agent workflows with the Task t
 
 # Workflows Skills
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
-
 Skills for running multi-stage, multi-agent workflows in Monomind.
 
 The CLI has no `workflow` command. A workflow runs in one of two real ways:
@@ -64,7 +62,6 @@ npx monomind task create -t testing -d "Test auth API" --dependencies <task-id>
 There are no workflow MCP tools. Related real tools:
 
 ```javascript
-mcp__monomind__monoswarm_init({ topology: "hierarchical", maxAgents: 8, strategy: "specialized" })
 mcp__monomind__task_create({ /* see task_create schema */ })
 mcp__monomind__memory_pattern-store({ pattern: "JWT auth + Zod validation worked well", type: "workflow" })
 mcp__monomind__memory_pattern-search({ query: "auth workflow", topK: 5 })

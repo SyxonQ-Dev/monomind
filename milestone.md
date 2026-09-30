@@ -319,14 +319,14 @@ This is the MCP surface `@monomind/cli` exposes to Claude Code and other clients
 
 ## Monoswarm & Agent/Task/Session Stores (part of `@monoes/monomindcli`)
 
-The "monoswarm" coordination feature: 13 `monoswarm_*` MCP tools, the `agent_*`/`task_*`/`session_*` tools, and the matching CLI groups. Every tool here is JSON bookkeeping. `agent_spawn` starts no process, votes are tallied in-process, and no code links monoswarm state to Claude Code's Agent/Task tool.
+The `agent_*`/`task_*`/`session_*` tools and the matching CLI groups. Every tool here is JSON bookkeeping, and `agent_spawn` starts no process. The "monoswarm" coordination feature (13 `monoswarm_*` MCP tools and the `monoswarm` CLI group) was removed in 2.22.0 (#418), together with `autopilot`: it tallied votes in-process, and no code linked its state to Claude Code's Agent/Task tool.
 
 ### Achieved Milestones
-- 13 `monoswarm_*` tools over one `<dataRoot>/monoswarm/state.json` (`.git/monomind` in a git repo); honest "starts no process" descriptions; real vote math with deadlock detection, flip invalidation, duplicate check, divergence gate; HMAC-signed audit trail. `agent_spawn`/`task_*`/`session_*` persist JSON stores with corrupt-store refusal. 59 tests across 7 files.
+- (Removed in 2.22.0, #418) 13 `monoswarm_*` tools over one `<dataRoot>/monoswarm/state.json` (`.git/monomind` in a git repo); honest "starts no process" descriptions; real vote math with deadlock detection, flip invalidation, duplicate check, divergence gate; HMAC-signed audit trail. `agent_spawn`/`task_*`/`session_*` persist JSON stores with corrupt-store refusal. 59 tests across 7 files.
 
 ### Future Milestones
 - **[6/10]** (quick win) `session restore --latest` "restores" garbage. `session-tools.ts:271` sorts on an unguarded `savedAt` (undefined → NaN), and `:345` returns `restored: true` for any parseable JSON. Meanwhile the hook's `.claude/helpers/session.cjs:32` writes `current.json`, with a different schema and no `savedAt`, into the same `<dataRoot>/sessions`. Validate the shape, skip entries without `savedAt`, separate or namespace the directories, and return `restored: false` with a reason. (The generated CLAUDE.md does not tell sessions to run this.) {i-036}
-- Whether monoswarm's "MUST" stays is **Owner testing #8**; the code work sits in Init's CLAUDE.md group.
+- ~~Whether monoswarm's "MUST" stays~~ (Owner testing #8): resolved, monoswarm was removed in 2.22.0 (#418).
 
 ---
 

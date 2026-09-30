@@ -12,27 +12,6 @@ export async function displayStatus(
   output.writeln(`${output.bold('Monomind')} ${statusIcon}`);
   output.writeln();
 
-  // Swarm section. monoswarm_status never returns a health verdict, an uptime,
-  // or an active/idle breakdown — only `status`/`topology`/`agentCount` — so
-  // those are the only fields shown here.
-  output.writeln(output.bold('Swarm'));
-  if (status.swarm.id) {
-    output.printTable({
-      columns: [
-        { key: 'property', header: 'Property', width: 15 },
-        { key: 'value', header: 'Value', width: 30 },
-      ],
-      data: [
-        { property: 'ID', value: status.swarm.id },
-        { property: 'Topology', value: status.swarm.topology },
-        { property: 'Status', value: status.swarm.status },
-      ],
-    });
-  } else {
-    output.printInfo('  No active swarm');
-  }
-  output.writeln();
-
   // Agents section
   output.writeln(output.bold('Agents'));
   output.printTable({
@@ -40,7 +19,7 @@ export async function displayStatus(
       { key: 'status', header: 'Status', width: 12 },
       { key: 'count', header: 'Count', width: 10, align: 'right' },
     ],
-    data: [{ status: output.bold('Total'), count: status.swarm.agents.total }],
+    data: [{ status: output.bold('Total'), count: status.agents.total }],
   });
   output.writeln();
 
