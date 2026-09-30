@@ -7,7 +7,7 @@ default_mode: auto
 
 # Mastermind Research Domain
 
-This skill is invoked by `mastermind:master` or directly via `/mastermind:research`.
+This skill is invoked directly via `/mastermind:research`, or by `/mastermind:master` (pack extras — `monomind packs add extras`).
 
 ---
 

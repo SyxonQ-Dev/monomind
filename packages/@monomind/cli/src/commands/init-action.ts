@@ -539,7 +539,7 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
       `     ${output.highlight('/mastermind:help')}   ${output.dim('# see all available slash commands')}`,
     );
     output.writeln(
-      `     ${output.highlight('/mastermind:understand')}   ${output.dim('# analyze your project with an LLM')}`,
+      `     ${output.highlight('/mastermind:plan')}   ${output.dim('# plan a change before touching code')}`,
     );
     output.writeln('');
     output.writeln(

@@ -1,6 +1,6 @@
 ---
 name: monolean
-description: "Forces the simplest solution that works: YAGNI, stdlib and native features before dependencies. Levels lite/full/ultra. Use for \"be lean\", \"simplest\", over-engineering."
+description: "Forces the simplest solution that works: YAGNI, stdlib before dependencies. Levels lite/full/ultra. Use for \"lean mode\", \"yagni\", \"do less\", \"minimal solution\", or over-engineering."
 argument-hint: "[lite|full|ultra]"
 license: MIT
 ---

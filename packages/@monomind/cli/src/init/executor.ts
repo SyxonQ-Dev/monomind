@@ -29,7 +29,7 @@ import { finalizeGuard, guardFor, pruneBackups } from './file-guard.js';
 import { recordPacks } from './init-manifest.js';
 import { initProjectMemory, seedProjectMemory } from './init-memory.js';
 import { initKnowledgeGraph, runDoctorFix } from './init-post-steps.js';
-import { installedPacks } from './pack-install.js';
+import { installedPacks, packsOnDisk } from './pack-install.js';
 import { PACK_NAMES } from './packs.js';
 import { wantsAgentsDirs, wantsGeminiDirs } from './platform-dirs.js';
 import { buildProjectIndexes } from './project-indexes.js';
@@ -274,13 +274,15 @@ export async function executeInit(options: InitOptions): Promise<InitResult> {
     }
 
     // Remember which opt-in packs the project has, for `packs list` and
-    // `init upgrade --add-missing` (GH #411). Never shrinks here.
-    if (options.components.skills || options.components.commands || options.components.agents) {
+    // `init upgrade --add-missing` (GH #411): only packs this run really put
+    // on disk (`--packs specialists` with agents off copies nothing). Never
+    // shrinks here.
+    const { components } = options;
+    if (components.skills || components.commands || components.agents) {
       const all = options.skills.all || options.commands.all || options.agents.all;
-      recordPacks(
-        targetDir,
-        all ? PACK_NAMES : [...installedPacks(targetDir), ...(options.packs ?? [])],
-      );
+      const asked = all ? PACK_NAMES : (options.packs ?? []);
+      const copied = packsOnDisk(targetDir, asked, components);
+      recordPacks(targetDir, [...installedPacks(targetDir), ...copied]);
     }
 
     // Generate helpers

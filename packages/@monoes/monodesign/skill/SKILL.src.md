@@ -1,6 +1,6 @@
 ---
 name: monodesign
-description: "Design, redesign, critique, audit or polish a frontend UI: layout, typography, color, motion, accessibility, UX copy, design systems, design images. Not for non-UI tasks."
+description: "Design, redesign, critique, audit or polish a frontend UI: landing pages, dashboards, components, forms; make it bolder or quieter; type, color, motion, a11y, design systems. Not for non-UI."
 version: 2.0.0
 argument-hint: "[{{command_hint}}] [target]"
 user-invocable: true

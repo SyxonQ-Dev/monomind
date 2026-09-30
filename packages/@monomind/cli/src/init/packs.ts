@@ -58,6 +58,7 @@ export const CORE_PACK: AssetPack = {
     'mastermind-delegation',
     'monolean',
     'monodesign',
+    'monomotion',
     'stop-slop',
     'verification-quality',
     'hooks-automation',
@@ -91,6 +92,7 @@ export const CORE_PACK: AssetPack = {
     'core',
     'architecture',
     'design',
+    'schemas', // JSON output schemas, no agents
     'engineering/engineering-security-engineer.md',
     'engineering/engineering-frontend-developer.md',
     'engineering/engineering-software-architect.md',
@@ -293,7 +295,6 @@ export const OPTIONAL_PACKS: readonly AssetPack[] = [
       'pair-programming',
       'skill-builder',
       'specialagent',
-      'monomotion',
       'monolean-audit',
       'monolean-debt',
       'monolean-help',

@@ -77,9 +77,11 @@ describe('the default init listing', () => {
 });
 
 describe('packs cover what ships', () => {
+  // Every file, not only .md: a shipped file no pack covers (agents/schemas/*.json)
+  // is retired from projects that had it the next time init runs.
   const files = (dir: string): string[] =>
     readdirSync(dir, { recursive: true, encoding: 'utf8' })
-      .filter((f) => f.endsWith('.md') && statSync(join(dir, f)).isFile())
+      .filter((f) => !f.split(/[\\/]/).pop()?.startsWith('._') && statSync(join(dir, f)).isFile())
       .map((f) => f.split('\\').join('/'));
 
   /** Every file an entry covers, relative to the kind's directory. */

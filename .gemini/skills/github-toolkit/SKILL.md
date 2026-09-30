@@ -12,17 +12,17 @@ through monomind's MCP GitHub tools when running inside a swarm.
 ## Core operations
 
 - **Issues** — triage, label, and track via `gh issue` or `mcp__monomind__github_issue_track`.
-  See `/github:issue-tracker` (github pack).
+  See `/github:issue-tracker` (pack github — `monomind packs add github`).
 - **Pull requests** — create, review, and merge via `gh pr` or `mcp__monomind__github_pr_manage`.
-  See `/github:pr-manager` (github pack).
+  See `/github:pr-manager` (pack github — `monomind packs add github`).
 - **Releases** — version bump, changelog, tag, and publish coordination.
-  See `/github:release-manager` (github pack).
+  See `/github:release-manager` (pack github — `monomind packs add github`).
 - **Repo structure** — multi-repo layout and package boundary decisions.
-  See `/github:repo-architect` (github pack).
+  See `/github:repo-architect` (pack github — `monomind packs add github`).
 - **Multi-package sync** — version alignment and dependency sync across a monorepo.
-  See `/github:sync-coordinator` (github pack).
+  See `/github:sync-coordinator` (pack github — `monomind packs add github`).
 - **Integration modes overview** — which mode to use for which workflow.
-  See `/github:github-modes` (github pack).
+  See `/github:github-modes` (pack github — `monomind packs add github`).
 
 ## Quick reference
 
