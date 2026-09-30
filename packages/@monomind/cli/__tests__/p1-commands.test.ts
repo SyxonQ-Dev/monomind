@@ -367,6 +367,8 @@ vi.mock('../src/output.js', () => ({
     printJson: vi.fn(),
     printList: vi.fn(),
     printBox: vi.fn(),
+    writeErrorln: vi.fn(),
+    isQuiet: () => false,
     createSpinner: vi.fn(() => ({
       start: vi.fn(),
       succeed: vi.fn(),
