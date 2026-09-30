@@ -21,6 +21,7 @@
 
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
+import { protectedClaudeBinary } from './claude-sdk.js';
 
 /** `~/.monomind` entries a role's own `monomind` commands write: browser
  *  automation state, the embedding-model cache, per-project memory, update
@@ -198,6 +199,10 @@ function protectedCandidates(ctx: ProtectedCtx): string[] {
     join(mmHome, 'enable-terminal.json'),
     ...monomindEntries,
     ...HOME_OPERATOR_EXEC.map((p) => join(ctx.home, p)),
+    // #522: the MONOMIND_CLAUDE_PATH binary (its real path), which the
+    // daemons run unsandboxed. The mask and the SDK sandbox also pin the
+    // directories above it (claude-sdk.ts's protectedClaudeBinary().dirs).
+    ...[protectedClaudeBinary(ctx.env, ctx.home)?.file].filter((f): f is string => !!f),
   ];
   return [...new Set(paths)];
 }

@@ -7,9 +7,18 @@
  * mask, with its parent a mount point so it cannot be renamed aside.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   authorityMaskArgs,
@@ -18,6 +27,8 @@ import {
 } from '../../src/orgrt/authority-mask.js';
 import { fileToolDenied, HOME_DENY_WRITE } from '../../src/orgrt/file-roots.js';
 import { gitCommonDir, prepareGitGuard } from '../../src/orgrt/git-guard.js';
+import { isOperatorProtected } from '../../src/orgrt/operator-protected-paths.js';
+import { realPath } from '../../src/orgrt/policy-paths.js';
 import { buildClaudeRestrictions } from '../../src/orgrt/role-sandbox.js';
 
 const scratch = (p: string) => realpathSync(mkdtempSync(join(tmpdir(), p)));
@@ -93,4 +104,85 @@ describe.runIf(authorityMaskAvailability().available)('inside the real mask', ()
     );
     expect(spawnSync(cmd, argv, { encoding: 'utf8' }).stderr).toMatch(/Read-only file system/);
   });
+});
+
+/** #522 review: an operator-chosen Claude Code under $HOME, which the
+ *  daemons run unsandboxed, is read-only to roles and cannot be moved aside. */
+function claudeHome() {
+  const home = scratch('dp-home-');
+  const file = join(home, '.local', 'share', 'claude', 'versions', '2.1.300');
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, '\x7fELF', { mode: 0o755 });
+  mkdirSync(join(home, '.local', 'bin'));
+  symlinkSync(file, join(home, '.local', 'bin', 'claude'));
+  const env = { MONOMIND_CLAUDE_PATH: join(home, '.local', 'bin', 'claude') };
+  const dirs = ['.local', '.local/share', '.local/share/claude', '.local/share/claude/versions'];
+  return { home, file, env, dirs: dirs.map((d) => join(home, d)) };
+}
+
+describe('the MONOMIND_CLAUDE_PATH binary is write-denied to roles', () => {
+  it('it is an operator-protected path, which the file tools refuse to write', () => {
+    const { home, file, env } = claudeHome();
+    expect(isOperatorProtected(file, { home, env }, realPath)).toBe(file);
+  });
+
+  it('the SDK sandbox denies it and pins every directory under $HOME on the way', () => {
+    const { home, file, env, dirs } = claudeHome();
+    const base = scratch('dp-base-');
+    const repo = join(base, 'repo');
+    spawnSync('git', ['init', '-q', repo]);
+    const guard = prepareGitGuard({
+      level: 'read',
+      stateDir: join(base, 'guard'),
+      protectedGitDirs: [gitCommonDir(repo)!],
+    })!;
+    const sb = buildClaudeRestrictions(
+      guard,
+      undefined,
+      { cwd: repo, orgRoot: base, home, tmp: '/tmp', env },
+      true,
+    ).sandbox as { filesystem: { denyWrite: string[]; allowWrite: string[] } };
+    expect(sb.filesystem.denyWrite).toContain(file);
+    expect(sb.filesystem.allowWrite).toEqual(expect.arrayContaining(dirs));
+  });
+
+  it('the mask pins those directories first, binds the file read-only, and never ~/.monomind read-write', () => {
+    const { home, file, env, dirs } = claudeHome();
+    const root = scratch('dp-root-');
+    const args = authorityMaskArgs({ home, env, roots: [root], orgRoot: root });
+    expect(args.slice(3, 3 + 3 * dirs.length)).toEqual(dirs.flatMap((d) => ['--bind', d, d]));
+    const at = args.indexOf(file);
+    expect(args.slice(at - 1, at + 2)).toEqual(['--ro-bind', file, file]);
+    // With the other read-only binds: after the org binds, before the tmpfs.
+    expect(at).toBeGreaterThan(args.lastIndexOf(join(home, '.monomind')));
+    const tmpfs = args.indexOf('--tmpfs');
+    if (tmpfs >= 0) expect(at).toBeLessThan(tmpfs);
+    const mm = join(home, '.monomind');
+    for (let i = 0; i < args.length; i++)
+      if (args[i] === '--bind') expect(args[i + 2]).not.toBe(mm);
+  });
+
+  it.runIf(authorityMaskAvailability().available)(
+    'inside the real mask a role can neither overwrite it nor move a directory above it aside',
+    () => {
+      const { home, file, env } = claudeHome();
+      const root = scratch('dp-root-');
+      const v = dirname(file);
+      const [cmd, argv] = maskedCommand(
+        authorityMaskArgs({ home, env, roots: [root], orgRoot: root }),
+        'bash',
+        [
+          '-c',
+          `echo evil > ${file} 2>/dev/null && echo WROTE; ` +
+            `mv ${v} ${v}-aside 2>/dev/null && echo MOVED1; ` +
+            `mv ${dirname(v)} ${dirname(v)}-aside 2>/dev/null && echo MOVED2; ` +
+            `mv ${home}/.local ${home}/.local-aside 2>/dev/null && echo MOVED3; ` +
+            `touch ${home}/.monomind/newfile 2>/dev/null && echo PLANTED; true`,
+        ],
+      );
+      expect(spawnSync(cmd, argv, { encoding: 'utf8' }).stdout).not.toMatch(/WROTE|MOVED|PLANTED/);
+      expect(readFileSync(file, 'utf8')).toBe('\x7fELF');
+      expect(existsSync(join(home, '.monomind', 'newfile'))).toBe(false);
+    },
+  );
 });
