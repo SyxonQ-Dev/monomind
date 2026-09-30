@@ -496,6 +496,22 @@ describe('Start Command', () => {
       expect(callMCPTool).not.toHaveBeenCalled();
     });
 
+    it.each([['--topology'], ['-t']])('warns that %s was removed (#418)', async (flag) => {
+      const parser = new CommandParser();
+      parser.registerCommand(startCommand);
+      const parsed = parser.parse(['start', flag, 'mesh']);
+
+      const result = await startCommand.action!({ ...ctx, flags: parsed.flags });
+
+      expect(result.success).toBe(true);
+      expect(output.printWarning).toHaveBeenCalledWith(expect.stringContaining('was removed in 2.22.0'));
+    });
+
+    it('does not warn about --topology when it is not passed', async () => {
+      await startCommand.action!(ctx);
+      expect(output.printWarning).not.toHaveBeenCalled();
+    });
+
     it('should honour the swarm section init writes to config.yaml (#509)', async () => {
       vi.mocked(fs.readFileSync).mockReturnValue(
         'version: "3.0.0"\n\nswarm:\n  topology: mesh\n  maxAgents: 4\n',

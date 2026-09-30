@@ -107,6 +107,13 @@ const startAction = async (ctx: CommandContext): Promise<CommandResult> => {
   const daemon = ctx.flags.daemon as boolean;
   const cwd = ctx.cwd;
 
+  // #418: --topology only set the recorded monoswarm state, removed in 2.22.0.
+  if (ctx.flags.topology !== undefined || ctx.flags.t !== undefined) {
+    output.printWarning(
+      '--topology/-t was removed in 2.22.0 with monoswarm; it is ignored. The topology shown comes from .monomind/config.yaml.',
+    );
+  }
+
   // Check initialization
   if (!isInitialized(cwd)) {
     output.printError('MonoMind is not initialized in this directory');
