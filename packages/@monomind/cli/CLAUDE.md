@@ -8,6 +8,8 @@
 
 ## Automatic Monoswarm Orchestration
 
+> **Deprecated:** `monoswarm` (the CLI command and the `monoswarm_*` MCP tools) is deprecated and removed in 2.21.0 (#418): it records state and starts no agents. Don't initialize a monoswarm; spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
+
 For complex work, spawn agents via the Task tool in the same message so they run concurrently — Task tool agents do the actual work.
 
 Coordination state (topology, roster, votes) lives in
@@ -22,9 +24,9 @@ table (`majority`/`supermajority`/`unanimous`/`threshold`).
 - Never poll TaskOutput or check monoswarm status; don't ask "should I check?" — wait for results
 - When agent results arrive, review ALL results before proceeding
 
-### Anti-Drift Config (PREFERRED)
+### Anti-Drift Config (deprecated — removed in 2.21.0)
 
-**Use this to prevent agent drift:**
+These commands only record a state file; they start no agents and change no behaviour:
 
 ```bash
 # Small teams (6-8 agents) - use hierarchical for tight control
@@ -176,7 +178,7 @@ emitted for new projects by `src/init/claudemd-generator.ts` stops at code 9.
 | `init`      | 5           | Project initialization with wizard, presets, skills, hooks               | Working         |
 | `ui`        | 0           | Start the Neural Control Room dashboard (`--no-open`, `--port`; alias `dashboard`) | Working         |
 | `agent`     | 7           | Agent lifecycle (spawn, list, status, stop, metrics, pool, health)       | Working — runs in-process, no MCP server needed |
-| `monoswarm` | 6           | Multi-agent coordination and orchestration                               | Working — runs in-process, no MCP server needed |
+| `monoswarm` | 6           | Deprecated — records state, starts no agents; removed in 2.21.0          | Deprecated (#418) |
 | `memory`    | 12          | Memory store (SQLite/JSON; optional vector search)                        | Working         |
 | `mcp`       | 9           | MCP server management and tool execution                                 | Working         |
 | `task`      | 5           | Task creation, assignment, and lifecycle                                 | Working         |
@@ -210,8 +212,8 @@ npx monomind@latest init --wizard
 # Spawn an agent
 npx monomind@latest agent spawn -t coder --name my-coder
 
-# Initialize monoswarm
-npx monomind@latest monoswarm init --v1-mode
+# Run an agent org (monoswarm is deprecated and removed in 2.21.0)
+npx monomind@latest org run <org> --task "..."
 
 # Search memory (local SQLite + local HF-embeddings; keyword fallback. HNSW ANN
 # index is used automatically above 5,000 entries; --build-hnsw builds it early)
@@ -461,8 +463,7 @@ npx monomind@latest doctor --fix
 
 ### CLI Tools Handle Coordination (via Bash):
 
-- **Monoswarm init**: `npx monomind@latest monoswarm init --topology <type>`
-- **Monoswarm status**: `npx monomind@latest monoswarm status`
+- **Monoswarm init/status** (deprecated, removed in 2.21.0 — records state, starts no agents): `npx monomind@latest monoswarm init --topology <type>`, `npx monomind@latest monoswarm status`
 - **Agent spawn**: `npx monomind@latest agent spawn -t <type> --name <name>`
 - **Memory store**: `npx monomind@latest memory store --key "mykey" --value "myvalue" --namespace patterns`
 - **Memory search**: `npx monomind@latest memory search --query "search terms"`

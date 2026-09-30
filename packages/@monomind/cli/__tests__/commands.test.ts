@@ -198,8 +198,12 @@ vi.mock('../src/output.js', () => ({
     printWarning: vi.fn(),
     printTable: vi.fn(),
     printJson: vi.fn(),
+    printDocument: vi.fn(),
     printList: vi.fn(),
     printBox: vi.fn(),
+    writeErrorln: vi.fn(),
+    isQuiet: () => false,
+    reserveStdout: (_reserve: boolean, fn: () => Promise<unknown>) => fn(),
     createSpinner: vi.fn(() => ({
       start: vi.fn(),
       succeed: vi.fn(),

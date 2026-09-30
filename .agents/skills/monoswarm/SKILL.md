@@ -1,9 +1,11 @@
 ---
 name: monoswarm
-description: "Coordinate in-process multi-agent work: topology, agent lifecycle, shared memory and vote-based consensus, for decomposable tasks or decisions that need a recorded vote."
+description: Deprecated, removed in 2.21.0 — records monoswarm topology, roster, shared memory and votes in a state file; starts no agents. Use the Task tool or `monomind org run` instead.
 ---
 
 # Monoswarm
+
+> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.21.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
 
 ## What This Skill Does
 

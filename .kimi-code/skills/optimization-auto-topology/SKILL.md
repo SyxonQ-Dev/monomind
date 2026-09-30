@@ -1,10 +1,12 @@
 ---
 name: optimization-auto-topology
-description: Automatically select the optimal monoswarm topology based on task complexity — use pre-task hook recommendations, monoswarm init flags, and the performance_optimize MCP tool
+description: Deprecated, removed in 2.21.0 — select a monoswarm topology from task complexity with pre-task hook recommendations, monoswarm init flags and the performance_optimize MCP tool
 type: flow
 ---
 
 # Auto Topology Selection
+
+> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.21.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
 
 Automatically select the optimal monoswarm topology based on task complexity so you don't have to configure it manually.
 

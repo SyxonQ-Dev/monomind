@@ -6,6 +6,8 @@ type: flow
 
 # GitHub Release Manager
 
+> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.21.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
+
 ## Purpose
 
 Automated release coordination and deployment with Monomind swarm orchestration for seamless version management, testing, and deployment across multiple packages.
