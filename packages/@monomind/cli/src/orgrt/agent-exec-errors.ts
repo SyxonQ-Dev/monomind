@@ -41,11 +41,31 @@ export interface RateLimitHit {
   vendorRetries?: number;
 }
 
+/** A credential that was never set: pi's "No API key found for …", the
+ *  runners' own "missing API key: set X" (#532), and hermes's "No inference
+ *  provider configured" / "no API keys or providers found". §3.4 `auth`. */
+const MISSING_KEY_RE =
+  /\bmissing api key\b|\bno api key (?:found|configured)\b|\bno inference provider configured\b|\bno api keys or providers found\b/i;
+
+/** Runners put text they did not write themselves (a CLI's stdout, the
+ *  model's final words) after this marker in an error message.
+ *  execErrorCode classifies only what comes before it, so model output can
+ *  never turn a failure into auth, quota or a rate limit. */
+export const UNCLASSIFIED_MARKER = '\n[output below is not classified]\n';
+
+/** The part of an error message execErrorCode classifies. */
+export function classifiedText(message: string): string {
+  const i = message.indexOf(UNCLASSIFIED_MARKER);
+  return i === -1 ? message : message.slice(0, i);
+}
+
 /** §3.4 code for a runner failure's text (anything but a missing binary). */
 export function execErrorCode(
   err: unknown,
-  message: string,
+  fullMessage: string,
 ): { code: ExecErrorCode; rateLimit?: RateLimitHit } {
+  const message = classifiedText(fullMessage);
+  if (MISSING_KEY_RE.test(message)) return { code: 'auth' };
   const cls = classifyStderr(message);
   if (!cls.fatal) return { code: 'runner-error' };
   if (/auth/i.test(cls.label ?? '')) return { code: 'auth' };
