@@ -946,6 +946,20 @@ function isPidAlive(pid) {
   }
 }
 
+// #573: a runtime.json pid counts only while it is still the process that
+// wrote the record — its recorded start time (pidStart, Linux) must match.
+function isRecordedPidAlive(pid, pidStart) {
+  if (!isPidAlive(pid)) return false;
+  if (typeof pidStart !== 'string' || !pidStart.startsWith('linux:')) return true;
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const start = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+    return pidStart.endsWith(`:${start}`);
+  } catch {
+    return true;
+  }
+}
+
 // Active org runs — scan .monomind/orgs/*/runtime.json (Org Runtime v2)
 // and fallback to .monomind/orgs/*/runs/*.jsonl / <runId>/bus.jsonl.
 function getActiveOrgs() {
@@ -976,7 +990,7 @@ function getActiveOrgs() {
           const age = stat ? now - stat.mtimeMs : 0;
           const data = readJSON(runtimePath);
           if (data && typeof data === 'object') {
-            const isRunning = data.status === 'running' && (typeof data.pid === 'number' ? isPidAlive(data.pid) : age < STALE_MS);
+            const isRunning = data.status === 'running' && (typeof data.pid === 'number' ? isRecordedPidAlive(data.pid, data.pidStart) : age < STALE_MS);
             if (isRunning || age < STALE_MS) {
               active.push({
                 name: orgName,

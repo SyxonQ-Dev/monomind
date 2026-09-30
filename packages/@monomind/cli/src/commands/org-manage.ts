@@ -6,6 +6,7 @@
 import { existsSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { migrateOrgFile } from '../orgrt/migrate.js';
+import { recordedPidLiveness } from '../orgrt/run-liveness.js';
 import { ORG_DIR } from '../orgrt/types.js';
 import { output } from '../output.js';
 import type { CommandContext, CommandResult } from '../types.js';
@@ -20,20 +21,32 @@ const log = (text: string): void => {
   console.log(text);
 };
 
-/** True when runtime.json records a running org whose recorded pid is still alive. */
+/** True when runtime.json records a running org whose recorded pid is still
+ *  its process (#573: alive, and not reused by another process). */
 const isOrgRunning = (cwd: string, name: string): boolean => {
   try {
     const rt = JSON.parse(readFileSync(join(cwd, ORG_DIR, name, 'runtime.json'), 'utf8')) as {
       status?: string;
       pid?: number;
+      pidStart?: string;
     };
     if (rt.status !== 'running' || !rt.pid) return false;
-    process.kill(rt.pid, 0); // throws if the pid is gone (crashed daemon left a stale file)
-    return true;
+    return recordedPidLiveness(rt.pid, rt.pidStart) === 'alive';
   } catch {
     return false;
   }
 };
+
+/** runtime.json's status as `org list` reports it: a 'running' record whose
+ *  pid is gone or reused is a crashed daemon, not a running org (#573). */
+const listedStatus = (rt: {
+  status?: string;
+  pid?: number;
+  pidStart?: string;
+}): string | undefined =>
+  rt.status === 'running' && rt.pid && recordedPidLiveness(rt.pid, rt.pidStart) !== 'alive'
+    ? 'crashed'
+    : rt.status;
 
 export const testLoopAction = async (ctx: CommandContext): Promise<CommandResult> => {
   // non-literal specifier: test-loop.ts lands in a later task; keeps tsc clean until then
@@ -84,20 +97,9 @@ export const listAction = async (ctx: CommandContext): Promise<CommandResult> =>
         };
         let status = 'never run';
         try {
-          const rt = JSON.parse(readFileSync(join(orgsDir, stem, 'runtime.json'), 'utf8')) as {
-            status?: string;
-            pid?: number;
-          };
-          status = rt.status ?? status;
-          // Same liveness rule as `org status`: a 'running' record with a dead
-          // pid is a crashed daemon, not a running org — list must not disagree.
-          if (status === 'running' && rt.pid) {
-            try {
-              process.kill(rt.pid, 0);
-            } catch {
-              status = 'crashed';
-            }
-          }
+          const rt = JSON.parse(readFileSync(join(orgsDir, stem, 'runtime.json'), 'utf8'));
+          // Same liveness rule as `org status` — list must not disagree.
+          status = listedStatus(rt) ?? status;
         } catch {
           /* no runtime state yet */
         }
@@ -129,20 +131,9 @@ export const listAction = async (ctx: CommandContext): Promise<CommandResult> =>
       const sched = def.schedule ? `every ${def.schedule}` : 'manual';
       let status = 'never run';
       try {
-        const rt = JSON.parse(readFileSync(join(orgsDir, stem, 'runtime.json'), 'utf8')) as {
-          status?: string;
-          pid?: number;
-        };
-        status = rt.status ?? status;
-        // Same liveness rule as `org status`: a 'running' record with a dead
-        // pid is a crashed daemon, not a running org — list must not disagree.
-        if (status === 'running' && rt.pid) {
-          try {
-            process.kill(rt.pid, 0);
-          } catch {
-            status = 'crashed';
-          }
-        }
+        const rt = JSON.parse(readFileSync(join(orgsDir, stem, 'runtime.json'), 'utf8'));
+        // Same liveness rule as `org status` — list must not disagree.
+        status = listedStatus(rt) ?? status;
       } catch {
         /* no runtime state yet */
       }
@@ -246,7 +237,7 @@ const clearStaleRuntime = (
     } => {
   const rtPath = join(cwd, ORG_DIR, name, 'runtime.json');
   if (!existsSync(rtPath)) return { cleared: false, reason: 'absent' };
-  let rt: { status?: string; run?: string; pid?: number };
+  let rt: { status?: string; run?: string; pid?: number; pidStart?: string };
   try {
     rt = JSON.parse(readFileSync(rtPath, 'utf8'));
   } catch (err) {
@@ -258,14 +249,10 @@ const clearStaleRuntime = (
   }
   if (rt.status !== 'running' && rt.status !== 'crashed')
     return { cleared: false, reason: 'not-running' };
-  if (rt.status === 'running' && rt.pid) {
-    try {
-      process.kill(rt.pid, 0);
-      return { cleared: false, reason: 'alive', detail: String(rt.pid) };
-    } catch {
-      /* pid is gone — this is exactly the stale case mark-complete exists for */
-    }
-  }
+  // A pid that is gone, or now another process's (#573), is exactly the
+  // stale case mark-complete exists for.
+  if (rt.status === 'running' && rt.pid && recordedPidLiveness(rt.pid, rt.pidStart) === 'alive')
+    return { cleared: false, reason: 'alive', detail: String(rt.pid) };
   // Same shape stopOrg's persistState() writes, so every reader (org status,
   // isOrgRunning, the mastermind-org* skills' jq checks) sees a stopped org.
   writeFileSync(

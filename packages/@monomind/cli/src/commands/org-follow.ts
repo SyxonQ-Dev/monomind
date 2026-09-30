@@ -8,6 +8,7 @@
 import { closeSync, existsSync, fstatSync, openSync, readFileSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 import { type BusEvent, ORG_DIR } from '../orgrt/types.js';
+import { classifyRun } from './org-control.js';
 
 export const FOLLOW_INTERVAL_MS = 500;
 
@@ -69,13 +70,21 @@ export function createLineTail(file: string): () => string[] {
  *  newer run (or absent), the run's own terminal `org-stopped` status event —
  *  which every stop path emits — is the signal. */
 export function isRunClosed(cwd: string, org: string, run: string, stopSeen: boolean): boolean {
-  let rt: { status?: unknown; run?: unknown } | null = null;
+  let rt: { status?: unknown; run?: unknown; pid?: number; pidStart?: string } | null = null;
   try {
     rt = JSON.parse(readFileSync(join(cwd, ORG_DIR, org, 'runtime.json'), 'utf8'));
   } catch {
     rt = null;
   }
-  if (rt?.run === run) return rt.status === 'stopped' || rt.status === 'crashed';
+  if (rt?.run === run) {
+    if (rt.status === 'stopped' || rt.status === 'crashed') return true;
+    // #573: a 'running' record whose run is dead gains no more events either.
+    return (
+      rt.status === 'running' &&
+      classifyRun(cwd, org, { status: 'running', run, pid: rt.pid, pidStart: rt.pidStart })
+        .state === 'crashed'
+    );
+  }
   return stopSeen;
 }
 

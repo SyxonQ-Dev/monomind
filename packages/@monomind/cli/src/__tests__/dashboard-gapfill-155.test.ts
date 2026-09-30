@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { recordedPidLiveness } from '../orgrt/run-liveness.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER_SRC = readFileSync(join(__dirname, '../ui/server.mjs'), 'utf-8');
@@ -35,7 +36,8 @@ describe("dashboard gap-fill reads runtime.json's authoritative status (#155 fol
   });
 
   it('treats a "running" record with a dead pid as not-active too, mirroring org.ts\'s statusAction', () => {
-    expect(SERVER_SRC).toMatch(/process\.kill\(_gfRt\.pid, 0\)/);
+    // #573: alive and still the process that wrote the record (pid reuse).
+    expect(SERVER_SRC).toMatch(/recordedPidLiveness\(_gfRt\.pid, _gfRt\.pidStart\) === 'alive'/);
   });
 
   // The gap-fill's org-directory scan is duplicated below rather than
@@ -57,11 +59,7 @@ describe("dashboard gap-fill reads runtime.json's authoritative status (#155 fol
         if (!runId) continue;
         let active = rt.status === 'running';
         if (active && typeof rt.pid === 'number') {
-          try {
-            process.kill(rt.pid, 0);
-          } catch {
-            active = false;
-          }
+          active = recordedPidLiveness(rt.pid, rt.pidStart) === 'alive';
         }
         if (active) activeOrgRuns.set(org, runId);
       } catch {
