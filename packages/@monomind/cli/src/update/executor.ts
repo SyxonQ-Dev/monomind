@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { npmCommand } from '../utils/npm-command.js';
+import { npmInvocation } from '../utils/npm-command.js';
 import type { UpdateCheckResult } from './checker.js';
 import { type ValidationResult, validateUpdate } from './validator.js';
 
@@ -161,13 +161,9 @@ export async function executeUpdate(
     }
     // Install globally — -g is critical: without it npm installs into the
     // user's cwd, silently modifying their project package.json (#83).
-    await execFileAsync(npmCommand(), [
-      'install',
-      '-g',
-      `${pkg}@${version}`,
-      '--save-exact',
-      '--ignore-scripts',
-    ]);
+    await execFileAsync(
+      ...npmInvocation(['install', '-g', `${pkg}@${version}`, '--save-exact', '--ignore-scripts']),
+    );
 
     // Record successful update
     recordUpdate({
@@ -265,13 +261,9 @@ export async function rollbackUpdate(
       throw new Error(`Invalid version: ${version}`);
     }
     // Install globally — prevents modifying the user's project (#83).
-    await execFileAsync(npmCommand(), [
-      'install',
-      '-g',
-      `${pkg}@${version}`,
-      '--save-exact',
-      '--ignore-scripts',
-    ]);
+    await execFileAsync(
+      ...npmInvocation(['install', '-g', `${pkg}@${version}`, '--save-exact', '--ignore-scripts']),
+    );
 
     // Record the rollback
     recordUpdate({

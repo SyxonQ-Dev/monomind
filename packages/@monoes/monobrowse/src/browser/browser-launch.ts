@@ -8,11 +8,11 @@ import {
   browserIdOf,
   chromeIdentity,
   fetchBrowserWebSocketUrl,
-  findChrome,
   isChromeIdentity,
   isPortOpen,
   isTcpPortOpen,
   readDevToolsActivePort,
+  resolveChrome,
 } from './browser-discovery.js';
 import { reapIdleLaunchedBrowser } from './browser-lifecycle.js';
 import { launchedPids, launchedUserDataDirs, ownedUserDataDirPorts } from './browser-state.js';
@@ -179,7 +179,7 @@ export async function launchBrowser(config: BrowserConfig = {}): Promise<number>
  * doomed pid there. It also covers Chrome's [::1] fallback described above.
  */
 async function launchOnFreePort(config: BrowserConfig, port: number): Promise<number> {
-  const chromePath = findChrome(config.executablePath);
+  const chromePath = await resolveChrome(config.executablePath);
   // Unique per launch, not just per port and pid: two concurrent launches
   // that both probe the same candidate port as free (the race this function
   // exists to survive — see the retry-on-collision caller above) would

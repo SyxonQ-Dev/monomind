@@ -2,6 +2,7 @@
 import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
+import { protectableDepsRoot } from '../utils/optional-deps.js';
 import {
   authorityDirs,
   authorityFilePaths,
@@ -191,6 +192,10 @@ export function buildClaudeRestrictions(
   if (!sandboxEnabled) return { disallowedTools };
 
   const allowWrite = uniq([ctx.cwd, ctx.orgRoot, home, tmp, ...(cfg?.allowWrite ?? [])]);
+  // #518 review (B1): the deps dir must exist to be denied (only existing
+  // paths are passed below), and its parent becomes a mount point so the
+  // role cannot rename ~/.monomind aside and plant a new deps dir.
+  const deps = protectableDepsRoot(env, home);
   // Stubs first: with all of the cwd's in place, bwrap creates nothing there.
   const missingStubs =
     (ctx.platform ?? process.platform) === 'linux' ? ctx.holdStubs?.(allowWrite) : undefined;
@@ -203,6 +208,7 @@ export function buildClaudeRestrictions(
       ...(lockedRepo ? gitDirs : gitDirs.flatMap((d) => [join(d, 'config'), join(d, 'hooks')])),
       ...gitDirs.flatMap(gitLocalRemotePaths),
       ...HOME_DENY_WRITE.map((p) => join(home, p)),
+      ...(deps ? [deps] : []),
       ...authorityFilePaths(ctx.orgRoot, ctx.current),
       // Every role's guard dir, not only this one's (#498).
       ...gitGuardDirs(ctx.orgRoot),
@@ -233,6 +239,7 @@ export function buildClaudeRestrictions(
         // denied one would stay read-only: the orgs dir itself cannot be
         // denied here, and new files in it stay possible (authority-mask.ts).
         ...orgsMountPoints(ctx.orgRoot).filter((d) => underAnyRoot(d, allowWrite)),
+        ...(deps ? [dirname(deps)] : []).filter((d) => underAnyRoot(d, allowWrite)),
       ]),
       denyWrite: existing(expanded.denyWrite),
       denyRead: existing([

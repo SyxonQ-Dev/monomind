@@ -65,6 +65,7 @@ test, not just this page, if you need the full reasoning.
 | Crash report | `api.github.com/repos/<repo>/issues` | **Only after you explicitly consent** — a non-interactive crash (CI, agents, most real runs) never asks and only saves the report locally until you've answered | Decline the one-time prompt, or set `MONOMIND_CRASH_REPORTING=off` up front |
 | monoes.me connect | `https://monoes.me` | Only when you explicitly connect a community account via `monomind ui` → Connect (nothing is sent before you do) — and once connected, this is an **ongoing channel, not a one-shot handshake**: every MCP message for that session is forwarded to `monoes.me/api/mcp`, and org definitions are uploaded on publish | Never connect, or Disconnect in `monomind ui` |
 | Embedding/reranker model download | HuggingFace CDN (`huggingface.co`), via the `@huggingface/transformers` package or a direct fetch of the reranker classifier head | First `monomind doc ingest`/index that needs it, an explicit `monomind download-embeddings`, or the reranker head's first use | Stay offline — search degrades to keyword matching |
+| Heavy dependencies installed on first use | Your npm registry (`registry.npmjs.org` by default), and `storage.googleapis.com/chrome-for-testing-public` for Chrome | The first Claude org role, `agent exec --runtime claude` or `agent models --runtime claude` installs `@anthropic-ai/claude-agent-sdk` (about 300 MB with its Claude binary). The first `monomind browse` command, or `design detect` of a URL, on a machine with **no** Chrome, Chromium or Edge installs `@puppeteer/browsers` (about 2 MB) and downloads Chrome (about 400 MB). Each happens once, into `~/.monomind/deps` (`$MONOMIND_HOME/deps`), with a notice on stderr; see [Install-time downloads](#install-time-downloads) | `MONOMIND_NO_AUTO_INSTALL=1`: nothing is installed, and the error prints the command that does the same install by hand |
 | sql.js WASM binary | `sql.js.org` | Only if the memory backend falls back to the sql.js driver **and** the WASM file bundled with the package can't be resolved locally | Ensure the bundled WASM resolves (the normal case); there is no separate flag |
 | Dashboard / Monograph HTML graph visualization | `fonts.googleapis.com`, `unpkg.com` (vis-network **and** the React/Babel UMD builds), `cdnjs.cloudflare.com` (sigma.js, graphology), `cdn.jsdelivr.net` (gsap, used by the dashboard's own pages and by the graphology/sigma fallback build) | Opening the dashboard via `monomind ui`, or a graph view via the `monograph_visualize`/`monograph_serve` MCP tools — these hosts are contacted by **your browser**, loading `<script>`/`<link>` tags monomind's server put in the page it served you | Don't open the dashboard or a graph view; there is no bundled-assets flag yet |
 | `/mastermind:understand` semantic analysis | `api.anthropic.com` (`packages/@monomind/cli/scripts/understand-analyze.mjs`) | Only when the script is run directly with `ANTHROPIC_API_KEY` set and without `--no-llm` — the documented `/mastermind:understand` slash command always invokes it with `--no-llm` itself, so the *documented* path never calls out | Pass `--no-llm` yourself if invoking the script directly, or don't set `ANTHROPIC_API_KEY` in that shell |
@@ -82,26 +83,87 @@ test, not just this page, if you need the full reasoning.
 
 The table above covers what monomind does once installed. Installing it is
 a separate matter: some dependencies run install scripts that download
-binaries. Measured with `npm install monomind@2.18.5` into an empty prefix
-(Linux x64, Node 22, npm 11), with a cold npm cache:
+binaries. Measured by installing this repository's packed tarballs (the
+packages as they will be published, with `scripts/pack-workspace-closure.mjs`)
+into an empty prefix on Linux x64 with Node 26 and npm 11, before and after
+[#428](https://github.com/monoes/monomind/issues/428):
 
 | Package (pulled in by) | Script | What it does |
 |---|---|---|
-| `puppeteer` (optional dependency of `@monoes/monodesign`) | `postinstall` | Downloads Chrome and chrome-headless-shell from `storage.googleapis.com/chrome-for-testing-public` into `~/.cache/puppeteer` (394 MB + 263 MB), outside `node_modules`. monodesign only uses it as a fallback when monobrowse can't find a system browser for URL scans. Skip with `PUPPETEER_SKIP_DOWNLOAD=1`. |
 | `onnxruntime-node` (via `@huggingface/transformers`, optional, for local embeddings) | `postinstall` | On Linux x64, downloads the CUDA execution-provider libraries from `api.nuget.org` (260 MB, on top of the 288 MB package). Skip with `ONNXRUNTIME_NODE_INSTALL=skip`; CPU embeddings still work. |
 | `better-sqlite3` (via `@monoes/monograph` and `@monoes/memory`) | `install` | `prebuild-install` fetches a prebuilt native addon from the package's GitHub releases, and compiles it with `node-gyp` when no prebuilt matches. |
 | `protobufjs` (via `onnxruntime-web`) | `postinstall` | Checks the version scheme of the packages that depend on it. No download. |
 | `monomind` itself | `postinstall` | Deletes macOS `._*` resource-fork files under `node_modules` (skipped on Windows). No download. |
 
-Result: 362 packages and 1.3 GB in `node_modules`, plus the 657 MB of
-Chrome in `~/.cache/puppeteer`. The largest entries are `onnxruntime-node`
-(548 MB with the CUDA libraries), the Claude Code binary in
-`@anthropic-ai/claude-agent-sdk-<platform>` (232 MB; the SDK installs it as
-an optional dependency, and Claude-backed org roles run it), and
-`onnxruntime-web` (141 MB).
+| Install | Packages | `node_modules` | Outside `node_modules` |
+|---|---|---|---|
+| Before #428 | 344 | 1.23 GB | 686 MB of Chrome in `~/.cache/puppeteer` (puppeteer's postinstall) |
+| Now | 263 | 938 MB | nothing |
+| Now, `ONNXRUNTIME_NODE_INSTALL=skip` | 263 | 665 MB | nothing |
+| Now, `--omit=optional` | 188 | 135 MB | nothing |
 
-- `PUPPETEER_SKIP_DOWNLOAD=1 ONNXRUNTIME_NODE_INSTALL=skip npm install monomind`: same 362 packages, 981 MB, no Chrome and no NuGet download.
-- `npm install monomind --omit=optional`: 236 packages, 171 MB. This drops local embeddings, the memory, hooks, routing and MCP packages, the AI-SDK providers, puppeteer, and the Claude Code binary, so Claude-backed org roles cannot start.
+The largest entries left are `onnxruntime-node` (548 MB with the CUDA
+libraries) and `onnxruntime-web` (141 MB). `--omit=optional` drops local
+embeddings, the memory, hooks, routing and MCP packages, and the AI-SDK
+providers.
+
+### Installed on first use
+
+Two heavy dependencies are no longer part of the install. The feature that
+needs one installs it the first time it runs, once per machine:
+
+| What | Installed when | Size |
+|---|---|---|
+| `@anthropic-ai/claude-agent-sdk`, pinned to the version monomind is tested with, and the native Claude binary it brings as a per-platform package | The first Claude org role, `agent exec --runtime claude` or `agent models --runtime claude` | about 300 MB |
+| `@puppeteer/browsers` (the downloader puppeteer itself uses), then Chrome for Testing | The first `monomind browse` command that launches a browser, or `design detect` of a URL, **only if** no Chrome, Chromium or Edge is installed. An installed browser is always used first | about 2 MB, then about 400 MB of Chrome |
+
+Where and how:
+
+- Everything goes into `~/.monomind/deps/` (`$MONOMIND_HOME/deps/` when that
+  is set), one directory per package and version, for example
+  `~/.monomind/deps/@anthropic-ai+claude-agent-sdk@0.3.226/`. Nothing is
+  installed into your project, and your `package.json` and lockfile are
+  never read or written.
+- npm runs `npm ci` in a staging directory there, against a lockfile that
+  ships with monomind (`packages/@monomind/cli/src/utils/optional-deps-locks.ts`),
+  with `--ignore-scripts`. Every package, including the dependencies of
+  `@puppeteer/browsers`, is pinned by that lockfile and must match its
+  integrity hash, whatever registry `~/.npmrc` points at. One fetch attempt
+  with a 15-second timeout, so an offline machine fails quickly. The
+  directory is moved into place only once complete, and a lock keeps two
+  processes from installing the same thing at once.
+- Chrome comes from `storage.googleapis.com/chrome-for-testing-public` and
+  is checked by HTTPS only: Chrome for Testing publishes no checksums.
+- Org roles cannot write `~/.monomind/deps`, `~/.npmrc` or `~/.config/npm`:
+  they are denied to the file tools and the Claude sandbox, and the deps
+  directory is read-only inside the bubblewrap mask other roles run in. A
+  role that needs a missing package gets an error asking the operator to
+  install it. Before loading anything from the deps directory, monomind also
+  refuses a tree that contains a symlink on the way in (or one leading out),
+  a file owned by another user, or a group- or other-writable file.
+- A notice on stderr says what is being installed, where, and how large it
+  is. stdout is left alone, so an MCP stdio session or `agent exec`'s NDJSON
+  stays clean.
+- Only these packages can be installed this way, at the versions pinned in
+  `packages/@monomind/cli/src/utils/optional-deps.ts`.
+
+To pre-install the Claude runtime, run `monomind agent models --runtime claude`
+(it installs the SDK and lists models without sending a prompt), or run the
+command monomind prints when auto-install is off. To opt out, set
+`MONOMIND_NO_AUTO_INSTALL=1`: nothing is installed, and the feature fails
+with the exact command to run by hand (a plain `npm install` of the pinned
+version, without the lockfile), such as
+
+```sh
+npm install --prefix '/home/you/.monomind/deps/@anthropic-ai+claude-agent-sdk@0.3.226' --global=false --ignore-scripts --legacy-peer-deps --no-audit --no-fund --save-exact @anthropic-ai/claude-agent-sdk@0.3.226
+```
+
+To remove them, delete `~/.monomind/deps`.
+
+`monomind design detect` of a URL uses the downloaded Chrome through the
+monodesign detector. The monodesign skill's own scripts, run on their own,
+do not install anything: without an installed browser they still need
+`npm install puppeteer`.
 
 ## What's not in this table, on purpose
 

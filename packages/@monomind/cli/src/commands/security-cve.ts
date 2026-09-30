@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 import { output } from '../output.js';
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { writeJsonFileAtomic } from '../utils/json-file.js';
-import { npmCommand } from '../utils/npm-command.js';
+import { npmInvocation } from '../utils/npm-command.js';
 
 // ─── CVE helpers ─────────────────────────────────────────────────────────────
 
@@ -264,7 +264,7 @@ async function runCve(ctx: CommandContext): Promise<CommandResult> {
 
     let auditOutput = '';
     try {
-      const { stdout } = await execFileAsync(npmCommand(), ['audit', '--json'], {
+      const { stdout } = await execFileAsync(...npmInvocation(['audit', '--json']), {
         cwd: ctx.cwd,
         timeout: 30000,
       });
