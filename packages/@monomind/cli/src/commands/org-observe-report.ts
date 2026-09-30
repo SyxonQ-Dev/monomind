@@ -334,9 +334,8 @@ export const costsAction = async (ctx: CommandContext, name: string): Promise<Co
       if (endpointIds.has(roleId)) continue;
       roleData.set(roleId, {
         tokens: metrics.tokens,
-        // Older runtime state stored an unknown cost as 0; only a positive
-        // figure is known here without the run's own usage events.
-        costUsd: metrics.costUsd || null,
+        // A live $0 is a real cost; only null/missing is unknown (#540).
+        costUsd: metrics.costUsd ?? null,
         costComplete: metrics.costUsd !== null && metrics.costUsd !== undefined,
         messages: 0,
       });

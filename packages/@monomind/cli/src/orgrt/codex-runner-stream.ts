@@ -1,5 +1,14 @@
 // packages/@monomind/cli/src/orgrt/codex-runner-stream.ts
-import { chmodSync, lstatSync } from 'node:fs';
+import {
+  chmodSync,
+  closeSync,
+  fchmodSync,
+  constants as fsConstants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  realpathSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentRunArgs } from './agent-runner.js';
@@ -45,23 +54,54 @@ export function codexHomeDir(env: NodeJS.ProcessEnv): string {
 }
 
 /**
+ * chmod 0700 `dir` when it is a real directory (not a symlink) owned by `uid`
+ * and not already 0700. Opens it with O_NOFOLLOW | O_DIRECTORY and uses
+ * fstat + fchmod on that fd, so a symlink swapped in between the check and
+ * the chmod is refused (ELOOP/ENOTDIR) instead of followed. Where Node lacks
+ * those flags (Windows) it falls back to lstat + chmod. Throws when missing.
+ */
+function tightenDir(dir: string, uid: number): boolean {
+  const { O_RDONLY, O_DIRECTORY, O_NOFOLLOW } = fsConstants;
+  if (O_DIRECTORY === undefined || O_NOFOLLOW === undefined) {
+    const st = lstatSync(dir);
+    if (!st.isDirectory() || st.uid !== uid || (st.mode & 0o777) === 0o700) return false;
+    chmodSync(dir, 0o700);
+    return true;
+  }
+  const fd = openSync(dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+  try {
+    const st = fstatSync(fd);
+    if (st.uid !== uid || (st.mode & 0o777) === 0o700) return false;
+    fchmodSync(fd, 0o700);
+    return true;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
  * chmod 0700 `codexHome` and its `sessions/` and `shell_snapshots/`, each
- * only when it is a real directory (not a symlink) owned by the current user.
+ * only when it is a real directory owned by the current user. A symlinked
+ * `codexHome` (dotfile managers) is resolved with realpath and its target
+ * tightened under the same checks (#540); symlinked subdirs are left alone.
  * Missing dirs are left for codex to create; errors are ignored (best effort,
  * never blocks a turn). Returns the paths it tightened. No-op on win32.
  */
 export function restrictCodexHome(codexHome: string): string[] {
   if (process.platform === 'win32' || typeof process.getuid !== 'function') return [];
   const uid = process.getuid();
+  let home = codexHome;
+  try {
+    if (lstatSync(codexHome).isSymbolicLink()) home = realpathSync(codexHome);
+  } catch {
+    return []; // missing or dangling: codex creates it
+  }
   const changed: string[] = [];
-  for (const dir of [codexHome, join(codexHome, 'sessions'), join(codexHome, 'shell_snapshots')]) {
+  for (const dir of [home, join(home, 'sessions'), join(home, 'shell_snapshots')]) {
     try {
-      const st = lstatSync(dir);
-      if (!st.isDirectory() || st.uid !== uid || (st.mode & 0o777) === 0o700) continue;
-      chmodSync(dir, 0o700);
-      changed.push(dir);
+      if (tightenDir(dir, uid)) changed.push(dir);
     } catch {
-      /* missing or not ours to change */
+      /* missing, a symlink, or not ours to change */
     }
   }
   return changed;
