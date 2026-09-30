@@ -62,7 +62,7 @@ export const startCommand: Command = {
     strategy = strategy || 'development';
 
     output.writeln();
-    output.printInfo(`Starting swarm with objective: ${output.highlight(objective)}`);
+    output.printInfo(`Recording swarm config for objective: ${output.highlight(objective)}`);
     output.writeln();
 
     // Compute the suggested roster for this strategy. Display-only: nothing

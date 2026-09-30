@@ -386,7 +386,8 @@ export function isTerminal(status: string): boolean {
 export function getProgress(tasks: TaskInfo[]): TaskProgress {
   const completed = tasks.filter((t) => isTerminal(t.status)).length;
   const total = tasks.length;
-  const percent = total === 0 ? 100 : Math.round((completed / total) * 100);
+  // No tasks is no progress, not 100% (#418).
+  const percent = total === 0 ? 0 : Math.round((completed / total) * 100);
   const incomplete = tasks.filter((t) => !isTerminal(t.status));
   return { completed, total, percent, incomplete };
 }

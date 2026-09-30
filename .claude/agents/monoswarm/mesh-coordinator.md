@@ -24,6 +24,8 @@ capability:
 
 # Mesh Coordinator
 
+> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.21.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
+
 You coordinate several agents working **as peers** — no lead agent, no chain of
 command — on independent slices of one problem, then reconcile what they return.
 

@@ -82,9 +82,11 @@ describe('data-root agreement between the monoswarm CLI and the MCP tools', () =
     expect(Object.keys(onDisk.agents)).toHaveLength(2);
 
     const result = (await findSub('status').action?.(makeCtx())) as CommandResult;
-    const data = result.data as { agents: { total: number; active: number } };
+    const data = result.data as { agents: { total: number; active: number; idle: number } };
     expect(data.agents.total).toBe(2);
-    expect(data.agents.active).toBe(2);
+    // agent_spawn records an idle row; nothing marks it busy.
+    expect(data.agents.idle).toBe(2);
+    expect(data.agents.active).toBe(0);
   });
 
   it('monoswarm status reads state written by the monoswarm_init MCP tool (no second copy)', async () => {

@@ -43,6 +43,7 @@ function capture(): () => string {
     'printError',
     'printTable',
     'printList',
+    'writeErrorln',
   ] as const) {
     vi.spyOn(output, fn).mockImplementation(push as never);
   }
@@ -127,5 +128,8 @@ describe('autopilot is flagged deprecated with no task source (#418)', () => {
     await status?.action?.(ctx({ flags: { _: [] } }));
     expect(printed()).toMatch(/deprecated/i);
     expect(printed()).toMatch(/no task source/i);
+    // Zero tasks is no progress, not 100%.
+    expect(printed()).toMatch(/Tasks: 0\/0 \(n\/a\)/);
+    expect(printed()).not.toMatch(/100%/);
   });
 });
