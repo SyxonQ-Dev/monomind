@@ -65,6 +65,11 @@ export const OPTIONAL_DEPENDENCIES = {
     size: 'about 2 MB',
     feature: 'The Chrome download for `monomind browse`',
   },
+  'monofence-ai': {
+    version: '1.0.7',
+    size: 'under 1 MB',
+    feature: 'The monofence_* MCP security tools',
+  },
 } as const satisfies Record<string, OptionalDependencySpec>;
 
 export type OptionalDependencyName = keyof typeof OPTIONAL_DEPENDENCIES;

@@ -1,119 +1,69 @@
 /**
  * Auto-install utility for optional MCP tool dependencies
  *
- * When an MCP tool requires an optional package that isn't installed,
- * this utility attempts to install it automatically on first use.
+ * When an MCP tool requires an optional package that isn't installed, this
+ * loads it through ensureOptionalDependency (utils/optional-deps.ts), which
+ * installs it once into ~/.monomind/deps at the version pinned there and
+ * never touches the user's project (#519). Only packages on that allow-list
+ * are installed; anything else is imported if present and otherwise skipped.
  */
 
-import { spawnSync } from 'node:child_process';
-import { npmCommand } from '../utils/npm-command.js';
+import {
+  type EnsureOptions,
+  ensureOptionalDependency,
+  OPTIONAL_DEPENDENCIES,
+  type OptionalDependencyName,
+} from '../utils/optional-deps.js';
 
-// Track which packages we've attempted to install this session
-const installAttempts = new Set<string>();
+// Packages whose install failed this session; they are not retried.
+const failedInstalls = new Set<string>();
 
-export interface AutoInstallOptions {
-  /**
-   * Timeout in milliseconds for npm install (default: 60000)
-   */
-  timeout?: number;
-
-  /**
-   * Whether to save to package.json (default: false)
-   */
-  save?: boolean;
-
+export interface AutoInstallOptions extends EnsureOptions {
   /**
    * Silent install (no console output)
    */
   silent?: boolean;
 }
 
-/**
- * Auto-install a package if not available
- *
- * @param packageName - npm package name to install
- * @param options - Installation options
- * @returns true if installed successfully or already attempted
- */
-export async function autoInstallPackage(
-  packageName: string,
-  options: AutoInstallOptions = {},
-): Promise<boolean> {
-  const { timeout = 60000, save = false, silent = false } = options;
-
-  // Validate package name to prevent command injection (CVE fix)
-  // Valid npm package names: @scope/name or name, alphanumeric with - . _ ~
-  const validPackageName =
-    /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*(@[a-z0-9-._~]+)?$/i;
-  if (!validPackageName.test(packageName)) {
-    if (!silent) {
-      console.error(`[monomind] Invalid package name: ${packageName}`);
-    }
-    return false;
-  }
-
-  // Only attempt once per session
-  if (installAttempts.has(packageName)) {
-    return false;
-  }
-  installAttempts.add(packageName);
-
-  try {
-    if (!silent) {
-      console.error(`[monomind] Auto-installing ${packageName}...`);
-    }
-
-    // Use spawn with array args to prevent shell injection
-    const args = ['install', packageName, save ? '--save' : '--no-save'];
-    const result = spawnSync(npmCommand(), args, {
-      stdio: silent ? 'pipe' : ['pipe', 'pipe', 'pipe'],
-      timeout,
-      shell: false, // Explicitly disable shell
-    });
-
-    if (result.status !== 0) {
-      throw new Error(result.stderr?.toString() || 'Installation failed');
-    }
-
-    if (!silent) {
-      console.error(`[monomind] Successfully installed ${packageName}`);
-    }
-    return true;
-  } catch (error) {
-    if (!silent) {
-      console.error(`[monomind] Failed to auto-install ${packageName}: ${error}`);
-    }
-    return false;
-  }
+function isInstallable(name: string): name is OptionalDependencyName {
+  return Object.hasOwn(OPTIONAL_DEPENDENCIES, name);
 }
 
 /**
- * Try to import a package, auto-install if not found, and retry
+ * Import a package, installing it into monomind's deps directory first if it
+ * is an allow-listed optional dependency that is missing. The module comes
+ * from wherever it was resolved, so callers must use the returned module
+ * rather than importing the package by name.
  *
  * @param packageName - npm package name
  * @param options - Installation options
- * @returns The imported module or null if failed
+ * @returns The imported module or null if unavailable
  */
 export async function tryImportOrInstall<T = unknown>(
   packageName: string,
   options: AutoInstallOptions = {},
 ): Promise<T | null> {
+  const { silent = false, ...ensureOptions } = options;
+
+  if (!isInstallable(packageName)) {
+    try {
+      return (await import(packageName)) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  if (failedInstalls.has(packageName)) return null;
+
   try {
-    // First try to import
-    return (await import(packageName)) as T;
-  } catch {
-    // Package not found, try to install
-    const installed = await autoInstallPackage(packageName, options);
-    if (installed) {
-      try {
-        return (await import(packageName)) as T;
-      } catch {
-        // ESM module cache cannot be busted programmatically; a server restart is required
-        console.error(
-          `[monomind] ${packageName} installed but failed to load. Restart MCP server.`,
-        );
-        return null;
-      }
+    return await ensureOptionalDependency<T>(packageName, {
+      ...ensureOptions,
+      log: silent ? () => {} : ensureOptions.log,
+    });
+  } catch (error) {
+    failedInstalls.add(packageName);
+    if (!silent) {
+      console.error(`[monomind] ${packageName} is not available: ${(error as Error).message}`);
     }
     return null;
   }
@@ -135,7 +85,7 @@ export async function isPackageAvailable(packageName: string): Promise<boolean> 
  * Reset install attempts (useful for testing)
  */
 export function resetInstallAttempts(): void {
-  installAttempts.clear();
+  failedInstalls.clear();
 }
 
 /**
@@ -153,7 +103,6 @@ export const OPTIONAL_PACKAGES = {
 } as const;
 
 export default {
-  autoInstallPackage,
   tryImportOrInstall,
   isPackageAvailable,
   resetInstallAttempts,

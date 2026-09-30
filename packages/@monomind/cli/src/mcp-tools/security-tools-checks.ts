@@ -1,4 +1,9 @@
-import { capSecurityInput, getMonoFence, MAX_SECURITY_INPUT_LEN } from './security-tools-core.js';
+import {
+  capSecurityInput,
+  getMonoFence,
+  loadMonoFenceModule,
+  MAX_SECURITY_INPUT_LEN,
+} from './security-tools-core.js';
 import type { MCPTool, MCPToolResult } from './types.js';
 
 /**
@@ -29,8 +34,7 @@ export const monofenceIsSafeTool: MCPTool = {
     }
 
     try {
-      await getMonoFence(); // triggers auto-install if package is missing
-      const { isSafe } = await import('monofence-ai');
+      const { isSafe } = await loadMonoFenceModule(); // installs it on first use
       const safe = isSafe(input);
 
       return {

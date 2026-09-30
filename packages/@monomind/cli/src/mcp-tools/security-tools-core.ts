@@ -8,7 +8,7 @@
  */
 
 import { createRequire } from 'node:module';
-import { autoInstallPackage } from './auto-install.js';
+import { tryImportOrInstall } from './auto-install.js';
 
 // Create require for resolving module paths
 const _require = createRequire(import.meta.url);
@@ -17,11 +17,12 @@ const _require = createRequire(import.meta.url);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type MonoFenceInstance = Record<string, (...args: any[]) => any>;
 
-// Lazy-loaded MonoFence instance
-let monofenceInstance: MonoFenceInstance | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type MonoFenceModule = Record<string, (...args: any[]) => any>;
 
-// Track if we've attempted install this session
-let installAttempted = false;
+// Lazy-loaded MonoFence module and instance
+let monofenceModule: MonoFenceModule | null = null;
+let monofenceInstance: MonoFenceInstance | null = null;
 
 // ── Security input bounds ─────────────────────────────────────────────────────
 // MonoFence runs multiple regex patterns over the entire input string (O(n × P)
@@ -40,6 +41,22 @@ export function capSecurityInput(raw: unknown, fieldName = 'input'): string {
 }
 
 /**
+ * Load the monofence-ai module, installing it into monomind's deps directory
+ * on first use (never into the user's project, #519). Callers must use the
+ * returned module rather than `import('monofence-ai')`, which does not see
+ * that directory.
+ */
+export async function loadMonoFenceModule(): Promise<MonoFenceModule> {
+  if (monofenceModule) return monofenceModule;
+  const mod = await tryImportOrInstall<MonoFenceModule>('monofence-ai');
+  if (!mod) {
+    throw new Error('MonoFence package not available. Install with: npm install monofence-ai');
+  }
+  monofenceModule = mod;
+  return mod;
+}
+
+/**
  * Get or create MonoFence instance (throws if unavailable)
  */
 export async function getMonoFence(): Promise<MonoFenceInstance> {
@@ -47,45 +64,11 @@ export async function getMonoFence(): Promise<MonoFenceInstance> {
     return monofenceInstance;
   }
 
-  const packageName = 'monofence-ai';
-
-  // First attempt - try to load via dynamic import (ESM)
-  try {
-    const monofence = await import(packageName);
-    const instance = monofence.createMonoDefence({ enableLearning: true });
-    if (!instance) {
-      throw new Error('createMonoDefence returned null');
-    }
-    monofenceInstance = instance;
-    return instance;
-  } catch (e) {
-    // Package not found or failed to load
-    const error = e as Error;
-    if (
-      !error.message?.includes('Cannot find package') &&
-      !error.message?.includes('ERR_MODULE_NOT_FOUND')
-    ) {
-      // Different error - might be a real issue
-      throw new Error(`MonoFence failed to load: ${error.message}`);
-    }
+  const monofence = await loadMonoFenceModule();
+  const instance = monofence.createMonoDefence({ enableLearning: true });
+  if (!instance) {
+    throw new Error('MonoFence failed to load: createMonoDefence returned null');
   }
-
-  // Don't attempt install more than once per session
-  if (installAttempted) {
-    throw new Error('MonoFence package not available. Install with: npm install monofence-ai');
-  }
-  installAttempted = true;
-
-  // Second attempt - auto-install and retry
-  console.error(`[monomind] ${packageName} not found, attempting auto-install...`);
-  const installed = await autoInstallPackage(packageName);
-
-  if (!installed) {
-    throw new Error('MonoFence package not available. Install with: npm install monofence-ai');
-  }
-
-  // The in-process ESM module cache cannot be invalidated after install; require a server restart.
-  throw new Error(
-    `MonoFence installed successfully. Restart the MCP server to load it: npx monomind mcp start`,
-  );
+  monofenceInstance = instance;
+  return instance;
 }

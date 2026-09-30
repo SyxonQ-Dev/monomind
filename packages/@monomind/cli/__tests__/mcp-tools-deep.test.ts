@@ -154,7 +154,7 @@ vi.mock('../src/transfer/anonymization/index.js', () => ({
 
 // Mock module for auto-install
 vi.mock('../src/mcp-tools/auto-install.js', () => ({
-  autoInstallPackage: vi.fn(async () => false),
+  tryImportOrInstall: vi.fn(async () => null),
 }));
 
 // ============================================================================
