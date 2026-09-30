@@ -213,6 +213,8 @@ describe('init --pin flag resolution (issue #419)', () => {
     const result = resolveInitOptions(
       { flags, args: [], cwd: '/x' } as unknown as CommandContext,
       '/x',
+      // Detection stubbed: the result must not depend on this machine (#420).
+      () => [],
     );
     if (!result.ok) throw new Error(result.message);
     return result.options.mcp.pin;

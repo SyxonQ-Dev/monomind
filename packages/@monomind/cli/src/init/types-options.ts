@@ -25,6 +25,12 @@ export interface InitOptions {
   sourceBaseDir?: string;
   /** Explicit adapter targets selected by init flags; absent keeps legacy init behavior. */
   selectedPlatforms?: readonly import('../platform-adapters/types.js').PlatformId[];
+  /**
+   * The non-Claude trees (`.gemini/`, `.agents/`) this run may create, when
+   * set; overrides what `selectedPlatforms` implies. `init skills` passes the
+   * ones the project already has (#420).
+   */
+  platformTrees?: readonly ('gemini' | 'agents')[];
   /** Opt in to platform-native deterministic hooks; disabled by default. */
   enablePlatformHooks?: boolean;
   /** Force overwrite existing files */
@@ -44,6 +50,8 @@ export interface InitOptions {
   components: InitComponents;
   /** Hooks configuration */
   hooks: HooksConfig;
+  /** Opt-in packs to install on top of core (names from init/packs.ts) */
+  packs?: string[];
   /** Skills configuration */
   skills: SkillsConfig;
   /** Commands configuration */
@@ -59,11 +67,11 @@ export interface InitOptions {
   /** Embeddings configuration */
   embeddings: EmbeddingsConfig;
   /**
-   * Run the post-init `doctor --install` pass, which may perform a global
-   * `npm install -g @anthropic-ai/claude-code` if the Claude Code CLI isn't
-   * already present. Defaults to true (undefined is treated as true) for
-   * backward compatibility; set false (`monomind init --no-install`) to skip
-   * it entirely.
+   * Allow the post-init doctor pass to offer a global
+   * `npm install -g @anthropic-ai/claude-code` when Claude Code is selected
+   * and missing. It asks first and only in an interactive terminal (#420).
+   * Defaults to true (undefined is treated as true); set false
+   * (`monomind init --no-install`) to never offer it.
    */
   installClaudeCode?: boolean;
   /**
@@ -115,36 +123,10 @@ export const DEFAULT_INIT_OPTIONS: InitOptions = {
     timeout: 5000,
     continueOnError: true,
   },
-  skills: {
-    core: true,
-    extended: true,
-    memory: true,
-    github: true,
-    browser: true,
-    advanced: true,
-
-    all: true,
-  },
-  commands: {
-    core: true,
-    analysis: true,
-    automation: true,
-    github: true,
-    hooks: true,
-    monitoring: true,
-    optimization: true,
-    all: true,
-  },
-  agents: {
-    core: true,
-    consensus: true,
-    github: true,
-    monoswarm: true,
-    optimization: true,
-    testing: true,
-
-    all: true,
-  },
+  // The core pack only (GH #411); opt-in packs via `packs`.
+  skills: { core: true, all: false },
+  commands: { core: true, all: false },
+  agents: { core: true, all: false },
   statusline: {
     enabled: true,
     showProgress: true,
@@ -206,26 +188,6 @@ export const MINIMAL_INIT_OPTIONS: InitOptions = {
     teammateIdle: false,
     taskCompleted: false,
   },
-  skills: {
-    core: true,
-    extended: false,
-    memory: true,
-    github: true,
-    browser: true,
-    advanced: false,
-
-    all: false,
-  },
-  agents: {
-    core: true,
-    consensus: false,
-    github: false,
-    monoswarm: false,
-    optimization: false,
-    testing: false,
-
-    all: false,
-  },
   runtime: {
     topology: 'mesh',
     maxAgents: 5,
@@ -264,24 +226,10 @@ export const FULL_INIT_OPTIONS: InitOptions = {
     kimicode: false,
     codex: false,
   },
-  skills: {
-    core: true,
-    extended: true,
-    memory: true,
-    github: true,
-    browser: true,
-    advanced: true,
-
-    all: true,
-  },
-  commands: {
-    ...DEFAULT_INIT_OPTIONS.commands,
-    all: true,
-  },
-  agents: {
-    ...DEFAULT_INIT_OPTIONS.agents,
-    all: true,
-  },
+  // Every pack.
+  skills: { core: true, all: true },
+  commands: { core: true, all: true },
+  agents: { core: true, all: true },
   mcp: {
     monomind: true,
     monograph: false,

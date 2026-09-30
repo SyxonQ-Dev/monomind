@@ -59,7 +59,7 @@ describe('init keeps shipped files the user edited', () => {
   const init = (flags: Record<string, unknown> = {}) =>
     initCommand.action!({
       args: [],
-      flags: { _: [], 'no-watch': true, 'no-start-all': true, 'no-memory': true, ...flags },
+      flags: { _: [], 'no-watch': true, 'no-start-all': true, 'no-memory': true, 'all-platforms': true, ...flags },
       cwd: tmpDir,
       interactive: false,
     } as CommandContext);
@@ -168,7 +168,7 @@ describe('managed blocks edited by the user', () => {
   const run = (flags: Record<string, unknown> = {}) =>
     initCommand.action!({
       args: [],
-      flags: { _: [], 'no-watch': true, 'no-start-all': true, 'no-memory': true, ...flags },
+      flags: { _: [], 'no-watch': true, 'no-start-all': true, 'no-memory': true, 'all-platforms': true, ...flags },
       cwd: tmpDir,
       interactive: false,
     } as CommandContext);

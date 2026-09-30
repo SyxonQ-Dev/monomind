@@ -1,6 +1,6 @@
 ---
 name: mastermind-agent-select
-description: Shared utility — registry-aware agent selection for mastermind domain skills. Reads .monomind/registry.json and returns ranked agent slugs/names for a given task, prompt, and category filter. Include this logic wherever a domain skill needs to pick the best agent(s) instead of hardcoding types.
+description: "Shared utility: ranks agents from .monomind/registry.json for a task and category, so mastermind skills pick agents instead of hardcoding them."
 type: helper
 ---
 
@@ -125,15 +125,15 @@ best_agent="${best_agent:-coder}"   # fixed fallback: a real core agent
 
 ## Fallback
 
-If the pick tool, the CLI and the registry all come up empty, use these safe defaults per domain (all real agent names):
+If the pick tool, the CLI and the registry all come up empty, use these safe defaults per domain (all in the core pack a default `monomind init` installs):
 
 | Domain | Fallback agents |
 |---|---|
-| idea specialists | `researcher`, `Launch Strategist`, `CRO Specialist` |
+| idea specialists | `researcher`, `planner`, `Software Architect` |
 | dev decomp | `Software Architect` |
-| ops decomp | `Launch Strategist` |
+| ops decomp | `planner` |
 | build | `coder`, `tester`, `reviewer` |
-| marketing / content / sales | `Competitive Content Strategist`, `Email Marketing Specialist`, `Launch Strategist` |
+| marketing / content / sales | `Technical Writer`, `researcher` (the marketing specialists come with `monomind packs add business`) |
 | review | `reviewer`, `Security Engineer` |
 | research | `researcher` |
 | release | `release-manager` |

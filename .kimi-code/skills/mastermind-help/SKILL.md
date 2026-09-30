@@ -6,7 +6,7 @@ name: mastermind-help
 
 # Mastermind Help
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.21.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
+> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
 
 Quick reference for all Mastermind skills and CLI commands available in this project.
 
@@ -19,20 +19,20 @@ Quick reference for all Mastermind skills and CLI commands available in this pro
 | `mastermind:ideate` | Research ideas, evaluate, elaborate, decompose — saved to `docs/ideas/` (add `--monotask` for board) |
 | `mastermind:improve` | Analyze a component, research improvements, create tasks in `docs/improvements/` (`--monotask` for board) |
 | `mastermind:repeat` | Repeat a prompt on a schedule (default: 15 min, 10 times) |
-| `mastermind:understand` | Run semantic enrichment on the monograph knowledge graph |
-| `mastermind:specialagents` | Activate a specialist agent persona (browse categories or auto-select) |
+| `mastermind:understand` | Run semantic enrichment on the monograph knowledge graph (pack extras — `monomind packs add extras`) |
+| `mastermind:specialagents` | Activate a specialist agent persona (browse categories or auto-select) (pack orgs — `monomind packs add orgs`) |
 | `mastermind:swarm` | Swarm coordination reference — topologies, strategies, init patterns |
-| `mastermind:memory` | Memory CLI quick reference |
+| `mastermind:memory` | Memory CLI quick reference (pack orgs — `monomind packs add orgs`) |
 
 ## Org Runtime
 
 | Command | Description |
 |-------|-------------|
-| `/mastermind:createorg` | Define and save an org |
-| `/mastermind:runorg` | Start a saved org via the Org Runtime daemon (`monomind org run`/`serve`) — converts legacy-format config files first |
-| `/mastermind:stoporg` | Stop a running org (`monomind org stop`) |
-| `/mastermind:orgstatus` | Detailed status for a single org |
-| `/mastermind:orgs` | List all saved orgs |
+| `/mastermind:createorg` | Define and save an org (pack orgs — `monomind packs add orgs`) |
+| `/mastermind:runorg` | Start a saved org via the Org Runtime daemon (`monomind org run`/`serve`) — converts legacy-format config files first (pack orgs — `monomind packs add orgs`) |
+| `/mastermind:stoporg` | Stop a running org (`monomind org stop`) (pack orgs — `monomind packs add orgs`) |
+| `/mastermind:orgstatus` | Detailed status for a single org (pack orgs — `monomind packs add orgs`) |
+| `/mastermind:orgs` | List all saved orgs (pack orgs — `monomind packs add orgs`) |
 
 Pending tool approvals from a running org: `monomind org approvals <org>`, then `monomind org approve` / `monomind org deny` (or the dashboard's Human Input tab).
 

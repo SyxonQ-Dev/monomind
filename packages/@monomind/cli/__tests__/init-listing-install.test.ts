@@ -18,9 +18,11 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { copyAgents, copyCommands, copySkills } from '../src/init/copy-assets.js';
+import { CORE_PACK, OPTIONAL_PACKS } from '../src/init/packs.js';
 import {
   DEFAULT_INIT_OPTIONS,
   detectPlatform,
+  FULL_INIT_OPTIONS,
   type InitOptions,
   type InitResult,
   MINIMAL_INIT_OPTIONS,
@@ -63,7 +65,7 @@ function options(base: InitOptions, sourceBaseDir: string): InitOptions {
 describe('copyCommands', () => {
   it('installs no README, references/ or _-include page as a command', async () => {
     const result = freshResult();
-    await copyCommands(target, options(DEFAULT_INIT_OPTIONS, PKG_ROOT), result);
+    await copyCommands(target, options(FULL_INIT_OPTIONS, PKG_ROOT), result);
     const installed = walk(path.join(target, '.claude', 'commands'));
     expect(installed.length).toBeGreaterThan(50);
     const docs = installed.filter((rel) => {
@@ -75,9 +77,12 @@ describe('copyCommands', () => {
     expect(result.summary.commandsCount).toBeGreaterThan(0);
   });
 
-  it('every file a shipped command reads by path is installed somewhere', async () => {
-    await copyCommands(target, options(DEFAULT_INIT_OPTIONS, PKG_ROOT), freshResult());
-    await copySkills(target, options(DEFAULT_INIT_OPTIONS, PKG_ROOT), freshResult());
+  it.each([
+    ['default', DEFAULT_INIT_OPTIONS],
+    ['full', FULL_INIT_OPTIONS],
+  ])('every file a shipped command reads by path is installed somewhere (%s)', async (_, preset) => {
+    await copyCommands(target, options(preset, PKG_ROOT), freshResult());
+    await copySkills(target, options(preset, PKG_ROOT), freshResult());
     const commandsDir = path.join(target, '.claude', 'commands');
     const missing: string[] = [];
     for (const rel of walk(commandsDir)) {
@@ -93,7 +98,7 @@ describe('copyCommands', () => {
 describe('copyAgents', () => {
   it('does not install agents marked deprecated: true', async () => {
     const result = freshResult();
-    await copyAgents(target, options(DEFAULT_INIT_OPTIONS, PKG_ROOT), result);
+    await copyAgents(target, options(FULL_INIT_OPTIONS, PKG_ROOT), result);
     const agentsDir = path.join(target, '.claude', 'agents');
     const installed = walk(agentsDir).filter((rel) => rel.endsWith('.md'));
     expect(installed.length).toBeGreaterThan(20);
@@ -127,40 +132,22 @@ describe('copySkills', () => {
 
   const installedSkills = () => fs.readdirSync(path.join(target, '.claude', 'skills')).sort();
 
-  it('--minimal installs exactly the core engineering set', async () => {
+  it('--minimal installs exactly the core pack skills', async () => {
     const result = freshResult();
     await copySkills(target, options(MINIMAL_INIT_OPTIONS, source), result);
     expect(result.errors).toEqual([]);
-    expect(installedSkills()).toEqual(
-      [
-        'agent-browser-testing',
-        'github-toolkit',
-        'mastermind',
-        'mastermind-agent-select',
-        'mastermind-debug',
-        'mastermind-delegation',
-        'mastermind-design',
-        'mastermind-execute',
-        'mastermind-intake',
-        'mastermind-plan',
-        'mastermind-protocol',
-        'mastermind-receive-review',
-        'mastermind-research',
-        'mastermind-review',
-        'mastermind-worktree',
-        'memory-toolkit',
-        'monodesign',
-        'monolean',
-        'stop-slop',
-        'verification-quality',
-      ].sort(),
-    );
+    expect(installedSkills()).toEqual([...CORE_PACK.skills].sort());
   });
 
-  it('the default install still ships every skill', async () => {
+  it('the default install is the core pack; --full ships every skill', async () => {
     await copySkills(target, options(DEFAULT_INIT_OPTIONS, source), freshResult());
+    expect(installedSkills()).toEqual([...CORE_PACK.skills].sort());
+    await copySkills(target, options(FULL_INIT_OPTIONS, source), freshResult());
     expect(installedSkills()).toEqual(
       fs.readdirSync(path.join(source, '.claude', 'skills')).sort(),
+    );
+    expect(installedSkills()).toEqual(
+      [...CORE_PACK.skills, ...OPTIONAL_PACKS.flatMap((p) => p.skills)].sort(),
     );
   });
 });

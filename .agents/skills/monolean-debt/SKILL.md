@@ -1,11 +1,6 @@
 ---
 name: monolean-debt
-description: >
-  Harvest every `monolean:` comment in the codebase into a debt ledger, so the
-  deliberate shortcuts and deferrals monolean leaves behind get tracked instead
-  of rotting into "later means never". Use when the user says "monolean debt",
-  "/monolean-debt", "what did monolean defer", "list the shortcuts", "monolean
-  ledger", or "what did we mark to do later". One-shot report, changes nothing.
+description: "Collect every `monolean:` comment into a debt ledger so deliberate shortcuts and deferrals get tracked. Use for \"monolean debt\" or \"what did we defer\". Changes nothing."
 ---
 
 Every deliberate monolean shortcut is marked with a `monolean:` comment naming

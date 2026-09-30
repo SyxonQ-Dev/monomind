@@ -1,11 +1,11 @@
 ---
 name: coordination:task-orchestrate
-description: Deprecated, removed in 2.21.0 — Coordinate tasks across a swarm of agents.
+description: Deprecated, removed in 2.22.0 — Coordinate tasks across a swarm of agents.
 ---
 
 # task-orchestrate
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.21.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
+> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
 
 Coordinate tasks across a swarm of agents.
 

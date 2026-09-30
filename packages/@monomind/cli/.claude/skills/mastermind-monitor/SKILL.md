@@ -1,6 +1,6 @@
 ---
 name: mastermind-monitor
-description: Mastermind monitor — a forever-running task executor that watches Linear, GitHub Issues/PRs, Monotask boards, and filesystem folders for new tasks, claims them, executes them with the right agent, posts progress comments, and advances status at every stage. Supports per-user/per-state filtering, 3-retry failure handling, and a single concurrent task at a time (safe default). Persists state across cycles via ScheduleWakeup.
+description: "Mastermind monitor — long-running executor that watches Linear, GitHub, Monotask boards and folders for new tasks, claims and runs them with the right agent, and reports progress."
 type: domain-skill
 default_mode: confirm
 ---

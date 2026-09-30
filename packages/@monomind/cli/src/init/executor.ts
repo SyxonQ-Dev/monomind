@@ -26,8 +26,11 @@ import { installPlatform } from '../platform-adapters/operations.js';
 import { DIRECTORIES } from './asset-maps.js';
 import { copyAgents, copyCommands, copySkills } from './copy-assets.js';
 import { finalizeGuard, guardFor, pruneBackups } from './file-guard.js';
+import { recordPacks } from './init-manifest.js';
 import { initProjectMemory, seedProjectMemory } from './init-memory.js';
 import { initKnowledgeGraph, runDoctorFix } from './init-post-steps.js';
+import { installedPacks, packsOnDisk } from './pack-install.js';
+import { PACK_NAMES } from './packs.js';
 import { wantsAgentsDirs, wantsGeminiDirs } from './platform-dirs.js';
 import { buildProjectIndexes } from './project-indexes.js';
 import {
@@ -270,6 +273,18 @@ export async function executeInit(options: InitOptions): Promise<InitResult> {
       await copyAgents(targetDir, options, result);
     }
 
+    // Remember which opt-in packs the project has, for `packs list` and
+    // `init upgrade --add-missing` (GH #411): only packs this run really put
+    // on disk (`--packs specialists` with agents off copies nothing). Never
+    // shrinks here.
+    const { components } = options;
+    if (components.skills || components.commands || components.agents) {
+      const all = options.skills.all || options.commands.all || options.agents.all;
+      const asked = all ? PACK_NAMES : (options.packs ?? []);
+      const copied = packsOnDisk(targetDir, asked, components);
+      recordPacks(targetDir, [...installedPacks(targetDir), ...copied]);
+    }
+
     // Generate helpers
     if (options.components.helpers) {
       await writeHelpers(targetDir, options, result);
@@ -412,7 +427,12 @@ export async function executeInit(options: InitOptions): Promise<InitResult> {
     // Run doctor auto-fix (non-blocking, best-effort) — unless the caller
     // runs it itself once all of its own writes are done (#425).
     if (!options.deferDoctor)
-      await runDoctorFix(targetDir, result, options.installClaudeCode !== false);
+      await runDoctorFix(
+        targetDir,
+        result,
+        options.installClaudeCode !== false,
+        options.selectedPlatforms?.includes('claude') ?? true,
+      );
 
     // Hash what this run left on disk (after adapters and doctor rewrote some
     // of it), so the next run can tell a user edit from an untouched file.

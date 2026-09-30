@@ -7,10 +7,12 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { describePlatformChoice } from '../init/detect-platforms.js';
 import { formatKeptFiles } from '../init/file-guard.js';
 import { DEFAULT_INIT_OPTIONS, executeInit } from '../init/index.js';
 import { reportProjectMemory } from '../init/init-memory.js';
 import { runDoctorFix } from '../init/init-post-steps.js';
+import { wantsAgentsDirs, wantsGeminiDirs } from '../init/platform-dirs.js';
 import { formatIndexSummary } from '../init/project-indexes.js';
 import { resolveInitOptions } from '../init/resolve-options.js';
 import { countInitFiles, formatInitFileCounts, snapshotInitFiles } from '../init/written-files.js';
@@ -100,6 +102,10 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
     return { success: false, exitCode: 1, message: resolved.message };
   }
   const options = resolved.options;
+  if (!options.components.agentsOnly) {
+    for (const line of describePlatformChoice(resolved.platforms)) output.printInfo(line);
+    output.writeln();
+  }
   // The doctor pass runs once, below, after every write this action makes (#425).
   options.deferDoctor = true;
 
@@ -283,7 +289,13 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
           options.components.claudeMd ? `CLAUDE.md:   Swarm guidance & configuration` : '',
           options.components.settings ? `Settings:    .claude/settings.json` : '',
           options.components.skills
-            ? `Skills:      .claude/skills/, .gemini/skills/, .agents/skills/ (${result.summary.skillsCount} skills)`
+            ? `Skills:      ${[
+                '.claude/skills/',
+                wantsGeminiDirs(options) ? '.gemini/skills/' : '',
+                wantsAgentsDirs(options) ? '.agents/skills/' : '',
+              ]
+                .filter(Boolean)
+                .join(', ')} (${result.summary.skillsCount} skills)`
             : '',
           options.components.commands
             ? `Commands:    .claude/commands/ (${result.summary.commandsCount} commands)`
@@ -484,7 +496,12 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
       }
     }
 
-    await runDoctorFix(options.targetDir, result, options.installClaudeCode !== false);
+    await runDoctorFix(
+      options.targetDir,
+      result,
+      options.installClaudeCode !== false,
+      options.selectedPlatforms?.includes('claude') ?? true,
+    );
 
     if (!startAll) {
       output.writeln(output.bold('Next steps:'));
@@ -522,7 +539,7 @@ export const initAction = async (ctx: CommandContext): Promise<CommandResult> =>
       `     ${output.highlight('/mastermind:help')}   ${output.dim('# see all available slash commands')}`,
     );
     output.writeln(
-      `     ${output.highlight('/mastermind:understand')}   ${output.dim('# analyze your project with an LLM')}`,
+      `     ${output.highlight('/mastermind:plan')}   ${output.dim('# plan a change before touching code')}`,
     );
     output.writeln('');
     output.writeln(

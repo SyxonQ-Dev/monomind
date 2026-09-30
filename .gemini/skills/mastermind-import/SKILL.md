@@ -1,6 +1,6 @@
 ---
 name: mastermind-import
-description: Mastermind import — import an org from a portable ZIP archive exported by mastermind:export. Previews the archive contents, shows agent plans (create/update/skip), lets you choose a collision strategy, and applies the import to the local .monomind/orgs/ directory. Mirrors CompanyImport.tsx.
+description: "Mastermind import — preview and import an org from a ZIP made by mastermind:export into .monomind/orgs/, choosing create/update/skip and a collision strategy."
 type: domain-skill
 default_mode: confirm
 pick: low

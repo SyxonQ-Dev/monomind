@@ -82,88 +82,25 @@ export interface HooksConfig {
 }
 
 /**
- * Skills configuration
+ * Which packs (see init/packs.ts) a run installs for one kind of asset:
+ * `core` — the core pack; `all` — every pack. Opt-in packs are chosen
+ * with `InitOptions.packs`.
  */
-export interface SkillsConfig {
-  /** Include core skills (the mastermind engineering workflows, monolean, monodesign) */
+export interface PackSelection {
+  /** Install the core pack */
   core: boolean;
-  /** Include extended skills (mastermind org admin, monoswarm, hooks, monomotion, …) */
-  extended?: boolean;
-  /** Include memory/SQLite skills */
-  memory: boolean;
-  /** Include GitHub integration skills */
-  github: boolean;
-  /** Include browser automation skills */
-  browser: boolean;
-  /** Include advanced skills (agentic-jujutsu, security, performance, etc.) */
-  advanced: boolean;
-  /** Include all available skills */
+  /** Install every pack (`--full`, `--all-packs`) */
   all: boolean;
 }
 
-/**
- * Commands configuration
- */
-export interface CommandsConfig {
-  /** Include core commands (mastermind.md, tokens.md, browse.md, ts.md) */
-  core: boolean;
-  /** Include agents commands */
-  agents?: boolean;
-  /** Include analysis commands */
-  analysis: boolean;
-  /** Include automation commands */
-  automation: boolean;
-  /** Include coordination commands */
-  coordination?: boolean;
-  /** Include github commands */
-  github: boolean;
-  /** Include monoswarm commands */
-  monoswarm?: boolean;
-  /** Include hooks commands */
-  hooks: boolean;
-  /** Include mastermind commands */
-  mastermind?: boolean;
-  /** Include memory commands */
-  memory?: boolean;
-  /** Include monitoring commands */
-  monitoring: boolean;
-  /** Include monograph commands */
-  monograph?: boolean;
-  /** Include monomind commands */
-  monomind?: boolean;
-  /** Include optimization commands */
-  optimization: boolean;
-  /** Include pair commands */
-  pair?: boolean;
-  /** Include stream-chain commands */
-  streamChain?: boolean;
-  /** Include truth commands */
-  truth?: boolean;
-  /** Include workflows commands */
-  workflows?: boolean;
-  /** Include all commands */
-  all: boolean;
-}
+/** Skills configuration */
+export type SkillsConfig = PackSelection;
 
-/**
- * Agents configuration
- */
-export interface AgentsConfig {
-  /** Include core agents (coder, tester, reviewer) */
-  core: boolean;
-  /** Include consensus agents */
-  consensus: boolean;
-  /** Include GitHub agents */
-  github: boolean;
-  /** Include monoswarm agents */
-  monoswarm: boolean;
-  /** Include optimization agents */
-  optimization: boolean;
-  /** Include testing agents */
-  testing: boolean;
-  /** Include all agents */
-  all: boolean;
-}
+/** Commands configuration */
+export type CommandsConfig = PackSelection;
+
+/** Agents configuration */
+export type AgentsConfig = PackSelection;
 
 /**
  * Statusline configuration

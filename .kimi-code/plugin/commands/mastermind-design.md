@@ -1,5 +1,5 @@
 ---
-description: Collaborative design session — explore intent, clarify requirements, propose approaches, and produce an approved spec before any implementation begins.
+description: "Design session: explore intent, clarify requirements, compare approaches, and get a spec approved before implementation."
 ---
 
 **First — extract repeat flags:** Follow REPEAT PREAMBLE from `mastermind-repeat/SKILL.md`.

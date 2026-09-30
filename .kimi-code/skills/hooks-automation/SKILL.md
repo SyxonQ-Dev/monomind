@@ -1,11 +1,11 @@
 ---
 name: hooks-automation
-description: Automated coordination and learning from Claude Code operations using the monomind hooks system. Covers pre/post edit, command and task hooks, session persistence, routing, pattern logging, background workers, Claude Code settings.json wiring, and Git hook integration.
+description: "Set up and use monomind hooks: pre/post edit, command and task hooks, sessions, routing, pattern logging, background workers, settings.json and Git hooks."
 ---
 
 # Hooks Automation
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.21.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
+> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
 
 Coordinate, validate, and learn from Claude Code operations through the `monomind hooks` command group and the hook handlers that `monomind init` installs into `.claude/settings.json`.
 

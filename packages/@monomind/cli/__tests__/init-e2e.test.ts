@@ -104,7 +104,10 @@ describe('Init Command E2E (real fs)', () => {
     fs.rmSync(fakeHome, { recursive: true, force: true });
   });
 
-  it('should initialize with default configuration', async () => {
+  it('should initialize all five platforms with --all-platforms', async () => {
+    // A plain `init` writes only the detected platforms (#420); see
+    // init-detected-platforms-e2e.test.ts.
+    ctx.flags = { ...ctx.flags, 'all-platforms': true };
     const result = await initCommand.action!(ctx);
 
     expect(result.success).toBe(true);
@@ -155,7 +158,7 @@ describe('Init Command E2E (real fs)', () => {
   }, 60000);
 
   it('writes one unmarked copy per shared .agents/skills file, not one per platform', async () => {
-    ctx.flags = { ...ctx.flags, yes: true, 'no-install': true };
+    ctx.flags = { ...ctx.flags, yes: true, 'no-install': true, 'all-platforms': true };
     const result = await initCommand.action!(ctx);
 
     expect(result.success).toBe(true);

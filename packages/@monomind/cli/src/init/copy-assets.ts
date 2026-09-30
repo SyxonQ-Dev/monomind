@@ -5,18 +5,16 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
-  AGENTS_MAP,
   allShippedAgents,
   allShippedCommands,
   allShippedSkills,
-  COMMANDS_MAP,
   isCommandDoc,
   isDeprecatedAgent,
-  SKILLS_MAP,
 } from './asset-maps.js';
 import { guardFor } from './file-guard.js';
 import { listFilesRecursive } from './fs-helpers.js';
 import { previouslyGenerated, recordGenerated, retireGeneratedEntry } from './init-manifest.js';
+import { packEntries, selectedPacks, topLevel } from './packs.js';
 import { wantsAgentsDirs, wantsGeminiDirs } from './platform-dirs.js';
 import { findSourceDir } from './shared.js';
 import type { InitOptions, InitResult } from './types.js';
@@ -29,23 +27,10 @@ export async function copySkills(
   options: InitOptions,
   result: InitResult,
 ): Promise<void> {
-  const skillsConfig = options.skills;
   const targetSkillsDir = path.join(targetDir, '.claude', 'skills');
 
-  // Determine which skills to copy
-  const skillsToCopy: string[] = [];
-
-  if (skillsConfig.all) {
-    // Copy all available skills
-    Object.values(SKILLS_MAP).forEach((skills) => skillsToCopy.push(...skills));
-  } else {
-    if (skillsConfig.core) skillsToCopy.push(...SKILLS_MAP.core);
-    if (skillsConfig.extended) skillsToCopy.push(...SKILLS_MAP.extended);
-    if (skillsConfig.memory) skillsToCopy.push(...SKILLS_MAP.memory);
-    if (skillsConfig.github) skillsToCopy.push(...SKILLS_MAP.github);
-    if (skillsConfig.browser) skillsToCopy.push(...SKILLS_MAP.browser);
-    if (skillsConfig.advanced) skillsToCopy.push(...SKILLS_MAP.advanced);
-  }
+  // Core plus the opt-in packs this run asked for (see packs.ts).
+  const skillsToCopy = packEntries(selectedPacks(options, 'skills'), 'skills');
 
   // Find source skills directory
   const sourceSkillsDir = findSourceDir('skills', options.sourceBaseDir);
@@ -54,35 +39,19 @@ export async function copySkills(
     return;
   }
 
-  // Expand glob-style entries ('mastermind-*') against the source tree.
-  // Only directories that actually contain a SKILL.md count — this also
-  // filters exFAT AppleDouble junk (._mastermind-…).
-  for (const entry of skillsToCopy.filter((e) => e.endsWith('*'))) {
-    const prefix = entry.slice(0, -1);
-    skillsToCopy.splice(skillsToCopy.indexOf(entry), 1);
-    skillsToCopy.push(
-      ...fs
-        .readdirSync(sourceSkillsDir)
-        .filter(
-          (n) => n.startsWith(prefix) && fs.existsSync(path.join(sourceSkillsDir, n, 'SKILL.md')),
-        ),
-    );
-  }
-
   // Retire skill directories that this version no longer ships ANYWHERE —
   // not "the user didn't select this run". o-38: the sweep used to compare
-  // against `knownSkills` (this run's selection, filtered by
-  // options.skills.{core,memory,github,browser,advanced,all}), so a
-  // documented flag like `--minimal` deleted every previously-installed
-  // skill outside the minimal set — no version skew needed. The correct
-  // comparison is the full shipped catalogue: a skill still shipped but
-  // merely not selected this run is left completely alone (no retire, no
-  // delete, no mirror change); only a name absent from every SKILLS_MAP
-  // section — genuinely dropped upstream — is stale. Entries init never
+  // against `knownSkills` (this run's selection), so a documented flag like
+  // `--minimal` deleted every previously-installed skill outside the minimal
+  // set — no version skew needed. The correct comparison is the full shipped
+  // catalogue: a skill still shipped but merely not selected this run (a
+  // pack the user did not ask for) is left completely alone (no retire, no
+  // delete, no mirror change); only a name absent from every pack —
+  // genuinely dropped upstream — is stale. Entries init never
   // wrote at all (user-authored skills, skills installed by other tools)
   // are left untouched either way — see readInitManifest.
   const knownSkills = new Set([...new Set(skillsToCopy)]);
-  const shippedSkills = allShippedSkills(sourceSkillsDir);
+  const shippedSkills = allShippedSkills();
   const priorSkills = previouslyGenerated(targetDir, 'skills');
   if (fs.existsSync(targetSkillsDir)) {
     for (const existing of fs.readdirSync(targetSkillsDir)) {
@@ -180,34 +149,12 @@ export async function copyCommands(
   options: InitOptions,
   result: InitResult,
 ): Promise<void> {
-  const commandsConfig = options.commands;
   const targetCommandsDir = path.join(targetDir, '.claude', 'commands');
 
-  // Determine which commands to copy
-  const commandsToCopy: string[] = [];
-
-  if (commandsConfig.all) {
-    Object.values(COMMANDS_MAP).forEach((cmds) => commandsToCopy.push(...cmds));
-  } else {
-    if (commandsConfig.core) commandsToCopy.push(...COMMANDS_MAP.core);
-    if (commandsConfig.agents) commandsToCopy.push(...(COMMANDS_MAP.agents || []));
-    if (commandsConfig.analysis) commandsToCopy.push(...COMMANDS_MAP.analysis);
-    if (commandsConfig.automation) commandsToCopy.push(...COMMANDS_MAP.automation);
-    if (commandsConfig.coordination) commandsToCopy.push(...(COMMANDS_MAP.coordination || []));
-    if (commandsConfig.github) commandsToCopy.push(...COMMANDS_MAP.github);
-    if (commandsConfig.monoswarm) commandsToCopy.push(...(COMMANDS_MAP.monoswarm || []));
-    if (commandsConfig.hooks) commandsToCopy.push(...COMMANDS_MAP.hooks);
-    if (commandsConfig.mastermind) commandsToCopy.push(...(COMMANDS_MAP.mastermind || []));
-    if (commandsConfig.memory) commandsToCopy.push(...(COMMANDS_MAP.memory || []));
-    if (commandsConfig.monitoring) commandsToCopy.push(...COMMANDS_MAP.monitoring);
-    if (commandsConfig.monograph) commandsToCopy.push(...(COMMANDS_MAP.monograph || []));
-    if (commandsConfig.monomind) commandsToCopy.push(...(COMMANDS_MAP.monomind || []));
-    if (commandsConfig.optimization) commandsToCopy.push(...COMMANDS_MAP.optimization);
-    if (commandsConfig.pair) commandsToCopy.push(...(COMMANDS_MAP.pair || []));
-    if (commandsConfig.streamChain) commandsToCopy.push(...(COMMANDS_MAP.streamChain || []));
-    if (commandsConfig.truth) commandsToCopy.push(...(COMMANDS_MAP.truth || []));
-    if (commandsConfig.workflows) commandsToCopy.push(...(COMMANDS_MAP.workflows || []));
-  }
+  // Core plus the opt-in packs this run asked for (see packs.ts). An entry
+  // is a directory or a single file, possibly inside a directory that
+  // another pack also installs files into (`mastermind/do.md`).
+  const commandsToCopy = packEntries(selectedPacks(options, 'commands'), 'commands');
 
   // Find source commands directory
   const sourceCommandsDir = findSourceDir('commands', options.sourceBaseDir);
@@ -247,7 +194,7 @@ export async function copyCommands(
       const changed = fs.statSync(sourcePath).isDirectory()
         ? guard.copyDir(sourcePath, targetPath, skipDoc)
         : guard.copyFile(sourcePath, targetPath) === 'written';
-      writtenCommands.push(cmdName);
+      writtenCommands.push(topLevel(cmdName));
       if (changed) result.created.files.push(`.claude/commands/${cmdName}`);
       result.summary.commandsCount++;
     }
@@ -268,22 +215,11 @@ export async function copyAgents(
   options: InitOptions,
   result: InitResult,
 ): Promise<void> {
-  const agentsConfig = options.agents;
   const targetAgentsDir = path.join(targetDir, '.claude', 'agents');
 
-  // Determine which agents to copy
-  const agentsToCopy: string[] = [];
-
-  if (agentsConfig.all) {
-    Object.values(AGENTS_MAP).forEach((agents) => agentsToCopy.push(...agents));
-  } else {
-    if (agentsConfig.core) agentsToCopy.push(...AGENTS_MAP.core);
-    if (agentsConfig.consensus) agentsToCopy.push(...AGENTS_MAP.consensus);
-    if (agentsConfig.github) agentsToCopy.push(...AGENTS_MAP.github);
-    if (agentsConfig.monoswarm) agentsToCopy.push(...AGENTS_MAP.monoswarm);
-    if (agentsConfig.optimization) agentsToCopy.push(...(AGENTS_MAP.optimization || []));
-    if (agentsConfig.testing) agentsToCopy.push(...(AGENTS_MAP.testing || []));
-  }
+  // Core plus the opt-in packs this run asked for (see packs.ts); an entry is
+  // a category directory or a single agent file.
+  const agentsToCopy = packEntries(selectedPacks(options, 'agents'), 'agents');
 
   // Find source agents directory
   const sourceAgentsDir = findSourceDir('agents', options.sourceBaseDir);
@@ -322,6 +258,15 @@ export async function copyAgents(
       // extra command in a shipped folder. `init --force` did exactly that.
       // The cost of not wiping is that a file removed from a newer version
       // lingers; the cost of wiping is silent data loss, which is worse.
+      if (fs.statSync(sourcePath).isFile()) {
+        if (isDeprecatedAgent(sourcePath)) continue;
+        if (guard.copyFile(sourcePath, targetPath) === 'written') {
+          result.created.files.push(`.claude/agents/${agentCategory}`);
+        }
+        result.summary.agentsCount++;
+        writtenAgents.push(topLevel(agentCategory));
+        continue;
+      }
       const changed = guard.copyDir(sourcePath, targetPath, isDeprecatedAgent);
       // Count agent files (.md only — .yaml agents were migrated to .md)
       result.summary.agentsCount += [...listFilesRecursive(sourcePath)].filter(

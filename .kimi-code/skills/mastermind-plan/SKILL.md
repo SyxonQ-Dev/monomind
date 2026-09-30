@@ -1,6 +1,6 @@
 ---
 name: mastermind-plan
-description: Write comprehensive implementation plans from specs or requirements before touching code. Saves plans to docs/mastermind/plans/. No placeholders — every step has exact file paths, complete code, and expected output.
+description: "Write a complete implementation plan from a spec before touching code, saved to docs/mastermind/plans/: exact file paths, code and expected output."
 type: domain-skill
 default_mode: confirm
 ---

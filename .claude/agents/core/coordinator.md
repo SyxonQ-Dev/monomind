@@ -25,7 +25,7 @@ capability:
   termination: Goal met or all subtasks delegated, completed, and reconciled into authoritative state
 ---
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.21.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
+> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
 
 <!--
   Absorbed `queen-coordinator` (2026-07). That agent was the same shape as this
@@ -119,10 +119,10 @@ must outlive the session, persist it to memory before returning.
 **Routing to monoswarm specialists:**
 
 - Synthesising several agents' findings into durable knowledge →
-  `collective-intelligence-coordinator`
+  `collective-intelligence-coordinator` (pack swarm — `monomind packs add swarm`)
 - Independent slices runnable in parallel with no central owner →
   `mesh-coordinator`
-- A vote tally across agents against an explicit threshold → `quorum-manager`
+- A vote tally across agents against an explicit threshold → `quorum-manager` (pack swarm — `monomind packs add swarm`)
 - Implementation, testing, review, research → `coder`, `tester`, `reviewer`,
   `researcher`, `planner` via the Task tool
 

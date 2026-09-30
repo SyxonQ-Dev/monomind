@@ -1,5 +1,5 @@
 ---
-description: Mastermind — Research ideas from a prompt, evaluate them with a PM lens, elaborate, and decompose into subtasks saved to docs/ideas/ (default) or monotask boards (--monotask flag)
+description: "Research and evaluate ideas from a prompt, then split them into subtasks in docs/ideas/ or a monotask board (--monotask)."
 ---
 
 **First — extract repeat flags:** Follow the REPEAT PREAMBLE from `mastermind-repeat/SKILL.md`. Extracts `--repeat`, `--tillend`, `--maxruns`, `--wait`, `--rep`, `--loop` from `$ARGUMENTS` before all other parsing. If `is_continuation = true`, skip the empty-arguments check below.

@@ -32,11 +32,22 @@ cd your-project
 monomind init
 ```
 
-This initializes every supported coding system: Claude Code, Antigravity, OpenCode, Kimi Code, and Codex. It writes each platform's native instructions/configuration, shared skills, and MCP wiring, then builds the initial code graph. It takes 30–60 seconds and spawns a background process for the graph build.
+This sets up the coding systems installed on your machine, out of Claude Code, Antigravity, OpenCode, Kimi Code, and Codex, plus any of them the project already has. A system counts as installed when its CLI is on your `PATH` (`claude`, `gemini`/`agy`/`antigravity`, `opencode`, `kimi`, `codex`) or its config directory exists (`~/.claude` or `$CLAUDE_CONFIG_DIR`, `~/.gemini` or `~/.antigravity`, `~/.config/opencode`, `$XDG_CONFIG_HOME/opencode` or `~/.opencode`, `~/.kimi` or `~/.kimi-code`, `~/.codex` or `$CODEX_HOME`). If none is found, init sets up Claude Code and says so. Init prints what it detected and how to add the others. For each system it writes the native instructions/configuration, shared skills, and MCP wiring, then builds the initial code graph. It takes 30–60 seconds and spawns a background process for the graph build.
+
+Init never installs anything into your project: your `package.json` and lockfile stay as they are. If Claude Code is selected but its CLI is missing, init asks whether to install it globally (`npm install -g @anthropic-ai/claude-code`), and only in an interactive terminal; otherwise it prints that command. `--no-install` turns the question off. The code graph is built with the copy of `@monoes/monograph` that ships with the monomind CLI, and the hooks find that same copy (or a global install) later.
+
+To choose the systems yourself:
+
+```bash
+monomind init --platforms claude,codex   # exactly these, installed or not
+monomind init --all-platforms            # all five platforms (same as --target all)
+```
+
+`--full` also writes all five, along with every component and pack. `monomind init wizard` asks the same question, with the detected systems pre-selected (all five for the Full preset). Re-running `monomind init --yes` (or `--force`, which also refreshes the managed files) keeps every system the project already has, so it re-pins their MCP entries after an upgrade. `monomind init upgrade` refreshes the Claude Code helpers, statusline and CLAUDE.md, and with `--add-missing` copies new skills into `.gemini/` and `.agents/` only if the project has them; it does not refresh `.codex/`, `opencode.json`/`.opencode/` or `.kimi-code/`, and never adds a system. To add one later, run `monomind init --platforms claude,codex --yes`.
 
 Init also sets up the memory database (`.swarm/memory.db`, the same one `monomind memory init` creates, copied to `.claude/memory.db`), so `monomind doctor` reports **Memory Database ✓** straight away. Re-running init keeps an existing database and everything in it. Pass `--no-memory` to skip it; `--only-claude` skips it too, since that mode writes no runtime state, and `--skip-claude` creates the database without the `.claude/` copy. If the database can't be created (for example, `sql.js` is missing), init still finishes and prints a warning: run `monomind memory init` to retry.
 
-To initialize only one system, use `--target`:
+To initialize only one system, you can also use `--target`:
 
 ```bash
 monomind init --target codex
@@ -110,20 +121,44 @@ This lists all available slash commands. The most useful starting points:
 
 | Command | What it does |
 |---|---|
-| `/mastermind:understand` | Analyze your project with an LLM and enrich the knowledge graph |
+| `/mastermind:understand` | Analyze your project with an LLM and enrich the knowledge graph (extras pack: `monomind packs add extras`) |
 | `/mastermind:debug` | Systematic root-cause debugging protocol |
 | `/mastermind:plan` | Write a comprehensive implementation plan before touching code |
 | `/mastermind:review` | Review the work and auto-fix findings; add `--tillend` to loop until a round comes back clean |
 
 ### Agents and skills
 
-`monomind init` installs <!-- doc-count:installed-agents -->84<!-- /doc-count:installed-agents --> agents under `.claude/agents` with the default selection, skills under `.claude/skills` and slash commands under `.claude/commands`. You rarely name one yourself: for each prompt, the hook adds a line such as
+By default, `monomind init` installs the core pack: <!-- doc-count:installed-agents -->20<!-- /doc-count:installed-agents --> agents under `.claude/agents`, the everyday skills under `.claude/skills` and slash commands under `.claude/commands`. You rarely name one yourself: for each prompt, the hook adds a line such as
 
 ```
 [PICK] agent: Security Engineer · skill: /mastermind:review
 ```
 
 to Claude's context when one agent or skill clearly fits, and Claude uses it. To see the ranking for any task, run `monomind pick -t "<task>"`. Your own agents and skills are Markdown files in the same folders; [Agents & Skills](concepts/agents-and-skills.md) shows where each kind goes and what to put in its frontmatter.
+
+### Packs
+
+Claude Code lists every installed skill and command with its description, and once that list passes about 1% of the context window it drops descriptions. So `monomind init` installs only the **core** pack; the rest are opt-in:
+
+| Pack | What it adds |
+|---|---|
+| `orgs` | Agent orgs: create, run, stop and inspect them; org tasks, goals and routines |
+| `org-admin` | Org admin bookkeeping: access, invites, plugins, adapters, secrets, backups |
+| `swarm` | Monoswarm, hooks and workflow commands; consensus and optimization agents |
+| `github` | GitHub commands and agents: repo architecture, multi-repo sync, project boards, Actions |
+| `testing` | QA agents: API, accessibility, evidence collection, test analysis |
+| `specialists` | Specialist agents: data, SRE, mobile, embedded, Solidity, WeChat, Feishu, MCP |
+| `business` | Marketing, sales, finance, content and ops workflows; marketing agents |
+| `extras` | Pair programming, monograph commands, monolean audits, skill builders, jj |
+
+```bash
+monomind packs list                    # every pack, installed or not, and its listing size
+monomind packs add orgs github         # add packs to this project
+monomind packs remove business         # remove a pack (files you changed are kept)
+monomind init --packs orgs,github      # or choose at init time; --all-packs installs everything
+```
+
+The wizard (`monomind init wizard`) asks which packs to add. A project initialised before packs existed keeps everything it has: `init` and `init upgrade` never delete a skill, command or agent, and `init upgrade --add-missing` only adds files for the packs the project has. `packs remove` deletes only files that still match what init installed.
 
 ## What's running?
 

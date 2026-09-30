@@ -12,13 +12,15 @@
 // is not a command reference.
 //
 // Run: node scripts/lint-skills.mjs
-// CI: fails on any unresolved command or subcommand, any @alpha dist-tag, or
-// cross-tree drift. A word after a command that has no subcommands is taken as
+// CI: fails on any unresolved command or subcommand, any @alpha dist-tag,
+// cross-tree drift, or a shipped skill/command/agent description over
+// DESCRIPTION_MAX_CHARS (GH #411). A word after a command that has no subcommands is taken as
 // a positional argument and not checked.
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { parse as parseYaml } from 'yaml';
 
 const ROOT = process.cwd();
 const SKILL_TREES = [
@@ -46,6 +48,10 @@ const SYNCED_SKILLS = new Set([
   'mastermind-runorg',
   'mastermind-createorg',
 ]);
+// Repo-only by design (same list as tests/repo/claude-tree-parity.test.ts):
+// monoagent-image is tied to the local "monoes" browser profile and monodoc is
+// a repo authoring aid, so neither ships in the package.
+const ROOT_ONLY_SKILLS = new Set(['monoagent-image', 'monodoc']);
 const ALPHA_NEEDLE = 'monomind@alpha';
 const errors = [];
 const warnings = [];
@@ -262,11 +268,7 @@ function checkDrift() {
       readdirSync(tree2).filter((d) => existsSync(join(tree2, d, 'SKILL.md'))),
     );
 
-    // Repo-only by design (same list as tests/repo/claude-tree-parity.test.ts):
-    // monoagent-image is tied to the local "monoes" browser profile and
-    // monodoc is a repo authoring aid, so neither ships in the package.
-    const ROOT_ONLY_ALLOWED = new Set(['monoagent-image', 'monodoc']);
-    const only1 = [...skills1].filter((s) => !skills2.has(s) && !ROOT_ONLY_ALLOWED.has(s));
+    const only1 = [...skills1].filter((s) => !skills2.has(s) && !ROOT_ONLY_SKILLS.has(s));
     const only2 = [...skills2].filter((s) => !skills1.has(s));
 
     if (only1.length > 0) {
@@ -297,6 +299,77 @@ function checkDrift() {
   }
 }
 
+// --- Description length cap (GH #411) ---
+// Claude Code lists every skill and command with its description in a budget
+// of ~1% of the context window (~8k chars on a 200k model) and drops
+// descriptions past it; agents are listed the same way in the Agent tool.
+// 8,000 chars over the ~40 entries the default install lists is 200 per
+// entry. Keep in step with DESCRIPTION_MAX_CHARS in
+// packages/@monomind/cli/src/init/listing-size.ts.
+export const DESCRIPTION_MAX_CHARS = 200;
+
+// The trees that ship: the root source of truth and the npm package copy.
+const SHIPPED_DESCRIPTION_TREES = ['.claude', 'packages/@monomind/cli/.claude'];
+
+/** Listing description of a markdown file: frontmatter `description` plus a
+ *  skill's `when_to_use` (Claude Code shows both). Null without frontmatter. */
+export function listingDescription(content, { skill = false } = {}) {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
+  if (!m) return null;
+  let data;
+  try {
+    data = parseYaml(m[1]);
+  } catch {
+    return null; // invalid YAML is reported by skill-frontmatter/command-frontmatter tests
+  }
+  if (!data || typeof data !== 'object') return null;
+  const text = (v) => (typeof v === 'string' ? v.trim() : '');
+  return [text(data.description), skill ? text(data.when_to_use) : ''].filter(Boolean).join(' ');
+}
+
+/** Why `content`'s description is over the cap, or null. */
+export function descriptionTooLong(content, opts) {
+  const desc = listingDescription(content, opts);
+  if (desc === null || desc.length <= DESCRIPTION_MAX_CHARS) return null;
+  return `description is ${desc.length} chars (max ${DESCRIPTION_MAX_CHARS}) — shorten it in the root .claude/ copy, then run pnpm run sync:claude-trees`;
+}
+
+/** Same filter as isCommandDoc in src/init/asset-maps.ts: not a command. */
+const isCommandDoc = (rel) => {
+  const segs = rel.split('/');
+  const base = segs[segs.length - 1];
+  return base === 'README.md' || base.startsWith('_') || segs.includes('references');
+};
+
+function checkDescriptionLengths() {
+  for (const tree of SHIPPED_DESCRIPTION_TREES) {
+    const skillsDir = join(ROOT, tree, 'skills');
+    if (existsSync(skillsDir)) {
+      for (const d of readdirSync(skillsDir)) {
+        const file = join(skillsDir, d, 'SKILL.md');
+        if (!existsSync(file) || ROOT_ONLY_SKILLS.has(d)) continue;
+        const why = descriptionTooLong(readFileSync(file, 'utf8'), { skill: true });
+        if (why) errors.push(`${tree}/skills/${d}/SKILL.md: ${why}`);
+      }
+    }
+    for (const kind of ['commands', 'agents']) {
+      const dir = join(ROOT, tree, kind);
+      for (const file of walkMarkdownFiles(dir)) {
+        const rel = file
+          .slice(dir.length + 1)
+          .split('\\')
+          .join('/');
+        if (kind === 'commands' && isCommandDoc(rel)) continue;
+        const why = descriptionTooLong(readFileSync(file, 'utf8'));
+        if (why) errors.push(`${tree}/${kind}/${rel}: ${why}`);
+      }
+    }
+  } // monodesign's SKILL.md is compiled from this source at pack time.
+  const monodesign = 'packages/@monoes/monodesign/skill/SKILL.src.md';
+  const why = descriptionTooLong(readFileSync(join(ROOT, monodesign), 'utf8'), { skill: true });
+  if (why) errors.push(`${monodesign}: ${why}`);
+}
+
 // --- Run ---
 async function main() {
   let cli;
@@ -313,6 +386,7 @@ async function main() {
     lintCommandTree(tree, cli);
   }
   checkDrift();
+  checkDescriptionLengths();
 
   // --- Report ---
   if (warnings.length > 0) {

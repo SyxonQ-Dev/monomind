@@ -1,6 +1,6 @@
 ---
 name: pair-programming
-description: AI pair programming workflow with Claude as driver, navigator, reviewer, or mentor. Supports TDD, debugging, refactoring, review, and learning sessions using Claude Code tools, Task-tool agents, and real monomind commands (hooks, memory, session) for tracking and continuity. There is no pair CLI; the session is run in the conversation.
+description: "Pair programming with Claude as driver, navigator, reviewer or mentor, for TDD, debugging, refactoring and learning, run in the conversation (there is no pair CLI)."
 ---
 
 # Pair Programming

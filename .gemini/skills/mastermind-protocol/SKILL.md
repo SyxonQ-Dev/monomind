@@ -1,6 +1,6 @@
 ---
 name: mastermind-protocol
-description: Shared protocol for all mastermind domain skills — brain-load, brain-write, output schema, memory scoring, and task briefing standard. Never invoked directly; referenced by domain skills and master.
+description: "Shared protocol for mastermind domain skills: brain load/write, output schema, memory scoring, task briefs. Never invoked directly."
 type: shared
 ---
 
