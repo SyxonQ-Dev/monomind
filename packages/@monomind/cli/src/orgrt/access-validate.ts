@@ -10,6 +10,7 @@
 
 import { isUnattendedRun, resolveRoleAccess } from './access-grant.js';
 import { runnerSpec } from './runner-registry.js';
+import { effectiveRoleRuntime } from './runner-specs.js';
 import type { OrgDef } from './types.js';
 
 /** `policy` fields the schema still parses (with defaults) but that a
@@ -59,7 +60,7 @@ export function accessValidationFindings(
     const declared = role.policy?.access ?? 'scoped';
     if (declared !== 'full') continue;
 
-    const runtimeId = role.runtime ?? def.runtime ?? 'claude';
+    const runtimeId = effectiveRoleRuntime(role.runtime, def.runtime, role.provider?.kind);
     if (!runnerSpec(runtimeId)?.supportsFullAccess) {
       errors.push(
         `role ${role.id}: policy.access 'full' is not supported by runtime "${runtimeId}" — this role will refuse to run with full access`,

@@ -14,6 +14,7 @@ import type { TokenUsage } from './policy.js';
 import { summarizeToolOutput } from './policy.js';
 import { resolveRoleProvider } from './provider.js';
 import { resolveRoleGitEnforcement, roleAuthorityMask } from './role-sandbox.js';
+import { effectiveRoleRuntime } from './runner-resolve.js';
 import { BUDGET_STOP_SUBTYPE } from './runner-usage.js'; // #550: a runner's budget stop
 import { type FaultRestarts, ProcessFaultError } from './sandbox-fault.js';
 import { sandboxStubPaths, sandboxStubs } from './sandbox-stubs.js';
@@ -103,7 +104,9 @@ export async function runOneSession(
   // with full access — role.policy.access alone is never trusted below this
   // point. Absent opts.def (a handful of low-level tests construct
   // SessionOpts directly with no org def), a role can only ever be scoped.
-  const runtimeKey = role.runtime ?? opts.def?.runtime ?? 'claude';
+  // #567: the runtime whose runner hosts this role (provider.kind included),
+  // so full access, the sandbox choice and the audit name the one that runs.
+  const runtimeKey = effectiveRoleRuntime(role.runtime, opts.def?.runtime, role.provider?.kind);
   const fullAccessSession = beginFullAccessSession(bus, role, opts.def, runtimeKey);
   const { resolvedAccess } = fullAccessSession;
   let fullAccessToolCalls = 0;
@@ -167,7 +170,7 @@ export async function runOneSession(
             run: opts.run,
             bus,
             claudeRuntime: runner instanceof ClaudeAgentRunner,
-            runtime: role.runtime ?? opts.def?.runtime,
+            runtime: runtimeKey,
             // The sandbox's mount-point stubs, created once and kept until the run
             // ends, so no other role's process deletes one mid-bind (sandbox-stubs.ts).
             // Held before the deny list is built, which keeps a denied cwd read-only
@@ -193,7 +196,7 @@ export async function runOneSession(
             roleId: role.id,
             inSdkSandbox: !!gitEnforcement.claudeRestrictions?.sandbox,
             // vercel runs in-process with no shell; its file tools go through the policy engine.
-            inProcess: (role.runtime ?? opts.def?.runtime) === 'vercel',
+            inProcess: runtimeKey === 'vercel',
             cwd,
             orgRoot: opts.orgRoot,
             fileWrite: role.policy?.fileWrite,
