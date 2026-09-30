@@ -6,6 +6,7 @@ import { catalogDir, packageDigest, packagesDir } from '../../src/catalog/digest
 import {
   CatalogStateError,
   loadCatalogState,
+  lockPath,
   mutateCatalogState,
   statePath,
   transition,
@@ -202,7 +203,7 @@ describe('mutateCatalogState', () => {
     const root = newRoot();
     mutateCatalogState(root, (s) => ({ ...s, entries: [entry()] }));
     expect(loadCatalogState(root).entries.map((e) => e.id)).toEqual(['skill:example']);
-    expect(existsSync(join(root, '.monomind', 'locks', 'catalog.lock'))).toBe(false);
+    expect(existsSync(lockPath(root))).toBe(false);
   });
   it('writes nothing when the new state fails validation', () => {
     const root = newRoot();

@@ -236,6 +236,7 @@ export async function stage(root: string, src: string, opts: StageOptions): Prom
   // #576: an org start creates `.monomind/catalog/` empty so a role can't
   // plant one; a refused stage must not remove it again mid-run.
   const catalogExisted = existsSync(catalogDir(root));
+  const monomindExisted = existsSync(join(root, '.monomind'));
   let temp: string | undefined;
   try {
     const { kind, c } = choose(co.root, opts);
@@ -349,6 +350,7 @@ export async function stage(root: string, src: string, opts: StageOptions): Prom
     if (!storeExisted) {
       rmdirIfEmpty(store);
       if (!catalogExisted) rmdirIfEmpty(catalogDir(root));
+      if (!monomindExisted) rmdirIfEmpty(join(root, '.monomind'));
     }
   }
 }
