@@ -4,6 +4,7 @@
 import { existsSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 // ── Extracted module imports ────────────────────────────────────────────
+import { type ApprovalVerdict, awaitApproval } from './approval-decider.js';
 import * as approvalOps from './approvals.js';
 import type { BrokerLease } from './broker.js';
 import type { OrgBus } from './bus.js';
@@ -263,6 +264,15 @@ export class OrgDaemon {
     input: Record<string, unknown>,
   ): Promise<boolean | null> {
     return approvalOps.checkApproval(this, org, role, action, input);
+  }
+  /** @internal #553: checkApproval that waits inline when a decider owns it. */
+  awaitApproval(
+    org: string,
+    role: string,
+    action: string,
+    input: Record<string, unknown>,
+  ): Promise<ApprovalVerdict> {
+    return awaitApproval(this, org, role, action, input);
   }
   async setApproval(
     ...args: DaemonArgs<typeof approvalOps.setApproval>
