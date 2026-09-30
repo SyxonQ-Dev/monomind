@@ -14,11 +14,13 @@
  *     packages, whose active `org` skills (their content and grantedTools,
  *     which decide the MCP tools the daemon grants) and blueprints roles get
  *     at start. Only the operator's `monomind catalog` writes it;
- *   - #580: `<project>/.agents/skills` — the catalog's other projection
- *     surface, which the operator's Codex, Gemini, Kimi, OpenCode… sessions
- *     load skills from, as Claude Code loads `.claude/`. Like `.claude/` it
- *     is not pre-created (that would leave a stray `.agents/` in every repo);
- *     while missing it is on the planted-path watch (planted-paths.ts);
+ *   - #580: the project config other runtimes' operator sessions load and
+ *     act on, as Claude Code loads `.claude/` and `.mcp.json`
+ *     (PROJECT_RUNTIME_CONFIG): `.agents/skills` (the catalog's other
+ *     projection surface), the hook bridge, `.gemini/`, `.codex/`, … Like
+ *     `.claude/` none is pre-created (that would leave stray dirs in every
+ *     repo); while missing each is on the planted-path watch
+ *     (planted-paths.ts);
  *   - `~/.npm/_npx` (what `npx -y monomind …` runs), `~/.npmrc`,
  *     `~/.local/bin`, and shell startup files beyond HOME_DENY_WRITE;
  *   - #527: the node, npm, claude and monomind installs the operator's
@@ -156,6 +158,45 @@ export const CLAUDE_HOME_EXEC = [
   'CLAUDE.md',
 ];
 
+/** #580: relative to the org root and a role's cwd, what the operator's
+ *  non-Claude sessions in the project load and act on: MCP servers, hooks and
+ *  the scripts they run, plugins (and the node_modules OpenCode installs for
+ *  them), extensions, skills and commands. A role that wrote one would get
+ *  code run, or a skill loaded, in the operator's next Codex, Gemini, agy,
+ *  Kimi, OpenCode, Qwen, Crush, pi, Cline, aider, Cursor, Kiro or Droid
+ *  session. Instruction files (AGENTS.md, GEMINI.md, QWEN.md, the rest of
+ *  `.agents/`) stay writable, like CLAUDE.md, and so do runtime state dirs
+ *  such as Crush's `.crush/`. */
+export const PROJECT_RUNTIME_CONFIG = [
+  // The catalog's other projection surface (Codex, Gemini, Cursor, OpenCode,
+  // Kimi… skills).
+  '.agents/skills',
+  // `node .agents/monomind/hook-bridge.mjs`, which rendered hooks run.
+  '.agents/monomind',
+  // settings.json (mcpServers, hooks), helpers, commands, skills, plugins.
+  '.gemini',
+  // config.toml (mcp_servers, hooks) and the hook scripts it names.
+  '.codex',
+  // mcp.json and the plugin hooks.
+  '.kimi-code',
+  '.opencode',
+  'opencode.json',
+  'opencode.jsonc',
+  '.qwen',
+  'crush.json',
+  '.crush.json',
+  // pi's project extensions.
+  '.pi',
+  // Cline rules and hooks.
+  '.clinerules',
+  // lint-cmd / test-cmd, which aider runs.
+  '.aider.conf.yml',
+  '.cursor',
+  '.vscode/mcp.json',
+  '.kiro',
+  '.factory',
+];
+
 export const monomindHome = (home: string, env: NodeJS.ProcessEnv): string =>
   env.MONOMIND_HOME ? resolve(env.MONOMIND_HOME) : join(home, '.monomind');
 
@@ -235,7 +276,7 @@ function protectedCandidates(ctx: ProtectedCtx): string[] {
     ...roots.map((r) => join(r, '.mcp.json')),
     ...roots.map((r) => join(r, '.monomind', 'org-skills')),
     ...roots.map((r) => join(r, '.monomind', 'catalog')),
-    ...roots.map((r) => join(r, '.agents', 'skills')),
+    ...roots.flatMap((r) => PROJECT_RUNTIME_CONFIG.map((p) => join(r, p))),
     join(mmHome, 'org-skills'),
     join(mmHome, 'enable-terminal.json'),
     ...monomindEntries,

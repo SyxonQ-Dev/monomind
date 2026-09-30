@@ -119,6 +119,13 @@ describe('stage', () => {
     expect(storeListing(root)).toEqual([]);
   });
 
+  it('a package refused at inspection in a project with no .monomind/ leaves none behind (#581)', async () => {
+    const root = newRoot();
+    const repo = gitRepo({ LICENSE: MIT, 'skills/x/SKILL.md': '---\nname: x\n---\n\nNo description.\n' });
+    await expect(stage(root, repo, { actor: 't', fence: clean })).rejects.toThrow(/refused/);
+    expect(existsSync(join(root, '.monomind'))).toBe(false);
+  });
+
   it('stages a blueprint-only repo and rejects a blueprint with a forbidden key before copying', async () => {
     const root = newRoot();
     const good = gitRepo({

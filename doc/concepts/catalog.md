@@ -137,7 +137,12 @@ The projection targets are protected the same way (#580): `.claude/` as a
 whole, and `.agents/skills`, which the operator's Codex, Gemini, Kimi,
 OpenCode and other sessions load skills from. Neither is created at org start
 (that would leave a stray `.agents/` in every repo); a missing one is on the
-planted-path watch instead, so one a role creates is quarantined.
+planted-path watch instead, so one a role creates is quarantined. A
+projection you apply while an org runs into a missing `.agents/skills` is
+quarantined the same way; restore it with the `mv … && monomind org
+approve-paths …` the notice gives, or project before starting the org. The
+other runtimes' project config (`.gemini/`, `.codex/`, `.opencode/`, …) is
+protected alongside ([org runtime](./org-runtime.md)).
 
 `monomind cleanup --force` treats `.monomind/catalog/` as data: it keeps the
 staged packages, approvals and grants unless `--purge-data` is given (#579).
