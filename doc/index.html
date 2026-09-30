@@ -312,7 +312,7 @@ code { font-family: var(--ff-m); font-size: 0.85em; background: var(--surface2);
       </a>
     </div>
     <div class="hero-stats">
-      <div class="stat-item"><span class="stat-num" id="stat-agents"><!-- doc-count:pickable-agents -->84<!-- /doc-count:pickable-agents --></span><span class="stat-label">Pickable Agents</span></div>
+      <div class="stat-item"><span class="stat-num" id="stat-agents"><!-- doc-count:pickable-agents -->83<!-- /doc-count:pickable-agents --></span><span class="stat-label">Pickable Agents</span></div>
       <div class="stat-item"><span class="stat-num" id="stat-commands">0</span><span class="stat-label">CLI Commands</span></div>
       <div class="stat-item"><span class="stat-num" id="stat-hooks">0</span><span class="stat-label">Hook Events</span></div>
       <div class="stat-item"><span class="stat-num" id="stat-packages">0</span><span class="stat-label">Packages</span></div>
@@ -478,7 +478,7 @@ code { font-family: var(--ff-m); font-size: 0.85em; background: var(--surface2);
     <table class="doc-table">
       <thead><tr><th>Package</th><th>Path</th><th>Purpose</th></tr></thead>
       <tbody>
-        <tr><td class="mono">@monomind/cli</td><td class="mono">packages/@monomind/cli/</td><td>CLI entry point — 39 commands, including <code>org</code> (org runtime, see <code>src/orgrt/</code>), <code>catalog</code> (skill catalog lifecycle) and <code>monoswarm</code> (multi-agent coordination state, deprecated)</td></tr>
+        <tr><td class="mono">@monomind/cli</td><td class="mono">packages/@monomind/cli/</td><td>CLI entry point — <!-- doc-count:cli-commands -->38<!-- /doc-count:cli-commands --> commands, including <code>org</code> (org runtime, see <code>src/orgrt/</code>) and <code>catalog</code> (skill catalog lifecycle)</td></tr>
         <tr><td class="mono">@monoes/hooks</td><td class="mono">packages/@monomind/hooks/</td><td>20 typed hook events (registry/executor) + <!-- doc-count:workers -->9<!-- /doc-count:workers --> background workers; exposed via 29 <code>hooks</code> CLI subcommands</td></tr>
         <tr><td class="mono">@monoes/memory</td><td class="mono">packages/@monomind/memory/</td><td>Memory backends — local SQLite with embedded vectors (default engine, local HF embeddings); a dormant pure-JS HNSW index is the scale-up path. LanceDB was removed 2026-07</td></tr>
         <tr><td class="mono">@monoes/mcp</td><td class="mono">packages/@monomind/mcp/</td><td>MCP server framework for explicit HTTP/WebSocket transports (<code>mcp start -t http|websocket</code>). The default stdio path (<code>claude mcp add ... mcp start</code>) uses a separate hand-rolled JSON-RPC loop in the CLI itself, not this package.</td></tr>
@@ -765,10 +765,6 @@ monomind doc ingest ./their-knowledge -s shared
       <div class="cmd-item" data-search="org questions human in the loop ask_human pending"><div class="cmd-name">org questions &lt;name&gt; [--all]</div><div class="cmd-desc">List pending (or all) human-in-the-loop questions an agent asked via ask_human</div></div>
       <div class="cmd-item" data-search="org answer human in the loop respond"><div class="cmd-name">org answer &lt;name&gt; &lt;id&gt; "&lt;text&gt;"</div><div class="cmd-desc">Answer a pending question — delivered live if the org is running, queued for next start otherwise</div></div>
       <div class="cmd-item" data-search="org create wizard define roles"><div class="cmd-name">org create</div><div class="cmd-desc">Define and save a new org config</div></div>
-      <div class="cmd-item" data-search="monoswarm init topology start coordination"><div class="cmd-name">monoswarm init</div><div class="cmd-desc">Record monoswarm coordination state — topology, roster, vote strategy (real work happens via Claude Code's Task tool)</div></div>
-      <div class="cmd-item" data-search="monoswarm status health report"><div class="cmd-name">monoswarm status</div><div class="cmd-desc">Read back monoswarm state: registered agents, tasks, topology</div></div>
-      <div class="cmd-item" data-search="monoswarm scale add remove agent"><div class="cmd-name">monoswarm scale</div><div class="cmd-desc">Register/deregister agents in monoswarm state</div></div>
-      <div class="cmd-item" data-search="monoswarm stop shutdown terminate"><div class="cmd-name">monoswarm stop</div><div class="cmd-desc">Mark monoswarm state terminated</div></div>
       <div class="cmd-item" data-search="memory store save write"><div class="cmd-name">memory store</div><div class="cmd-desc">Store a memory entry with optional namespace</div></div>
       <div class="cmd-item" data-search="memory search query find bm25 keyword"><div class="cmd-name">memory search</div><div class="cmd-desc">Keyword/BM25 search over stored memories</div></div>
       <div class="cmd-item" data-search="memory list show namespace"><div class="cmd-name">memory list</div><div class="cmd-desc">List memories by namespace or tag</div></div>
@@ -838,12 +834,12 @@ monomind doc ingest ./their-knowledge -s shared
     <div class="page-header">
       <span class="page-tag">Reference</span>
       <h1 class="page-title">Slash Commands</h1>
-      <p class="page-desc"><!-- doc-count:slash-commands -->115<!-- /doc-count:slash-commands --> slash commands ship with Monomind, a selection below. Invoke via <code>/command</code> inside Claude Code; add your own under <code>.claude/commands</code> (<a href="#agents" style="color:var(--accent)">Agents &amp; Skills</a>).</p>
+      <p class="page-desc"><!-- doc-count:slash-commands -->96<!-- /doc-count:slash-commands --> slash commands ship with Monomind, a selection below. Invoke via <code>/command</code> inside Claude Code; add your own under <code>.claude/commands</code> (<a href="#agents" style="color:var(--accent)">Agents &amp; Skills</a>).</p>
     </div>
     <div class="search-bar reveal"><span class="search-icon">⌕</span><input type="text" id="slash-search" placeholder="Search slash commands..." aria-label="Search slash commands"></div>
     <div class="cmd-grid" id="slash-grid">
       <!-- Core / Root -->
-      <div class="cmd-item" data-search="mastermind monoswarm topology picker"><div class="cmd-name">/mastermind</div><div class="cmd-desc">Monoswarm topology picker — one recommendation</div></div>
+      <div class="cmd-item" data-search="mastermind intent router"><div class="cmd-name">/mastermind</div><div class="cmd-desc">Intent router — picks the right capability, then runs it or gives exact steps</div></div>
       <div class="cmd-item" data-search="monobrowse browse browser testing automation cdp"><div class="cmd-name">/monobrowse</div><div class="cmd-desc">UI testing via monomind browse CDP client</div></div>
       <div class="cmd-item" data-search="tokens usage cost dashboard spend"><div class="cmd-name">/tokens</div><div class="cmd-desc">Token usage dashboard: today/week/30days/month</div></div>
       <div class="cmd-item" data-search="ts statusline toggle compact full panel"><div class="cmd-name">/ts</div><div class="cmd-desc">Toggle statusline between full and compact mode</div></div>
@@ -885,7 +881,6 @@ monomind doc ingest ./their-knowledge -s shared
       <div class="cmd-item" data-search="mastermind loops active running tillend repeat command"><div class="cmd-name">/mastermind:loops</div><div class="cmd-desc">List active --tillend/--repeat loops</div></div>
       <div class="cmd-item" data-search="mastermind repeat loop schedule every times command"><div class="cmd-name">/mastermind:repeat</div><div class="cmd-desc">Repeat any prompt or slash command on a schedule</div></div>
       <div class="cmd-item" data-search="mastermind understand semantic enrichment monograph codebase"><div class="cmd-name">/mastermind:understand</div><div class="cmd-desc">Semantic enrichment for monograph</div></div>
-      <div class="cmd-item" data-search="mastermind monoswarm swarm coordination init start status stop scale"><div class="cmd-name">/mastermind:monoswarm</div><div class="cmd-desc">Multi-agent swarm coordination</div></div>
       <div class="cmd-item" data-search="mastermind help reference commands skills workflow quick"><div class="cmd-name">/mastermind:help</div><div class="cmd-desc">Quick-reference: all skills, commands, and CLI</div></div>
       <div class="cmd-item" data-search="mastermind skill builder create edit verify skills"><div class="cmd-name">/mastermind:skill-builder</div><div class="cmd-desc">Create, edit, or verify mastermind skills</div></div>
       <div class="cmd-item" data-search="mastermind specialagents specialist activate persona category"><div class="cmd-name">/mastermind:specialagents</div><div class="cmd-desc">Activate a specialist agent persona</div></div>
@@ -932,7 +927,7 @@ monomind doc ingest ./their-knowledge -s shared
     <div class="page-header">
       <span class="page-tag">Reference</span>
       <h1 class="page-title">Mastermind</h1>
-      <p class="page-desc"><!-- doc-count:mastermind-commands -->42<!-- /doc-count:mastermind-commands --> slash commands with Brain Load/Write protocol and --tillend loop mechanics.</p>
+      <p class="page-desc"><!-- doc-count:mastermind-commands -->40<!-- /doc-count:mastermind-commands --> slash commands with Brain Load/Write protocol and --tillend loop mechanics.</p>
     </div>
     <div class="section-title reveal">--tillend Loop Mechanics</div>
     <div class="code-block reveal">Session 1: <span class="cmd">/mastermind:review --tillend</span>
@@ -1003,7 +998,6 @@ Session N: empty round (zero findings AND zero actions)
         <tr><td class="mono">/mastermind:loops</td><td>List active --tillend/--repeat loops</td></tr>
         <tr><td class="mono">/mastermind:repeat</td><td>Repeat any prompt or slash command on a schedule</td></tr>
         <tr><td class="mono">/mastermind:understand</td><td>Semantic enrichment for monograph</td></tr>
-        <tr><td class="mono">/mastermind:monoswarm</td><td>Multi-agent swarm coordination</td></tr>
         <tr><td class="mono">/mastermind:help</td><td>Quick-reference: all skills, commands, and CLI</td></tr>
         <tr><td class="mono">/mastermind:skill-builder</td><td>Create, edit, or verify mastermind skills</td></tr>
         <tr><td class="mono">/mastermind:specialagents</td><td>Activate a specialist agent persona</td></tr>
@@ -1291,7 +1285,7 @@ Session N: empty round (zero findings AND zero actions)
     <p class="reveal" style="font-size:13px;color:var(--text2);margin-top:1rem;margin-bottom:4px;"><strong>Routing tab:</strong> Routing data is collected automatically whenever Claude Code routes a task to an agent. No setup required. Use <code>/hooks:overview</code> to understand the routing hook.</p>
     <p class="reveal" style="font-size:13px;color:var(--text2);margin-bottom:8px;margin-top:1rem"><strong>ADRs tab:</strong> ADRs are created via the slash command or discovered automatically from existing ADR files:</p>
     <div class="code-block reveal"><span class="cmd">/mastermind:adr</span>    <span class="comment"># draft an ADR from accumulated decision markers in the codebase</span></div>
-    <p class="reveal" style="font-size:13px;color:var(--text2);margin-bottom:8px;margin-top:1rem"><strong>Swarm tab:</strong> reflects <code>monoswarm</code> coordination state (written by Task-tool-driven work, not org runtime activity). For a running <code>monomind org run</code> org, watch its own live dashboard instead:</p>
+    <p class="reveal" style="font-size:13px;color:var(--text2);margin-bottom:8px;margin-top:1rem"><strong>Swarm tab:</strong> reflects Task-tool subagent activity, not org runtime activity. For a running <code>monomind org run</code> org, watch its own live dashboard instead:</p>
     <div class="code-block reveal"><span class="cmd">monomind org run &lt;name&gt;</span>    <span class="comment"># live view at http://localhost:4243</span></div>
     <p class="reveal" style="font-size:13px;color:var(--text2);margin-bottom:8px;margin-top:1rem"><strong>Chunks tab:</strong> Chunks are built by indexing your project's documentation and skill files:</p>
     <div class="code-block reveal"><span class="comment"># From the dashboard: click "⊕ Build Docs" in the Chunks tab</span>
@@ -1572,7 +1566,7 @@ Session N: empty round (zero findings AND zero actions)
     <div class="page-header">
       <span class="page-tag">Usage</span>
       <h1 class="page-title">Agents &amp; Skills</h1>
-      <p class="page-desc">Monomind ships <!-- doc-count:pickable-agents -->84<!-- /doc-count:pickable-agents --> pickable agents, <!-- doc-count:pickable-skills -->83<!-- /doc-count:pickable-skills --> skills, <!-- doc-count:slash-commands -->115<!-- /doc-count:slash-commands --> slash commands and <!-- doc-count:org-skills -->376<!-- /doc-count:org-skills --> Org skills. Add your own as Markdown files; one central picker ranks all of them for every task.</p>
+      <p class="page-desc">Monomind ships <!-- doc-count:pickable-agents -->83<!-- /doc-count:pickable-agents --> pickable agents, <!-- doc-count:pickable-skills -->82<!-- /doc-count:pickable-skills --> skills, <!-- doc-count:slash-commands -->96<!-- /doc-count:slash-commands --> slash commands and <!-- doc-count:org-skills -->376<!-- /doc-count:org-skills --> Org skills. Add your own as Markdown files; one central picker ranks all of them for every task.</p>
     </div>
     <div class="reveal" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:40px">
       <a class="btn btn-primary" href="https://github.com/monoes/monomind/blob/main/doc/concepts/agents-and-skills.md" target="_blank" rel="noopener" style="text-decoration:none">Full guide: structure &amp; frontmatter</a>

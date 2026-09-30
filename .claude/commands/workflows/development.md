@@ -5,8 +5,6 @@ description: Development workflow pattern — plan, implement, test, and review 
 
 # Development Workflow Coordination
 
-> **Deprecated ([#418](https://github.com/monoes/monomind/issues/418)):** `monoswarm` — the `monomind monoswarm` CLI command and the `monoswarm_*` MCP tools — records state and starts no agents, and is removed in monomind 2.22.0. Skip its steps: spawn agents with Claude Code's Task tool, or run an org with `monomind org run`.
-
 Structure multi-agent development work. The CLI has no `workflow` command; run the stages with the Task tool, or as a `dev-team` org.
 
 ## How to Invoke
@@ -40,10 +38,9 @@ Task({ subagent_type: "reviewer",          prompt: "Review the diff for correctn
 Task({ subagent_type: "Security Engineer", prompt: "Review the auth code for vulnerabilities." })
 ```
 
-Optional coordination and tracking:
+Optional tracking:
 
 ```bash
-npx monomind monoswarm init --topology hierarchical --max-agents 8
 npx monomind hooks pre-task --description "Build REST API with auth" --task-id rest-api
 npx monomind hooks post-task --task-id rest-api --success true
 npx monomind memory store --key "dev-pattern-rest-api" \
@@ -71,5 +68,4 @@ The `dev-team` template has tech-lead, developer, code-reviewer, and qa roles.
 ## Related Skills
 
 - `workflows:workflow-execute` — Running workflows
-- `monoswarm:development` — Monoswarm-based development coordination
 - `mastermind-plan` / `mastermind-execute` — Plan, then execute step by step

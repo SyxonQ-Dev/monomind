@@ -1,10 +1,10 @@
 # CLI Command Reference
 
-> All <!-- doc-count:cli-commands -->40<!-- /doc-count:cli-commands --> top-level `monomind` commands, verified against `packages/@monomind/cli/src/commands/index.ts:15-55` (the `COMMAND_LOADERS` map) plus a live `node bin/cli.js --help` run on the built dist (reported `v2.9.3`). The category grouping is defined statically in `CATEGORY_NAMES` (`src/commands/index.ts:75-104`); real `Command` objects are attached on demand by `getCommandsByCategory()` (`src/commands/index.ts:171-182`) and `loadAllCommands()` (`src/commands/index.ts:156-160`), with `getCommand`/`getCommandAsync` as the single-command entry points (`src/commands/index.ts:136-142`). Subcommand counts for `doc`, `analyze`, and `org` are read directly from each command's own `subcommands:` array, not estimated.
+> All <!-- doc-count:cli-commands -->38<!-- /doc-count:cli-commands --> top-level `monomind` commands, verified against `packages/@monomind/cli/src/commands/index.ts:15-55` (the `COMMAND_LOADERS` map) plus a live `node bin/cli.js --help` run on the built dist (reported `v2.9.3`). The category grouping is defined statically in `CATEGORY_NAMES` (`src/commands/index.ts:75-104`); real `Command` objects are attached on demand by `getCommandsByCategory()` (`src/commands/index.ts:171-182`) and `loadAllCommands()` (`src/commands/index.ts:156-160`), with `getCommand`/`getCommandAsync` as the single-command entry points (`src/commands/index.ts:136-142`). Subcommand counts for `doc`, `analyze`, and `org` are read directly from each command's own `subcommands:` array, not estimated.
 
 **Note on `--help` coverage:** a live run of `monomind --help` (2.16.0, `node packages/@monomind/cli/bin/cli.js --help` against the built dist) shows all 39 commands except `report-crash` — including `pick` and `catalog`, added for the Jev decision model and the unified skill catalog. `report-crash` alone is absent, and that's intentional: it's the only command with `hidden: true` (`report-crash.ts:16`), an internal command shelled out to by monotask/mono-clip crash handlers, not meant for interactive use. This doc lists all 39 regardless of what `--help` shows.
 
-## Full command list (<!-- doc-count:cli-commands -->40<!-- /doc-count:cli-commands -->)
+## Full command list (<!-- doc-count:cli-commands -->38<!-- /doc-count:cli-commands -->)
 
 | Command | Purpose | Subcommands |
 |---|---|---|
@@ -12,7 +12,6 @@
 | `start` | Start the MonoMind orchestration system | 3 — stop, restart, quick |
 | `status` | Show system status (watch mode supported) | 3 — agents, tasks, memory |
 | `agent` | Agent lifecycle (in-process, no separate MCP server needed), plus the [Agent Exec Protocol](../agent-exec-protocol.md) runtime commands. `agent test <runtime> [--model M] [--timeout 60s] [--sandbox MODE] [--sandbox-fallback F] [--env KEY=V]... --json` sends one "reply ok" turn and prints `status` (`ok`, `ok_unexpected`, `auth`, `quota`, `model_unavailable`, `timeout`, `missing_binary`, `error`), latency, tokens, cost, `native_sandbox` and `sandbox_applied` (§13); `--sandbox`/`--sandbox-fallback`/`--env` work as in `agent exec`. | 11 — spawn, list, status, stop, metrics, pool, health, exec, scan, models, test |
-| `monoswarm` | Deprecated (removed in 2.22.0) — records topology, roster, and vote state; starts no agents. See [Monoswarm](../concepts/monoswarm.md). | 6 — init, start, status, stop, scale, coordinate |
 | `memory` | Memory management — local SQLite + local embeddings. See [Memory Command Reference](./memory.md). | 12 — init, store, edit, retrieve, search, list, delete, templates, stats, configure, export, import (export/import: `--format okf` only — any other value is rejected at runtime, `memory-transfer.ts:91`) |
 | `doc` | Second Brain — document ingestion & retrieval | 11 — ingest, search, list (alias: `library`), cite, lookup, related, watch, export, import, remove (aliases: `rm`, `forget`), eval. `lookup <url>` answers "is this already saved, and what was noted about it" on capture identity (canonical URL, fragment stripped — the rule ingest dedupes by); `--text` on `list`/`search` is the older substring filter, which matches any longer URL containing the string and carries no note. |
 | `task` | Task creation and lifecycle | 5 — create, list, status, cancel, assign |
@@ -22,7 +21,6 @@
 | `security` | Security scanning, CVE, threat modeling, AI defense | 6 — scan, cve, audit, secrets, defend, redteam. `audit` reads/writes a real JSONL audit trail (`--action list/log/export/clear`), populated by the destructive-ops, secrets, and monofence PreToolUse gates. `redteam` lists its 20-prompt/4-category attack library for manual review by default (`--dry-run`), or with `--target <url>` POSTs each prompt as `{ prompt, category }`, evaluates the `{ response }` via monofence-ai's `scanOutput()`, and drives the exit code off `--threshold` (unsafe-response rate). |
 | `performance` | Profiling, benchmarking, real metrics | 4 — benchmark, profile, metrics, bottleneck |
 | `guidance` | Wire enforcement gates into Claude Code hooks | 1 — setup |
-| `autopilot` | Deprecated (removed in 2.22.0) — re-engagement loop over local task files; use `org run` | 8 — status, enable, disable, config, reset, log, predict, check |
 | `config` | Configuration management | 7 — init, get, set, providers, reset, export, import |
 | `doctor` | System diagnostics — flat command, no subcommands | 0 — flags only: `--fix`, `--install`, `--verbose`, `--json`, `--read-only`, `--offline`, `--component` (`--component` accepts one of 28 named categories — see below) |
 | `completions` | Shell completion scripts | 4 — bash, zsh, fish, powershell |

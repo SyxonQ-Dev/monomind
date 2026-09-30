@@ -48,6 +48,10 @@ export interface SessionRecord extends RecordKey {
   /** Hash of the system prompt the session was built with; '*' matches any. */
   promptHash: string;
   updatedAt?: number;
+  /** Set on every record this build writes: its `runtime` is the resolved
+   *  runtime (#562). A record without it predates that and may sit under
+   *  'claude' for a role that runs elsewhere. */
+  runtimeResolved?: true;
 }
 
 export interface SessionRun extends RecordKey {
@@ -121,12 +125,26 @@ export class SessionLedger {
     }
   }
 
-  /** Which session to resume for this key, or why none can be. */
-  resumeFor(q: RecordKey & { cwd: string; promptHash: string }): {
+  /** Which session to resume for this key, or why none can be.
+   *  `legacyRuntime`: the runtime an older build filed this key under (#562);
+   *  a record found only there, and written by that older build, is moved to
+   *  `q.runtime` and used. One this build wrote under `legacyRuntime` belongs
+   *  to that runtime's runner (the role's provider or MONOMIND_RUNTIME
+   *  changed since) and is never handed to another. */
+  resumeFor(q: RecordKey & { cwd: string; promptHash: string; legacyRuntime?: string }): {
     sessionId?: string;
     reason: SessionStartReason;
   } {
-    const r = this.records.get(keyOf(q));
+    let r = this.records.get(keyOf(q));
+    if (!r && q.legacyRuntime !== undefined) {
+      const legacy = { role: q.role, runtime: q.legacyRuntime, taskKey: q.taskKey };
+      const old = this.records.get(keyOf(legacy));
+      if (old && !old.runtimeResolved) {
+        this.records.delete(keyOf(legacy));
+        r = { ...old, runtime: q.runtime };
+        this.set(r);
+      }
+    }
     if (!r) return { reason: 'fresh-no-record' };
     // SDK sessions are stored per working directory; resuming from another
     // cwd either fails or silently finds nothing.
@@ -139,7 +157,7 @@ export class SessionLedger {
   }
 
   set(r: SessionRecord): void {
-    this.records.set(keyOf(r), { ...r, updatedAt: Date.now() });
+    this.records.set(keyOf(r), { ...r, updatedAt: Date.now(), runtimeResolved: true });
     this.save();
   }
 

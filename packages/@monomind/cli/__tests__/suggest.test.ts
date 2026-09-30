@@ -198,7 +198,6 @@ describe('getTypoCorrection', () => {
     expect(getTypoCorrection('agnet')).toBe('agent');
     expect(getTypoCorrection('memroy')).toBe('memory');
     expect(getTypoCorrection('confg')).toBe('config');
-    expect(getTypoCorrection('swarrm')).toBe('monoswarm');
     expect(getTypoCorrection('staus')).toBe('status');
   });
 
@@ -241,9 +240,9 @@ describe('COMMON_TYPOS', () => {
     }
   });
 
-  it('should include monoswarm typos', () => {
-    expect(COMMON_TYPOS.swarrm).toBe('monoswarm');
-    expect(COMMON_TYPOS.swarn).toBe('monoswarm');
+  it('suggests no removed monoswarm command (#418)', () => {
+    expect(COMMON_TYPOS.swarrm).toBeUndefined();
+    expect(Object.values(COMMON_TYPOS)).not.toContain('monoswarm');
   });
 
   it('does not suggest a "hive-mind" command — it was never real and no longer exists as a concept', () => {

@@ -5,7 +5,7 @@
  * writeFileSync(tmp) + renameSync(tmp, path) pattern:
  *   - mcp-tools/neural-tools.ts
  *   - memory/intelligence.ts
- *   - autopilot-state.ts
+ *   - autopilot-state.ts (removed with autopilot in 2.22.0, #418)
  *   - commands/claims.ts
  *   - commands/swarm.ts
  *   - commands/neural-optimize.ts

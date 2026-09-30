@@ -10,7 +10,7 @@
  * sandbox, so it installs the SDK here, through the same hash-pinned
  * installer (utils/optional-deps.ts), before it spawns the role.
  *
- * Which roles get it: those whose effective runtime (runner-resolve.ts's
+ * Which roles get it: those whose effective runtime (runner-specs.ts's
  * effectiveRoleRuntime, the resolution runner selection uses) is claude. A
  * role on another runtime that runs `agent exec --runtime claude` is not
  * worth a 300 MB download for every codex-only org: inside a role nothing is

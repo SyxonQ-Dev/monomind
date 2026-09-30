@@ -48,6 +48,7 @@ import {
   sandboxAvailability,
   uniq,
 } from './role-sandbox-restrictions.js';
+import { effectiveRoleRuntime } from './runner-specs.js';
 import type { OrgDef, OrgRole } from './types.js';
 
 export type {
@@ -261,12 +262,6 @@ export function resolveRoleGitEnforcement(args: {
   };
 }
 
-const PROVIDER_RUNTIME: Record<string, string> = {
-  'vercel-api-key': 'vercel',
-  codex: 'codex',
-  antigravity: 'antigravity',
-};
-
 /** `monomind org validate` findings: roles whose policy.git will not have the
  *  OS sandbox behind it on this host. */
 export function gitEnforcementFindings(
@@ -283,12 +278,7 @@ export function gitEnforcementFindings(
     if ((role as { kind?: string }).kind === 'endpoint') continue;
     const level = role.policy?.git ?? 'read';
     if (level === 'push') continue;
-    const runtime =
-      role.runtime ??
-      def.runtime ??
-      PROVIDER_RUNTIME[role.provider?.kind ?? ''] ??
-      process.env.MONOMIND_RUNTIME ??
-      'claude';
+    const runtime = effectiveRoleRuntime(role.runtime, def.runtime, role.provider?.kind);
     const mode = (role.policy?.sandbox as RoleSandboxPolicy | undefined)?.mode ?? 'auto';
     if (CLI_SANDBOX_MODES[runtime])
       cliSandboxed.push(`${role.id} (${runtime}: ${CLI_SANDBOX_MODES[runtime]})`);

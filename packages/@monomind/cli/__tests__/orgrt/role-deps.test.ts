@@ -134,25 +134,18 @@ describe('ensureRoleDeps (host side)', () => {
   });
 });
 
-describe('effectiveRoleRuntime (the runtime runner selection picks)', () => {
-  it('follows role runtime > org runtime > provider kind > MONOMIND_RUNTIME > claude', () => {
-    expect(effectiveRoleRuntime('claude', 'codex', 'codex', undefined, { MONOMIND_RUNTIME: 'pi' })).toBe(
-      'claude',
-    );
-    expect(effectiveRoleRuntime(undefined, 'codex', undefined, undefined, {})).toBe('codex');
-    expect(effectiveRoleRuntime(undefined, undefined, 'codex', undefined, { MONOMIND_RUNTIME: 'pi' })).toBe(
-      'codex',
-    );
-    expect(effectiveRoleRuntime(undefined, undefined, 'subscription', undefined, { MONOMIND_RUNTIME: 'pi' })).toBe(
-      'pi',
-    );
-    expect(effectiveRoleRuntime(undefined, undefined, undefined, undefined, {})).toBe('claude');
-  });
-
-  it('is claude when MONOMIND_RUNTIME names no runner (the default path runs)', () => {
-    expect(effectiveRoleRuntime(undefined, undefined, undefined, undefined, { MONOMIND_RUNTIME: 'nope' })).toBe(
-      'claude',
-    );
+// #566's effectiveRoleRuntime (runner-specs.ts) decides which roles get the
+// host install; runtime-checks-567.test.ts covers the rest of its precedence.
+describe('effectiveRoleRuntime, as the host install uses it', () => {
+  it('puts provider kind before MONOMIND_RUNTIME, and a configured runtime before both', () => {
+    vi.stubEnv('MONOMIND_RUNTIME', 'pi');
+    try {
+      expect(effectiveRoleRuntime(undefined, undefined, 'codex')).toBe('codex');
+      expect(effectiveRoleRuntime(undefined, undefined, 'subscription')).toBe('pi');
+      expect(effectiveRoleRuntime('claude', 'codex', 'codex')).toBe('claude');
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

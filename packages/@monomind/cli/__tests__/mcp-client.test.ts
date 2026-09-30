@@ -77,33 +77,6 @@ vi.mock('../src/mcp-tools/agent-tools.js', () => ({
   ]
 }));
 
-vi.mock('../src/mcp-tools/monoswarm-tools.js', () => ({
-  monoswarmTools: [
-    {
-      name: 'monoswarm_init',
-      description: 'Initialize a monoswarm',
-      category: 'monoswarm',
-      inputSchema: {
-        type: 'object',
-        required: ['topology'],
-        properties: {
-          topology: { type: 'string' },
-          maxAgents: { type: 'number' }
-        }
-      },
-      handler: vi.fn(async (input) => ({
-        monoswarmId: 'monoswarm-test',
-        topology: input.topology,
-        initializedAt: new Date().toISOString(),
-        config: {
-          topology: input.topology,
-          maxAgents: input.maxAgents || 15,
-        }
-      }))
-    }
-  ]
-}));
-
 vi.mock('../src/mcp-tools/memory-tools.js', () => ({
   memoryTools: [
     {
@@ -189,19 +162,15 @@ describe('MCP Client', () => {
       expect(result.terminatedAt).toBeDefined();
     });
 
-    it('should call monoswarm_init tool successfully', async () => {
-      const result = await callMCPTool('monoswarm_init', {
-        topology: 'hierarchical-mesh',
-        maxAgents: 15
+    it('should call memory_pattern-store tool successfully', async () => {
+      const result = await callMCPTool('memory_pattern-store', {
+        pattern: 'retry with backoff',
+        confidence: 0.9
       });
 
       expect(result).toMatchObject({
-        monoswarmId: 'monoswarm-test',
-        topology: 'hierarchical-mesh'
-      });
-      expect(result.config).toMatchObject({
-        topology: 'hierarchical-mesh',
-        maxAgents: 15
+        pattern: 'retry with backoff',
+        stored: true
       });
     });
 
@@ -301,12 +270,12 @@ describe('MCP Client', () => {
     });
 
     it('should return complete metadata structure', async () => {
-      const metadata = await getToolMetadata('monoswarm_init');
+      const metadata = await getToolMetadata('memory_pattern-store');
 
       expect(metadata).toMatchObject({
-        name: 'monoswarm_init',
+        name: 'memory_pattern-store',
         description: expect.any(String),
-        category: 'monoswarm',
+        category: 'memory',
         inputSchema: expect.any(Object)
       });
     });
@@ -359,7 +328,7 @@ describe('MCP Client', () => {
     it('should return true for existing tool', async () => {
       expect(await hasTool('agent_spawn')).toBe(true);
       expect(await hasTool('agent_list')).toBe(true);
-      expect(await hasTool('monoswarm_init')).toBe(true);
+      expect(await hasTool('memory_pattern-store')).toBe(true);
     });
 
     it('should return false for non-existent tool', async () => {
@@ -378,7 +347,6 @@ describe('MCP Client', () => {
       const categories = await getToolCategories();
 
       expect(categories).toContain('agent');
-      expect(categories).toContain('monoswarm');
       expect(categories).toContain('memory');
       expect(categories).toContain('config');
     });
@@ -448,9 +416,9 @@ describe('MCP Client', () => {
     });
 
     it('should allow optional fields to be missing', async () => {
-      const result = await validateToolInput('monoswarm_init', {
-        topology: 'hierarchical'
-        // maxAgents is optional
+      const result = await validateToolInput('memory_pattern-store', {
+        pattern: 'retry with backoff'
+        // type and confidence are optional
       });
 
       expect(result.valid).toBe(true);

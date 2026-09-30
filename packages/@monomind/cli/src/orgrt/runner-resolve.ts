@@ -16,7 +16,7 @@ import { PiRpcAgentRunner } from './pi-rpc-runner.js';
 import { PiAgentRunner } from './pi-runner.js';
 import { QwenRpcAgentRunner } from './qwen-rpc-runner.js';
 import { QwenAgentRunner } from './qwen-runner.js';
-import { BASE_SPECS } from './runner-specs.js';
+import { autoRuntimeFromProvider, resolveRoleRuntime } from './runner-specs.js';
 import type { ProviderConfig } from './types.js';
 import { VercelAgentRunner } from './vercel-runner.js';
 
@@ -84,14 +84,6 @@ export type ProviderKind =
   | 'codex'
   | 'antigravity';
 
-/** Auto-resolve runtime from provider kind. Returns undefined for Claude default. */
-function autoRuntimeFromProvider(kind?: ProviderKind): RuntimeKind | undefined {
-  if (kind === 'vercel-api-key') return 'vercel';
-  if (kind === 'codex') return 'codex';
-  if (kind === 'antigravity') return 'antigravity';
-  return undefined;
-}
-
 export function resolveRunner(
   orgRuntime?: RuntimeKind,
   providerKind?: ProviderKind,
@@ -131,25 +123,6 @@ export function resolveRunner(
   return undefined;
 }
 
-/** #559 review: the runtime resolveRoleRunner selects for a role, by the same
- *  precedence: role runtime > org runtime > provider kind > MONOMIND_RUNTIME.
- *  'claude' when it falls through to the default path, including a runtime
- *  that names no runner. */
-export function effectiveRoleRuntime(
-  roleRuntime?: string,
-  orgRuntime?: string,
-  roleProviderKind?: ProviderKind,
-  orgProviderKind?: ProviderKind,
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  const selected =
-    roleRuntime ??
-    orgRuntime ??
-    autoRuntimeFromProvider(roleProviderKind ?? orgProviderKind) ??
-    env.MONOMIND_RUNTIME;
-  return selected && BASE_SPECS.some((s) => s.id === selected) ? selected : 'claude';
-}
-
 /** Per-session variant: a role's own `runtime` field wins over the org-level
  *  one (and the env var) — including `role.runtime === 'claude'`, which forces
  *  the default Claude path even when the org/env select another runtime.
@@ -162,7 +135,11 @@ export function resolveRoleRunner(
   orgProviderKind?: ProviderKind,
   roleProvider?: ProviderConfig,
 ): AgentRunner | undefined {
-  const explicit = roleRuntime ?? orgRuntime;
-  if (explicit) return resolveRunner(explicit, undefined, roleProvider);
-  return resolveRunner(undefined, roleProviderKind ?? orgProviderKind, roleProvider);
+  return resolveRunner(
+    resolveRoleRuntime(roleRuntime, orgRuntime, roleProviderKind, orgProviderKind),
+    undefined,
+    roleProvider,
+  );
 }
+
+export { effectiveRoleRuntime, resolveRoleRuntime } from './runner-specs.js';
