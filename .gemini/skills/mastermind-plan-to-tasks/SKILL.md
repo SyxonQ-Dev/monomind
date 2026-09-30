@@ -1,6 +1,6 @@
 ---
 name: mastermind-plan-to-tasks
-description: Mastermind plan-to-tasks — converts a written plan (prose, outline, or structured doc) into assigned org issues with correct specialties, dependency wiring, and parallelization. Mirrors Paperclip's plan-to-tasks skill. Use when breaking down a project plan into executable issue trees.
+description: "Mastermind plan-to-tasks — turn a written plan into assigned org issues with the right specialties, dependencies and parallelization."
 type: domain-skill
 default_mode: confirm
 ---

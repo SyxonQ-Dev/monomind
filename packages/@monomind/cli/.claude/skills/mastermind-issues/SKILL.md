@@ -1,6 +1,6 @@
 ---
 name: mastermind-issues
-description: Mastermind issues — list, create, update, and close org-level issues (tasks/tickets) with search, assignee, status, and workspace filters. Mirrors Issues.tsx. For personal assigned issues use mastermind:my-issues; for issue detail use mastermind:issue-detail.
+description: "Mastermind issues — list, create, update and close org issues with search, assignee, status and workspace filters. See mastermind:my-issues and mastermind:issue-detail."
 type: domain-skill
 default_mode: auto
 pick: low

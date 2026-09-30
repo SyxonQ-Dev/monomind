@@ -46,7 +46,19 @@ export const initCommand: Command = {
     },
     {
       name: 'full',
-      description: 'Create full configuration with all components',
+      description: 'Create full configuration with all components and every pack',
+      type: 'boolean',
+      default: false,
+    },
+    {
+      name: 'packs',
+      description:
+        'Opt-in packs to install on top of core, comma-separated (see `monomind packs list`)',
+      type: 'string',
+    },
+    {
+      name: 'all-packs',
+      description: 'Install every pack (every shipped skill, command and agent)',
       type: 'boolean',
       default: false,
     },

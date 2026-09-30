@@ -234,7 +234,8 @@ npx monomind@latest performance benchmark --suite all
 **Counts are for THIS package, not the repo root.** `packages/@monomind/cli/.claude/agents/`
 holds 97 `.md` files. The 9 under `reengineer-squad/` are repo-only: `package.json`'s `files`
 array excludes them and the registry builder skips them, so npm users get the rest, and
-`monomind init` copies them into `.claude/agents/`. Of those, 4 carry `deprecated: true`
+`monomind init` copies the core pack's share of them into `.claude/agents/` (the rest come
+with opt-in packs — `src/init/packs.ts`, `monomind packs add`). Of those, 4 carry `deprecated: true`
 (`Code Reviewer`, `monoswarm-pr`, `monoswarm-issue`, `mobile-dev`): they stay
 spawnable by name but are never picked.
 
@@ -483,7 +484,7 @@ For a comprehensive overview of all Monomind features, agents, commands, and int
 It includes:
 
 - Agent type definitions with recommendations
-- All <!-- doc-count:cli-commands -->38<!-- /doc-count:cli-commands --> CLI commands
+- All <!-- doc-count:cli-commands -->39<!-- /doc-count:cli-commands --> CLI commands
 - All <!-- doc-count:hooks-subcommands -->28<!-- /doc-count:hooks-subcommands --> hook subcommands + <!-- doc-count:workers -->9<!-- /doc-count:workers --> background workers (@monoes/hooks)
 - Intelligence system details (keyword routing + trajectory/outcome logging)
 - Monoswarm coordination and vote strategies

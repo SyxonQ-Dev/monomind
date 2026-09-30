@@ -1,6 +1,6 @@
 ---
 name: mastermind-budgets
-description: Mastermind budgets — view, set, and track the spend caps the Org Runtime enforces (roles[].budget_usd, roles[].budget_tokens, run_config.budget_tokens) in the org definition. Shows each role's cap next to its spend from the runtime's own cost records, flags roles near or over a cap, and hot-reloads a running org after a change.
+description: "Mastermind budgets — view, set and track the spend caps the Org Runtime enforces per role, compare them with recorded spend, and hot-reload a running org."
 type: domain-skill
 default_mode: auto
 pick: low

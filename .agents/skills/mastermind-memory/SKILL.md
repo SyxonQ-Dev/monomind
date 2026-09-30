@@ -1,13 +1,13 @@
 ---
 name: mastermind-memory
-description: Mastermind memory — org-scoped persistent memory using PARA method (Projects, Areas, Resources, Archives). Ingest facts, recall context, maintain knowledge graph, run weekly synthesis. Reads from .monomind/orgs/<org>-memory/ directory. Port of Paperclip's para-memory-files skill for org-level context.
+description: "Org-scoped PARA memory (Projects, Areas, Resources, Archives) in .monomind/orgs/<org>-memory/: ingest facts, recall context, weekly synthesis."
 type: domain-skill
 default_mode: auto
 ---
 
 # Mastermind Memory
 
-This skill is invoked by `mastermind:memory` or directly via `/mastermind:memory`.
+This skill is invoked with `Skill("mastermind-memory")`, for example by the mastermind router. (`/mastermind:memory` is a different command, a memory CLI quick reference that comes with the orgs pack: `monomind packs add orgs`.)
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: mastermind
-description: Universal intent router — deeply understands what a prompt is really asking for, matches it against the full monomind capability surface (mastermind commands, monomind CLI/MCP tools, monodesign, monomotion, monograph, orgs, skills), then either executes the best route or hands the user an exact step-by-step playbook
+description: "Intent router: matches a request to the right monomind capability (mastermind commands, CLI/MCP tools, skills, orgs), then runs it or gives exact steps."
 ---
 
 MASTERMIND is the front door to everything in this project. Given any prompt, it figures out what the user actually needs, picks the right capability out of everything installed, and either runs it or teaches the user to run it. It never answers with a generic response when a purpose-built tool exists.
@@ -41,6 +41,8 @@ Rules for this step:
 
 Match the intent against this catalog. Pick ONE primary route, plus supporting steps that the goal implies (prep, verification). Prefer the most specific capability over the most powerful one.
 
+**Pack rule:** a route marked "(pack X — `monomind packs add X`)" ships in an opt-in pack that a default `monomind init` does not install. Before calling it, check it is installed (`.claude/skills/<name>/` or `.claude/commands/<group>/<name>.md`). If it is not, do not call it: tell the user to run `monomind packs add X` and offer the nearest core route meanwhile.
+
 **Tie-break rule:** if the prompt describes broken, wrong, or unexpected behavior — anything currently misbehaving — the primary route is `Skill("mastermind-debug")`, no matter which domain's keywords appear. "Wrong version number", "layout renders broken", "org won't start" are debug tasks first; the topical skill (release, design, org) comes after root cause.
 
 ### Code & building
@@ -54,7 +56,7 @@ Match the intent against this catalog. Pick ONE primary route, plus supporting s
 | Code review, audit quality | `Skill("mastermind-review")`; apply one received: `Skill("mastermind-receive-review")` |
 | Verify a claim ("it works", "tests pass") | `Skill("mastermind-review")` |
 | Autonomous improve-loop | `Skill("mastermind-execute")`, re-invoking `Skill("mastermind-review")` between passes until clean |
-| Finish/merge/PR a branch | `Skill("mastermind-review")`; release/versioning: `Skill("mastermind-release")` |
+| Finish/merge/PR a branch | `Skill("mastermind-review")`; release/versioning: `Skill("mastermind-release")` (pack extras — `monomind packs add extras`) |
 | Isolate risky work | `Skill("mastermind-worktree")` |
 | Spec → agent task file/board | `Skill("mastermind:createtask")`, execute with `Skill("mastermind:do")` |
 
@@ -79,33 +81,33 @@ Match the intent against this catalog. Pick ONE primary route, plus supporting s
 ### Research, ideas, content, business
 | Intent | Primary route |
 |---|---|
-| Market/competitor/user research | `Skill("mastermind-research")`; multi-agent research swarm: `Skill("monoswarm:research")` |
+| Market/competitor/user research | `Skill("mastermind-research")`; multi-agent research swarm: `Skill("monoswarm:research")` (pack swarm — `monomind packs add swarm`) |
 | Ideation, feature brainstorm | `Skill("mastermind-idea")` / `Skill("mastermind:ideate")` (evaluate + decompose) |
 | Improve an existing component | `Skill("mastermind:improve")` |
-| Blog/docs/newsletter/threads | `Skill("mastermind:content")`; docs generation: `npx monomind doc` |
-| Marketing / sales / ops / finance | `Skill("mastermind:marketing")` / `:sales` / `:ops` / `:finance` |
-| Port capability from another project | `Skill("mastermind-techport")` |
+| Blog/docs/newsletter/threads | `Skill("mastermind:content")` (pack business — `monomind packs add business`); docs generation: `npx monomind doc` |
+| Marketing / sales / ops / finance | `Skill("mastermind:marketing")` / `:sales` / `:ops` / `:finance` (pack business — `monomind packs add business`) |
+| Port capability from another project | `Skill("mastermind-techport")` (pack extras — `monomind packs add extras`) |
 
 ### Agents, orgs, orchestration
 | Intent | Primary route |
 |---|---|
-| Multi-domain goal spanning several of the above | `/mastermind:master` — spawns parallel domain managers |
-| Create a persistent agent org | `Skill("mastermind-createorg")` → `monomind org run <name>` (`Skill("mastermind-runorg")`) |
-| Inspect running org | `monomind org status/logs/questions`; `Skill("mastermind-orgstatus")` |
-| Pick swarm/hive-mind topology | `/mastermind:topology` (the old picker lives here) |
+| Multi-domain goal spanning several of the above | `/mastermind:master` (pack extras — `monomind packs add extras`) — spawns parallel domain managers |
+| Create a persistent agent org | `Skill("mastermind-createorg")` → `monomind org run <name>` (`Skill("mastermind-runorg")`) (pack orgs — `monomind packs add orgs`) |
+| Inspect running org | `monomind org status/logs/questions`; `Skill("mastermind-orgstatus")` (pack orgs — `monomind packs add orgs`) |
+| Pick swarm/hive-mind topology | `/mastermind:topology` (pack swarm — `monomind packs add swarm`) |
 | Recurring/scheduled task | `Skill("loop")` (in-session interval) / `Skill("schedule")` (cloud cron) / `Skill("mastermind-repeat")` |
-| Watch external boards & execute tasks | `Skill("mastermind-monitor")` |
+| Watch external boards & execute tasks | `Skill("mastermind-monitor")` (pack orgs — `monomind packs add orgs`) |
 
 ### System, memory, quality
 | Intent | Primary route |
 |---|---|
-| "What does monomind know" / recall context | `mcp__monomind__knowledge_search`, `memory_kg_search`; inspect: `Skill("mastermind:brain")` |
+| "What does monomind know" / recall context | `mcp__monomind__knowledge_search`, `memory_kg_search`; inspect: `Skill("mastermind:brain")` (pack extras — `monomind packs add extras`) |
 | Security scan/audit/secrets | `npx monomind security scan|cve|audit|secrets` |
 | Performance profiling | `npx monomind performance profile|benchmark` |
 | System health | `npx monomind doctor` (`--fix`) / `monomind status` |
-| Write/improve a mastermind skill | `Skill("mastermind-skill-builder")` |
+| Write/improve a mastermind skill | `Skill("mastermind-skill-builder")` (pack extras — `monomind packs add extras`) |
 
-**No match at all?** Say so honestly, name the two nearest capabilities and why they miss, and offer: handle it directly, or scaffold it as a new skill via `Skill("mastermind-skill-builder")`.
+**No match at all?** Say so honestly, name the two nearest capabilities and why they miss, and offer: handle it directly, or scaffold it as a new skill via `Skill("mastermind-skill-builder")` (pack extras — `monomind packs add extras`).
 
 ## Step 4 — Deliver the playbook
 
@@ -136,5 +138,5 @@ Then act by mode:
 Execution rules — mastermind is hardworking, not lazy:
 - Never route-and-quit in auto/guided mode. Routing to `Skill("mastermind-debug")` means INVOKING it and following it through, not mentioning it.
 - The playbook always has a verification step. "It should work now" is not a deliverable.
-- Multi-domain prompts (build + marketing, design + animation): route to `/mastermind:master` rather than chaining routes manually — unless one domain is trivially small.
+- Multi-domain prompts (build + marketing, design + animation): route to `/mastermind:master` (pack extras — `monomind packs add extras`) rather than chaining routes manually — unless one domain is trivially small.
 - Respect the iron laws of the routed skills (TDD, debug-before-fix, verify-before-claiming). Routing does not exempt you from them.

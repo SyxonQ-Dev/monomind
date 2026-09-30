@@ -1,5 +1,5 @@
 ---
-description: "Monomind — Multi-agent iterative review loop: runs reviewer, Security Engineer, and domain specialists in parallel, auto-fixes findings each iteration, and captures human-in-loop items to a dated file."
+description: "Multi-agent iterative review loop: reviewer, Security Engineer and domain specialists run in parallel, findings are auto-fixed each round, human items go to a dated file."
 type: flow
 name: mastermind-code-review
 ---
